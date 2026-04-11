@@ -1,0 +1,40 @@
+import {
+  ExecutionContext,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+
+interface JwtUser {
+  userId: string;
+  username: string;
+  role: string;
+}
+
+@Injectable()
+export class JwtAuthGuard extends AuthGuard('jwt') {
+  handleRequest<TUser = JwtUser>(
+    err: unknown,
+    user: JwtUser | null,
+    info: unknown,
+    context: ExecutionContext,
+    status?: unknown,
+  ): TUser {
+    void info;
+    void context;
+    void status;
+
+    if (err instanceof Error) {
+      throw err;
+    }
+
+    if (!user) {
+      throw new UnauthorizedException({
+        code: 'AUTH_INVALID_TOKEN',
+        message: 'Token không hợp lệ hoặc đã hết hạn',
+      });
+    }
+
+    return user as TUser;
+  }
+}
