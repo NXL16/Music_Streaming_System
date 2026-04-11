@@ -111,3 +111,84 @@ Tạo các Endpoint `GET /` và `GET /:id`, đính kèm `@UseGuards(JwtAuthGuard
 Gom Schema, Controller và Service lại thành một module độc lập và import vào `app.module.ts`
 
 - `apps/api/src/songs/songs.module.ts`
+
+---
+
+# 🚀 DOCUMENTATION: ARCHITECTURE & WORKFLOW (PHASE 1)
+
+## 1. Kiến Trúc Tổng Quan
+
+Hệ thống được xây dựng trên nền tảng **NestJS Monorepo**, tuân thủ nguyên tắc chia lớp (Layered Architecture) để đảm bảo tính bảo mật, khả năng mở rộng và dễ dàng bảo trì.
+
+---
+
+## 2. Chi Tiết Các Thành Phần & Liên Kết
+
+### 🛡️ Lớp Cấu Hình & Khởi Tạo (The Entry Point)
+
+- **`main.ts`**:
+  - **Chức năng**: Cổng vào duy nhất của ứng dụng. Thiết lập `Global Prefix` (`/api/v1`), cấu hình `CORS` với `credentials: true` để hỗ trợ Signed Cookies/Tokens, và kích hoạt `ValidationPipe` toàn cục.
+  - **Liên kết**: Sử dụng `class-validator` để tự động lọc dữ liệu rác (whitelist) và chặn các trường lạ (forbidNonWhitelisted) từ Client gửi lên.
+- **`app.module.ts`**:
+  - **Chức năng**: "Bộ não" trung tâm điều phối và khởi tạo các Dependency Injection.
+  - **Liên kết**: Import `ConfigModule` để cung cấp biến môi trường toàn cục và `DatabaseModule` để thiết lập kết nối Mongoose.
+
+### 🔑 Lớp Xác Thực & Bảo Mật (The Security Guard)
+
+Lớp này chịu trách nhiệm định danh và bảo vệ tài nguyên hệ thống.
+
+- **`auth.service.ts`**:
+  - **Chức năng**: Xử lý logic nghiệp vụ như băm (hash) mật khẩu bằng `bcryptjs` và phát hành JWT (Access/Refresh Token).
+  - **Liên kết**: Sử dụng `UserModel` để tương tác với MongoDB và `JwtService` để tạo chuỗi mã hóa.
+- **`jwt.strategy.ts`**:
+  - **Chức năng**: Một Middleware chuyên biệt dùng để giải mã (decode) và xác thực tính hợp lệ của Token từ Header `Authorization`.
+  - **Liên kết**: Trích xuất thông tin người dùng (payload) và đính kèm vào đối tượng `request.user` cho các bước xử lý sau.
+- **`jwt-auth.guard.ts`**:
+  - **Chức năng**: "Vệ sĩ" đứng trước các Controller nhạy cảm.
+  - **Liên kết**: Gọi đến `JwtStrategy` để xác thực. Nếu Token không hợp lệ, nó sẽ chặn request và trả về lỗi chuẩn hóa.
+
+### 📊 Lớp Dữ Liệu & Xử Lý (The Data & Logic Layer)
+
+- **`user.schema.ts` & `song.schema.ts`**:
+  - **Chức năng**: Định nghĩa cấu trúc dữ liệu bền vững cho MongoDB.
+  - **Liên kết**: Cung cấp Model cho các Service thực hiện truy vấn dữ liệu.
+- **`songs.service.ts`**:
+  - **Chức năng**: Thực thi logic tìm kiếm bài hát theo thể loại, tên và phân trang.
+  - **Liên kết**: Triển khai **Cursor-based Pagination** (dựa trên `_id`) giúp tối ưu hiệu suất và ngăn chặn lỗi hiệu năng khi dữ liệu bài hát lớn dần.
+- **`songs.controller.ts`**:
+  - **Chức năng**: Tiếp nhận các yêu cầu HTTP (`GET /`, `GET /:id`).
+  - **Liên kết**: Được bảo vệ bởi `@UseGuards(JwtAuthGuard)`, đảm bảo chỉ người dùng đã đăng nhập mới xem được thông tin bài hát.
+
+---
+
+## 🔄 Phân Tích Luồng Xử Lý (Request Flow)
+
+### A. Luồng Đăng Ký / Đăng Nhập
+
+1. **Client**: Gửi request `POST /auth/register` hoặc `/auth/login` kèm dữ liệu JSON.
+2. **Validation Layer**: `main.ts` kiểm tra tính hợp lệ của dữ liệu thông qua `RegisterDto` hoặc `LoginDto`.
+3. **AuthService**:
+   - Kiểm tra User tồn tại trong Database.
+   - Hash mật khẩu (Register) hoặc so sánh mật khẩu (Login).
+   - Trả về cặp Token (Access & Refresh).
+
+### B. Luồng Truy Cập Dữ Liệu Bảo Mật (Lấy danh sách nhạc)
+
+1. **Client**: Gửi request `GET /songs` kèm `Authorization: Bearer <Token>`.
+2. **Guard Layer**: `JwtAuthGuard` chặn lại và yêu cầu `JwtStrategy` kiểm tra Token.
+3. **Strategy Layer**: Giải mã Token bằng `JWT_SECRET`. Nếu hợp lệ, cho phép request đi tiếp vào Controller.
+4. **Service Layer**: `SongsService` truy vấn MongoDB, áp dụng phân trang Cursor và trả kết quả về cho Controller.
+5. **Response**: Trả về danh sách bài hát (tối đa 50 bản ghi) dưới định dạng JSON sạch sẽ.
+
+---
+
+## 🛠️ Trạng Thái Hoàn Thành Giai Đoạn 1
+
+- ✅ **Hệ thống Auth**: Hoàn thiện Login/Signup với bảo mật Bcrypt.
+- ✅ **Phân quyền**: Áp dụng thành công JWT Guard cho tài nguyên bài hát.
+- ✅ **Hiệu năng**: Cơ chế Cursor-based pagination sẵn sàng cho dữ liệu lớn.
+- ✅ **Cấu trúc**: Monorepo sạch sẽ, các file thừa đã được dọn dẹp.
+
+---
+
+_Tài liệu này được tạo ra để đảm bảo sự hiểu biết đồng nhất về kiến trúc hệ thống trước khi triển khai Giai đoạn 2: KMS & Media Security._

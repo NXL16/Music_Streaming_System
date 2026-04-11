@@ -6,6 +6,7 @@ import { SongsModule } from './songs/songs.module';
 import { DatabaseModule } from './database/database.module';
 import { ConfigModule } from '@nestjs/config';
 import { AuthModule } from './auth/auth.module';
+import { KmsModule } from './kms/kms.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { AuthModule } from './auth/auth.module';
     SongsModule,
     DatabaseModule,
     AuthModule,
+    KmsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
