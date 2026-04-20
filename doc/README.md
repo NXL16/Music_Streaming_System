@@ -7,6 +7,7 @@ Thư mục này chứa tài liệu kỹ thuật hiện tại của monorepo.
 - SYSTEM_OVERVIEW.md: Kiến trúc dịch vụ, luồng dữ liệu và trách nhiệm từng thành phần.
 - QUICK_START.md: Hướng dẫn thiết lập môi trường local và lệnh chạy.
 - ENVIRONMENT.md: Danh sách biến môi trường cho API và Worker.
+- TEST_FLOW.md: Ma trận test case theo endpoint và lệnh chạy e2e.
 
 ## Phạm Vi
 
