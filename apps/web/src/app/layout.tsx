@@ -3,6 +3,7 @@ import "./globals.css";
 import Sidebar from "../components/layout/Sidebar";
 import Header from "../components/layout/Header";
 import PlayerBar from "../components/layout/PlayerBar";
+import SessionManager from "../components/session/SessionManager";
 
 export const metadata: Metadata = {
   title: "Musical - Web Player",
@@ -17,6 +18,7 @@ export default function RootLayout({
   return (
     <html lang="vi">
       <body className="flex flex-col h-screen">
+        <SessionManager />
         {/* Phần trên: Sidebar + Nội dung chính */}
         <div className="flex flex-1 overflow-hidden p-2 gap-2">
           <Sidebar />

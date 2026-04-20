@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuthStore } from "@/src/store/useAuthStore";
+import { api } from "@/src/lib/api";
 import {
   ChevronLeft,
   ChevronRight,
@@ -8,9 +9,22 @@ import {
   LogOut,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 export default function Header() {
+  const router = useRouter();
   const { isAuthenticated, user, logout } = useAuthStore();
+
+  const handleLogout = async () => {
+    try {
+      await api.post("/auth/logout");
+    } catch {
+      // Dù backend lỗi, vẫn xóa phiên local để tránh giữ token hỏng.
+    } finally {
+      logout();
+      router.push("/login");
+    }
+  };
 
   return (
     <header className="h-16 bg-spotify-base/80 backdrop-blur-md sticky top-0 z-10 flex items-center justify-between px-6 rounded-t-lg">
@@ -32,7 +46,7 @@ export default function Header() {
               <UserIcon size={16} />
             </button>
             <button
-              onClick={logout}
+              onClick={handleLogout}
               className="text-gray-400 hover:text-white ml-2"
               title="Đăng xuất"
             >
@@ -41,9 +55,12 @@ export default function Header() {
           </div>
         ) : (
           <>
-            <button className="text-gray-400 hover:text-white font-semibold text-sm hover:scale-105 transition">
+            <Link
+              href="/login"
+              className="text-gray-400 hover:text-white font-semibold text-sm hover:scale-105 transition"
+            >
               Đăng ký
-            </button>
+            </Link>
             <Link href="/login">
               <button className="bg-white text-black px-6 py-2 rounded-full font-bold text-sm hover:scale-105 transition">
                 Đăng nhập

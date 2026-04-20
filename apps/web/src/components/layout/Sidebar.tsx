@@ -21,10 +21,10 @@ export default function Sidebar() {
           <Home size={24} /> Trang chủ
         </Link>
         <Link
-          href="/search"
+          href="/login"
           className="flex items-center gap-4 text-gray-400 hover:text-white transition font-semibold"
         >
-          <Search size={24} /> Tìm kiếm
+          <Search size={24} /> Xác thực
         </Link>
       </nav>
 
@@ -33,7 +33,11 @@ export default function Sidebar() {
         <div className="flex items-center gap-4 text-gray-400 hover:text-white transition font-semibold mb-4 cursor-pointer">
           <Library size={24} /> Thư viện của bạn
         </div>
-        <div className="text-sm text-gray-400 mt-4">Chưa có playlist nào.</div>
+        <div className="text-sm text-gray-400 mt-4 space-y-2">
+          <p>Không gian nghe nhạc của bạn.</p>
+          <p>Khám phá bài hát và phát ngay.</p>
+          <p>Đăng nhập để tải bài hát mới.</p>
+        </div>
       </div>
     </aside>
   );

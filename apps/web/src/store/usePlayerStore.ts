@@ -4,9 +4,16 @@ import { create } from "zustand";
 export interface Song {
   _id: string;
   title: string;
-  artistId: string;
-  hlsMasterPath: string;
-  thumbnails?: { large: string };
+  artistId?: string;
+  uploadedBy?: string;
+  status?: string;
+  isPublic?: boolean;
+  hlsMasterPath?: string | null;
+  thumbnails?: {
+    small?: string | null;
+    medium?: string | null;
+    large?: string | null;
+  };
   duration: number;
 }
 
