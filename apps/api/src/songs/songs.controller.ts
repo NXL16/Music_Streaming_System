@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Get,
   HttpException,
@@ -24,6 +25,7 @@ import { extname, join } from 'path';
 import type { Request, Response } from 'express';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { UploadSongDto } from './dto/upload-song.dto';
+import { JwtUser } from '@musical/shared-types';
 
 const uploadDir = join(process.cwd(), 'uploads', 'temp');
 if (!fs.existsSync(uploadDir)) {
@@ -97,7 +99,7 @@ export class SongsController {
   @Throttle({ default: { limit: 100, ttl: 60000 } })
   @Get(':id')
   async getSongDetails(@Param('id') id: string, @Req() req: Request) {
-    const user = req.user as { userId: string };
+    const user = req.user as JwtUser;
     const song = await this.songsService.findOne(id, user.userId);
     return {
       success: true,
@@ -109,7 +111,7 @@ export class SongsController {
   }
 
   @UseGuards(ThrottlerGuard)
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle({ default: { limit: 15, ttl: 60000 } })
   @Post('upload')
   @UseInterceptors(
     FileInterceptor('file', {
@@ -156,7 +158,7 @@ export class SongsController {
 
     const { title, isPublic = false } = uploadSongDto;
 
-    const user = req.user as { userId: string };
+    const user = req.user as JwtUser;
     const userId = user.userId;
 
     const hasValidAudioSignature = await this.validateAudioSignature(file.path);
@@ -177,13 +179,24 @@ export class SongsController {
         title,
         isPublic,
       );
+
+      const isProcessing = result.isProcessing === true;
+      const isDuplicateReady = result.isDuplicate && !isProcessing;
+
+      if (isDuplicateReady) {
+        throw new ConflictException({
+          success: false,
+          code: 'SONG_DUPLICATE',
+          message: 'Bài hát đã tồn tại trong thư viện của bạn.',
+          timestamp: new Date().toISOString(),
+        });
+      }
+
       return {
         success: true,
-        code: result.isDuplicate ? 'SONG_DUPLICATE' : 'SONG_PROCESSING',
+        code: 'SONG_PROCESSING',
         data: result.song,
-        message: result.isDuplicate
-          ? 'Bài hát đã tồn tại, sử dụng lại dữ liệu có sẵn'
-          : 'Tải lên thành công, bài hát đang được xử lý',
+        message: 'Tải lên thành công, bài hát đang được xử lý',
         timestamp: new Date().toISOString(),
       };
     } catch (error) {
@@ -203,14 +216,14 @@ export class SongsController {
   }
 
   @UseGuards(ThrottlerGuard)
-  @Throttle({ default: { limit: 10, ttl: 60000 } }) // 10 req/min - high value endpoint
+  @Throttle({ default: { limit: 240, ttl: 60000 } })
   @Get(':id/key')
   async getSongKey(
     @Param('id') id: string,
     @Req() req: Request,
     @Res() res: Response,
   ) {
-    const user = req.user as { userId: string };
+    const user = req.user as JwtUser;
     const userAgent = req.headers['user-agent'];
     const deviceFingerprint = Array.isArray(userAgent)
       ? userAgent.join('|')
@@ -223,6 +236,7 @@ export class SongsController {
     );
 
     res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Cache-Control', 'private, max-age=600');
     res.send(keyBuffer);
   }
 }

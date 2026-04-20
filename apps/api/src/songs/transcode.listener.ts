@@ -9,16 +9,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Song, SongDocument } from './schemas/song.schema';
 import { Queue } from 'bullmq';
-import { SongStatus } from '@musical/shared-types';
-
-interface TranscodeResult {
-  success: boolean;
-  songId: string;
-  duration: number;
-  hlsMasterPath: string;
-  hlsKeyId: string;
-  coverUrl: string | null;
-}
+import { ITranscodeResult, SongStatus } from '@musical/shared-types';
 
 @QueueEventsListener('transcode-queue')
 @Injectable()
@@ -40,25 +31,48 @@ export class TranscodeListener extends QueueEventsHost {
     returnvalue,
   }: {
     jobId: string;
-    returnvalue: string | TranscodeResult;
+    returnvalue: string | ITranscodeResult;
   }) {
     this.logger.log(`Bắt được sự kiện hoàn thành từ Worker cho Job ${jobId}`);
 
     // BullMQ lưu returnvalue dạng chuỗi JSON nếu truyền qua Redis, nên cần parse an toàn
     const result = (
       typeof returnvalue === 'string' ? JSON.parse(returnvalue) : returnvalue
-    ) as TranscodeResult;
+    ) as ITranscodeResult;
 
     if (result?.success && result?.songId) {
       // API TỰ MÌNH CẬP NHẬT DATABASE
-      await this.songModel.findByIdAndUpdate(result.songId, {
-        status: SongStatus.READY,
-        duration: result.duration,
-        hlsMasterPath: result.hlsMasterPath,
-        hlsKeyId: result.hlsKeyId,
-        processingLog: null,
-        'thumbnails.large': result.coverUrl,
-      });
+      const updatedSourceSong = await this.songModel.findByIdAndUpdate(
+        result.songId,
+        {
+          status: SongStatus.READY,
+          duration: result.duration,
+          hlsMasterPath: result.hlsMasterPath,
+          hlsKeyId: result.hlsKeyId,
+          processingLog: null,
+          'thumbnails.large': result.coverUrl,
+        },
+        { new: true },
+      );
+
+      if (updatedSourceSong?.checksum) {
+        // Đồng bộ các bản ghi đang chờ cùng checksum (upload bởi user khác).
+        await this.songModel.updateMany(
+          {
+            checksum: updatedSourceSong.checksum,
+            status: SongStatus.PROCESSING,
+            _id: { $ne: updatedSourceSong._id },
+          },
+          {
+            status: SongStatus.READY,
+            duration: result.duration,
+            hlsMasterPath: result.hlsMasterPath,
+            hlsKeyId: result.hlsKeyId,
+            processingLog: null,
+            'thumbnails.large': result.coverUrl,
+          },
+        );
+      }
 
       this.logger.log(
         `Đã cập nhật Database thành công cho bài hát: ${result.songId}`,
@@ -87,11 +101,30 @@ export class TranscodeListener extends QueueEventsHost {
       return;
     }
 
-    await this.songModel.findByIdAndUpdate(songId, {
-      status: SongStatus.FAILED,
-      processingLog: failedReason,
-      processingCompletedAt: new Date(),
-    });
+    const failedSourceSong = await this.songModel.findByIdAndUpdate(
+      songId,
+      {
+        status: SongStatus.FAILED,
+        processingLog: failedReason,
+        processingCompletedAt: new Date(),
+      },
+      { new: true },
+    );
+
+    if (failedSourceSong?.checksum) {
+      await this.songModel.updateMany(
+        {
+          checksum: failedSourceSong.checksum,
+          status: SongStatus.PROCESSING,
+          _id: { $ne: failedSourceSong._id },
+        },
+        {
+          status: SongStatus.FAILED,
+          processingLog: failedReason,
+          processingCompletedAt: new Date(),
+        },
+      );
+    }
 
     this.logger.warn(`Đã cập nhật bài hát ${songId} sang trạng thái failed.`);
   }

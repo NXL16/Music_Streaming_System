@@ -190,8 +190,8 @@ describe('Songs Upload Flow (e2e)', () => {
 
     const body = response.body as ApiResponseBody;
 
-    expect(response.status).toBe(201);
-    expect(body.success).toBe(true);
+    expect(response.status).toBe(409);
+    expect(body.success).toBe(false);
     expect(body.code).toBe('SONG_DUPLICATE');
   });
 

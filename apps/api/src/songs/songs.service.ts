@@ -22,6 +22,12 @@ import * as crypto from 'crypto';
 import { createReadStream } from 'fs';
 import Redis from 'ioredis';
 
+interface UploadSongResult {
+  song: SongDocument | Record<string, unknown> | null;
+  isDuplicate: boolean;
+  isProcessing?: boolean;
+}
+
 @Injectable()
 export class SongsService {
   constructor(
@@ -130,12 +136,81 @@ export class SongsService {
     });
   }
 
+  private async releaseUploadLock(lockKey: string, lockValue: string) {
+    // Chỉ giải phóng lock nếu đúng owner để tránh xóa lock của tiến trình khác.
+    await this.redis.eval(
+      `
+        if redis.call("get", KEYS[1]) == ARGV[1] then
+          return redis.call("del", KEYS[1])
+        else
+          return 0
+        end
+      `,
+      1,
+      lockKey,
+      lockValue,
+    );
+  }
+
+  private async findExistingUserSongByChecksum(
+    checksum: string,
+    userId: string,
+  ) {
+    return this.songModel
+      .findOne(
+        {
+          checksum,
+          uploadedBy: new Types.ObjectId(userId),
+          status: { $in: [SongStatus.PROCESSING, SongStatus.READY] },
+        } as Record<string, unknown>,
+      )
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec();
+  }
+
+  private async createOrGetProcessingSong(
+    file: Express.Multer.File,
+    userId: string,
+    title: string,
+    isPublic: boolean,
+    checksum: string,
+  ) {
+    const existingProcessingSong = await this.songModel
+      .findOne(
+        {
+          checksum,
+          uploadedBy: new Types.ObjectId(userId),
+          status: SongStatus.PROCESSING,
+        } as Record<string, unknown>,
+      )
+      .exec();
+
+    if (existingProcessingSong) {
+      return existingProcessingSong;
+    }
+
+    const processingSong = new this.songModel({
+      title: title || file.originalname,
+      originalFormat: file.mimetype,
+      fileSize: file.size,
+      uploadedBy: new Types.ObjectId(userId),
+      artistId: new Types.ObjectId(userId),
+      status: SongStatus.PROCESSING,
+      isPublic,
+      duration: 1,
+      checksum,
+    });
+
+    return processingSong.save();
+  }
+
   async uploadSong(
     file: Express.Multer.File,
     userId: string,
     title: string,
     isPublic = false,
-  ) {
+  ): Promise<UploadSongResult> {
     if (!file) {
       throw new BadRequestException('Không tìm thấy file');
     }
@@ -143,79 +218,179 @@ export class SongsService {
     // BƯỚC 1: Tính toán dấu vân tay (Hash) thực tế của file
     const fileChecksum = await this.calculateFileHash(file.path);
 
-    // BƯỚC 2: Kiểm tra xem "vân tay" này đã tồn tại trong hệ thống chưa
-    // Chỉ tìm những bài đã xử lý thành công (READY)
-    const existingSong = await this.songModel
-      .findOne({
-        checksum: fileChecksum,
-        status: SongStatus.READY,
-      })
-      .lean()
-      .exec();
+    const existingUserSong = await this.findExistingUserSongByChecksum(
+      fileChecksum,
+      userId,
+    );
 
-    if (existingSong) {
-      // NHƯỢC ĐIỂM CỦA CÁCH CŨ LÀM ĐÃ ĐƯỢC KHẮC PHỤC Ở ĐÂY:
-      // Nếu file đã tồn tại, ta xóa ngay file tạm vừa upload lên để đỡ chật ổ cứng
+    if (existingUserSong) {
       if (fs.existsSync(file.path)) {
-        fs.unlinkSync(file.path);
+        await fs.promises.unlink(file.path);
       }
 
-      // Tạo bản ghi mới cho người dùng này, nhưng trỏ dữ liệu nhạc về file cũ
-      const duplicateSong = new this.songModel({
+      return {
+        song: existingUserSong,
+        isDuplicate: true,
+        isProcessing: existingUserSong.status === SongStatus.PROCESSING,
+      };
+    }
+
+    const lockKey = `lock:upload:${fileChecksum}`;
+    const lockValue = crypto.randomUUID();
+    const lock = await this.redis.set(lockKey, lockValue, 'EX', 120, 'NX');
+
+    if (!lock) {
+      const existingSong = await this.songModel
+        .findOne({
+          checksum: fileChecksum,
+          status: { $in: [SongStatus.PROCESSING, SongStatus.READY] },
+        })
+        .sort({ createdAt: -1 })
+        .lean()
+        .exec();
+
+      if (fs.existsSync(file.path)) {
+        await fs.promises.unlink(file.path);
+      }
+
+      if (existingSong?.status === SongStatus.PROCESSING) {
+        const processingSong = await this.createOrGetProcessingSong(
+          file,
+          userId,
+          title,
+          isPublic,
+          fileChecksum,
+        );
+
+        return {
+          song: processingSong,
+          isDuplicate: false,
+          isProcessing: true,
+        };
+      }
+
+      if (existingSong?.status === SongStatus.READY) {
+        const duplicateSong = new this.songModel({
+          title: title || file.originalname,
+          originalFormat: file.mimetype,
+          fileSize: file.size,
+          uploadedBy: new Types.ObjectId(userId),
+          artistId: new Types.ObjectId(userId),
+          status: SongStatus.READY,
+          isPublic,
+          checksum: fileChecksum,
+          duration: existingSong.duration,
+          hlsMasterPath: existingSong.hlsMasterPath,
+          hlsKeyId: existingSong.hlsKeyId,
+          thumbnails: existingSong.thumbnails,
+        });
+
+        return {
+          song: await duplicateSong.save(),
+          isDuplicate: true,
+        };
+      }
+
+      return {
+        song: null,
+        isDuplicate: false,
+        isProcessing: true,
+      };
+    }
+
+    try {
+      // BƯỚC 2: Kiểm tra xem "vân tay" này đã tồn tại trong hệ thống chưa.
+      // READY: có thể tạo bản ghi duplicate ngay.
+      // PROCESSING: trả trạng thái đang xử lý, không tạo thêm job.
+      const existingSong = await this.songModel
+        .findOne({
+          checksum: fileChecksum,
+          status: { $in: [SongStatus.READY, SongStatus.PROCESSING] },
+        })
+        .sort({ createdAt: -1 })
+        .lean()
+        .exec();
+
+      if (existingSong) {
+        if (fs.existsSync(file.path)) {
+          await fs.promises.unlink(file.path);
+        }
+
+        if (existingSong.status === SongStatus.PROCESSING) {
+          const processingSong = await this.createOrGetProcessingSong(
+            file,
+            userId,
+            title,
+            isPublic,
+            fileChecksum,
+          );
+
+          return {
+            song: processingSong,
+            isDuplicate: false,
+            isProcessing: true,
+          };
+        }
+
+        // Tạo bản ghi mới cho người dùng này, nhưng trỏ dữ liệu nhạc về file cũ
+        const duplicateSong = new this.songModel({
+          title: title || file.originalname,
+          originalFormat: file.mimetype,
+          fileSize: file.size,
+          uploadedBy: new Types.ObjectId(userId),
+          artistId: new Types.ObjectId(userId),
+          status: SongStatus.READY, // Sẵn sàng luôn
+          isPublic,
+          checksum: fileChecksum,
+          duration: existingSong.duration,
+          hlsMasterPath: existingSong.hlsMasterPath, // Dùng chung file đã transcode trên R2
+          hlsKeyId: existingSong.hlsKeyId,
+          thumbnails: existingSong.thumbnails,
+        });
+
+        return {
+          song: await duplicateSong.save(),
+          isDuplicate: true,
+        };
+      }
+
+      // BƯỚC 3: Nếu là file mới hoàn toàn, tiến hành quy trình cũ
+      const newSong = new this.songModel({
         title: title || file.originalname,
         originalFormat: file.mimetype,
         fileSize: file.size,
         uploadedBy: new Types.ObjectId(userId),
-        artistId: new Types.ObjectId(userId),
-        status: SongStatus.READY, // Sẵn sàng luôn
+        status: SongStatus.PROCESSING,
         isPublic,
+        artistId: new Types.ObjectId(userId), // Tạm thời lấy người upload làm artist
+        duration: 1, // Thời lượng 1s (Worker sẽ update sau)
+        checksum: fileChecksum, // Lưu hash thật
+      });
+
+      await newSong.save();
+
+      // b. Đóng gói dữ liệu Payload chuẩn bị ném cho Worker
+      const jobPayload: ITranscodeJob = {
+        songId: newSong._id.toString(),
+        originalFilePath: file.path,
+        uploadedBy: userId,
+        format: file.mimetype,
         checksum: fileChecksum,
-        duration: existingSong.duration,
-        hlsMasterPath: existingSong.hlsMasterPath, // Dùng chung file đã transcode trên R2
-        hlsKeyId: existingSong.hlsKeyId,
-        thumbnails: existingSong.thumbnails,
+      };
+
+      // c. Đẩy Job vào Queue (BullMQ lưu vào Redis)
+      await this.transcodeQueue.add('transcode-hls', jobPayload, {
+        removeOnComplete: true,
+        attempts: 3,
       });
 
       return {
-        song: await duplicateSong.save(),
-        isDuplicate: true,
+        song: newSong,
+        isDuplicate: false,
       };
+    } finally {
+      await this.releaseUploadLock(lockKey, lockValue);
     }
-
-    // BƯỚC 3: Nếu là file mới hoàn toàn, tiến hành quy trình cũ
-    const newSong = new this.songModel({
-      title: title || file.originalname,
-      originalFormat: file.mimetype,
-      fileSize: file.size,
-      uploadedBy: new Types.ObjectId(userId),
-      status: SongStatus.PROCESSING,
-      isPublic,
-      artistId: new Types.ObjectId(userId), // Tạm thời lấy người upload làm artist
-      duration: 1, // Thời lượng 1s (Worker sẽ update sau)
-      checksum: fileChecksum, // Lưu hash thật
-    });
-
-    await newSong.save();
-
-    // b. Đóng gói dữ liệu Payload chuẩn bị ném cho Worker
-    const jobPayload: ITranscodeJob = {
-      songId: newSong._id.toString(),
-      originalFilePath: file.path,
-      uploadedBy: userId,
-      format: file.mimetype,
-      checksum: fileChecksum,
-    };
-
-    // c. Đẩy Job vào Queue (BullMQ lưu vào Redis)
-    await this.transcodeQueue.add('transcode-hls', jobPayload, {
-      removeOnComplete: true,
-      attempts: 3,
-    });
-
-    return {
-      song: newSong,
-      isDuplicate: false,
-    };
   }
 
   // HÀM LẤY KHÓA (WITH CACHING)
