@@ -2,31 +2,42 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { ThrottlerExceptionFilter } from './common/filters/throttler-exception.filter';
+import { ValidationExceptionFilter } from './common/filters/validation-exception.filter';
+import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   const configService = app.get(ConfigService);
 
-  const webUrl = configService.get<string>('WEB_URL');
-  const host = configService.get<string>('API_HOST');
-  const port = Number(configService.get<string>('API_PORT'));
-  const prefix = configService.get<string>('API_PREFIX');
+  const corsOrigin =
+    configService.get<string>('CORS_ORIGIN') ||
+    configService.getOrThrow<string>('WEB_URL');
+  const host = configService.getOrThrow<string>('API_HOST');
+  const port = Number(configService.getOrThrow<string>('API_PORT'));
+  const prefix = configService.getOrThrow<string>('API_PREFIX');
 
   app.enableCors({
-    origin: webUrl,
-    credentials: true, // Bắt buộc bật để gửi Signed Cookie cho HLS và Token
+    origin: corsOrigin,
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    credentials: true,
   });
 
-  app.setGlobalPrefix(prefix as string);
+  app.setGlobalPrefix(prefix);
 
-  // Kích hoạt Validation toàn cục cho DTO
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist: true, // Tự động loại bỏ các trường gửi lên mà không được khai báo trong DTO
-      forbidNonWhitelisted: true, // Báo lỗi 400 nếu client gửi lên các trường lạ
-      transform: true, // Tự động chuyển đổi kiểu dữ liệu (Ví dụ: parse string thành number)
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
     }),
+  );
+
+  app.useGlobalFilters(
+    new ValidationExceptionFilter(),
+    new ThrottlerExceptionFilter(),
+    new HttpExceptionFilter(),
   );
 
   await app.listen(port, () =>

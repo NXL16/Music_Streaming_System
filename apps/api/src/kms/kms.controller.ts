@@ -1,10 +1,13 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { KmsService } from './kms.service';
 
 @Controller('kms')
 export class KmsController {
   constructor(private readonly kmsService: KmsService) {}
 
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @Get('test-generate/:songId')
   async testGenerateKey(@Param('songId') songId: string) {
     // Gọi gRPC sang KMS với một userId giả định

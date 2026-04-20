@@ -9,7 +9,6 @@ async function bootstrap() {
     {
       transport: Transport.GRPC,
       options: {
-        // Cổng nội bộ cho gRPC
         url: '0.0.0.0:5000',
         package: 'musicstreaming',
         protoPath: join(__dirname, '../proto/key-management.proto'),
@@ -23,4 +22,4 @@ async function bootstrap() {
   await app.listen();
   console.log('KMS Microservice is listening on gRPC port 5000');
 }
-bootstrap().catch((e) => console.log(e));
+bootstrap().catch((e) => console.error(e));

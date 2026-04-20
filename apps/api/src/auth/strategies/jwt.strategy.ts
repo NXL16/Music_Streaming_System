@@ -2,12 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
-
-interface JwtPayload {
-  sub: string;
-  username: string;
-  role: string;
-}
+import { JwtPayload, JwtUser } from '@musical/shared-types';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -15,11 +10,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: configService.getOrThrow<string>('JWT_SECRET'),
+      secretOrKey: configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
     });
   }
 
-  validate(payload: JwtPayload) {
+  validate(payload: JwtPayload):JwtUser {
     // Payload là thông tin đã giải mã từ token (sub, username, role)
     if (!payload.sub) {
       throw new UnauthorizedException();
@@ -29,6 +24,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       userId: payload.sub,
       username: payload.username,
       role: payload.role,
+      deviceId: payload.deviceId,
     };
   }
 }

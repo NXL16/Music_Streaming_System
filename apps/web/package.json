@@ -12,10 +12,14 @@
   },
   "dependencies": {
     "@musical/shared-types": "workspace:*",
+    "axios": "^1.15.0",
+    "hls.js": "^1.6.16",
+    "lucide-react": "^1.8.0",
     "next": "16.2.2",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "react-hook-form": "^7.72.1"
+    "react-hook-form": "^7.72.1",
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@musical/ts-config": "workspace:*",

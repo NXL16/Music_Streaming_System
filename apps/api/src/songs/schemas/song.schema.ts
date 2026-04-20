@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Schema as MongooseSchema } from 'mongoose';
-import { SongStatus, QualityQuality } from '@musical/shared-types';
+import { SongStatus, AudioQuality } from '@musical/shared-types';
 
 export type SongDocument = Song & Document;
 
@@ -31,7 +31,7 @@ export class Song {
   lyrics!: string;
 
   // HLS & Streaming
-  @Prop({ default: null, unique: true, sparse: true })
+  @Prop({ default: null })
   hlsMasterPath?: string;
 
   @Prop({ default: null })
@@ -46,7 +46,7 @@ export class Song {
   @Prop({
     type: [
       {
-        quality: { type: String, enum: QualityQuality },
+        quality: { type: String, enum: AudioQuality },
         path: String,
         bandwidth: Number,
         avgSegmentSize: Number,
@@ -73,7 +73,7 @@ export class Song {
   })
   thumbnails?: Record<string, any>;
 
-  @Prop({ required: true, unique: true })
+  @Prop({ required: true, index: true })
   checksum!: string;
 
   @Prop({ default: 0 })
@@ -118,7 +118,27 @@ export class Song {
 
 export const SongSchema = SchemaFactory.createForClass(Song);
 
+// Text search index
 SongSchema.index({ title: 'text' });
-SongSchema.index({ status: 1, isPublic: 1 });
+
+// Cursor pagination with status filtering
+SongSchema.index({ isPublic: 1, _id: -1 });
+SongSchema.index({ status: 1, isPublic: 1, _id: -1 });
+
+// Deduplication check
+SongSchema.index({ checksum: 1, status: 1 });
+
+// User's songs
+SongSchema.index({ uploadedBy: 1, status: 1 });
+
+// Genre filtering
+SongSchema.index({ genre: 1, isPublic: 1 });
+
+// Status and sorting
 SongSchema.index({ status: 1, updatedAt: -1 });
+
+// Popularity sorting
 SongSchema.index({ 'metrics.playCount': -1 });
+
+// Performance monitoring indexes
+SongSchema.index({ status: 1, processingCompletedAt: -1 });

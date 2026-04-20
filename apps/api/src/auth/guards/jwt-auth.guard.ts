@@ -1,15 +1,10 @@
+import { JwtUser } from '@musical/shared-types';
 import {
   ExecutionContext,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-
-interface JwtUser {
-  userId: string;
-  username: string;
-  role: string;
-}
 
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
@@ -24,11 +19,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     void context;
     void status;
 
-    if (err instanceof Error) {
-      throw err;
-    }
-
-    if (!user) {
+    if (err || !user) {
       throw new UnauthorizedException({
         code: 'AUTH_INVALID_TOKEN',
         message: 'Token không hợp lệ hoặc đã hết hạn',

@@ -2,7 +2,6 @@ import { Injectable, Inject, OnModuleInit } from '@nestjs/common';
 import * as microservices from '@nestjs/microservices';
 import { lastValueFrom, Observable } from 'rxjs';
 
-// 1. Định nghĩa Interface phản hồi để tránh lỗi 'any' của ESLint
 interface GenerateKeyResponse {
   key_id: string;
   key: Uint8Array; // 'bytes' trong proto tương ứng với Uint8Array trong TS

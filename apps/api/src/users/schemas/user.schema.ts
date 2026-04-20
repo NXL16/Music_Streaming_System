@@ -16,7 +16,7 @@ export class User {
   })
   username!: string;
 
-  @Prop({ required: true, minlength: 60 }) // Bcrypt hash
+  @Prop({ required: true, minlength: 60 })
   password!: string;
 
   @Prop({
@@ -80,5 +80,13 @@ export class User {
 
 export const UserSchema = SchemaFactory.createForClass(User);
 
+// User filtering
 UserSchema.index({ isActive: 1, createdAt: -1 });
+UserSchema.index({ role: 1, isActive: 1 });
+
+// Analytics and admin
 UserSchema.index({ lastLoginAt: -1 });
+UserSchema.index({ createdAt: -1 });
+
+// Two-factor authentication
+UserSchema.index({ twoFactorEnabled: 1 });

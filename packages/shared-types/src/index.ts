@@ -1,3 +1,5 @@
+export const TRANSCODE_QUEUE: string = "transcode-queue";
+
 // ==========================================
 // CONSTANTS & TYPES
 // ==========================================
@@ -14,13 +16,26 @@ export const SongStatus = {
 } as const;
 export type SongStatus = (typeof SongStatus)[keyof typeof SongStatus];
 
-export const QualityQuality = {
+export const AudioQuality = {
   Q128K: "128k",
   Q192K: "192k",
   Q320K: "320k",
 } as const;
-export type QualityQuality =
-  (typeof QualityQuality)[keyof typeof QualityQuality];
+export type AudioQuality = (typeof AudioQuality)[keyof typeof AudioQuality];
+
+export interface JwtUser {
+  userId: string;
+  username: string;
+  role: UserRole;
+  deviceId: string;
+}
+
+export interface JwtPayload {
+  sub: string;
+  username: string;
+  role: UserRole;
+  deviceId: string;
+}
 
 // ==========================================
 // INTERFACES (Dựa theo MongoDB Schema)
@@ -66,7 +81,7 @@ export interface ISong {
   isEncrypted: boolean;
 
   bitrates: {
-    quality: QualityQuality;
+    quality: AudioQuality;
     path: string;
     bandwidth: number;
     avgSegmentSize: number;

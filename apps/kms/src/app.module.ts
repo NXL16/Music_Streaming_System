@@ -5,10 +5,7 @@ import { KeyManagementModule } from './key-management/key-management.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-      envFilePath: '.env',
-    }),
+    ConfigModule.forRoot({ isGlobal: true }),
     DatabaseModule,
     KeyManagementModule,
   ],
