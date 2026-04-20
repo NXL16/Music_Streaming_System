@@ -11,6 +11,7 @@ const REQUIRED_KEYS = [
   'JWT_REFRESH_EXPIRES_IN',
   'REDIS_HOST',
   'REDIS_PORT',
+  'REDIS_PASSWORD',
 ] as const;
 
 const isPositiveInteger = (value: string): boolean => /^\d+$/.test(value);

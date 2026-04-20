@@ -11,12 +11,15 @@ import { StorageModule } from "./storage/storage.module";
 
     BullModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get<string>("REDIS_HOST"),
-          port: configService.get<number>("REDIS_PORT"),
-        },
-      }),
+      useFactory: (configService: ConfigService) => {
+        return {
+          connection: {
+            host: configService.get<string>("REDIS_HOST"),
+            port: configService.get<number>("REDIS_PORT"),
+            password: configService.getOrThrow<string>("REDIS_PASSWORD"),
+          },
+        };
+      },
       inject: [ConfigService],
     }),
 

@@ -16,6 +16,7 @@ class RedisProvider implements OnModuleDestroy, BeforeApplicationShutdown {
     this.client = new Redis({
       host: config.getOrThrow<string>('REDIS_HOST'),
       port: Number(config.getOrThrow<string>('REDIS_PORT')),
+      password: config.getOrThrow<string>('REDIS_PASSWORD'),
       maxRetriesPerRequest: null,
       enableReadyCheck: true,
     });

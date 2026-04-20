@@ -16,9 +16,9 @@
     "dev:kms": "pnpm --filter kms start:dev",
     "dev:worker": "pnpm --filter worker start:dev",
     "clean": "turbo run clean && rm -rf node_modules",
-    "docker:up": "docker-compose -f tools/docker/docker-compose.dev.yml up -d",
-    "docker:down": "docker-compose -f tools/docker/docker-compose.dev.yml down",
-    "docker:logs": "docker-compose -f tools/docker/docker-compose.dev.yml logs -f"
+    "docker:up": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/scripts/docker-up-redis.ps1",
+    "docker:down": "docker rm -f my-redis",
+    "docker:logs": "docker logs -f my-redis"
   },
   "keywords": [],
   "author": "",

@@ -11,5 +11,6 @@ export const getBullConfig = (config: ConfigService) => ({
   connection: {
     host: config.get<string>('REDIS_HOST'),
     port: config.get<number>('REDIS_PORT'),
+    password: config.getOrThrow<string>('REDIS_PASSWORD'),
   },
 });
