@@ -5,13 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { Response } from 'express';
-
-interface ValidationErrorResponse {
-  message: string[] | string;
-  code?: string;
-  error?: string;
-  statusCode?: number;
-}
+import { HttpExceptionResponseBody } from '@musical/shared-types';
 
 @Catch(BadRequestException)
 export class ValidationExceptionFilter implements ExceptionFilter {
@@ -20,7 +14,7 @@ export class ValidationExceptionFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const status = exception.getStatus();
     const exceptionResponse =
-      exception.getResponse() as ValidationErrorResponse;
+      exception.getResponse() as HttpExceptionResponseBody;
 
     const isValidationPipeError =
       exceptionResponse?.error === 'Bad Request' &&

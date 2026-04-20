@@ -1,28 +1,16 @@
 import { Injectable, Inject, OnModuleInit } from "@nestjs/common";
 import * as microservices from "@nestjs/microservices";
 import { lastValueFrom, Observable } from "rxjs";
-
-interface GenerateKeyResponse {
-  key_id: string;
-  key: Uint8Array; // 'bytes' trong proto tương ứng với Uint8Array trong TS
-  iv: Uint8Array;
-}
-
-interface GetKeyResponse {
-  key: Uint8Array;
-  iv: Uint8Array;
-}
+import {
+  KmsGenerateKeyRequest,
+  KmsGenerateKeyResponse,
+  KmsGetKeyRequest,
+  KmsGetKeyResponse,
+} from "@musical/shared-types";
 
 interface KeyManagementGrpcService {
-  generateKey(data: {
-    song_id: string;
-    user_id: string;
-  }): Observable<GenerateKeyResponse>;
-  getKey(data: {
-    song_id: string;
-    user_id: string;
-    device_fingerprint: string;
-  }): Observable<GetKeyResponse>;
+  generateKey(data: KmsGenerateKeyRequest): Observable<KmsGenerateKeyResponse>;
+  getKey(data: KmsGetKeyRequest): Observable<KmsGetKeyResponse>;
 }
 
 @Injectable()

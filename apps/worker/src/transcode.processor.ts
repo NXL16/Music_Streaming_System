@@ -7,6 +7,7 @@ import { promises as fs } from "fs";
 import * as path from "path";
 import sharp from "sharp";
 import { randomUUID } from "crypto";
+import { ITranscodeResult } from "@musical/shared-types";
 
 import { KmsService } from "./kms/kms.service";
 import { StorageService } from "./storage/storage.service";
@@ -18,15 +19,6 @@ interface TranscodeJobData {
   originalFilePath: string;
   uploadedBy: string;
   checksum: string;
-}
-
-interface TranscodeResult {
-  success: true;
-  songId: string;
-  duration: number;
-  hlsMasterPath: string;
-  hlsKeyId: string;
-  coverUrl: string | null;
 }
 
 const toErrorMessage = (error: unknown): string =>
@@ -45,7 +37,7 @@ export class TranscodeProcessor extends WorkerHost {
     super();
   }
 
-  async process(job: Job<TranscodeJobData>): Promise<TranscodeResult> {
+  async process(job: Job<TranscodeJobData>): Promise<ITranscodeResult> {
     const { songId, originalFilePath, uploadedBy, checksum } = job.data;
 
     // ================= VALIDATE =================
@@ -121,7 +113,7 @@ export class TranscodeProcessor extends WorkerHost {
     // ================= STEP 3: FFMPEG =================
     const masterPlaylistPath = path.join(outputDir, "master.m3u8");
 
-    return new Promise<TranscodeResult>((resolve, reject) => {
+    return new Promise<ITranscodeResult>((resolve, reject) => {
       ffmpeg(originalFilePath)
         .outputOptions([
           "-vn",

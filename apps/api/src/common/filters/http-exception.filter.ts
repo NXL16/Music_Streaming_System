@@ -5,13 +5,7 @@ import {
   HttpException,
 } from '@nestjs/common';
 import { Response } from 'express';
-
-interface ValidationErrorResponse {
-  message: string[] | string;
-  code?: string;
-  error?: string;
-  statusCode?: number;
-}
+import { HttpExceptionResponseBody } from '@musical/shared-types';
 
 const DEFAULT_ERROR_CODE_BY_STATUS: Record<number, string> = {
   400: 'BAD_REQUEST',
@@ -30,7 +24,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const status = exception.getStatus();
     const exceptionResponse =
-      exception.getResponse() as ValidationErrorResponse;
+      exception.getResponse() as HttpExceptionResponseBody;
 
     let message: string | string[] =
       status >= 500

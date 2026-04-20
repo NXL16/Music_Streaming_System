@@ -37,6 +37,63 @@ export interface JwtPayload {
   deviceId: string;
 }
 
+export interface AuthSessionTokens {
+  accessToken: string;
+  refreshToken: string;
+  deviceId: string;
+}
+
+export interface AuthUserSummary {
+  sub: string;
+  username: string;
+  email?: string;
+  displayName?: string;
+  role: UserRole;
+}
+
+export interface AuthSessionData extends AuthSessionTokens {
+  user?: AuthUserSummary;
+  expiresIn?: number;
+}
+
+export interface ApiEnvelope<T = unknown> {
+  data?: T;
+  message?: string | string[];
+}
+
+export interface AuthRefreshApiResponse {
+  data?: Partial<AuthSessionTokens>;
+}
+
+export interface KmsGenerateKeyRequest {
+  song_id: string;
+  user_id: string;
+}
+
+export interface KmsGetKeyRequest {
+  song_id: string;
+  user_id: string;
+  device_fingerprint: string;
+}
+
+export interface KmsGenerateKeyResponse {
+  key_id: string;
+  key: Uint8Array;
+  iv: Uint8Array;
+}
+
+export interface KmsGetKeyResponse {
+  key: Uint8Array;
+  iv: Uint8Array;
+}
+
+export interface HttpExceptionResponseBody {
+  message: string[] | string;
+  code?: string;
+  error?: string;
+  statusCode?: number;
+}
+
 // ==========================================
 // INTERFACES (Dựa theo MongoDB Schema)
 // ==========================================
@@ -143,4 +200,13 @@ export interface ITranscodeJob {
   uploadedBy: string;
   format: string; // mp3, flac, wav
   checksum: string;
+}
+
+export interface ITranscodeResult {
+  success: true;
+  songId: string;
+  duration: number;
+  hlsMasterPath: string;
+  hlsKeyId: string;
+  coverUrl: string | null;
 }
