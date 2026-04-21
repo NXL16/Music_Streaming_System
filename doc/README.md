@@ -8,6 +8,7 @@ Thư mục này chứa tài liệu kỹ thuật hiện tại của monorepo.
 - QUICK_START.md: Hướng dẫn thiết lập môi trường local và lệnh chạy.
 - ENVIRONMENT.md: Danh sách biến môi trường cho API và Worker.
 - TEST_FLOW.md: Ma trận test case theo endpoint và lệnh chạy e2e.
+- API_ROADMAP_2_WEEKS.md: Lộ trình 2 tuần mở rộng API theo thứ tự risk-based và product value.
 
 ## Phạm Vi
 

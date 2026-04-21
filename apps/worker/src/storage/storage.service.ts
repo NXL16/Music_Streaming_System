@@ -2,6 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import * as fs from "fs";
+import { promises as fsp } from "fs";
 import * as path from "path";
 import * as mime from "mime-types";
 
@@ -33,18 +34,22 @@ export class StorageService {
    * Upload một thư mục (chứa file m3u8 và các file .ts) lên R2
    */
   async uploadDirectory(localDir: string, s3Prefix: string): Promise<string> {
-    const files = fs.readdirSync(localDir);
+    const entries = await fsp.readdir(localDir, { withFileTypes: true });
 
-    for (const file of files) {
+    for (const entry of entries) {
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      const file = entry.name;
       const filePath = path.join(localDir, file);
 
-      // Chỉ upload file, bỏ qua thư mục con (nếu có)
-      if (fs.statSync(filePath).isFile()) {
-        if (file.endsWith(".key") || file.endsWith(".keyinfo")) continue;
-
-        const s3Key = `${s3Prefix}/${file}`;
-        await this.uploadFile(filePath, s3Key);
+      if (file.endsWith(".key") || file.endsWith(".keyinfo")) {
+        continue;
       }
+
+      const s3Key = `${s3Prefix}/${file}`;
+      await this.uploadFile(filePath, s3Key);
     }
 
     // Trả về Public URL của file Master Playlist (.m3u8)

@@ -1,6 +1,7 @@
 import { Processor, WorkerHost } from "@nestjs/bullmq";
 import { Job } from "bullmq";
 import { Logger } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import ffmpeg from "fluent-ffmpeg";
 import * as ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
 import { promises as fs } from "fs";
@@ -33,6 +34,7 @@ export class TranscodeProcessor extends WorkerHost {
   constructor(
     private readonly kmsService: KmsService,
     private readonly storageService: StorageService,
+    private readonly configService: ConfigService,
   ) {
     super();
   }
@@ -105,13 +107,16 @@ export class TranscodeProcessor extends WorkerHost {
 
     await fs.writeFile(keyFilePath, keyBuffer);
 
-    const keyUrl = `http://localhost:9999/api/v1/songs/${songId}/key`;
+    const apiBaseUrl = this.configService.get<string>("API_BASE_URL")!;
+    const normalizedApiBaseUrl = apiBaseUrl.replace(/\/$/, "");
+    const keyUrl = `${normalizedApiBaseUrl}/songs/${songId}/key`;
     const keyInfoContent = `${keyUrl}\n${keyFilePath}\n${ivHex}`;
 
     await fs.writeFile(keyInfoPath, keyInfoContent);
 
     // ================= STEP 3: FFMPEG =================
     const masterPlaylistPath = path.join(outputDir, "master.m3u8");
+    let lastLoggedProgressBucket = -1;
 
     return new Promise<ITranscodeResult>((resolve, reject) => {
       ffmpeg(originalFilePath)
@@ -132,7 +137,16 @@ export class TranscodeProcessor extends WorkerHost {
         })
 
         .on("progress", (p) => {
-          this.logger.log(`Progress: ${p.percent?.toFixed(2)}%`);
+          const percent = p.percent;
+          if (typeof percent !== "number") {
+            return;
+          }
+
+          const bucket = Math.floor(percent / 10);
+          if (bucket > lastLoggedProgressBucket) {
+            lastLoggedProgressBucket = bucket;
+            this.logger.log(`Progress: ${Math.min(bucket * 10, 100)}%`);
+          }
         })
 
         .on("end", () => {
@@ -153,7 +167,7 @@ export class TranscodeProcessor extends WorkerHost {
                 .rm(outputDir, { recursive: true, force: true })
                 .catch(() => {});
 
-              this.logger.log(`✅ DONE: ${songId}`);
+              this.logger.log(`DONE: ${songId}`);
 
               resolve({
                 success: true,

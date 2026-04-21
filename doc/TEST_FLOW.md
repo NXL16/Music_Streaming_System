@@ -121,7 +121,7 @@ File test e2e hiện có:
 
 5. `POST /songs/upload` duplicate.
 - Service trả `isDuplicate = true`.
-- Kỳ vọng HTTP 201 và `SONG_DUPLICATE`.
+- Kỳ vọng HTTP 409 và `SONG_DUPLICATE`.
 
 6. `POST /songs/upload` unknown internal error.
 - Service ném lỗi không xác định.
@@ -131,9 +131,13 @@ File test e2e hiện có:
 
 1. `GET /kms/test-generate/:songId` thành công.
 - Kiểm tra map `key`/`iv` sang hex string.
+- Yêu cầu `JwtAuthGuard` + `AdminGuard`.
 
 2. `GET /kms/test-generate/:songId` fail từ service.
 - Kỳ vọng HTTP 400.
+
+3. `GET /kms/test-generate/:songId` bị vô hiệu hóa ở production.
+- Kỳ vọng HTTP 404 và `KMS_TEST_ENDPOINT_DISABLED`.
 
 ### Cleanup
 
@@ -172,7 +176,7 @@ pnpm --filter api exec jest --config ./test/jest-e2e.json --runInBand --testPath
 
 ## Trạng Thái Hiện Tại
 
-- 6 suites / 33 tests: PASS.
+- 6 suites / 34 tests: PASS.
 - Lint test files: PASS.
 
 ## Lưu Ý Quan Trọng

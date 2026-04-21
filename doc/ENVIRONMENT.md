@@ -29,6 +29,7 @@ Nếu thiếu biến bắt buộc hoặc giá trị không hợp lệ, tiến tr
 ### Biến Bổ Sung Thường Dùng Khi Runtime
 
 - CORS_ORIGIN (origin dùng cho CORS ở API).
+- KMS_GRPC_URL (tuỳ chọn, mặc định localhost:5000).
 
 ## Worker (apps/worker)
 
@@ -39,6 +40,8 @@ File mẫu biến môi trường của Worker nằm tại apps/worker/.env.examp
 - REDIS_HOST
 - REDIS_PORT
 - REDIS_PASSWORD
+- KMS_GRPC_URL (tuỳ chọn, mặc định localhost:5000)
+- API_BASE_URL (tuỳ chọn, URL API để worker tạo key URL trong HLS keyinfo, mặc định http://localhost:9999/api/v1)
 
 Giá trị khuyến nghị khi chạy Redis bằng Docker trên máy local:
 

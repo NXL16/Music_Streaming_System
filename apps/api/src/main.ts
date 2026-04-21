@@ -11,10 +11,14 @@ async function bootstrap() {
 
   const configService = app.get(ConfigService);
 
-  const corsOrigin = configService.get<string>('CORS_ORIGIN');
+  const corsOrigin = configService.get<string>('CORS_ORIGIN')!;
   const host = configService.getOrThrow<string>('API_HOST');
   const port = Number(configService.getOrThrow<string>('API_PORT'));
   const prefix = configService.getOrThrow<string>('API_PREFIX');
+
+  if (corsOrigin.trim() === '*') {
+    throw new Error('CORS_ORIGIN must not be "*" when credentials are enabled');
+  }
 
   app.enableCors({
     origin: corsOrigin,

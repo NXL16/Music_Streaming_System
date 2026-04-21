@@ -35,10 +35,18 @@ export class TranscodeListener extends QueueEventsHost {
   }) {
     this.logger.log(`Bắt được sự kiện hoàn thành từ Worker cho Job ${jobId}`);
 
-    // BullMQ lưu returnvalue dạng chuỗi JSON nếu truyền qua Redis, nên cần parse an toàn
-    const result = (
-      typeof returnvalue === 'string' ? JSON.parse(returnvalue) : returnvalue
-    ) as ITranscodeResult;
+    let result: ITranscodeResult;
+    try {
+      result = (
+        typeof returnvalue === 'string' ? JSON.parse(returnvalue) : returnvalue
+      ) as ITranscodeResult;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `Không parse được returnvalue của job ${jobId}: ${message}`,
+      );
+      return;
+    }
 
     if (result?.success && result?.songId) {
       // API TỰ MÌNH CẬP NHẬT DATABASE
@@ -90,6 +98,7 @@ export class TranscodeListener extends QueueEventsHost {
     failedReason: string;
   }) {
     this.logger.error(`❌ Job ${jobId} thất bại. Lý do: ${failedReason}`);
+    const completedAt = new Date();
 
     const job = await this.transcodeQueue.getJob(jobId);
     const songId = (job?.data as { songId?: string } | undefined)?.songId;
@@ -106,7 +115,7 @@ export class TranscodeListener extends QueueEventsHost {
       {
         status: SongStatus.FAILED,
         processingLog: failedReason,
-        processingCompletedAt: new Date(),
+        processingCompletedAt: completedAt,
       },
       { new: true },
     );
@@ -121,7 +130,7 @@ export class TranscodeListener extends QueueEventsHost {
         {
           status: SongStatus.FAILED,
           processingLog: failedReason,
-          processingCompletedAt: new Date(),
+          processingCompletedAt: completedAt,
         },
       );
     }

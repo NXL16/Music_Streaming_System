@@ -6,6 +6,7 @@ import {
   Get,
   HttpException,
   InternalServerErrorException,
+  Logger,
   Param,
   Post,
   Query,
@@ -46,11 +47,16 @@ const allowedAudioMimeTypes = new Set([
 @Controller('songs')
 @UseGuards(JwtAuthGuard)
 export class SongsController {
+  private readonly logger = new Logger(SongsController.name);
+
   constructor(private readonly songsService: SongsService) {}
 
   private async removeTempFile(file?: Express.Multer.File): Promise<void> {
     if (file?.path && fs.existsSync(file.path)) {
-      await fs.promises.unlink(file.path).catch(() => {});
+      await fs.promises.unlink(file.path).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`Cleanup temp file failed (${file.path}): ${message}`);
+      });
     }
   }
 

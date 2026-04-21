@@ -55,6 +55,10 @@ export class SongsService {
     return this.isSameUserId(song.uploadedBy, userId);
   }
 
+  private escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
   async findAll(queryDto: GetSongsQueryDto) {
     const { cursor, limit, genre, search } = queryDto;
 
@@ -70,7 +74,7 @@ export class SongsService {
     }
 
     if (search) {
-      filter.title = { $regex: search, $options: 'i' };
+      filter.title = { $regex: this.escapeRegex(search), $options: 'i' };
     }
 
     if (cursor) {

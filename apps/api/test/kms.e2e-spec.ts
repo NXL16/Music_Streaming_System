@@ -1,14 +1,25 @@
-import { BadRequestException, INestApplication, ValidationPipe } from '@nestjs/common';
+import {
+  BadRequestException,
+  ExecutionContext,
+  INestApplication,
+  ValidationPipe,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { ThrottlerGuard } from '@nestjs/throttler';
+import { JwtUser, UserRole } from '@musical/shared-types';
 import request from 'supertest';
-import { KmsController } from '../src/kms/kms.controller';
-import { KmsService } from '../src/kms/kms.service';
+import { AdminGuard } from '../src/auth/guards/admin.guard';
+import { JwtAuthGuard } from '../src/auth/guards/jwt-auth.guard';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { ThrottlerExceptionFilter } from '../src/common/filters/throttler-exception.filter';
 import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
+import { KmsController } from '../src/kms/kms.controller';
+import { KmsService } from '../src/kms/kms.service';
 
 type HttpServer = Parameters<typeof request>[0];
+
+type NodeEnv = 'test' | 'production';
 
 interface KmsGenerateResponseBody {
   message: string;
@@ -22,12 +33,50 @@ interface ErrorResponseBody {
   code: string;
 }
 
+interface RequestWithUser {
+  user?: JwtUser;
+}
+
 describe('KmsController (e2e)', () => {
   let app: INestApplication;
   const getHttpServer = (): HttpServer => app.getHttpServer() as HttpServer;
 
   const kmsServiceMock = {
     generateKey: jest.fn(),
+  };
+
+  let nodeEnv: NodeEnv = 'test';
+
+  const configServiceMock = {
+    get: jest.fn((key: string): string | undefined => {
+      if (key === 'NODE_ENV') {
+        return nodeEnv;
+      }
+
+      return undefined;
+    }),
+  };
+
+  const jwtAuthGuardMock = {
+    canActivate: jest.fn((context: ExecutionContext): boolean => {
+      const req = context.switchToHttp().getRequest<RequestWithUser>();
+      req.user = {
+        userId: 'admin-user-123',
+        username: 'admin',
+        role: UserRole.ADMIN,
+        deviceId: 'device-1',
+      };
+
+      return true;
+    }),
+  };
+
+  const adminGuardMock = {
+    canActivate: jest.fn().mockReturnValue(true),
+  };
+
+  const throttlerGuardMock = {
+    canActivate: jest.fn().mockReturnValue(true),
   };
 
   beforeAll(async () => {
@@ -38,10 +87,18 @@ describe('KmsController (e2e)', () => {
           provide: KmsService,
           useValue: kmsServiceMock,
         },
+        {
+          provide: ConfigService,
+          useValue: configServiceMock,
+        },
       ],
     })
+      .overrideGuard(JwtAuthGuard)
+      .useValue(jwtAuthGuardMock)
+      .overrideGuard(AdminGuard)
+      .useValue(adminGuardMock)
       .overrideGuard(ThrottlerGuard)
-      .useValue({ canActivate: jest.fn().mockReturnValue(true) })
+      .useValue(throttlerGuardMock)
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -64,6 +121,7 @@ describe('KmsController (e2e)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    nodeEnv = 'test';
   });
 
   afterAll(async () => {
@@ -81,7 +139,9 @@ describe('KmsController (e2e)', () => {
       iv: Uint8Array.from([0xca, 0xfe, 0xba, 0xbe]),
     });
 
-    const response = await request(getHttpServer()).get(`/kms/test-generate/${songId}`);
+    const response = await request(getHttpServer()).get(
+      `/kms/test-generate/${songId}`,
+    );
     const body = response.body as KmsGenerateResponseBody;
 
     expect(response.status).toBe(200);
@@ -89,7 +149,10 @@ describe('KmsController (e2e)', () => {
     expect(body.key_id).toBe('key-123');
     expect(body.key_hex).toBe('deadbeef');
     expect(body.iv_hex).toBe('cafebabe');
-    expect(kmsServiceMock.generateKey).toHaveBeenCalledWith(songId, 'user-test-123');
+    expect(kmsServiceMock.generateKey).toHaveBeenCalledWith(
+      songId,
+      'admin-user-123',
+    );
   });
 
   it('GET /kms/test-generate/:songId -> propagates service error', async () => {
@@ -99,11 +162,28 @@ describe('KmsController (e2e)', () => {
       new BadRequestException('Không thể tạo khóa cho bài hát này'),
     );
 
-    const response = await request(getHttpServer()).get(`/kms/test-generate/${songId}`);
+    const response = await request(getHttpServer()).get(
+      `/kms/test-generate/${songId}`,
+    );
     const body = response.body as ErrorResponseBody;
 
     expect(response.status).toBe(400);
     expect(body.success).toBe(false);
     expect(body.code).toBe('BAD_REQUEST');
+  });
+
+  it('GET /kms/test-generate/:songId -> disabled in production', async () => {
+    const songId = '507f1f77bcf86cd799439011';
+    nodeEnv = 'production';
+
+    const response = await request(getHttpServer()).get(
+      `/kms/test-generate/${songId}`,
+    );
+    const body = response.body as ErrorResponseBody;
+
+    expect(response.status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(body.code).toBe('KMS_TEST_ENDPOINT_DISABLED');
+    expect(kmsServiceMock.generateKey).not.toHaveBeenCalled();
   });
 });
