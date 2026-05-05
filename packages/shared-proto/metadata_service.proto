@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package metadata_service;
+
+option go_package = "Music_Streaming_System/packages/shared-proto/metadata";
+
+service MetadataService {
+  rpc UpdateTechnicalMeta (UpdateMetaRequest) returns (EmptyResponse);
+  rpc GetStreamData (GetStreamDataRequest) returns (StreamDataResponse);
+}
+
+message SeekPoint {
+  double timestamp = 1;
+  int64 byte_offset = 2;
+}
+
+message UpdateMetaRequest {
+  string song_id = 1;
+  double duration = 2;
+  repeated SeekPoint seek_points = 3;
+  repeated float waveform = 4;
+}
+
+message GetStreamDataRequest {
+  string song_id = 1;
+}
+
+message StreamDataResponse {
+  string song_id = 1;
+  double duration = 2;
+  repeated SeekPoint seek_points = 3;
+  repeated float waveform = 4;
+}
+
+message EmptyResponse {}

@@ -5,39 +5,37 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { Response } from 'express';
-import { HttpExceptionResponseBody } from '@musical/shared-types';
+
+interface ValidationErrorResponse {
+  message?: string | string[];
+  error?: string;
+  statusCode?: number;
+}
 
 @Catch(BadRequestException)
 export class ValidationExceptionFilter implements ExceptionFilter {
-  catch(exception: BadRequestException, host: ArgumentsHost) {
+  catch(exception: BadRequestException, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const status = exception.getStatus();
+
     const exceptionResponse =
-      exception.getResponse() as HttpExceptionResponseBody;
+      exception.getResponse() as ValidationErrorResponse;
 
-    const isValidationPipeError =
-      exceptionResponse?.error === 'Bad Request' &&
-      Array.isArray(exceptionResponse?.message);
+    let message = 'Dữ liệu gửi lên không hợp lệ';
 
-    let message: string | string[] = 'Dữ liệu gửi lên không hợp lệ.';
-    let code = 'BAD_REQUEST';
+    const rawMessage = exceptionResponse?.message;
 
-    if (Array.isArray(exceptionResponse.message)) {
-      message = exceptionResponse.message;
-    } else if (typeof exceptionResponse.message === 'string') {
-      message = exceptionResponse.message;
-    }
-
-    if (isValidationPipeError) {
-      code = 'VALIDATION_ERROR';
-    } else if (exceptionResponse.code) {
-      code = exceptionResponse.code;
+    // Normalize về string
+    if (Array.isArray(rawMessage)) {
+      message = rawMessage[0] ?? message;
+    } else if (typeof rawMessage === 'string') {
+      message = rawMessage;
     }
 
     response.status(status).json({
       success: false,
-      code,
+      code: 'VALIDATION_ERROR',
       message,
       timestamp: new Date().toISOString(),
     });

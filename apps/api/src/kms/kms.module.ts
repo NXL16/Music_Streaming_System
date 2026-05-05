@@ -4,6 +4,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
 import { join } from 'path';
 import { KmsService } from './kms.service';
 import { KmsController } from './kms.controller';
+import { KMS } from '@musical/shared-proto';
 
 @Module({
   imports: [
@@ -14,12 +15,13 @@ import { KmsController } from './kms.controller';
         useFactory: (configService: ConfigService) => ({
           transport: Transport.GRPC,
           options: {
-            url: configService.get<string>('KMS_GRPC_URL') ?? 'localhost:5000',
-            package: 'musicstreaming',
-            protoPath: join(__dirname, '../../proto/key-management.proto'),
-            loader: {
-              keepCase: true,
-            },
+            url: configService.get<string>('KMS_GRPC_URL'),
+            package: KMS.PACKAGE,
+            protoPath: join(
+              __dirname,
+              '../../../../packages/shared-proto',
+              KMS.PROTO_FILE,
+            ),
           },
         }),
       },

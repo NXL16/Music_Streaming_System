@@ -1,25 +1,33 @@
 import { Module } from '@nestjs/common';
-import { JwtModule } from '@nestjs/jwt';
-import { PassportModule } from '@nestjs/passport';
 import { ConfigService } from '@nestjs/config';
+import { ClientsModule, Transport } from '@nestjs/microservices';
+import { join } from 'path';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
-import { JwtStrategy } from './strategies/jwt.strategy';
-import { UsersModule } from '../users/users.module';
+import { IDENTITY } from '@musical/shared-proto';
+import { JwtStrategy } from '../common/strategies/jwt.strategy';
 
 @Module({
   imports: [
-    UsersModule,
-    PassportModule,
-    JwtModule.registerAsync({
-      useFactory: (configService: ConfigService) => ({
-        secret: configService.get<string>('JWT_ACCESS_SECRET'),
-        signOptions: {
-          expiresIn: configService.get('JWT_ACCESS_EXPIRES_IN'),
-        },
-      }),
-      inject: [ConfigService],
-    }),
+    ClientsModule.registerAsync([
+      {
+        name: 'IDENTITY_PACKAGE',
+        inject: [ConfigService],
+        useFactory: (configService: ConfigService) => ({
+          transport: Transport.GRPC,
+          options: {
+            package: IDENTITY.PACKAGE,
+            protoPath: join(
+              __dirname,
+              '../../../../packages/shared-proto/',
+              IDENTITY.PROTO_FILE,
+            ),
+            url: configService.getOrThrow<string>('IDENTITY_GRPC_URL'),
+            loader: { longs: Number },
+          },
+        }),
+      },
+    ]),
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],

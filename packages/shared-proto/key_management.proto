@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package key_management;
+
+option go_package = "Music_Streaming_System/packages/shared-proto/kms";
+
+service KeyManagementService {
+  rpc GenerateSongKey (GenerateKeyRequest) returns (KeyResponse);
+  rpc GetSongKey (GetKeyRequest) returns (KeyResponse);
+}
+
+message GenerateKeyRequest {
+  string song_id = 1;
+  string user_id = 2;
+}
+
+message KeyResponse {
+  string song_id = 1;
+  bytes encryption_key = 2; 
+  bytes iv = 3;             
+  int64 created_at = 4;     
+}
+
+message GetKeyRequest {
+  string song_id = 1;
+}

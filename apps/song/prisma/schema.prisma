@@ -1,0 +1,36 @@
+generator client {
+    provider     = "prisma-client"
+    output       = "../src/generated/prisma"
+    moduleFormat = "cjs"
+}
+
+datasource db {
+    provider = "postgresql"
+}
+
+model Song {
+    id                String   @id @default(uuid())
+    title             String   @db.VarChar(255)
+    artist            String   @default("") @db.VarChar(255)
+    album             String   @default("") @db.VarChar(255)
+    coverUrl          String   @default("") @db.VarChar(500)
+    uploaderId        String   @db.VarChar(128)
+    isPublic          Boolean  @default(true)
+    status            Int      @default(1)
+    sourceObjectPath  String   @default("") @db.VarChar(500)
+    checksum          String   @unique @default("") @db.VarChar(64)
+    fileSizeBytes     BigInt   @default(0)
+    encryptedFilePath String   @default("") @db.VarChar(500)
+    durationSec       Int      @default(0)
+    bitrateKbps       Int      @default(0)
+    codec             String   @default("") @db.VarChar(32)
+    format            String   @default("fmp4") @db.VarChar(32)
+    tags              String[] @default([])
+    createdAt         DateTime @default(now()) @db.Timestamptz
+    updatedAt         DateTime @updatedAt @db.Timestamptz
+
+    @@index([status, createdAt])
+    @@index([title])
+    @@index([uploaderId])
+    @@map("songs")
+}

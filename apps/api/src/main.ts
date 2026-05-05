@@ -5,10 +5,10 @@ import { ConfigService } from '@nestjs/config';
 import { ThrottlerExceptionFilter } from './common/filters/throttler-exception.filter';
 import { ValidationExceptionFilter } from './common/filters/validation-exception.filter';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { GrpcExceptionFilter } from './common/filters/grpc-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-
   const configService = app.get(ConfigService);
 
   const corsOrigin = configService.get<string>('CORS_ORIGIN')!;
@@ -33,12 +33,14 @@ async function bootstrap() {
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      stopAtFirstError: true,
     }),
   );
 
   app.useGlobalFilters(
-    new ValidationExceptionFilter(),
+    new GrpcExceptionFilter(),
     new ThrottlerExceptionFilter(),
+    new ValidationExceptionFilter(),
     new HttpExceptionFilter(),
   );
 

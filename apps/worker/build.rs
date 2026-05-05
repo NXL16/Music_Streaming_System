@@ -1,0 +1,20 @@
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let protoc_path = protoc_bin_vendored::protoc_bin_path()?;
+
+    unsafe {
+        std::env::set_var("PROTOC", protoc_path);
+    }
+
+    tonic_build::configure()
+        .build_server(false)
+        .compile_protos(
+            &[
+                "../../packages/shared-proto/key_management.proto",
+                "../../packages/shared-proto/metadata_service.proto",
+                "../../packages/shared-proto/ingestion_orchestrator.proto",
+            ],
+            &["../../packages/shared-proto"],
+        )?;
+
+    Ok(())
+}

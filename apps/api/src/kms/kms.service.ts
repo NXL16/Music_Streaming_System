@@ -1,44 +1,64 @@
-import { Injectable, Inject, OnModuleInit } from '@nestjs/common';
-import * as microservices from '@nestjs/microservices';
-import { lastValueFrom, Observable } from 'rxjs';
 import {
-  KmsGenerateKeyRequest,
-  KmsGenerateKeyResponse,
-  KmsGetKeyRequest,
-  KmsGetKeyResponse,
-} from '@musical/shared-types';
-
-interface KeyManagementGrpcService {
-  generateKey(data: KmsGenerateKeyRequest): Observable<KmsGenerateKeyResponse>;
-  getKey(data: KmsGetKeyRequest): Observable<KmsGetKeyResponse>;
-}
+  Injectable,
+  Inject,
+  OnModuleInit,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  KeyManagementServiceClient,
+  KeyResponse,
+  GenerateKeyRequest,
+  GetKeyRequest,
+} from '@musical/shared-proto';
+import type { ClientGrpc } from '@nestjs/microservices';
+import { lastValueFrom } from 'rxjs';
 
 @Injectable()
 export class KmsService implements OnModuleInit {
-  private keyManagementGrpc!: KeyManagementGrpcService;
+  private keyManagementGrpc!: KeyManagementServiceClient;
 
-  constructor(
-    @Inject('KMS_PACKAGE') private readonly client: microservices.ClientGrpc,
-  ) {}
+  constructor(@Inject('KMS_PACKAGE') private readonly client: ClientGrpc) {}
 
   onModuleInit() {
-    this.keyManagementGrpc =
-      this.client.getService<KeyManagementGrpcService>('KeyManagement');
-  }
-
-  async generateKey(songId: string, userId: string) {
-    return await lastValueFrom(
-      this.keyManagementGrpc.generateKey({ song_id: songId, user_id: userId }),
+    this.keyManagementGrpc = this.client.getService<KeyManagementServiceClient>(
+      'KeyManagementService',
     );
   }
 
-  async getKey(songId: string, userId: string, deviceFingerprint: string) {
-    return await lastValueFrom(
-      this.keyManagementGrpc.getKey({
-        song_id: songId,
-        user_id: userId,
-        device_fingerprint: deviceFingerprint,
-      }),
-    );
+  async generateKey(
+    songId: string,
+    userId: string = 'system',
+  ): Promise<KeyResponse> {
+    try {
+      const request: GenerateKeyRequest = { songId, userId };
+
+      return await lastValueFrom(
+        this.keyManagementGrpc.generateSongKey(request),
+      );
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      throw new InternalServerErrorException(
+        `KMS_GENERATE_FAILED: ${errorMessage}`,
+      );
+    }
+  }
+
+  async getKey(songId: string): Promise<KeyResponse> {
+    try {
+      const request: GetKeyRequest = { songId };
+
+      const result = await lastValueFrom(
+        this.keyManagementGrpc.getSongKey(request),
+      );
+
+      if (!result) throw new Error('Empty response from KMS');
+      return result;
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      throw new NotFoundException(
+        `KMS_KEY_NOT_FOUND: ${songId} - ${errorMessage}`,
+      );
+    }
   }
 }

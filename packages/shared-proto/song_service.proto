@@ -1,0 +1,183 @@
+syntax = "proto3";
+
+package song_service;
+
+option go_package = "Music_Streaming_System/packages/shared-proto/song";
+
+// Song service theo kiến trúc v5 (fMP4 + microservices)
+service SongService {
+  // Public read APIs
+  rpc GetSong(GetSongRequest) returns (GetSongResponse);
+  rpc GetSongByChecksum(GetSongByChecksumRequest) returns (GetSongByChecksumResponse);
+  rpc GetSongIngestInfo(GetSongIngestInfoRequest) returns (GetSongIngestInfoResponse);
+  rpc ListSongs(ListSongsRequest) returns (ListSongsResponse);
+
+  // Ingest-oriented APIs
+  rpc CreateSongRecord(CreateSongRecordRequest) returns (CreateSongRecordResponse);
+  rpc UpdateSongProcessingResult(UpdateSongProcessingResultRequest) returns (UpdateSongProcessingResultResponse);
+
+  // User library
+  rpc AddFavorite(FavoriteRequest) returns (FavoriteResponse);
+  rpc RemoveFavorite(FavoriteRequest) returns (FavoriteResponse);
+  rpc GetPlaylist(GetPlaylistRequest) returns (GetPlaylistResponse);
+}
+
+enum SongStatus {
+  SONG_STATUS_UNSPECIFIED = 0;
+  SONG_STATUS_PENDING = 1;      // Da tao record, cho worker xu ly
+  SONG_STATUS_PROCESSING = 2;   // Worker dang transcode/encrypt
+  SONG_STATUS_READY = 3;        // San sang phat
+  SONG_STATUS_FAILED = 4;       // Xu ly that bai
+}
+
+// Lightweight summary for list/browse use cases
+message SongSummary {
+  string id = 1;
+  string title = 2;
+  string artist = 3;
+  string album = 4;
+  bool is_public = 5;
+  SongStatus status = 6;
+  int32 duration_sec = 7;
+  int64 created_at = 8;
+}
+
+// Full detail for playback
+message SongDetail {
+  string id = 1;
+  string title = 2;
+  string artist = 3;
+  string album = 4;
+  string uploader_id = 5;
+  bool is_public = 6;
+  SongStatus status = 7;
+
+  // Output path for encrypted fMP4 on R2 Production
+  string encrypted_file_path = 8;
+
+  // Basic technical metadata (heavy arrays stay in Metadata Service)
+  int32 duration_sec = 9;
+  int32 bitrate_kbps = 10;
+  string codec = 11; // ex: "aac"
+  string format = 12; // ex: "fmp4"
+
+  int64 created_at = 13;
+  int64 updated_at = 14;
+}
+
+// Internal ingest metadata
+message SongIngestInfo {
+  string id = 1;
+  SongStatus status = 2;
+  string source_object_path = 3;
+  string checksum = 4;
+  int64 file_size_bytes = 5;
+  int64 created_at = 6;
+}
+
+message GetSongRequest {
+  string song_id = 1;
+  string requester_user_id = 2;
+}
+
+message GetSongByChecksumRequest {
+  string checksum = 1;
+}
+
+message GetSongByChecksumResponse {
+  SongIngestInfo song = 1;
+  bool found = 2;
+}
+
+message GetSongResponse {
+  SongDetail song = 1;
+}
+
+message GetSongIngestInfoRequest {
+  string song_id = 1;
+}
+
+message GetSongIngestInfoResponse {
+  SongIngestInfo song = 1;
+}
+
+message ListSongsRequest {
+  string cursor = 1;
+  int32 limit = 2;
+  string search = 3;
+  string artist = 4;
+  bool only_public = 5;
+  string requester_user_id = 6;
+}
+
+message ListSongsResponse {
+  repeated SongSummary songs = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+// API Gateway calls this after upload authorization / object registration
+message CreateSongRecordRequest {
+  string title = 1;
+  string artist = 2;
+  string album = 3;
+  string uploader_id = 4;
+  bool is_public = 5;
+
+  // Quarantine object key/path on R2
+  string source_object_path = 6;
+  int64 file_size_bytes = 7;
+  string checksum = 8;
+}
+
+message CreateSongRecordResponse {
+  SongIngestInfo song = 1;
+  string ingest_job_id = 2;
+}
+
+// Worker calls this to finalize processing state
+message UpdateSongProcessingResultRequest {
+  string song_id = 1;
+  SongStatus status = 2;
+
+  // Present when READY
+  string encrypted_file_path = 3;
+  int32 duration_sec = 4;
+  int32 bitrate_kbps = 5;
+  string codec = 6;
+  string format = 7;
+
+  // Present when FAILED
+  string error_message = 8;
+}
+
+message UpdateSongProcessingResultResponse {
+  bool success = 1;
+}
+
+message FavoriteRequest {
+  string user_id = 1;
+  string song_id = 2;
+}
+
+message FavoriteResponse {
+  bool success = 1;
+}
+
+message Playlist {
+  string id = 1;
+  string name = 2;
+  string owner_id = 3;
+  repeated SongSummary songs = 4;
+  int64 created_at = 5;
+  int64 updated_at = 6;
+}
+
+message GetPlaylistRequest {
+  string playlist_id = 1;
+  string requester_user_id = 2;
+}
+
+message GetPlaylistResponse {
+  Playlist playlist = 1;
+}

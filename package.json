@@ -1,7 +1,6 @@
 {
   "name": "01-musical",
   "version": "1.0.0",
-  "description": "",
   "private": true,
   "main": "index.js",
   "scripts": {
@@ -11,14 +10,14 @@
     "lint": "turbo run lint",
     "format": "turbo run format",
     "type-check": "turbo run type-check",
-    "dev:web": "pnpm --filter web dev",
     "dev:api": "pnpm --filter api start:dev",
-    "dev:kms": "pnpm --filter kms start:dev",
-    "dev:worker": "pnpm --filter worker start:dev",
+    "dev:song": "pnpm --filter song start:dev",
+    "dev:identity": "pnpm --filter identity start:dev",
     "clean": "turbo run clean && rm -rf node_modules",
     "docker:up": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/scripts/docker-up-redis.ps1",
     "docker:down": "docker rm -f my-redis",
-    "docker:logs": "docker logs -f my-redis"
+    "docker:logs": "docker logs -f my-redis",
+    "proto:gen": "cd packages/shared-proto && buf generate"
   },
   "keywords": [],
   "author": "",
@@ -29,6 +28,9 @@
     "typescript": "^6.0.2"
   },
   "dependencies": {
-    "@nestjs/schedule": "^6.1.3"
+    "@bufbuild/protobuf": "^2.12.0",
+    "@grpc/grpc-js": "^1.14.3",
+    "@nestjs/microservices": "^11.1.19",
+    "rxjs": "^7.8.2"
   }
 }

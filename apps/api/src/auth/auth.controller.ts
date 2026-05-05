@@ -1,103 +1,96 @@
 import {
-  Body,
   Controller,
   Post,
+  Body,
   HttpCode,
   HttpStatus,
-  UseGuards,
   Req,
-  BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
-import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
-import type { Request } from 'express';
 import { JwtUser } from '@musical/shared-types';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import type { Request } from 'express';
 
 @Controller('auth')
-@UseGuards(ThrottlerGuard)
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('signup')
   async signup(@Body() signupDto: SignupDto) {
     const data = await this.authService.signUp(signupDto);
-    return {
-      success: true,
-      code: 'AUTH_SIGNUP_SUCCESS',
+    return this.formatResponse(
       data,
-      message: 'Đăng ký thành công',
-      timestamp: new Date().toISOString(), 
-    };
+      'AUTH_SIGNUP_SUCCESS',
+      'Đăng ký thành công',
+    );
   }
 
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(@Body() loginDto: LoginDto) {
     const data = await this.authService.login(loginDto);
-    return {
-      success: true,
-      code: 'AUTH_LOGIN_SUCCESS',
+    return this.formatResponse(
       data,
-      message: 'Đăng nhập thành công',
-      timestamp: new Date().toISOString(),
-    };
+      'AUTH_LOGIN_SUCCESS',
+      'Đăng nhập thành công',
+    );
   }
 
   @Post('refresh')
-  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   async refresh(@Body('refreshToken') refreshToken: string) {
-    if (!refreshToken || typeof refreshToken !== 'string') {
-      throw new BadRequestException({
-        success: false,
-        code: 'AUTH_REFRESH_TOKEN_REQUIRED',
-        message: 'Refresh token là bắt buộc',
-      });
-    }
-
-    const data = await this.authService.refreshToken(refreshToken);
-    return {
-      success: true,
-      code: 'AUTH_REFRESH_SUCCESS',
+    const data = await this.authService.refreshToken({ refreshToken });
+    return this.formatResponse(
       data,
-      message: 'Làm mới token thành công',
-      timestamp: new Date().toISOString(),
-    };
+      'AUTH_REFRESH_SUCCESS',
+      'Làm mới token thành công',
+    );
   }
 
-  @UseGuards(JwtAuthGuard)
   @Post('logout')
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async logout(@Req() req: Request) {
     const user = req.user as JwtUser;
 
-    await this.authService.logout(user.userId, user.deviceId);
+    await this.authService.logout({
+      userId: user.userId,
+      deviceId: user.deviceId,
+    });
 
-    return {
-      success: true,
-      code: 'AUTH_LOGOUT_SUCCESS',
-      message: 'Đăng xuất thành công',
-      timestamp: new Date().toISOString(),
-    };
+    return this.formatResponse(
+      null,
+      'AUTH_LOGOUT_SUCCESS',
+      'Đăng xuất thành công',
+    );
   }
 
-  @UseGuards(JwtAuthGuard)
   @Post('logout-all')
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async logoutAll(@Req() req: Request) {
     const user = req.user as JwtUser;
 
-    await this.authService.logoutAll(user.userId);
+    await this.authService.logoutAll({
+      userId: user.userId,
+    });
 
+    return this.formatResponse(
+      null,
+      'AUTH_LOGOUT_ALL_SUCCESS',
+      'Đăng xuất tất cả thiết bị thành công',
+    );
+  }
+
+  private formatResponse(data: unknown, code: string, message: string) {
     return {
       success: true,
-      code: 'AUTH_LOGOUT_ALL_SUCCESS',
-      message: 'Đăng xuất tất cả thiết bị thành công',
+      code,
+      data: data ?? {},
+      message,
       timestamp: new Date().toISOString(),
     };
   }

@@ -1,0 +1,20 @@
+version: v2
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: .
+    opt:
+      - module=Music_Streaming_System/packages/shared-proto
+
+  - remote: buf.build/grpc/go
+    out: .
+    opt:
+      - module=Music_Streaming_System/packages/shared-proto
+
+  - remote: buf.build/community/stephenh-ts-proto
+    out: ./src/generated
+    opt:
+      - nestJs=true
+      - outputServices=grpc-js
+      - esModuleInterop=true
+      - snakeToCamel=true
+      - useMetaData=true
