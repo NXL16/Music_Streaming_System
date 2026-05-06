@@ -26,7 +26,7 @@ async fn get_client() -> Result<KeyManagementServiceClient<Channel>> {
         return Ok(client.clone());
     }
 
-    let url = env::var("KMS_URL").context("KMS_URL environment variable not set")?;
+    let url = env::var("KMS_GRPC_URL").context("KMS_GRPC_URL environment variable not set")?;
 
     let endpoint = tonic::transport::Endpoint::from_shared(url)?
         .connect_timeout(CONNECT_TIMEOUT)

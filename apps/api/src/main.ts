@@ -1,6 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ThrottlerExceptionFilter } from './common/filters/throttler-exception.filter';
 import { ValidationExceptionFilter } from './common/filters/validation-exception.filter';
@@ -45,7 +45,7 @@ async function bootstrap() {
   );
 
   await app.listen(port, () =>
-    console.log(`API Server is running at http://${host}:${port}/${prefix}`),
+    Logger.log(`API Getway is running at http://${host}:${port}/${prefix}`),
   );
 }
 

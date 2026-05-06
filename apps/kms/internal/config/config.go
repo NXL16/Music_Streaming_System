@@ -17,7 +17,7 @@ func LoadConfig() *Config {
 	return &Config{
 		RedisAddr:     mustGetEnv("REDIS_HOST") + ":" + mustGetEnv("REDIS_PORT"),
 		RedisPassword: mustGetEnv("REDIS_PASSWORD"),
-		GRPCPort:      mustGetEnv("GRPC_PORT"),
+		GRPCPort:      mustGetEnv("KMS_GRPC_PORT"),
 	}
 }
 

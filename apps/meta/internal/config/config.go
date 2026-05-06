@@ -17,7 +17,7 @@ func LoadConfig() *Config {
 	return &Config{
 		MongoURI:    mustGetEnv("MONGO_URI"),
 		MongoDBName: mustGetEnv("MONGO_DB_NAME"),
-		GRPCPort:    mustGetEnv("GRPC_PORT"),
+		GRPCPort:    mustGetEnv("META_GRPC_PORT"),
 	}
 }
 

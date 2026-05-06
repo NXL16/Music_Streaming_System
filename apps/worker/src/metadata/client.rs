@@ -24,8 +24,7 @@ async fn get_client() -> Result<MetadataServiceClient<Channel>> {
         return Ok(client.clone());
     }
 
-    // Lấy META_URL trực tiếp từ env giống KMS
-    let url = env::var("META_URL").context("META_URL environment variable not set")?;
+    let url = env::var("META_GRPC_URL").context("META_GRPC_URL environment variable not set")?;
 
     let endpoint = tonic::transport::Endpoint::from_shared(url)?
         .connect_timeout(CONNECT_TIMEOUT)
