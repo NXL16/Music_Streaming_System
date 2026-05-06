@@ -8,6 +8,7 @@ import { Response } from 'express';
 
 const GRPC_CODE_TO_HTTP_STATUS: Record<number, number> = {
   3: HttpStatus.BAD_REQUEST,
+  4: HttpStatus.UNAUTHORIZED,
   5: HttpStatus.NOT_FOUND,
   6: HttpStatus.CONFLICT,
   7: HttpStatus.FORBIDDEN,

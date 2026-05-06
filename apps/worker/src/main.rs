@@ -8,6 +8,7 @@ mod r2;
 mod kms;
 mod proto;
 mod metadata;
+mod redis;
 
 use crate::config::config::Config;
 use crate::queue::consumer::Consumer;
