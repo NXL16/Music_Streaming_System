@@ -2,7 +2,7 @@ use crate::pipeline::context::PipelineContext;
 use crate::pipeline::steps::{download, transcode, encrypt, upload, metadata};
 use crate::queue::job::JobPayload;
 
-pub async fn run_pipeline(job: JobPayload) -> anyhow::Result<()> {
+pub async fn run_pipeline(job: JobPayload) -> anyhow::Result<PipelineContext> {
     let mut ctx = PipelineContext::new(job);
 
     download::download(&mut ctx).await?;
@@ -11,5 +11,5 @@ pub async fn run_pipeline(job: JobPayload) -> anyhow::Result<()> {
     encrypt::encrypt(&mut ctx).await?;
     upload::upload(&mut ctx).await?;
 
-    Ok(())
+    Ok(ctx)
 }

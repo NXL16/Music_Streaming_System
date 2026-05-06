@@ -10,6 +10,7 @@ pub struct PipelineContext {
     pub input_stream: Option<ByteStream>,
     pub data: Option<Vec<u8>>,
     pub duration: Option<f64>,
+    pub output_key: Option<String>,
 }
 
 impl PipelineContext {
@@ -19,6 +20,7 @@ impl PipelineContext {
             input_stream: None,
             data: None,
             duration: None,
+            output_key: None,
         }
     }
 }

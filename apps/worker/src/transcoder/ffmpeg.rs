@@ -27,9 +27,12 @@ where
         .stderr(Stdio::piped()) // 👉 Bắt buộc phải có để parse duration
         .spawn()?;
 
-    let mut stdin = child.stdin.take().unwrap();
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
+    let mut stdin = child.stdin.take()
+        .ok_or_else(|| anyhow::anyhow!("FFmpeg: Failed to open stdin pipe"))?;
+    let stdout = child.stdout.take()
+        .ok_or_else(|| anyhow::anyhow!("FFmpeg: Failed to open stdout pipe"))?;
+    let stderr = child.stderr.take()
+        .ok_or_else(|| anyhow::anyhow!("FFmpeg: Failed to open stderr pipe"))?;
 
     // 1. Luồng ghi input (chạy background)
     tokio::spawn(async move {

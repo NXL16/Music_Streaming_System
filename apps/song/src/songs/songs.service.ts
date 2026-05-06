@@ -75,6 +75,17 @@ type SongIngestEntity = Prisma.SongGetPayload<{
 
 const MAX_LIST_LIMIT = 50;
 
+type WorkerSongCompletionEvent = {
+  song_id: string;
+  status: 'success' | 'error';
+  duration_sec?: number | null;
+  encrypted_file_path?: string | null;
+  bitrate_kbps?: number | null;
+  codec?: string | null;
+  format?: string | null;
+  error_message?: string | null;
+};
+
 @Injectable()
 export class SongsService {
   private readonly logger = new Logger(SongsService.name);
@@ -319,6 +330,24 @@ export class SongsService {
     });
   }
 
+  async applyWorkerCompletion(event: WorkerSongCompletionEvent): Promise<void> {
+    const succeeded = event.status === 'success';
+
+    await this.updateSongProcessingResult({
+      songId: event.song_id,
+      status: succeeded
+        ? SongStatus.SONG_STATUS_READY
+        : SongStatus.SONG_STATUS_FAILED,
+      encryptedFilePath:
+        event.encrypted_file_path || this.buildProcessedObjectPath(event.song_id),
+      durationSec: succeeded ? Math.max(0, Math.round(event.duration_sec ?? 0)) : 0,
+      bitrateKbps: succeeded ? event.bitrate_kbps ?? 128 : 0,
+      codec: succeeded ? event.codec ?? 'aac' : '',
+      format: succeeded ? event.format ?? 'fmp4' : '',
+      errorMessage: event.error_message ?? '',
+    });
+  }
+
   private mapEntityToSummary(entity: SongSummaryEntity): SongSummary {
     return {
       id: entity.id,
@@ -374,6 +403,10 @@ export class SongsService {
 
   private buildCursor(entity: SongSummaryEntity): string {
     return `${entity.createdAt.getTime()}:${entity.id}`;
+  }
+
+  private buildProcessedObjectPath(songId: string) {
+    return `processed/${songId}.m4a`;
   }
 
   private throwInvalidArgument(message: string): never {

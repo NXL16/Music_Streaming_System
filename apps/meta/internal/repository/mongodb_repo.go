@@ -3,6 +3,7 @@ package repository
 import (
 	"Music_Streaming_System/apps/meta/internal/domain"
 	"context"
+
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -29,6 +30,9 @@ func (r *MetadataRepository) GetBySongID(ctx context.Context, songID string) (*d
 	var meta domain.SongMetadata
 	err := r.collection.FindOne(ctx, bson.M{"song_id": songID}).Decode(&meta)
 	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &meta, nil

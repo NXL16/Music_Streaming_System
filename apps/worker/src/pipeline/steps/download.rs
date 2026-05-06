@@ -1,4 +1,5 @@
-use crate::pipeline::context::{PipelineContext};
+use crate::pipeline::context::PipelineContext;
+use anyhow::Context;
 
 pub async fn download(ctx: &mut PipelineContext) -> anyhow::Result<()> {
     let file_url = ctx
@@ -9,11 +10,12 @@ pub async fn download(ctx: &mut PipelineContext) -> anyhow::Result<()> {
 
     println!("📥 Downloading {}", file_url);
 
-    let res = reqwest::get(file_url).await.unwrap();
+    let res = reqwest::get(file_url)
+        .await
+        .context("failed to download source file")?;
 
     let stream = res.bytes_stream();
 
-    // 👇 box lại để lưu vào context
     ctx.input_stream = Some(Box::pin(stream));
 
     Ok(())

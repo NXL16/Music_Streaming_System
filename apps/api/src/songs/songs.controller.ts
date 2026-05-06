@@ -9,6 +9,8 @@ import {
   Delete,
   HttpStatus,
   HttpCode,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
 import { SongsService } from './songs.service';
 import type {
@@ -18,15 +20,20 @@ import type {
 } from '@musical/shared-proto';
 import { RequestUploadDto } from './dto/request-upload.dto';
 import { FinalizeUploadDto } from './dto/finalize-upload.dto';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import type { Request } from 'express';
+import { JwtUser } from '@musical/shared-types';
 
 @Controller('songs')
 export class SongsController {
   constructor(private readonly songsService: SongsService) {}
 
   @Post('request-upload')
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.CREATED)
-  async requestUpload(@Body() requestDto: RequestUploadDto) {
-    return await this.songsService.requestUpload(requestDto);
+  async requestUpload(@Req() req: Request, @Body() requestDto: RequestUploadDto) {
+    const user = req.user as JwtUser;
+    return await this.songsService.requestUpload(requestDto, user.userId);
   }
 
   @Post('finalize-upload')

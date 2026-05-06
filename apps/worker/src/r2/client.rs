@@ -1,10 +1,13 @@
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::{Credentials, Region};
 
-pub async fn create_r2_client() -> Client {
-    let access_key = std::env::var("R2_ACCESS_KEY").unwrap();
-    let secret_key = std::env::var("R2_SECRET_KEY").unwrap();
-    let endpoint = std::env::var("R2_ENDPOINT").unwrap();
+pub async fn create_r2_client() -> anyhow::Result<Client> {
+    let access_key = std::env::var("R2_ACCESS_KEY")
+        .map_err(|_| anyhow::anyhow!("R2_ACCESS_KEY env not set"))?;
+    let secret_key = std::env::var("R2_SECRET_KEY")
+        .map_err(|_| anyhow::anyhow!("R2_SECRET_KEY env not set"))?;
+    let endpoint = std::env::var("R2_ENDPOINT")
+        .map_err(|_| anyhow::anyhow!("R2_ENDPOINT env not set"))?;
 
     let region = Region::new("auto");
 
@@ -23,5 +26,5 @@ pub async fn create_r2_client() -> Client {
         .load()
         .await;
 
-    Client::new(&config)
+    Ok(Client::new(&config))
 }

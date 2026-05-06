@@ -9,7 +9,8 @@ pub async fn upload(ctx: &mut PipelineContext) -> Result<()> {
 
     // 2. Khởi tạo R2 client
     // Lưu ý: Trong thực tế bạn nên để client này trong context để dùng lại
-    let client = crate::r2::client::create_r2_client().await;
+    let client = crate::r2::client::create_r2_client().await
+        .context("Failed to initialize R2 client")?;
 
     // 3. Đọc cấu hình từ env
     let bucket = env::var("R2_BUCKET").context("R2_BUCKET env is not set")?;
@@ -17,6 +18,7 @@ pub async fn upload(ctx: &mut PipelineContext) -> Result<()> {
     // 4. Đặt tên file đúng định dạng .m4a (vì đã transcode sang AAC/fMP4)
     // Đường dẫn này tùy thuộc vào cách bạn quản lý trên R2
     let key = format!("processed/{}.m4a", ctx.job.song_id);
+    ctx.output_key = Some(key.clone());
 
     println!("☁️ Uploading processed song to R2: {}", key);
 

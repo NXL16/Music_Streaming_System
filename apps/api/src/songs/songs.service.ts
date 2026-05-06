@@ -93,7 +93,7 @@ export class SongsService implements OnModuleInit {
     return await firstValueFrom(this.songServiceClient.getPlaylist(data));
   }
 
-  async requestUpload(request: RequestUploadDto) {
+  async requestUpload(request: RequestUploadDto, userId: string) {
     const existing = await this.getSongByChecksum({
       checksum: request.checksum,
     });
@@ -113,10 +113,10 @@ export class SongsService implements OnModuleInit {
 
     const createRequest: CreateSongRecordRequest = {
       title: request.title,
-      artist: '',
-      album: '',
-      uploaderId: 'unknown',
-      isPublic: true,
+      artist: request.artist || '',
+      album: request.album || '',
+      uploaderId: userId,
+      isPublic: request.isPublic ?? true,
       sourceObjectPath: objectKey,
       fileSizeBytes: request.size,
       checksum: request.checksum,
@@ -156,8 +156,6 @@ export class SongsService implements OnModuleInit {
       file_url: downloadUrl,
     };
 
-    await this.redis.lpush('transcode_queue', JSON.stringify(jobPayload));
-
     await this.updateSongProcessingResult({
       songId: request.songId,
       status: SongStatus.SONG_STATUS_PROCESSING,
@@ -168,6 +166,23 @@ export class SongsService implements OnModuleInit {
       format: '',
       errorMessage: '',
     });
+
+    try {
+      await this.redis.lpush('transcode_queue', JSON.stringify(jobPayload));
+    } catch (error) {
+      await this.updateSongProcessingResult({
+        songId: request.songId,
+        status: SongStatus.SONG_STATUS_PENDING,
+        encryptedFilePath: '',
+        durationSec: 0,
+        bitrateKbps: 0,
+        codec: '',
+        format: '',
+        errorMessage: '',
+      });
+
+      throw error;
+    }
 
     return { status: 'PROCESSING' };
   }

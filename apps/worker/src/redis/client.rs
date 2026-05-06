@@ -8,6 +8,11 @@ use serde_json;
 pub struct SongCompletionEvent {
     pub song_id: String,
     pub status: String, // "success" or "error"
+    pub duration_sec: Option<i32>,
+    pub encrypted_file_path: Option<String>,
+    pub bitrate_kbps: Option<i32>,
+    pub codec: Option<String>,
+    pub format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
 }
