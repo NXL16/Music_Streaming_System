@@ -2,8 +2,6 @@ import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import request from 'supertest';
-import { AppController } from '../src/app.controller';
-import { AppService } from '../src/app.service';
 
 type HttpServer = Parameters<typeof request>[0];
 
@@ -17,13 +15,8 @@ describe('App Root Endpoint (e2e)', () => {
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
-      controllers: [AppController],
-      providers: [
-        {
-          provide: AppService,
-          useValue: appServiceMock,
-        },
-      ],
+      controllers: [],
+      providers: [],
     })
       .overrideGuard(ThrottlerGuard)
       .useValue({ canActivate: jest.fn().mockReturnValue(true) })
