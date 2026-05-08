@@ -23,6 +23,8 @@ import { FinalizeUploadDto } from './dto/finalize-upload.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import type { Request } from 'express';
 import { JwtUser } from '@musical/shared-types';
+import { Res } from '@nestjs/common';
+import type { Response } from 'express';
 
 @Controller('songs')
 export class SongsController {
@@ -39,6 +41,26 @@ export class SongsController {
   @Post('finalize-upload')
   async finalizeUpload(@Body() finalizeDto: FinalizeUploadDto) {
     return await this.songsService.finalizeUpload(finalizeDto);
+  }
+
+  @Post(':id/stream-cookie')
+  @UseGuards(JwtAuthGuard)
+  async createStreamCookie(
+    @Req() req: Request,
+    @Param('id') songId: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const user = req.user as JwtUser;
+    const result = await this.songsService.createStreamCookie(songId, user.userId);
+
+    res.cookie(result.cookieName, result.cookieValue, result.cookieOptions);
+
+    return {
+      streamUrl: result.streamUrl,
+      expiresAt: result.expiresAt,
+      cookieName: result.cookieName,
+      cookieValue: result.cookieValue,
+    };
   }
 
   @Get()

@@ -25,6 +25,8 @@ import { firstValueFrom } from 'rxjs';
 import { R2Service } from '../common/r2/r2.service';
 import { RequestUploadDto } from './dto/request-upload.dto';
 import { FinalizeUploadDto } from './dto/finalize-upload.dto';
+import { StreamCookieService } from '../common/edge/stream-cookie.service';
+import { TRANSCODE_QUEUE } from '@musical/shared-types';
 
 @Injectable()
 export class SongsService implements OnModuleInit {
@@ -35,6 +37,7 @@ export class SongsService implements OnModuleInit {
     @Inject('SONG_SERVICE') private readonly client: ClientGrpc,
     @Inject('REDIS_INSTANCE') private readonly redis: Redis,
     private readonly r2Service: R2Service,
+    private readonly streamCookieService: StreamCookieService,
   ) {
     this.songServiceClient =
       this.client.getService<SongServiceClient>('SongService');
@@ -137,8 +140,25 @@ export class SongsService implements OnModuleInit {
   }
 
   async finalizeUpload(request: FinalizeUploadDto) {
+    let songId = request.songId;
+
+    // If songId is not provided but checksum is, lookup by checksum
+    if (!songId && request.checksum) {
+      const songByChecksum = await this.getSongByChecksum({
+        checksum: request.checksum,
+      });
+      if (!songByChecksum.song) {
+        throw new Error('SONG_NOT_FOUND_BY_CHECKSUM');
+      }
+      songId = songByChecksum.song.id;
+    }
+
+    if (!songId) {
+      throw new Error('SONG_ID_OR_CHECKSUM_REQUIRED');
+    }
+
     const song = await this.getSongIngestInfo({
-      songId: request.songId,
+      songId,
     });
 
     if (!song.song || !song.song.sourceObjectPath) {
@@ -150,14 +170,14 @@ export class SongsService implements OnModuleInit {
     );
 
     const jobPayload = {
-      song_id: request.songId,
+      song_id: songId,
       r2_path: song.song.sourceObjectPath,
       checksum: song.song.checksum || '',
       file_url: downloadUrl,
     };
 
     await this.updateSongProcessingResult({
-      songId: request.songId,
+      songId,
       status: SongStatus.SONG_STATUS_PROCESSING,
       encryptedFilePath: '',
       durationSec: 0,
@@ -168,10 +188,13 @@ export class SongsService implements OnModuleInit {
     });
 
     try {
-      await this.redis.lpush('transcode_queue', JSON.stringify(jobPayload));
+      await this.redis.lpush(
+        TRANSCODE_QUEUE,
+        JSON.stringify(jobPayload),
+      );
     } catch (error) {
       await this.updateSongProcessingResult({
-        songId: request.songId,
+        songId,
         status: SongStatus.SONG_STATUS_PENDING,
         encryptedFilePath: '',
         durationSec: 0,
@@ -185,6 +208,23 @@ export class SongsService implements OnModuleInit {
     }
 
     return { status: 'PROCESSING' };
+  }
+
+  async createStreamCookie(songId: string, userId: string) {
+    const song = await this.getSong({
+      songId,
+      requesterUserId: userId,
+    });
+
+    if (!song.song) {
+      throw new Error('SONG_NOT_FOUND');
+    }
+
+    if (!song.song.encryptedFilePath) {
+      throw new Error('SONG_STREAM_PATH_MISSING');
+    }
+
+    return this.streamCookieService.create(song.song.id, song.song.encryptedFilePath);
   }
 
   private buildQuarantineObjectKey(checksum: string, title: string) {
