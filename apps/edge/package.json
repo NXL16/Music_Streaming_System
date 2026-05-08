@@ -1,0 +1,15 @@
+{
+  "name": "edge",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "wrangler dev src/index.ts",
+    "deploy": "wrangler deploy",
+    "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260507.1",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.88.0"
+  }
+}
