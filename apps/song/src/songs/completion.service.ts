@@ -7,6 +7,11 @@ import {
 } from '@nestjs/common';
 import type Redis from 'ioredis';
 import { SongsService } from './songs.service';
+import {
+  SONG_COMPLETION_QUEUE,
+  songCompletionLockKey,
+  songCompletionProcessedKey,
+} from '@musical/shared-types';
 
 type WorkerSongCompletionEvent = {
   song_id: string;
@@ -48,7 +53,7 @@ export class CompletionService
   private async consumeLoop(): Promise<void> {
     while (this.running) {
       try {
-        const result = await this.redis.blpop('song_completion_queue', 0);
+        const result = await this.redis.blpop(SONG_COMPLETION_QUEUE, 0);
 
         if (!result) {
           continue;
@@ -57,8 +62,8 @@ export class CompletionService
         const [, message] = result;
         const event = JSON.parse(message) as WorkerSongCompletionEvent;
 
-        const processedKey = `song_completion_processed:${event.song_id}`;
-        const lockKey = `song_completion_lock:${event.song_id}`;
+        const processedKey = songCompletionProcessedKey(event.song_id);
+        const lockKey = songCompletionLockKey(event.song_id);
 
         // skip if already processed
         const already = await this.redis.get(processedKey);
@@ -72,7 +77,7 @@ export class CompletionService
         if (!lock) {
           this.logger.log(`Song ${event.song_id} currently locked, requeueing`);
           // push back so another consumer can pick it up later
-          await this.redis.lpush('song_completion_queue', message);
+          await this.redis.lpush(SONG_COMPLETION_QUEUE, message);
           await new Promise((r) => setTimeout(r, 500));
           continue;
         }
@@ -97,7 +102,7 @@ export class CompletionService
             const next = { ...event, retry_count: retryCount + 1 };
             // exponential-ish backoff (best-effort): requeue and sleep briefly
             await this.redis.lpush(
-              'song_completion_queue',
+              SONG_COMPLETION_QUEUE,
               JSON.stringify(next),
             );
             const backoffMs = Math.min(1000 * 2 ** retryCount, 30000);

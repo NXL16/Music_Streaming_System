@@ -4,7 +4,11 @@ import * as argon2 from 'argon2';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { createHash, randomUUID } from 'crypto';
-import { JwtPayload } from '@musical/shared-types';
+import {
+  JwtPayload,
+  authDevicesKey,
+  authRefreshKey,
+} from '@musical/shared-types';
 import {
   AuthResponse,
   LoginRequest,
@@ -119,8 +123,8 @@ export class AuthService {
   }
 
   async logout(userId: string, deviceId: string) {
-    const key = `auth:refresh:${userId}:${deviceId}`;
-    const deviceSetKey = `auth:devices:${userId}`;
+    const key = authRefreshKey(userId, deviceId);
+    const deviceSetKey = authDevicesKey(userId);
 
     await Promise.all([
       this.redis.del(key),
@@ -129,7 +133,7 @@ export class AuthService {
   }
 
   async logoutAll(userId: string) {
-    const deviceSetKey = `auth:devices:${userId}`;
+    const deviceSetKey = authDevicesKey(userId);
     const deviceIds = await this.redis.smembers(deviceSetKey);
 
     if (!deviceIds.length) {
@@ -140,7 +144,7 @@ export class AuthService {
     const pipeline = this.redis.pipeline();
 
     for (const deviceId of deviceIds) {
-      pipeline.del(`auth:refresh:${userId}:${deviceId}`);
+      pipeline.del(authRefreshKey(userId, deviceId));
     }
 
     pipeline.del(deviceSetKey);
@@ -155,8 +159,8 @@ export class AuthService {
       });
 
       const hashedToken = createHash('sha256').update(token).digest('hex');
-      const key = `auth:refresh:${payload.sub}:${payload.deviceId}`;
-      const deviceSetKey = `auth:devices:${payload.sub}`;
+      const key = authRefreshKey(payload.sub, payload.deviceId);
+      const deviceSetKey = authDevicesKey(payload.sub);
 
       const luaScript = `
         local stored = redis.call("GET", KEYS[1])
@@ -233,8 +237,8 @@ export class AuthService {
     const ttl = Math.floor(ttlMs / 1000);
 
     const hashedToken = createHash('sha256').update(token).digest('hex');
-    const key = `auth:refresh:${userId}:${deviceId}`;
-    const deviceSetKey = `auth:devices:${userId}`;
+    const key = authRefreshKey(userId, deviceId);
+    const deviceSetKey = authDevicesKey(userId);
 
     await this.redis
       .pipeline()

@@ -1,4 +1,20 @@
-export const TRANSCODE_QUEUE: string = "transcode-queue";
+// ==========================================
+//                  REDIS
+// ==========================================
+export const TRANSCODE_QUEUE = "transcode_queue" as const;
+export const SONG_COMPLETION_QUEUE = "song_completion_queue" as const;
+
+export const authRefreshKey = (userId: string, deviceId: string): string =>
+  `auth:refresh:${userId}:${deviceId}`;
+
+export const authDevicesKey = (userId: string): string =>
+  `auth:devices:${userId}`;
+
+export const songCompletionProcessedKey = (songId: string): string =>
+  `song_completion_processed:${songId}`;
+
+export const songCompletionLockKey = (songId: string): string =>
+  `song_completion_lock:${songId}`;
 
 // ==========================================
 // CONSTANTS & TYPES
