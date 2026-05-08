@@ -21,6 +21,7 @@ dist/
 build/
 .next/
 .turbo/
+.wrangler/
 target/
 Cargo.lock
 
@@ -28,6 +29,7 @@ Cargo.lock
 .env
 .env.local
 .env.*.local
+.dev.vars
 
 # IDE
 .vscode/
