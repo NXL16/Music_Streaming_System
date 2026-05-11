@@ -1,16 +1,14 @@
-name = "music-streaming-edge"
+name = "edge-gateway"
 main = "src/index.ts"
-compatibility_date = "2024-12-01"
-
-[vars]
-STREAM_COOKIE_NAME = "stream_auth"
-STREAM_COOKIE_EXPIRY_SECONDS = "3600"
-API_BASE_URL = "http://localhost:9999/api/v1"
+compatibility_date = "2026-05-01"
+minify = true
+workers_dev = false
+preview_urls = false
 
 [[r2_buckets]]
 binding = "R2_PRODUCTION"
 bucket_name = "music-hls-bucket"
-remote = true
 
-[[queues.consumers]]
-queue = "upload-queue"
+[vars]
+R2_CDN_URL = "https://r2.404hz.me"
+KMS_URL = "https://marcus-pseudoscalar-unsurprisedly.ngrok-free.dev/api/v1/kms"
