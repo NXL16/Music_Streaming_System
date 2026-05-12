@@ -9,6 +9,9 @@ preview_urls = false
 binding = "R2_PRODUCTION"
 bucket_name = "music-hls-bucket"
 
+[[kv_namespaces]]
+binding = "SONG_KEYS"
+id = "57da292b58c6432bb8fb6f2d0a9473dc"
+
 [vars]
 R2_CDN_URL = "https://r2.404hz.me"
-KMS_URL = "https://marcus-pseudoscalar-unsurprisedly.ngrok-free.dev/api/v1/kms"

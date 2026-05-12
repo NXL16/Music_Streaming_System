@@ -1,18 +1,106 @@
-type SongKey = {
-  key: Uint8Array;
-  iv: Uint8Array;
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export type SongKey = {
   cryptoKey: CryptoKey;
-  expiresAt: number;
+  iv: Uint8Array;
 };
 
-const CACHE_TTL_MS = 10 * 60 * 1000;
-const CACHE_MAX_ENTRIES = 1024;
-const keyCache = new Map<string, SongKey>();
+// ─── KV schema ────────────────────────────────────────────────────────────────
+
+/**
+ * Schema lưu trong KV:
+ *   key:   "song:{songId}"
+ *   value: JSON { encryptionKey: string (base64url), iv: string (base64url) }
+ *
+ * Write từ upload pipeline:
+ *   await env.SONG_KEYS.put(`song:${songId}`, JSON.stringify({ encryptionKey, iv }));
+ *
+ * Không set TTL — key vĩnh viễn theo bài hát.
+ */
+type KvKeyPayload = {
+  encryptionKey: string;
+  iv: string;
+};
+
+// ─── In-isolate dedup cache ───────────────────────────────────────────────────
+
+/**
+ * Cache Promise<SongKey> trong lifetime của isolate.
+ * Mục đích: tránh gọi KV nhiều lần cho cùng songId trong 1 request burst
+ * (vd: nhiều chunk requests đến cùng lúc cho cùng bài hát).
+ *
+ * Không cần TTL hay eviction — key là vĩnh viễn và bất biến.
+ * KV là source of truth; đây chỉ là micro-latency optimization.
+ */
+const isolateCache = new Map<string, Promise<SongKey>>();
+
+export async function getSongKey(
+  kv: KVNamespace,
+  songId: string,
+): Promise<SongKey> {
+  const cached = isolateCache.get(songId);
+  if (cached) return cached;
+
+  const promise = fetchFromKv(kv, songId).catch((err) => {
+    // Xóa để cho phép retry nếu KV tạm thời lỗi
+    isolateCache.delete(songId);
+    throw err;
+  });
+
+  isolateCache.set(songId, promise);
+
+  if (isolateCache.size > 512) {
+    const oldest = isolateCache.keys().next().value;
+    if (oldest) isolateCache.delete(oldest);
+  }
+
+  return promise;
+}
+
+async function fetchFromKv(kv: KVNamespace, songId: string): Promise<SongKey> {
+  const raw = await kv.get(`song:${songId}`);
+
+  if (!raw) {
+    throw new Error(`Song key not found: ${songId}`);
+  }
+
+  let payload: KvKeyPayload;
+  try {
+    payload = JSON.parse(raw) as KvKeyPayload;
+  } catch {
+    throw new Error(`Malformed key payload for song: ${songId}`);
+  }
+
+  if (!payload.encryptionKey || !payload.iv) {
+    throw new Error(`Incomplete key payload for song: ${songId}`);
+  }
+
+  const keyBytes = base64ToBytes(payload.encryptionKey);
+  const iv = base64ToBytes(payload.iv);
+
+  if (iv.byteLength !== 16) {
+    throw new Error(
+      `Invalid IV length for ${songId}: expected 16, got ${iv.byteLength}`,
+    );
+  }
+
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    keyBytes,
+    { name: "AES-CTR" },
+    false,
+    ["decrypt"],
+  );
+
+  return { cryptoKey, iv };
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function base64ToBytes(input: string): Uint8Array {
   const normalized = input.replace(/-/g, "+").replace(/_/g, "/");
-  const paddingLength = (4 - (normalized.length % 4)) % 4;
-  const padded = normalized + "=".repeat(paddingLength);
+  const padding = (4 - (normalized.length % 4)) % 4;
+  const padded = normalized + "=".repeat(padding);
   const binary = atob(padded);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
@@ -21,70 +109,7 @@ function base64ToBytes(input: string): Uint8Array {
   return bytes;
 }
 
-function normalizeKmsUrl(baseUrl: string): string {
-  return baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
-}
-
-async function fetchSongKey(
-  kmsUrl: string,
-  songId: string,
-): Promise<Omit<SongKey, "expiresAt">> {
-  const url = `${normalizeKmsUrl(kmsUrl)}/key/${encodeURIComponent(songId)}`;
-  const response = await fetch(url, {
-    headers: {
-      Accept: "application/json",
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`KMS key fetch failed: ${response.status}`);
-  }
-
-  const payload = (await response.json()) as {
-    encryptionKey?: string;
-    iv?: string;
-  };
-
-  if (!payload.encryptionKey || !payload.iv) {
-    throw new Error("KMS key payload missing");
-  }
-
-  const key = base64ToBytes(payload.encryptionKey);
-  const iv = base64ToBytes(payload.iv);
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    key,
-    { name: "AES-CTR" },
-    false,
-    ["decrypt"],
-  );
-
-  return { key, iv, cryptoKey };
-}
-
-export async function getSongKey(
-  kmsUrl: string,
-  songId: string,
-): Promise<SongKey> {
-  const cached = keyCache.get(songId);
-  if (cached && cached.expiresAt > Date.now()) return cached;
-  if (cached) keyCache.delete(songId);
-
-  const fetched = await fetchSongKey(kmsUrl, songId);
-  const entry: SongKey = {
-    ...fetched,
-    expiresAt: Date.now() + CACHE_TTL_MS,
-  };
-  keyCache.set(songId, entry);
-
-  while (keyCache.size > CACHE_MAX_ENTRIES) {
-    const oldestKey = keyCache.keys().next().value as string | undefined;
-    if (!oldestKey) break;
-    keyCache.delete(oldestKey);
-  }
-
-  return entry;
-}
+// ─── AES-CTR counter ──────────────────────────────────────────────────────────
 
 function incrementCounter(counter: Uint8Array, blocks: number): void {
   let carry = blocks;
@@ -95,19 +120,18 @@ function incrementCounter(counter: Uint8Array, blocks: number): void {
   }
 }
 
+// ─── Decrypt ──────────────────────────────────────────────────────────────────
+
 async function decryptChunk(
   cryptoKey: CryptoKey,
   iv: Uint8Array,
   chunk: Uint8Array,
   streamOffset: number,
 ): Promise<Uint8Array> {
-  if (iv.byteLength !== 16) {
-    throw new Error("Invalid IV length");
-  }
-
   const blockSize = 16;
   const blockIndex = Math.floor(streamOffset / blockSize);
   const offsetInBlock = streamOffset % blockSize;
+
   const counter = new Uint8Array(iv);
   incrementCounter(counter, blockIndex);
 
@@ -120,6 +144,7 @@ async function decryptChunk(
     return new Uint8Array(result);
   }
 
+  // Pad về đầu block để align với AES block boundary
   const padded = new Uint8Array(offsetInBlock + chunk.length);
   padded.set(chunk, offsetInBlock);
   const result = await crypto.subtle.decrypt(
@@ -139,18 +164,28 @@ export function decryptAesCtrStream(
   let processed = 0;
 
   return body.pipeThrough(
-    new TransformStream<Uint8Array, Uint8Array>({
-      async transform(chunk, controller) {
-        const streamOffset = startOffset + processed;
-        const decrypted = await decryptChunk(
-          cryptoKey,
-          iv,
-          chunk,
-          streamOffset,
-        );
-        processed += chunk.length;
-        controller.enqueue(decrypted);
+    new TransformStream<Uint8Array, Uint8Array>(
+      {
+        async transform(chunk, controller) {
+          const streamOffset = startOffset + processed;
+          try {
+            const decrypted = await decryptChunk(
+              cryptoKey,
+              iv,
+              chunk,
+              streamOffset,
+            );
+            processed += chunk.length;
+            controller.enqueue(decrypted);
+          } catch (err) {
+            controller.error(
+              new Error(`Decrypt failed at offset ${streamOffset}: ${err}`),
+            );
+          }
+        },
       },
-    }),
+      new CountQueuingStrategy({ highWaterMark: 4 }),
+      new CountQueuingStrategy({ highWaterMark: 4 }),
+    ),
   );
 }
