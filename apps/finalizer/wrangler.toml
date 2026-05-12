@@ -1,0 +1,14 @@
+name = "finalizer"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+minify = true
+
+[[queues.consumers]]
+queue = "upload-events"
+max_batch_size = 10
+max_batch_timeout = 30
+max_retries = 3
+retry_delay = 20
+
+[vars]
+API_FINALIZE_URL = "https://marcus-pseudoscalar-unsurprisedly.ngrok-free.dev/api/v1/songs/finalize-upload"
