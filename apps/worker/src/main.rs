@@ -9,6 +9,7 @@ mod kms;
 mod proto;
 mod metadata;
 mod redis;
+mod cloudflare;
 
 use crate::config::config::Config;
 use crate::queue::consumer::Consumer;
