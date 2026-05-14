@@ -25,7 +25,6 @@ import { firstValueFrom } from 'rxjs';
 import { R2Service } from '../common/r2/r2.service';
 import { RequestUploadDto } from './dto/request-upload.dto';
 import { FinalizeUploadDto } from './dto/finalize-upload.dto';
-import { StreamCookieService } from '../common/edge/stream-cookie.service';
 import { TRANSCODE_QUEUE } from '@musical/shared-types';
 
 @Injectable()
@@ -37,7 +36,6 @@ export class SongsService implements OnModuleInit {
     @Inject('SONG_SERVICE') private readonly client: ClientGrpc,
     @Inject('REDIS_INSTANCE') private readonly redis: Redis,
     private readonly r2Service: R2Service,
-    private readonly streamCookieService: StreamCookieService,
   ) {
     this.songServiceClient =
       this.client.getService<SongServiceClient>('SongService');
@@ -208,23 +206,6 @@ export class SongsService implements OnModuleInit {
     }
 
     return { status: 'PROCESSING' };
-  }
-
-  async createStreamCookie(songId: string, userId: string) {
-    const song = await this.getSong({
-      songId,
-      requesterUserId: userId,
-    });
-
-    if (!song.song) {
-      throw new Error('SONG_NOT_FOUND');
-    }
-
-    if (!song.song.encryptedFilePath) {
-      throw new Error('SONG_STREAM_PATH_MISSING');
-    }
-
-    return this.streamCookieService.create(song.song.id, song.song.encryptedFilePath);
   }
 
   private buildQuarantineObjectKey(checksum: string, title: string) {

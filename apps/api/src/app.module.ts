@@ -8,6 +8,7 @@ import { RedisModule } from './common/redis/redis.module';
 import { getThrottlerConfig } from './common/configs/redis-services.config';
 import { validateEnv } from './common/configs/env.validation';
 import { AuthModule } from './auth/auth.module';
+import { StreamModule } from './stream/stream.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { AuthModule } from './auth/auth.module';
     SongsModule,
     KmsModule,
     RedisModule,
+    StreamModule,
 
     ThrottlerModule.forRootAsync({
       inject: ['REDIS_INSTANCE'],

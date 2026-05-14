@@ -4,7 +4,6 @@ import { join } from 'path';
 import { SongsController } from './songs.controller';
 import { SongsService } from './songs.service';
 import { R2Module } from '../common/r2/r2.module';
-import { StreamCookieService } from '../common/edge/stream-cookie.service';
 
 @Module({
   imports: [
@@ -26,7 +25,7 @@ import { StreamCookieService } from '../common/edge/stream-cookie.service';
     ]),
   ],
   controllers: [SongsController],
-  providers: [SongsService, StreamCookieService],
+  providers: [SongsService],
   exports: [SongsService],
 })
 export class SongsModule {}
