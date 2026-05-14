@@ -8,6 +8,7 @@ interface Env {
   R2_PRODUCTION: R2Bucket;
   R2_CDN_URL: string;
   SONG_KEYS: KVNamespace;
+  CDN_SIGNING_KEY: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -26,20 +27,19 @@ const CORS_HEADERS = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getContentType(objectKey: string): string {
-  if (objectKey.endsWith(".m4a")) return "audio/mp4";
-  if (objectKey.endsWith(".ogg")) return "audio/ogg";
-  return "audio/mpeg";
+function getContentType(_objectKey: string): string {
+  return "audio/mp4";
 }
 
 function buildR2Url(cdnUrl: string, objectKey: string): string {
   const base = cdnUrl.endsWith("/") ? cdnUrl.slice(0, -1) : cdnUrl;
-  return `${base}/processed/${objectKey}`;
+  return `${base}/processed/${objectKey}.m4a`;
 }
 
 function extractObjectKey(pathname: string): string | null {
-  const key = pathname.split("/").pop();
-  return key && key.length > 0 ? key : null;
+  const match = pathname.match(/^\/audio\/([^/]+)$/);
+  if (!match) return null;
+  return match[1];
 }
 
 function parseFileSize(r2Response: Response): number | null {
@@ -49,6 +49,58 @@ function parseFileSize(r2Response: Response): number | null {
     const match = contentRange.match(/\/(\d+)$/);
     if (match) return parseInt(match[1], 10);
   }
+  return null;
+}
+
+async function verifySignedUrl(
+  rawUrl: string,
+  songId: string,
+  signingKey: string,
+): Promise<Response | null> {
+  const url = new URL(rawUrl);
+  const token = url.searchParams.get("__token__");
+
+  if (!token) {
+    return new Response("Missing token", { status: 401 });
+  }
+
+  const expMatch = token.match(/exp=(\d+)/);
+  const hmacMatch = token.match(/hmac=([a-f0-9]+)/);
+
+  if (!expMatch || !hmacMatch) {
+    return new Response("Invalid token format", { status: 401 });
+  }
+
+  const exp = expMatch[1];
+  const hmac = hmacMatch[1];
+
+  if (parseInt(exp, 10) < Math.floor(Date.now() / 1000)) {
+    return new Response("Token expired", { status: 401 });
+  }
+
+  const payload = `${songId}~exp=${exp}`;
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(signingKey),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+
+  const expectedHmac = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(payload),
+  );
+
+  const expectedHex = Array.from(new Uint8Array(expectedHmac))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+
+  if (expectedHex !== hmac) {
+    return new Response("Invalid token", { status: 403 });
+  }
+
   return null;
 }
 
@@ -91,8 +143,18 @@ export default {
     const objectKey = extractObjectKey(url.pathname);
     if (!objectKey) return new Response("Invalid path", { status: 400 });
 
-    const songId = objectKey.replace(/\.[^/.]+$/, "");
+    const songId = objectKey;
     const contentType = getContentType(objectKey);
+
+    // ── Verify signed URL ─────────────────────────────────────────────────────
+    const verifyError = await verifySignedUrl(
+      request.url,
+      songId,
+      env.CDN_SIGNING_KEY,
+    );
+    if (verifyError) return verifyError;
+
+    // ── Parse range ───────────────────────────────────────────────────────────
     let range = normalizeRange(request.headers.get("Range"));
 
     const r2Url = buildR2Url(env.R2_CDN_URL, objectKey);
@@ -223,7 +285,7 @@ export default {
       "Content-Range": `bytes ${range.start}-${contentEnd}/${totalStr}`,
       "Accept-Ranges": "bytes",
       "Cache-Control": "private, max-age=3600",
-      "Vary": "Range",
+      Vary: "Range",
       "X-Cache": finalR2Res.headers.get("CF-Cache-Status") ?? "UNKNOWN",
     });
 
