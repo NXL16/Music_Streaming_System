@@ -80,13 +80,27 @@ export function SongServiceControllerMethods() {
       "getPlaylist",
     ];
     for (const method of grpcMethods) {
-      const descriptor: any = Reflect.getOwnPropertyDescriptor(constructor.prototype, method);
-      GrpcMethod("SongService", method)(constructor.prototype[method], method, descriptor);
+      const descriptor: any = Reflect.getOwnPropertyDescriptor(
+        constructor.prototype,
+        method,
+      );
+      GrpcMethod("SongService", method)(
+        constructor.prototype[method],
+        method,
+        descriptor,
+      );
     }
     const grpcStreamMethods: string[] = [];
     for (const method of grpcStreamMethods) {
-      const descriptor: any = Reflect.getOwnPropertyDescriptor(constructor.prototype, method);
-      GrpcStreamMethod("SongService", method)(constructor.prototype[method], method, descriptor);
+      const descriptor: any = Reflect.getOwnPropertyDescriptor(
+        constructor.prototype,
+        method,
+      );
+      GrpcStreamMethod("SongService", method)(
+        constructor.prototype[method],
+        method,
+        descriptor,
+      );
     }
   };
 }
@@ -102,10 +116,27 @@ export const SongStatus = {
 } as const;
 
 // Tạo type để các file khác vẫn dùng được kiểu dữ liệu
-export type SongStatus = typeof SongStatus[keyof typeof SongStatus];
+export type SongStatus = (typeof SongStatus)[keyof typeof SongStatus];
 
 export const SONG = {
   PACKAGE: "song_service",
   SERVICE: "SongService",
   PROTO_FILE: "song_service.proto",
+};
+
+// ========== METADATA PROTO ============
+export type {
+  SeekPoint,
+  UpdateMetaRequest,
+  GetStreamDataRequest,
+  StreamDataResponse,
+  EmptyResponse as MetadataEmptyResponse,
+  MetadataServiceClient,
+  MetadataServiceController,
+} from "./generated/metadata_service";
+
+export const METADATA = {
+  PACKAGE: "metadata_service",
+  SERVICE: "MetadataService",
+  PROTO_FILE: "metadata_service.proto",
 };
