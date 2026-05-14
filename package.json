@@ -17,13 +17,15 @@
     "docker:up": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/scripts/docker-up-redis.ps1",
     "docker:down": "docker rm -f my-redis",
     "docker:logs": "docker logs -f my-redis",
-    "proto:gen": "cd packages/shared-proto && buf generate"
+    "proto:gen": "cd packages/shared-proto && buf generate",
+    "dev:all": "concurrently \"pnpm dev\" \"cd apps/kms && go run ./cmd/server\" \"cd apps/meta && go run ./cmd/server\""
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "packageManager": "pnpm@10.33.0",
   "devDependencies": {
+    "concurrently": "^9.2.1",
     "turbo": "^2.9.4",
     "typescript": "^6.0.2"
   },
