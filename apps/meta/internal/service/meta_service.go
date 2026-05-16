@@ -27,21 +27,29 @@ func NewMetadataServer(repo *repository.MetadataRepository) *MetadataServer {
 func (s *MetadataServer) UpdateTechnicalMeta(ctx context.Context, req *pb.UpdateMetaRequest) (*pb.EmptyResponse, error) {
 	log.Printf("Received UpdateTechnicalMeta for Song ID: %s", req.SongId)
 
-	// Chuyển đổi từ Protobuf SeekPoint sang Domain SeekPoint
-	domainSeekPoints := make([]domain.SeekPoint, len(req.SeekPoints))
-	for i, sp := range req.SeekPoints {
-		domainSeekPoints[i] = domain.SeekPoint{
-			Timestamp:  sp.Timestamp,
-			ByteOffset: sp.ByteOffset,
+	domainSegments := make([]domain.Segment, len(req.Segments))
+	for i, seg := range req.Segments {
+		domainSegments[i] = domain.Segment{
+			StartByte:    seg.StartByte,
+			Size:         seg.Size,
+			DurationTs:   seg.DurationTs,
+			StartTimeSec: seg.StartTimeSec,
 		}
 	}
 
-	// Tạo struct domain để lưu vào DB
 	meta := domain.SongMetadata{
-		SongID:     req.SongId,
-		Duration:   req.Duration,
-		SeekPoints: domainSeekPoints,
-		Waveform:   req.Waveform,
+		SongID:                req.SongId,
+		Duration:              req.Duration,
+		EncryptionStartOffset: req.EncryptionStartOffset,
+		SeektableVersion:      req.SeektableVersion,
+		Timescale:             req.Timescale,
+		MediaOffset:           req.MediaOffset,
+		InitRange: domain.ByteRange{
+			Start: req.InitRange.Start,
+			End:   req.InitRange.End,
+		},
+		Segments: domainSegments,
+		Waveform: req.Waveform,
 	}
 
 	// Gọi repository để lưu (Upsert - nếu có rồi thì cập nhật, chưa có thì tạo mới)
@@ -69,19 +77,28 @@ func (s *MetadataServer) GetStreamData(ctx context.Context, req *pb.GetStreamDat
 		return nil, status.Errorf(codes.NotFound, "Metadata not found for song ID: %s", req.SongId)
 	}
 
-	// Chuyển đổi ngược lại từ Domain sang Protobuf để trả về qua gRPC
-	pbSeekPoints := make([]*pb.SeekPoint, len(meta.SeekPoints))
-	for i, sp := range meta.SeekPoints {
-		pbSeekPoints[i] = &pb.SeekPoint{
-			Timestamp:  sp.Timestamp,
-			ByteOffset: sp.ByteOffset,
+	pbSegments := make([]*pb.Segment, len(meta.Segments))
+	for i, seg := range meta.Segments {
+		pbSegments[i] = &pb.Segment{
+			StartByte:    seg.StartByte,
+			Size:         seg.Size,
+			DurationTs:   seg.DurationTs,
+			StartTimeSec: seg.StartTimeSec,
 		}
 	}
 
 	return &pb.StreamDataResponse{
-		SongId:     meta.SongID,
-		Duration:   meta.Duration,
-		SeekPoints: pbSeekPoints,
-		Waveform:   meta.Waveform,
+		SongId:                meta.SongID,
+		Duration:              meta.Duration,
+		EncryptionStartOffset: meta.EncryptionStartOffset,
+		SeektableVersion:      meta.SeektableVersion,
+		Timescale:             meta.Timescale,
+		MediaOffset:           meta.MediaOffset,
+		InitRange: &pb.ByteRange{
+			Start: meta.InitRange.Start,
+			End:   meta.InitRange.End,
+		},
+		Segments: pbSegments,
+		Waveform: meta.Waveform,
 	}, nil
 }

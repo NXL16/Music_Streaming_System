@@ -1,13 +1,25 @@
 package domain
 
 type SongMetadata struct {
-	SongID     string      `bson:"song_id"`
-	Duration   float64     `bson:"duration"`
-	SeekPoints []SeekPoint `bson:"seek_points"`
-	Waveform   []float32   `bson:"waveform"`
+	SongID                string    `bson:"song_id"`
+	Duration              float64   `bson:"duration"`
+	EncryptionStartOffset int64     `bson:"encryption_start_offset"`
+	SeektableVersion      int32     `bson:"seektable_version"`
+	Timescale             int32     `bson:"timescale"`
+	MediaOffset           int64     `bson:"media_offset"`
+	InitRange             ByteRange `bson:"init_range"`
+	Segments              []Segment `bson:"segments"`
+	Waveform              []float32 `bson:"waveform"`
 }
 
-type SeekPoint struct {
-	Timestamp  float64 `bson:"timestamp"`
-	ByteOffset int64   `bson:"byte_offset"`
+type ByteRange struct {
+	Start int64 `bson:"start"`
+	End   int64 `bson:"end"`
+}
+
+type Segment struct {
+	StartByte    int64   `bson:"start_byte"`
+	Size         int64   `bson:"size"`
+	DurationTs   int64   `bson:"duration_ts"`
+	StartTimeSec float64 `bson:"start_time_sec"`
 }
