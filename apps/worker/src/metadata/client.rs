@@ -1,13 +1,12 @@
 use crate::proto::metadata_service::{
-    metadata_service_client::MetadataServiceClient,
-    UpdateMetaRequest, SeekPoint
+    ByteRange, Segment, UpdateMetaRequest, metadata_service_client::MetadataServiceClient,
 };
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use std::env;
 use tokio::sync::RwLock;
-use tokio::time::{timeout, Duration};
-use tonic::{transport::Channel, Code};
+use tokio::time::{Duration, timeout};
+use tonic::{Code, transport::Channel};
 
 static META_CLIENT: RwLock<Option<MetadataServiceClient<Channel>>> = RwLock::const_new(None);
 
@@ -44,15 +43,29 @@ async fn invalidate_client() {
 pub async fn update_technical_meta(
     song_id: String,
     duration: f64,
-    seek_points: Vec<SeekPoint>,
+    segments: Vec<Segment>,
     waveform: Vec<f32>,
+    encryption_start_offset: i64,
+    seektable_version: i32,
+    timescale: i32,
+    media_offset: i64,
+    init_range_start: i64,
+    init_range_end: i64,
 ) -> Result<()> {
     let mut client = get_client().await?;
 
     let req = tonic::Request::new(UpdateMetaRequest {
         song_id,
         duration,
-        seek_points,
+        encryption_start_offset,
+        seektable_version,
+        timescale,
+        media_offset,
+        init_range: Some(ByteRange {
+            start: init_range_start,
+            end: init_range_end,
+        }),
+        segments,
         waveform,
     });
 

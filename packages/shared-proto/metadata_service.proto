@@ -14,11 +14,28 @@ message SeekPoint {
   int64 byte_offset = 2;
 }
 
+message ByteRange {
+  int64 start = 1;
+  int64 end = 2;
+}
+
+message Segment {
+  int64 start_byte = 1;
+  int64 size = 2;
+  int64 duration_ts = 3;
+  double start_time_sec = 4;
+}
+
 message UpdateMetaRequest {
   string song_id = 1;
   double duration = 2;
-  repeated SeekPoint seek_points = 3;
-  repeated float waveform = 4;
+  int64 encryption_start_offset = 3;
+  int32 seektable_version = 4;
+  int32 timescale = 5;
+  int64 media_offset = 6;
+  ByteRange init_range = 7;
+  repeated Segment segments = 8;
+  repeated float waveform = 9;
 }
 
 message GetStreamDataRequest {
@@ -28,8 +45,13 @@ message GetStreamDataRequest {
 message StreamDataResponse {
   string song_id = 1;
   double duration = 2;
-  repeated SeekPoint seek_points = 3;
-  repeated float waveform = 4;
+  int64 encryption_start_offset = 3;
+  int32 seektable_version = 4;
+  int32 timescale = 5;
+  int64 media_offset = 6;
+  ByteRange init_range = 7;
+  repeated Segment segments = 8;
+  repeated float waveform = 9;
 }
 
 message EmptyResponse {}
