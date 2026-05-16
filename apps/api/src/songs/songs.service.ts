@@ -138,7 +138,7 @@ export class SongsService implements OnModuleInit {
   }
 
   async finalizeUpload(request: FinalizeUploadDto) {
-    let songId = request.songId;
+    let songId = request.songId || request.song_id;
 
     // If songId is not provided but checksum is, lookup by checksum
     if (!songId && request.checksum) {
