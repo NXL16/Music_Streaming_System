@@ -1,15 +1,14 @@
 use crate::proto::key_management::{
-    key_management_service_client::KeyManagementServiceClient,
-    GenerateKeyRequest
+    GenerateKeyRequest, key_management_service_client::KeyManagementServiceClient,
 };
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use std::env;
 use std::error::Error as StdError;
 use std::fmt;
 use tokio::sync::RwLock;
-use tokio::time::{sleep, timeout, Duration};
-use tonic::{transport::Channel, Code};
+use tokio::time::{Duration, sleep, timeout};
+use tonic::{Code, transport::Channel};
 
 static KMS_CLIENT: RwLock<Option<KeyManagementServiceClient<Channel>>> = RwLock::const_new(None);
 

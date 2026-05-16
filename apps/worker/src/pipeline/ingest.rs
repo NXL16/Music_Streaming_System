@@ -1,5 +1,5 @@
 use crate::pipeline::context::PipelineContext;
-use crate::pipeline::steps::{download, transcode, encrypt, upload, metadata};
+use crate::pipeline::steps::{download, encrypt, metadata, transcode, upload};
 use crate::queue::job::JobPayload;
 
 pub async fn run_pipeline(job: JobPayload) -> anyhow::Result<PipelineContext> {
