@@ -1,13 +1,12 @@
+use anyhow::Result;
 use redis::aio::Connection;
-use anyhow::{Context, Result};
-use std::env;
 use serde::Serialize;
-use serde_json;
+use std::env;
 
 #[derive(Debug, Serialize)]
 pub struct SongCompletionEvent {
     pub song_id: String,
-    pub status: String, // "success" or "error"
+    pub status: String,
     pub duration_sec: Option<i32>,
     pub encrypted_file_path: Option<String>,
     pub bitrate_kbps: Option<i32>,
@@ -23,7 +22,7 @@ pub struct RedisPublisher {
 
 impl RedisPublisher {
     pub async fn new() -> Result<Self> {
-        let redis_url = env::var("REDIS_URL").context("REDIS_URL not set")?;
+        let redis_url = resolve_redis_url();
         let client = redis::Client::open(redis_url)?;
         let conn = client.get_async_connection().await?;
         Ok(Self { conn })
@@ -36,8 +35,22 @@ impl RedisPublisher {
             .arg(&message)
             .query_async(&mut self.conn)
             .await?;
-        
-        println!("📤 Published completion event for song {}: {}", event.song_id, event.status);
+
         Ok(())
     }
+}
+
+fn resolve_redis_url() -> String {
+    if let Ok(url) = env::var("REDIS_URL") {
+        if !url.trim().is_empty() {
+            return url;
+        }
+    }
+
+    let host = env::var("REDIS_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let port = env::var("REDIS_PORT").unwrap_or_else(|_| "6379".to_string());
+    let password = env::var("REDIS_PASSWORD").unwrap_or_default();
+    let encoded = urlencoding::encode(&password);
+
+    format!("redis://:{}@{}:{}", encoded, host, port)
 }

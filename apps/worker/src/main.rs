@@ -1,15 +1,15 @@
-mod config;
-mod queue;
-mod job;
-mod pipeline;
-mod transcoder;
-mod crypto;
-mod r2;
-mod kms;
-mod proto;
-mod metadata;
-mod redis;
 mod cloudflare;
+mod config;
+mod crypto;
+mod job;
+mod kms;
+mod metadata;
+mod pipeline;
+mod proto;
+mod queue;
+mod r2;
+mod redis;
+mod transcoder;
 
 use crate::config::config::Config;
 use crate::queue::consumer::Consumer;
@@ -20,8 +20,14 @@ async fn main() -> anyhow::Result<()> {
 
     let config = Config::load();
 
-    let redis_url = config.redis_url();
-    let consumer = Consumer::new(&redis_url).await?;
+    let consumer = Consumer::new(
+        &config.redis_url,
+        config.queue_name.clone(),
+        config.max_concurrency,
+        config.job_max_retries,
+        config.retry_backoff_ms,
+    )
+    .await?;
     consumer.run().await?;
 
     Ok(())

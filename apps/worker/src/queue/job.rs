@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobPayload {
     pub song_id: String,
-    pub r2_path: String,
-    pub checksum: String,
+    #[serde(default)]
     pub file_url: Option<String>,
 }
