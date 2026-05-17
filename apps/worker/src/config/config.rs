@@ -6,6 +6,7 @@ pub struct Config {
     pub max_concurrency: usize,
     pub job_max_retries: u32,
     pub retry_backoff_ms: u64,
+    pub master_secret_key: Vec<u8>,
 }
 
 impl Config {
@@ -30,7 +31,52 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse::<u64>().ok())
                 .unwrap_or(300),
+            master_secret_key: resolve_master_secret_key(),
         }
+    }
+}
+
+fn resolve_master_secret_key() -> Vec<u8> {
+    let raw = env::var("MASTER_SECRET_KEY")
+        .expect("MASTER_SECRET_KEY environment variable is required and must be hex-encoded");
+    let normalized = raw.trim();
+
+    if normalized.is_empty() {
+        panic!("MASTER_SECRET_KEY must not be empty");
+    }
+    if normalized.len() % 2 != 0 {
+        panic!("MASTER_SECRET_KEY must be an even-length hex string");
+    }
+
+    hex_to_bytes(normalized).unwrap_or_else(|err| panic!("{err}"))
+}
+
+fn hex_to_bytes(input: &str) -> Result<Vec<u8>, String> {
+    let mut out = Vec::with_capacity(input.len() / 2);
+    let bytes = input.as_bytes();
+
+    for i in (0..bytes.len()).step_by(2) {
+        let high = hex_value(bytes[i]).ok_or_else(|| {
+            format!("MASTER_SECRET_KEY has invalid hex character at position {i}")
+        })?;
+        let low = hex_value(bytes[i + 1]).ok_or_else(|| {
+            format!(
+                "MASTER_SECRET_KEY has invalid hex character at position {}",
+                i + 1
+            )
+        })?;
+        out.push((high << 4) | low);
+    }
+
+    Ok(out)
+}
+
+fn hex_value(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
     }
 }
 

@@ -8,6 +8,6 @@ pub fn encrypt_aes_in_place_from_offset(data: &mut [u8], key: &[u8], iv: &[u8], 
         return;
     }
     let mut cipher = Aes256Ctr::new_from_slices(key, iv).expect("invalid key/iv length");
-    cipher.seek(0u128);
+    cipher.seek(offset as u128);
     cipher.apply_keystream(&mut data[offset..]);
 }

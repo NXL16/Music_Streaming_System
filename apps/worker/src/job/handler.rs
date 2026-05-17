@@ -1,12 +1,17 @@
 use crate::pipeline::ingest::run_pipeline;
 use crate::queue::job::JobPayload;
 use crate::redis::{RedisPublisher, SongCompletionEvent};
+use std::sync::Arc;
 
-pub async fn handle_with_options(job: JobPayload, publish_error_event: bool) -> anyhow::Result<()> {
+pub async fn handle_with_options(
+    job: JobPayload,
+    publish_error_event: bool,
+    master_secret_key: Arc<Vec<u8>>,
+) -> anyhow::Result<()> {
     let song_id = job.song_id.clone();
     let mut redis = RedisPublisher::new().await?;
 
-    match run_pipeline(job).await {
+    match run_pipeline(job, master_secret_key).await {
         Ok(ctx) => {
             let duration_sec = ctx.duration.map(|duration| duration.round() as i32);
             let encrypted_file_path = ctx

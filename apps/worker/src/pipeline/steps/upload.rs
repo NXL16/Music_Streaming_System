@@ -1,4 +1,3 @@
-use crate::cloudflare::kv::put_song_key;
 use crate::pipeline::context::PipelineContext;
 use anyhow::{Context, Result};
 use aws_sdk_s3::primitives::ByteStream;
@@ -9,18 +8,6 @@ pub async fn upload(ctx: &mut PipelineContext) -> Result<()> {
         .data
         .take()
         .context("No processed data found in context to upload")?;
-
-    let encryption_start = ctx
-        .encryption_start_offset
-        .context("Missing encryption_start_offset before upload")?;
-    let encryption_key = ctx
-        .encryption_key
-        .take()
-        .context("Missing encryption key before upload")?;
-    let encryption_iv = ctx
-        .encryption_iv
-        .take()
-        .context("Missing encryption IV before upload")?;
 
     let client = crate::r2::client::create_r2_client()
         .await
@@ -40,13 +27,6 @@ pub async fn upload(ctx: &mut PipelineContext) -> Result<()> {
         .await
         .context("Failed to upload object to R2")?;
 
-    put_song_key(
-        &ctx.job.song_id,
-        &encryption_key,
-        &encryption_iv,
-        encryption_start,
-    )
-    .await?;
     ctx.output_key = Some(key);
 
     Ok(())

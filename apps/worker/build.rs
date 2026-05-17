@@ -9,9 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_server(false)
         .compile_protos(
             &[
-                "../../packages/shared-proto/key_management.proto",
                 "../../packages/shared-proto/metadata_service.proto",
-                "../../packages/shared-proto/ingestion_orchestrator.proto",
             ],
             &["../../packages/shared-proto"],
         )?;

@@ -272,9 +272,12 @@ pub async fn process(ctx: &mut PipelineContext) -> anyhow::Result<()> {
     validate_seek_points(&seek_points)?;
     let segments = build_segments(&seek_points, data.len(), duration, timescale)?;
 
-    ctx.encryption_start_offset = seek_points.first().map(|p| p.byte_offset.max(0) as usize);
-    let encryption_start = ctx.encryption_start_offset.unwrap_or(0) as i64;
-    let init_range_end = (encryption_start - 1).max(0);
+    // KDF edge decrypt no longer reads per-song encryption_start offset.
+    // Encrypt from byte 0, but keep media/init ranges based on first segment.
+    ctx.encryption_start_offset = Some(0);
+    let encryption_start = 0_i64;
+    let media_offset = seek_points.first().map(|p| p.byte_offset.max(0)).unwrap_or(0);
+    let init_range_end = (media_offset - 1).max(0);
 
     client::update_technical_meta(
         ctx.job.song_id.clone(),
@@ -284,7 +287,7 @@ pub async fn process(ctx: &mut PipelineContext) -> anyhow::Result<()> {
         encryption_start,
         SEEKTABLE_VERSION,
         timescale,
-        encryption_start,
+        media_offset,
         0,
         init_range_end,
     )

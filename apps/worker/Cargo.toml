@@ -28,6 +28,8 @@ rand = "0.8"
 aws-config = "1"
 aws-sdk-s3 = "1"
 base64 = "0.22"
+hkdf = "0.12"
+sha2 = "0.10"
 
 [build-dependencies]
 tonic-build = "0.12.3"

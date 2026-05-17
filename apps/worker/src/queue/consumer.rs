@@ -10,6 +10,7 @@ pub struct Consumer {
     max_concurrency: usize,
     job_max_retries: u32,
     retry_backoff_ms: u64,
+    master_secret_key: Arc<Vec<u8>>,
 }
 
 impl Consumer {
@@ -19,6 +20,7 @@ impl Consumer {
         max_concurrency: usize,
         job_max_retries: u32,
         retry_backoff_ms: u64,
+        master_secret_key: Vec<u8>,
     ) -> anyhow::Result<Self> {
         let client = redis::Client::open(redis_url)?;
         Ok(Self {
@@ -27,6 +29,7 @@ impl Consumer {
             max_concurrency,
             job_max_retries,
             retry_backoff_ms,
+            master_secret_key: Arc::new(master_secret_key),
         })
     }
 
@@ -62,10 +65,11 @@ impl Consumer {
             let permit = concurrency.clone().acquire_owned().await?;
             let retries = self.job_max_retries;
             let backoff_ms = self.retry_backoff_ms;
+            let master_secret_key = Arc::clone(&self.master_secret_key);
 
             tokio::spawn(async move {
                 let _permit = permit;
-                if let Err(err) = process_with_retry(job, retries, backoff_ms).await {
+                if let Err(err) = process_with_retry(job, retries, backoff_ms, master_secret_key).await {
                     eprintln!("Consumer: job failed permanently: {err}");
                 }
             });
@@ -77,12 +81,13 @@ async fn process_with_retry(
     job: JobPayload,
     max_retries: u32,
     retry_backoff_ms: u64,
+    master_secret_key: Arc<Vec<u8>>,
 ) -> anyhow::Result<()> {
     let total_attempts = max_retries.saturating_add(1);
 
     for attempt in 1..=total_attempts {
         let publish_error_event = attempt == total_attempts;
-        match handle_with_options(job.clone(), publish_error_event).await {
+        match handle_with_options(job.clone(), publish_error_event, Arc::clone(&master_secret_key)).await {
             Ok(_) => return Ok(()),
             Err(err) => {
                 if attempt == total_attempts {

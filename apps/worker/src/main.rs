@@ -1,8 +1,6 @@
-mod cloudflare;
 mod config;
 mod crypto;
 mod job;
-mod kms;
 mod metadata;
 mod pipeline;
 mod proto;
@@ -26,6 +24,7 @@ async fn main() -> anyhow::Result<()> {
         config.max_concurrency,
         config.job_max_retries,
         config.retry_backoff_ms,
+        config.master_secret_key.clone(),
     )
     .await?;
     consumer.run().await?;

@@ -1,5 +1,5 @@
 use crate::crypto::aes::encrypt_aes_in_place_from_offset;
-use crate::kms::client::generate_song_key;
+use crate::crypto::kdf::derive_song_key;
 use crate::pipeline::context::PipelineContext;
 use anyhow::Context;
 
@@ -18,13 +18,11 @@ pub async fn encrypt(ctx: &mut PipelineContext) -> anyhow::Result<()> {
         ));
     }
 
-    let (key, iv) = generate_song_key(&ctx.job.song_id).await?;
+    let (key, iv) = derive_song_key(ctx.master_secret_key.as_slice(), &ctx.job.song_id)?;
 
     let mut encrypted_data = data;
     encrypt_aes_in_place_from_offset(&mut encrypted_data, &key, &iv, encryption_start);
 
-    ctx.encryption_key = Some(key);
-    ctx.encryption_iv = Some(iv);
     ctx.data = Some(encrypted_data);
 
     Ok(())
