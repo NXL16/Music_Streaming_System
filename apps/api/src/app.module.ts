@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { SongsModule } from './songs/songs.module';
 import { ConfigModule } from '@nestjs/config';
-import { KmsModule } from './kms/kms.module';
 import { ThrottlerModule } from '@nestjs/throttler';
 import Redis from 'ioredis';
 import { RedisModule } from './common/redis/redis.module';
@@ -19,7 +18,6 @@ import { MetadataModule } from './metadata/metadata.module';
     }),
     AuthModule,
     SongsModule,
-    KmsModule,
     RedisModule,
     StreamModule,
     MetadataModule,

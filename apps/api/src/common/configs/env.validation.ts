@@ -4,7 +4,8 @@ const REQUIRED_KEYS = [
   'API_HOST',
   'API_PORT',
   'API_PREFIX',
-  'CDN_SIGNING_KEY',
+  'MASTER_SIGNING_KEY',
+  'STREAM_URL_TTL_SEC',
   'CDN_URL',
   'IDENTITY_GRPC_URL',
   'META_GRPC_URL',
@@ -30,6 +31,7 @@ export const validateEnv = (rawEnv: RawEnv): RawEnv => {
 
   const apiPort = rawEnv.API_PORT as string;
   const redisPort = rawEnv.REDIS_PORT as string;
+  const streamUrlTtlSec = rawEnv.STREAM_URL_TTL_SEC as string;
 
   if (!isPositiveInteger(apiPort)) {
     throw new Error('Invalid API_PORT: expected a positive integer');
@@ -37,6 +39,10 @@ export const validateEnv = (rawEnv: RawEnv): RawEnv => {
 
   if (!isPositiveInteger(redisPort)) {
     throw new Error('Invalid REDIS_PORT: expected a positive integer');
+  }
+
+  if (!isPositiveInteger(streamUrlTtlSec)) {
+    throw new Error('Invalid STREAM_URL_TTL_SEC: expected a positive integer');
   }
 
   return rawEnv;

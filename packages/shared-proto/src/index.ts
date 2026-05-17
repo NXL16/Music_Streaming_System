@@ -1,20 +1,5 @@
 import { GrpcMethod, GrpcStreamMethod } from "@nestjs/microservices";
 
-// ========== KMS PROTO ============
-export type {
-  GenerateKeyRequest,
-  KeyResponse,
-  GetKeyRequest,
-  KeyManagementServiceClient,
-  KeyManagementServiceController,
-} from "./generated/key_management";
-
-export const KMS = {
-  PACKAGE: "key_management",
-  SERVICE: "KeyManagementService",
-  PROTO_FILE: "key_management.proto",
-};
-
 // ========== IDENTITY PROTO ============
 export type {
   SignUpRequest,
