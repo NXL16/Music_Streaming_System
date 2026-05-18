@@ -1,107 +1,70 @@
-// ─── Types ────────────────────────────────────────────────────────────────────
-
 export interface NormalizedRange {
   start: number;
   end: number;
-  chunkIndex: number;
-  requestedStart: number;
   isSuffix: boolean;
   suffixLength: number;
+  isValid: boolean;
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+export const CHUNK_SIZE = 128 * 1024;
 
-export const CHUNK_SIZE = 128 * 1024; // 128 KB
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function chunkBoundary(byteOffset: number): {
-  start: number;
-  end: number;
-  chunkIndex: number;
-} {
-  const chunkIndex = Math.floor(byteOffset / CHUNK_SIZE);
-  const start = chunkIndex * CHUNK_SIZE;
-  const end = start + CHUNK_SIZE - 1;
-  return { start, end, chunkIndex };
+function defaultRange(): NormalizedRange {
+  return {
+    start: 0,
+    end: CHUNK_SIZE - 1,
+    isSuffix: false,
+    suffixLength: 0,
+    isValid: true,
+  };
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
-
-/**
- * Parse Range header theo RFC 7233.
- *
- * "bytes=123-456" / "bytes=123-" → snap về chunk boundary chứa byte 123
- * "bytes=-500"                   → suffix range, resolve sau khi biết fileSize
- */
 export function normalizeRange(rangeHeader: string | null): NormalizedRange {
-  if (!rangeHeader) {
-    return {
-      start: 0,
-      end: CHUNK_SIZE - 1,
-      chunkIndex: 0,
-      requestedStart: 0,
-      isSuffix: false,
-      suffixLength: 0,
-    };
-  }
+  if (!rangeHeader) return defaultRange();
 
   const match = rangeHeader.match(/^bytes=(\d*)-(\d*)$/);
-  if (!match) {
-    return {
-      start: 0,
-      end: CHUNK_SIZE - 1,
-      chunkIndex: 0,
-      requestedStart: 0,
-      isSuffix: false,
-      suffixLength: 0,
-    };
-  }
+  if (!match) return { ...defaultRange(), isValid: false };
 
   const prefix = match[1];
   const suffix = match[2];
 
-  // Suffix range: "bytes=-500"
   if (!prefix && suffix) {
-    const suffixLength = parseInt(suffix, 10);
+    const suffixLength = Number.parseInt(suffix, 10);
+    if (Number.isNaN(suffixLength) || suffixLength <= 0) {
+      return { ...defaultRange(), isValid: false };
+    }
     return {
-      start: 0,
-      end: CHUNK_SIZE - 1,
-      chunkIndex: 0,
-      requestedStart: 0,
+      ...defaultRange(),
       isSuffix: true,
-      suffixLength: isNaN(suffixLength) ? CHUNK_SIZE : suffixLength,
+      suffixLength,
     };
   }
 
-  const requestedStart = parseInt(prefix, 10) || 0;
-  const { start, end, chunkIndex } = chunkBoundary(requestedStart);
+  const start = Number.parseInt(prefix, 10);
+  if (Number.isNaN(start) || start < 0) return { ...defaultRange(), isValid: false };
+
+  const end = suffix ? Number.parseInt(suffix, 10) : start + CHUNK_SIZE - 1;
+  if (!Number.isNaN(end) && end < start) return { ...defaultRange(), isValid: false };
+
   return {
     start,
-    end,
-    chunkIndex,
-    requestedStart,
+    end: Number.isNaN(end) ? start + CHUNK_SIZE - 1 : end,
     isSuffix: false,
     suffixLength: 0,
+    isValid: true,
   };
 }
 
-/**
- * Resolve suffix range sau khi biết fileSize từ Content-Range của R2.
- */
 export function resolveSuffixRange(
   range: NormalizedRange,
   fileSize: number,
 ): NormalizedRange {
   if (!range.isSuffix) return range;
-  const requestedStart = Math.max(0, fileSize - range.suffixLength);
-  const { start, end, chunkIndex } = chunkBoundary(requestedStart);
+  const start = Math.max(0, fileSize - range.suffixLength);
   return {
     start,
-    end,
-    chunkIndex,
-    requestedStart,
+    end: fileSize - 1,
     isSuffix: false,
     suffixLength: 0,
+    isValid: true,
   };
 }

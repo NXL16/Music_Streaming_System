@@ -1,23 +1,13 @@
 import { ExecutionContext } from "@cloudflare/workers-types";
-import { decryptAesCtrStream, getSongKey } from "./crypto";
-import { normalizeRange, resolveSuffixRange, CHUNK_SIZE } from "./range";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
+import { decryptAesCtrStream, deriveSongKey } from "./crypto";
+import { CHUNK_SIZE, normalizeRange, resolveSuffixRange } from "./range";
 
 interface Env {
   R2_PRODUCTION: R2Bucket;
-  R2_CDN_URL: string;
-  SONG_KEYS: KVNamespace;
-  CDN_SIGNING_KEY: string;
+  MASTER_SECRET_KEY: string;
+  MASTER_SIGNING_KEY: string;
+  EDGE_CACHE_TTL_SEC?: string;
 }
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const CF_CACHE_OPTIONS = {
-  cacheEverything: true,
-  cacheTtl: 31536000,
-  cacheTtlByStatus: { "200-206": 31536000 },
-} as const;
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -25,31 +15,96 @@ const CORS_HEADERS = {
   "Access-Control-Expose-Headers": "Content-Range, Content-Length",
 } as const;
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+const DEFAULT_EDGE_CACHE_TTL_SEC = 31_536_000;
 
-function getContentType(_objectKey: string): string {
-  return "audio/mp4";
+let cachedSigningSecret = "";
+let cachedSigningKeyPromise: Promise<CryptoKey> | null = null;
+
+function buildRangeCacheKey(songId: string, start: number, end: number): string {
+  return `https://edge-cache.local/audio/${songId}?start=${start}&end=${end}`;
+}
+function chunkStartAt(offset: number): number {
+  return Math.floor(offset / CHUNK_SIZE) * CHUNK_SIZE;
 }
 
-function buildR2Url(cdnUrl: string, objectKey: string): string {
-  const base = cdnUrl.endsWith("/") ? cdnUrl.slice(0, -1) : cdnUrl;
-  return `${base}/processed/${objectKey}.m4a`;
-}
-
-function extractObjectKey(pathname: string): string | null {
+function extractSongId(pathname: string): string | null {
   const match = pathname.match(/^\/audio\/([^/]+)$/);
-  if (!match) return null;
-  return match[1];
+  return match ? match[1] : null;
 }
 
-function parseFileSize(r2Response: Response): number | null {
-  // Content-Range: bytes 0-131071/1234567
-  const contentRange = r2Response.headers.get("Content-Range");
-  if (contentRange) {
-    const match = contentRange.match(/\/(\d+)$/);
-    if (match) return parseInt(match[1], 10);
+function toR2ObjectKey(songId: string): string {
+  return `processed/${songId}.m4a`;
+}
+
+function hexToBytes(input: string): Uint8Array {
+  if (!input || input.length % 2 !== 0) return new Uint8Array();
+  const out = new Uint8Array(input.length / 2);
+  for (let i = 0; i < input.length; i += 2) {
+    const value = Number.parseInt(input.slice(i, i + 2), 16);
+    if (Number.isNaN(value)) return new Uint8Array();
+    out[i / 2] = value;
   }
-  return null;
+  return out;
+}
+
+function buildClientCacheControl(ttl: number): string {
+  return `public, max-age=${ttl}, s-maxage=${ttl}, immutable, no-transform`;
+}
+
+function buildEdgeCacheControl(ttl: number): string {
+  return `public, max-age=${ttl}`;
+}
+
+function sliceStream(
+  stream: ReadableStream<Uint8Array>,
+  start: number,
+  end: number,
+): ReadableStream<Uint8Array> {
+  let offset = 0;
+  return stream.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        if (offset > end) return;
+
+        const chunkStart = offset;
+        const chunkEnd = offset + chunk.length - 1;
+
+        if (chunkEnd < start) {
+          offset += chunk.length;
+          return;
+        }
+
+        const from = Math.max(0, start - chunkStart);
+        const to = Math.min(chunk.length, end - chunkStart + 1);
+
+        if (to > from) {
+          controller.enqueue(chunk.subarray(from, to));
+        }
+
+        offset += chunk.length;
+        if (offset > end) {
+          controller.terminate();
+        }
+      },
+    }),
+  );
+}
+
+async function getSigningKey(signingKey: string): Promise<CryptoKey> {
+  if (signingKey !== cachedSigningSecret) {
+    cachedSigningSecret = signingKey;
+    cachedSigningKeyPromise = crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(signingKey),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"],
+    );
+  }
+  if (!cachedSigningKeyPromise) {
+    throw new Error("Failed to initialize signing key");
+  }
+  return cachedSigningKeyPromise;
 }
 
 async function verifySignedUrl(
@@ -59,71 +114,31 @@ async function verifySignedUrl(
 ): Promise<Response | null> {
   const url = new URL(rawUrl);
   const token = url.searchParams.get("__token__");
-
-  if (!token) {
-    return new Response("Missing token", { status: 401 });
-  }
+  if (!token) return new Response("Missing token", { status: 401 });
 
   const expMatch = token.match(/exp=(\d+)/);
   const hmacMatch = token.match(/hmac=([a-f0-9]+)/);
-
   if (!expMatch || !hmacMatch) {
     return new Response("Invalid token format", { status: 401 });
   }
 
   const exp = expMatch[1];
-  const hmac = hmacMatch[1];
-
-  if (parseInt(exp, 10) < Math.floor(Date.now() / 1000)) {
+  const hmacHex = hmacMatch[1];
+  if (Number.parseInt(exp, 10) < Math.floor(Date.now() / 1000)) {
     return new Response("Token expired", { status: 401 });
   }
 
-  const payload = `${songId}~exp=${exp}`;
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(signingKey),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-
-  const expectedHmac = await crypto.subtle.sign(
+  const key = await getSigningKey(signingKey);
+  const payload = new TextEncoder().encode(`${songId}~exp=${exp}`);
+  const isValid = await crypto.subtle.verify(
     "HMAC",
     key,
-    new TextEncoder().encode(payload),
+    hexToBytes(hmacHex),
+    payload,
   );
-
-  const expectedHex = Array.from(new Uint8Array(expectedHmac))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-
-  if (expectedHex !== hmac) {
-    return new Response("Invalid token", { status: 403 });
-  }
-
+  if (!isValid) return new Response("Invalid token", { status: 403 });
   return null;
 }
-
-// ─── Prefetch ─────────────────────────────────────────────────────────────────
-
-async function prefetchNextChunk(
-  nextChunkIndex: number,
-  objectKey: string,
-  cdnUrl: string,
-  fileSize: number | null,
-): Promise<void> {
-  const start = nextChunkIndex * CHUNK_SIZE;
-  if (fileSize !== null && start >= fileSize) return;
-
-  const end = start + CHUNK_SIZE - 1;
-  await fetch(buildR2Url(cdnUrl, objectKey), {
-    method: "GET",
-    headers: { Range: `bytes=${start}-${end}` },
-    cf: CF_CACHE_OPTIONS,
-  });
-}
-
-// ─── Main handler ─────────────────────────────────────────────────────────────
 
 export default {
   async fetch(
@@ -131,172 +146,206 @@ export default {
     env: Env,
     ctx: ExecutionContext,
   ): Promise<Response> {
-    if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: CORS_HEADERS });
-    }
-
-    if (request.method !== "GET") {
-      return new Response("Method not allowed", { status: 405 });
-    }
-
-    const url = new URL(request.url);
-    const objectKey = extractObjectKey(url.pathname);
-    if (!objectKey) return new Response("Invalid path", { status: 400 });
-
-    const songId = objectKey;
-    const contentType = getContentType(objectKey);
-
-    // ── Verify signed URL ─────────────────────────────────────────────────────
-    const verifyError = await verifySignedUrl(
-      request.url,
-      songId,
-      env.CDN_SIGNING_KEY,
-    );
-    if (verifyError) return verifyError;
-
-    // ── Parse range ───────────────────────────────────────────────────────────
-    let range = normalizeRange(request.headers.get("Range"));
-
-    const r2Url = buildR2Url(env.R2_CDN_URL, objectKey);
-
-    // ── Fetch R2 chunk + KV key song song ─────────────────────────────────
-    //
-    // KV edge latency ~2-5ms, R2 CDN cache hit ~10-30ms
-    // → cả hai resolve gần như đồng thời → TTFB gần bằng R2 latency thuần
-    //
-    const ifNoneMatch = request.headers.get("If-None-Match");
-
-    const [r2Result, keyResult] = await Promise.allSettled([
-      fetch(
-        new Request(r2Url, {
-          headers: {
-            Range: `bytes=${range.start}-${range.end}`,
-            ...(ifNoneMatch ? { "If-None-Match": ifNoneMatch } : {}),
-          },
-        }),
-        { cf: CF_CACHE_OPTIONS },
-      ),
-      getSongKey(env.SONG_KEYS, songId),
-    ]);
-
-    // ── Handle lỗi R2 ────────────────────────────────────────────────────────
-
-    if (r2Result.status === "rejected") {
-      return new Response("Upstream fetch failed", { status: 502 });
-    }
-
-    const r2Res = r2Result.value;
-
-    if (r2Res.status === 404) {
-      return new Response("Not Found", { status: 404 });
-    }
-
-    if (r2Res.status === 304) {
-      return new Response(null, {
-        status: 304,
-        headers: {
-          ...CORS_HEADERS,
-          ETag: r2Res.headers.get("ETag") ?? "",
-          "Cache-Control": "private, max-age=3600",
-        },
-      });
-    }
-
-    if (!r2Res.body) {
-      return new Response("Empty upstream response", { status: 502 });
-    }
-
-    // ── Handle lỗi KV ────────────────────────────────────────────────────────
-
-    if (keyResult.status === "rejected") {
-      await r2Res.body.cancel();
-      const msg =
-        keyResult.reason instanceof Error
-          ? keyResult.reason.message
-          : "Key fetch failed";
-      // 404 nếu key không tồn tại (bài hát chưa được index), 502 nếu KV lỗi
-      const status = msg.includes("not found") ? 404 : 502;
-      return new Response(msg, { status });
-    }
-
-    const songKey = keyResult.value;
-    const fileSize = parseFileSize(r2Res);
-
-    // ── Resolve suffix range nếu cần ─────────────────────────────────────────
-
-    let finalR2Res = r2Res;
-
-    if (range.isSuffix) {
-      if (fileSize === null) {
-        await r2Res.body.cancel();
-        return new Response("Range Not Satisfiable", { status: 416 });
-      } else {
-        range = resolveSuffixRange(range, fileSize);
-
-        // Re-fetch đúng chunk (chunk 0 vừa fetch bị bỏ, đã có trong CDN cache)
-        await r2Res.body.cancel();
-        const correctedRes = await fetch(
-          new Request(r2Url, {
-            headers: { Range: `bytes=${range.start}-${range.end}` },
-          }),
-          { cf: CF_CACHE_OPTIONS },
-        );
-
-        if (!correctedRes.body) {
-          return new Response("Empty upstream response", { status: 502 });
-        }
-        finalR2Res = correctedRes;
+    try {
+      if (request.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: CORS_HEADERS });
       }
+      if (request.method !== "GET") {
+        return new Response("Method not allowed", { status: 405 });
+      }
+
+      const songId = extractSongId(new URL(request.url).pathname);
+      if (!songId) return new Response("Invalid path", { status: 400 });
+      const r2ObjectKey = toR2ObjectKey(songId);
+
+      const verifyError = await verifySignedUrl(
+        request.url,
+        songId,
+        env.MASTER_SIGNING_KEY,
+      );
+      if (verifyError) return verifyError;
+
+      const hasRangeHeader = !!request.headers.get("Range");
+      let range = normalizeRange(request.headers.get("Range"));
+      if (!hasRangeHeader) {
+        return new Response("Range header required", { status: 416 });
+      }
+      if (hasRangeHeader && !range.isValid) {
+        return new Response("Range Not Satisfiable", { status: 416 });
+      }
+
+      const edgeCacheTtl =
+        Number.parseInt(env.EDGE_CACHE_TTL_SEC ?? "", 10) ||
+        DEFAULT_EDGE_CACHE_TTL_SEC;
+      const clientCacheControl = buildClientCacheControl(edgeCacheTtl);
+      const cdnCacheControl = `public, s-maxage=${edgeCacheTtl}`;
+      const edgeCacheControl = buildEdgeCacheControl(edgeCacheTtl);
+
+      let totalSize: number | null = null;
+      if (hasRangeHeader && range.isSuffix) {
+        const headObj = await env.R2_PRODUCTION.head(r2ObjectKey);
+        if (!headObj) return new Response("Not Found", { status: 404 });
+        totalSize = headObj.size;
+        range = resolveSuffixRange(range, totalSize);
+      }
+
+      let cacheReq: Request | null = null;
+      let requestStart = range.start;
+      let requestEnd = range.end;
+      let fetchStart = range.start;
+      let fetchEnd = range.end;
+      let canUseChunkCache = false;
+
+      if (hasRangeHeader) {
+        const chunkStart = chunkStartAt(range.start);
+        const chunkEnd = chunkStart + CHUNK_SIZE - 1;
+        canUseChunkCache = range.end <= chunkEnd;
+        if (canUseChunkCache) {
+          fetchStart = chunkStart;
+          fetchEnd = chunkEnd;
+        }
+      }
+
+      if (hasRangeHeader) {
+        cacheReq = new Request(buildRangeCacheKey(songId, fetchStart, fetchEnd), {
+          method: "GET",
+        });
+        const cacheHit = await caches.default.match(cacheReq);
+        if (cacheHit) {
+          let cachedBody = await cacheHit.arrayBuffer();
+          if (canUseChunkCache) {
+            const from = Math.max(0, requestStart - fetchStart);
+            const to = Math.min(cachedBody.byteLength, requestEnd - fetchStart + 1);
+            cachedBody = cachedBody.slice(from, to);
+          }
+          const total = cacheHit.headers.get("X-Total-Size") ?? "*";
+          const headers = new Headers({
+            ...CORS_HEADERS,
+            "Content-Type": "audio/mp4",
+            "Content-Length": String(cachedBody.byteLength),
+            "Accept-Ranges": "bytes",
+            "Content-Range": `bytes ${requestStart}-${requestStart + cachedBody.byteLength - 1}/${total}`,
+            "Cache-Control": clientCacheControl,
+            "CDN-Cache-Control": cdnCacheControl,
+            "Surrogate-Control": `max-age=${edgeCacheTtl}`,
+          });
+          return new Response(cachedBody, { status: 206, headers });
+        }
+      }
+
+      const r2Obj = hasRangeHeader
+        ? await env.R2_PRODUCTION.get(r2ObjectKey, {
+            range: { offset: fetchStart, length: fetchEnd - fetchStart + 1 },
+          })
+        : await env.R2_PRODUCTION.get(r2ObjectKey);
+
+      if (!r2Obj || !r2Obj.body) {
+        if (hasRangeHeader) {
+          return new Response("Range Not Satisfiable", { status: 416 });
+        }
+        return new Response("Not Found", { status: 404 });
+      }
+
+      if (totalSize === null && typeof r2Obj.size === "number" && r2Obj.size > 0) {
+        totalSize = r2Obj.size;
+      }
+
+      const songKey = await deriveSongKey(env.MASTER_SECRET_KEY, songId);
+      const decryptedStream = decryptAesCtrStream(
+        r2Obj.body,
+        songKey.cryptoKey,
+        songKey.iv,
+        hasRangeHeader ? fetchStart : 0,
+      );
+
+      const contentLength =
+        hasRangeHeader && r2Obj.range && "length" in r2Obj.range
+          ? r2Obj.range.length
+          : typeof r2Obj.size === "number" && r2Obj.size > 0
+            ? r2Obj.size
+            : null;
+
+      const headers = new Headers({
+        ...CORS_HEADERS,
+        "Content-Type": "audio/mp4",
+        "Accept-Ranges": "bytes",
+        "Cache-Control": clientCacheControl,
+        "CDN-Cache-Control": cdnCacheControl,
+        "Surrogate-Control": `max-age=${edgeCacheTtl}`,
+      });
+      if (contentLength !== null) {
+        headers.set("Content-Length", String(contentLength));
+      }
+      if (r2Obj.httpEtag) headers.set("ETag", r2Obj.httpEtag);
+      if (r2Obj.uploaded) headers.set("Last-Modified", r2Obj.uploaded.toUTCString());
+
+      if (hasRangeHeader) {
+        if (canUseChunkCache) {
+          const relativeStart = Math.max(0, requestStart - fetchStart);
+          const relativeEnd = Math.max(relativeStart, requestEnd - fetchStart);
+          const contentEnd = requestStart + (relativeEnd - relativeStart);
+          headers.set(
+            "Content-Range",
+            `bytes ${requestStart}-${contentEnd}/${totalSize !== null ? String(totalSize) : "*"}`,
+          );
+          headers.set("Content-Length", String(relativeEnd - relativeStart + 1));
+
+          const [clientStream, cacheStream] = decryptedStream.tee();
+          const slicedStream = sliceStream(
+            clientStream,
+            relativeStart,
+            relativeEnd,
+          );
+
+          if (cacheReq) {
+            ctx.waitUntil(
+              (async () => {
+                const cacheBody = await new Response(cacheStream).arrayBuffer();
+                const cacheHeaders = new Headers({
+                  "X-Total-Size": totalSize !== null ? String(totalSize) : "*",
+                  "Content-Length": String(cacheBody.byteLength),
+                  "Cache-Control": edgeCacheControl,
+                });
+                await caches.default.put(
+                  cacheReq,
+                  new Response(cacheBody, { status: 200, headers: cacheHeaders }),
+                );
+              })().catch(() => {}),
+            );
+          }
+          return new Response(slicedStream, { status: 206, headers });
+        }
+
+        const contentEnd = requestStart + (requestEnd - requestStart);
+        headers.set(
+          "Content-Range",
+          `bytes ${requestStart}-${contentEnd}/${totalSize !== null ? String(totalSize) : "*"}`,
+        );
+        const [clientStream, cacheStream] = decryptedStream.tee();
+        headers.set("Content-Length", String(requestEnd - requestStart + 1));
+        if (cacheReq && fetchStart === requestStart && fetchEnd === requestEnd) {
+          ctx.waitUntil(
+            (async () => {
+              const cacheBody = await new Response(cacheStream).arrayBuffer();
+              const cacheHeaders = new Headers({
+                "X-Total-Size": totalSize !== null ? String(totalSize) : "*",
+                "Content-Length": String(cacheBody.byteLength),
+                "Cache-Control": edgeCacheControl,
+              });
+              await caches.default.put(
+                cacheReq,
+                new Response(cacheBody, { status: 200, headers: cacheHeaders }),
+              );
+            })().catch(() => {}),
+          );
+        }
+
+        return new Response(clientStream, { status: 206, headers });
+      }
+
+      return new Response(decryptedStream, { status: 206, headers });
+    } catch {
+      return new Response("Internal Server Error", { status: 500 });
     }
-
-    // ── Decrypt stream ────────────────────────────────────────────────────────
-
-    const decryptedStream = decryptAesCtrStream(
-      finalR2Res.body!,
-      songKey.cryptoKey,
-      songKey.iv,
-      range.start,
-    );
-
-    // ── Prefetch chunk tiếp theo (non-blocking) ───────────────────────────────
-
-    ctx.waitUntil(
-      prefetchNextChunk(
-        range.chunkIndex + 1,
-        objectKey,
-        env.R2_CDN_URL,
-        fileSize,
-      ),
-    );
-
-    // ── Build response headers ────────────────────────────────────────────────
-
-    const contentLengthRaw = finalR2Res.headers.get("Content-Length");
-    const contentLength = contentLengthRaw
-      ? parseInt(contentLengthRaw, 10)
-      : range.end - range.start + 1;
-    const contentEnd = range.start + contentLength - 1;
-    const totalStr = fileSize !== null ? String(fileSize) : "*";
-
-    const headers = new Headers({
-      ...CORS_HEADERS,
-      "Content-Type": contentType,
-      "Content-Length": String(contentLength),
-      "Content-Range": `bytes ${range.start}-${contentEnd}/${totalStr}`,
-      "Accept-Ranges": "bytes",
-      "Cache-Control": "private, max-age=3600",
-      Vary: "Range",
-      "X-Cache": finalR2Res.headers.get("CF-Cache-Status") ?? "UNKNOWN",
-    });
-
-    const etag = finalR2Res.headers.get("ETag");
-    if (etag) headers.set("ETag", etag);
-    const lastModified = finalR2Res.headers.get("Last-Modified");
-    if (lastModified) headers.set("Last-Modified", lastModified);
-
-    return new Response(decryptedStream, {
-      status: 206,
-      headers,
-    });
   },
 };

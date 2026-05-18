@@ -1,115 +1,108 @@
-// ─── Types ────────────────────────────────────────────────────────────────────
+const KEY_INFO = new TextEncoder().encode("music-stream:v1:key");
+const IV_INFO = new TextEncoder().encode("music-stream:v1:iv");
+
+const SONG_KEY_CACHE_MAX = 512;
+const MIN_DECRYPT_SIZE = 16_384;
+
+let cachedMasterSecret = "";
+let cachedHkdfKeyPromise: Promise<CryptoKey> | null = null;
+const songKeyCache = new Map<string, Promise<SongKey>>();
 
 export type SongKey = {
   cryptoKey: CryptoKey;
   iv: Uint8Array;
 };
 
-// ─── KV schema ────────────────────────────────────────────────────────────────
+export function hexToBytes(input: string): Uint8Array {
+  if (!input || input.length % 2 !== 0) {
+    throw new Error(
+      "MASTER_SECRET_KEY must be a non-empty even-length hex string",
+    );
+  }
+  const bytes = new Uint8Array(input.length / 2);
+  for (let i = 0; i < input.length; i += 2) {
+    const value = Number.parseInt(input.slice(i, i + 2), 16);
+    if (Number.isNaN(value)) {
+      throw new Error("MASTER_SECRET_KEY contains invalid hex characters");
+    }
+    bytes[i / 2] = value;
+  }
+  return bytes;
+}
 
-/**
- * Schema lưu trong KV:
- *   key:   "song:{songId}"
- *   value: JSON { encryptionKey: string (base64url), iv: string (base64url) }
- *
- * Write từ upload pipeline:
- *   await env.SONG_KEYS.put(`song:${songId}`, JSON.stringify({ encryptionKey, iv }));
- *
- * Không set TTL — key vĩnh viễn theo bài hát.
- */
-type KvKeyPayload = {
-  encryptionKey: string;
-  iv: string;
-};
-
-// ─── In-isolate dedup cache ───────────────────────────────────────────────────
-
-/**
- * Cache Promise<SongKey> trong lifetime của isolate.
- * Mục đích: tránh gọi KV nhiều lần cho cùng songId trong 1 request burst
- * (vd: nhiều chunk requests đến cùng lúc cho cùng bài hát).
- *
- * Không cần TTL hay eviction — key là vĩnh viễn và bất biến.
- * KV là source of truth; đây chỉ là micro-latency optimization.
- */
-const isolateCache = new Map<string, Promise<SongKey>>();
-
-export async function getSongKey(
-  kv: KVNamespace,
+export async function deriveSongKey(
+  masterSecretHex: string,
   songId: string,
 ): Promise<SongKey> {
-  const cached = isolateCache.get(songId);
-  if (cached) return cached;
+  const normalizedSecret = masterSecretHex.trim();
 
-  const promise = fetchFromKv(kv, songId).catch((err) => {
-    // Xóa để cho phép retry nếu KV tạm thời lỗi
-    isolateCache.delete(songId);
-    throw err;
-  });
+  // Simple LRU: delete + re-insert khi access
+  const cached = songKeyCache.get(songId);
+  if (cached) {
+    songKeyCache.delete(songId);
+    songKeyCache.set(songId, cached);
+    return cached;
+  }
 
-  isolateCache.set(songId, promise);
+  const promise = deriveSongKeyInternal(normalizedSecret, songId).catch(
+    (err) => {
+      songKeyCache.delete(songId);
+      throw err;
+    },
+  );
 
-  if (isolateCache.size > 512) {
-    const oldest = isolateCache.keys().next().value;
-    if (oldest) isolateCache.delete(oldest);
+  songKeyCache.set(songId, promise);
+  if (songKeyCache.size > SONG_KEY_CACHE_MAX) {
+    const oldest = songKeyCache.keys().next().value;
+    if (oldest) songKeyCache.delete(oldest);
   }
 
   return promise;
 }
 
-async function fetchFromKv(kv: KVNamespace, songId: string): Promise<SongKey> {
-  const raw = await kv.get(`song:${songId}`);
-
-  if (!raw) {
-    throw new Error(`Song key not found: ${songId}`);
-  }
-
-  let payload: KvKeyPayload;
-  try {
-    payload = JSON.parse(raw) as KvKeyPayload;
-  } catch {
-    throw new Error(`Malformed key payload for song: ${songId}`);
-  }
-
-  if (!payload.encryptionKey || !payload.iv) {
-    throw new Error(`Incomplete key payload for song: ${songId}`);
-  }
-
-  const keyBytes = base64ToBytes(payload.encryptionKey);
-  const iv = base64ToBytes(payload.iv);
-
-  if (iv.byteLength !== 16) {
-    throw new Error(
-      `Invalid IV length for ${songId}: expected 16, got ${iv.byteLength}`,
-    );
-  }
-
+async function deriveSongKeyInternal(
+  normalizedSecret: string,
+  songId: string,
+): Promise<SongKey> {
+  const hkdfKey = await getHkdfKey(normalizedSecret);
+  const salt = new TextEncoder().encode(songId);
+  const [keyBits, ivBits] = await Promise.all([
+    crypto.subtle.deriveBits(
+      { name: "HKDF", hash: "SHA-256", salt, info: KEY_INFO },
+      hkdfKey,
+      256,
+    ),
+    crypto.subtle.deriveBits(
+      { name: "HKDF", hash: "SHA-256", salt, info: IV_INFO },
+      hkdfKey,
+      128,
+    ),
+  ]);
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
-    keyBytes,
+    new Uint8Array(keyBits),
     { name: "AES-CTR" },
     false,
     ["decrypt"],
   );
-
-  return { cryptoKey, iv };
+  return { cryptoKey, iv: new Uint8Array(ivBits) };
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function base64ToBytes(input: string): Uint8Array {
-  const normalized = input.replace(/-/g, "+").replace(/_/g, "/");
-  const padding = (4 - (normalized.length % 4)) % 4;
-  const padded = normalized + "=".repeat(padding);
-  const binary = atob(padded);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
+async function getHkdfKey(masterSecretHex: string): Promise<CryptoKey> {
+  if (masterSecretHex !== cachedMasterSecret) {
+    cachedMasterSecret = masterSecretHex;
+    cachedHkdfKeyPromise = crypto.subtle.importKey(
+      "raw",
+      hexToBytes(masterSecretHex),
+      "HKDF",
+      false,
+      ["deriveBits"],
+    );
+    songKeyCache.clear();
   }
-  return bytes;
+  if (!cachedHkdfKeyPromise) throw new Error("Failed to initialize HKDF key");
+  return cachedHkdfKeyPromise;
 }
-
-// ─── AES-CTR counter ──────────────────────────────────────────────────────────
 
 function incrementCounter(counter: Uint8Array, blocks: number): void {
   let carry = blocks;
@@ -119,8 +112,6 @@ function incrementCounter(counter: Uint8Array, blocks: number): void {
     carry = (carry >>> 8) + (sum >>> 8);
   }
 }
-
-// ─── Decrypt ──────────────────────────────────────────────────────────────────
 
 async function decryptChunk(
   cryptoKey: CryptoKey,
@@ -144,7 +135,6 @@ async function decryptChunk(
     return new Uint8Array(result);
   }
 
-  // Pad về đầu block để align với AES block boundary
   const padded = new Uint8Array(offsetInBlock + chunk.length);
   padded.set(chunk, offsetInBlock);
   const result = await crypto.subtle.decrypt(
@@ -162,25 +152,56 @@ export function decryptAesCtrStream(
   startOffset: number,
 ): ReadableStream<Uint8Array> {
   let processed = 0;
+  let buffer = new Uint8Array(0);
 
   return body.pipeThrough(
     new TransformStream<Uint8Array, Uint8Array>(
       {
         async transform(chunk, controller) {
-          const streamOffset = startOffset + processed;
-          try {
-            const decrypted = await decryptChunk(
-              cryptoKey,
-              iv,
-              chunk,
-              streamOffset,
-            );
-            processed += chunk.length;
-            controller.enqueue(decrypted);
-          } catch (err) {
-            controller.error(
-              new Error(`Decrypt failed at offset ${streamOffset}: ${err}`),
-            );
+          const merged = new Uint8Array(buffer.length + chunk.length);
+          merged.set(buffer);
+          merged.set(chunk, buffer.length);
+          buffer = merged;
+
+          while (buffer.length >= MIN_DECRYPT_SIZE) {
+            const toDecrypt = buffer.subarray(0, MIN_DECRYPT_SIZE);
+            const remaining = buffer.subarray(MIN_DECRYPT_SIZE);
+            const streamOffset = startOffset + processed;
+            try {
+              const decrypted = await decryptChunk(
+                cryptoKey,
+                iv,
+                toDecrypt,
+                streamOffset,
+              );
+              processed += toDecrypt.length;
+              buffer = new Uint8Array(remaining);
+              controller.enqueue(decrypted);
+            } catch (err) {
+              controller.error(
+                new Error(`Decrypt failed at offset ${streamOffset}: ${err}`),
+              );
+              return;
+            }
+          }
+        },
+        async flush(controller) {
+          if (buffer.length > 0) {
+            const streamOffset = startOffset + processed;
+            try {
+              const decrypted = await decryptChunk(
+                cryptoKey,
+                iv,
+                buffer,
+                streamOffset,
+              );
+              controller.enqueue(decrypted);
+              buffer = new Uint8Array(0);
+            } catch (err) {
+              controller.error(
+                new Error(`Decrypt failed at offset ${streamOffset}: ${err}`),
+              );
+            }
           }
         },
       },

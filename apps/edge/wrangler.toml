@@ -1,6 +1,6 @@
 name = "edge-gateway"
 main = "src/index.ts"
-compatibility_date = "2026-05-01"
+compatibility_date = "2026-05-17"
 minify = true
 workers_dev = false
 preview_urls = false
@@ -9,9 +9,5 @@ preview_urls = false
 binding = "R2_PRODUCTION"
 bucket_name = "music-hls-bucket"
 
-[[kv_namespaces]]
-binding = "SONG_KEYS"
-id = "57da292b58c6432bb8fb6f2d0a9473dc"
-
 [vars]
-R2_CDN_URL = "https://r2.404hz.me"
+EDGE_CACHE_TTL_SEC = "31536000"
