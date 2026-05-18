@@ -9,6 +9,7 @@ go.sum
 
 # IDE workspace files
 *.code-workspace
+*.tsbuildinfo
 
 # Generated files
 **/src/generated/
