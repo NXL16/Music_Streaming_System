@@ -4,6 +4,10 @@ import { createHmac } from 'crypto';
 
 @Injectable()
 export class StreamService {
+  private readonly prewarmCooldownMs = 2_000;
+  private readonly lastPrewarmAt = new Map<string, number>();
+  private readonly inFlightPrewarm = new Set<string>();
+
   constructor(private readonly config: ConfigService) {}
 
   getStreamUrl(songId: string): { url: string } {
@@ -28,17 +32,36 @@ export class StreamService {
     const enabled =
       (this.config.get<string>('STREAM_PREWARM_ENABLED') ?? 'true').toLowerCase() !== 'false';
     if (!enabled) return;
+    if (!this.shouldPrewarm(url)) return;
 
-    const timeoutMs = Number(this.config.get<string>('STREAM_PREWARM_TIMEOUT_MS') ?? '1500');
+    const timeoutMs = Number(this.config.get<string>('STREAM_PREWARM_TIMEOUT_MS') ?? '1000');
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), Number.isFinite(timeoutMs) ? timeoutMs : 1500);
 
     void fetch(url, {
       method: 'GET',
-      headers: { Range: 'bytes=0-131071' },
+      headers: { Range: 'bytes=0-98303' },
       signal: controller.signal,
     })
       .catch(() => undefined)
-      .finally(() => clearTimeout(timer));
+      .finally(() => {
+        clearTimeout(timer);
+        this.inFlightPrewarm.delete(url);
+      });
+  }
+
+  private shouldPrewarm(url: string): boolean {
+    const now = Date.now();
+    const lastAt = this.lastPrewarmAt.get(url) ?? 0;
+    if (now - lastAt < this.prewarmCooldownMs) return false;
+    if (this.inFlightPrewarm.has(url)) return false;
+    this.lastPrewarmAt.set(url, now);
+    this.inFlightPrewarm.add(url);
+
+    if (this.lastPrewarmAt.size > 5000) {
+      const oldestKey = this.lastPrewarmAt.keys().next().value;
+      if (oldestKey) this.lastPrewarmAt.delete(oldestKey);
+    }
+    return true;
   }
 }
