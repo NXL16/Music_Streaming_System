@@ -4,18 +4,45 @@ import Image from "next/image";
 import { Play } from "lucide-react";
 import { Song, usePlayerStore } from "@/stores/player.store";
 import { getStreamUrl } from "@/lib/api";
+import { prewarmSongStart } from "@/lib/audio/prewarm-song";
+import { useShallow } from "zustand/react/shallow";
 
 type SongCardProps = {
   song: Song;
 };
 
 export function SongCard({ song }: SongCardProps) {
-  const { playSong, currentSong, isPlaying, togglePlay } = usePlayerStore();
+  const {
+    playSong,
+    setStreamUrlForSong,
+    currentSong,
+    streamUrl,
+    isPlaying,
+    togglePlay,
+  } = usePlayerStore(
+    useShallow((state) => ({
+      playSong: state.playSong,
+      setStreamUrlForSong: state.setStreamUrlForSong,
+      currentSong: state.currentSong,
+      streamUrl: state.streamUrl,
+      isPlaying: state.isPlaying,
+      togglePlay: state.togglePlay,
+    })),
+  );
 
   const isCurrentSong = currentSong?.id === song.id;
 
   async function handlePlay() {
     if (isCurrentSong) {
+      if (!streamUrl) {
+        try {
+          const url = await getStreamUrl(song.id);
+          setStreamUrlForSong(song.id, url);
+        } catch (err) {
+          console.error("Failed to retry stream URL:", err);
+        }
+        return;
+      }
       togglePlay();
       return;
     }
@@ -32,16 +59,27 @@ export function SongCard({ song }: SongCardProps) {
     <div
       className="group relative bg-zinc-800/50 hover:bg-zinc-700/50 rounded-lg p-4 cursor-pointer transition-colors"
       onClick={handlePlay}
+      onMouseEnter={() => {
+        if (isCurrentSong && streamUrl) return;
+        void prewarmSongStart(song.id).catch(() => {
+          // Best-effort prefetch; ignore hover failures.
+        });
+      }}
     >
       {/* Cover */}
       <div className="relative aspect-square mb-3">
-        <Image
-          src={song.coverUrl}
-          alt={song.title}
-          fill
-          loading="eager"
-          className="rounded object-cover"
-        />
+        {song.coverUrl ? (
+          <Image
+            src={song.coverUrl}
+            alt={song.title}
+            fill
+            loading="lazy"
+            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
+            className="rounded object-cover"
+          />
+        ) : (
+          <div className="w-full h-full rounded bg-zinc-700" />
+        )}
 
         {/* Play button overlay */}
         <div
