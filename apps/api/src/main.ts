@@ -17,7 +17,7 @@ async function bootstrap() {
   const prefix = configService.getOrThrow<string>('API_PREFIX');
 
   if (corsOrigin.trim() === '*') {
-    throw new Error('CORS_ORIGIN must not be "*" when credentials are enabled');
+    throw new Error('CORS_ORIGIN không được là "*" khi credentials được bật');
   }
 
   app.enableCors({
@@ -49,4 +49,4 @@ async function bootstrap() {
   );
 }
 
-bootstrap().catch((e) => console.error('Error starting server:', e));
+bootstrap().catch((e) => Logger.error('Lỗi khi khởi động:', e));

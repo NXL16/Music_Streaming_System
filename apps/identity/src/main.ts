@@ -34,4 +34,4 @@ async function bootstrap() {
   Logger.log(`Identity gRPC server running at ${IDENTITY.GRPC_URL}`);
 }
 
-bootstrap().catch((e) => console.error('Error starting server:', e));
+bootstrap().catch((e) => Logger.error('Lỗi khi khởi động:', e));

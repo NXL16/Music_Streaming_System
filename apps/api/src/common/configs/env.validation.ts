@@ -24,9 +24,7 @@ export const validateEnv = (rawEnv: RawEnv): RawEnv => {
   const missing = REQUIRED_KEYS.filter((key) => !rawEnv[key]);
 
   if (missing.length > 0) {
-    throw new Error(
-      `Missing required environment variables: ${missing.join(', ')}`,
-    );
+    throw new Error(`Thiếu biến môi trường bắt buộc: ${missing.join(', ')}`);
   }
 
   const apiPort = rawEnv.API_PORT as string;
@@ -34,15 +32,15 @@ export const validateEnv = (rawEnv: RawEnv): RawEnv => {
   const streamUrlTtlSec = rawEnv.STREAM_URL_TTL_SEC as string;
 
   if (!isPositiveInteger(apiPort)) {
-    throw new Error('Invalid API_PORT: expected a positive integer');
+    throw new Error('API_PORT phải là số nguyên dương');
   }
 
   if (!isPositiveInteger(redisPort)) {
-    throw new Error('Invalid REDIS_PORT: expected a positive integer');
+    throw new Error('REDIS_PORT phải là số nguyên dương');
   }
 
   if (!isPositiveInteger(streamUrlTtlSec)) {
-    throw new Error('Invalid STREAM_URL_TTL_SEC: expected a positive integer');
+    throw new Error('STREAM_URL_TTL_SEC phải là số nguyên dương');
   }
 
   return rawEnv;
