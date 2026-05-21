@@ -10,6 +10,11 @@ export const authRefreshKey = (userId: string, deviceId: string): string =>
 export const authDevicesKey = (userId: string): string =>
   `auth:devices:${userId}`;
 
+export const authAccessBlacklistKey = (jti: string): string =>
+  `auth:blacklist:${jti}`;
+
+export const authStateKey = (userId: string): string => `auth:state:${userId}`;
+
 export const songCompletionProcessedKey = (songId: string): string =>
   `song_completion_processed:${songId}`;
 
@@ -20,8 +25,9 @@ export const songCompletionLockKey = (songId: string): string =>
 // CONSTANTS & TYPES
 // ==========================================
 export const UserRole = {
-  USER: "user",
-  ADMIN: "admin",
+  USER: "USER",
+  ARTIST: "ARTIST",
+  ADMIN: "ADMIN",
 } as const;
 export type UserRole = (typeof UserRole)[keyof typeof UserRole];
 
@@ -44,6 +50,9 @@ export interface JwtUser {
   username: string;
   role: UserRole;
   deviceId: string;
+  tokenVersion: number;
+  jti: string;
+  exp: number;
 }
 
 export interface JwtPayload {
@@ -51,6 +60,9 @@ export interface JwtPayload {
   username: string;
   role: UserRole;
   deviceId: string;
+  tokenVersion: number;
+  jti: string;
+  exp: number;
 }
 
 export interface AuthSessionTokens {

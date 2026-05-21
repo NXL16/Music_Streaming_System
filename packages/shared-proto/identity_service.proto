@@ -31,8 +31,10 @@ message RefreshTokenRequest {
 }
 
 message LogoutRequest {
-  string user_id   = 1;
-  string device_id = 2;
+  string user_id    = 1;
+  string device_id  = 2;
+  string access_jti = 3;
+  int64  access_exp = 4;
 }
 
 message LogoutAllRequest {
