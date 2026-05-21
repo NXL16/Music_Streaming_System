@@ -10,6 +10,7 @@ import { User as PrismaUser } from '../generated/prisma/client';
 import { PrismaService } from '../common/database/prisma.service';
 
 type MetadataLean = {
+  userId?: string;
   avatar?: string | null;
   bio?: string;
   permissions?: string[];
@@ -51,14 +52,19 @@ export class UsersService {
   async create(data: CreateUserInput): Promise<UserEntity> {
     const user = await this.prisma.user.create({ data });
 
-    this.metadataModel.create({ userId: user.id }).catch((err) => {
-      console.error(
-        `[LazyInit] Chưa thể tạo metadata cho user ${user.id}:`,
-        err,
-      );
-    });
+    try {
+      const metadata = await this.metadataModel
+        .create({ userId: user.id })
+        .then((doc) => doc.toObject());
 
-    return this.mapToEntity(user, null);
+      return this.mapToEntity(user, metadata);
+    } catch (error) {
+      await this.prisma.user.delete({ where: { id: user.id } }).catch(() => {
+        // best-effort rollback
+      });
+
+      throw new Error('Không thể tạo metadata người dùng', { cause: error });
+    }
   }
 
   // ================================
@@ -151,6 +157,19 @@ export class UsersService {
     });
   }
 
+  async incrementTokenVersion(id: string): Promise<UserEntity> {
+    const user = await this.prisma.user.update({
+      where: { id },
+      data: {
+        tokenVersion: {
+          increment: 1,
+        },
+      },
+    });
+
+    return this.mapToEntity(user, null);
+  }
+
   // ================================
   // CHANGE PASSWORD
   // ================================
@@ -160,6 +179,9 @@ export class UsersService {
       data: {
         password: newPassword,
         lastPasswordChangeAt: new Date(),
+        tokenVersion: {
+          increment: 1,
+        },
       },
     });
   }
@@ -181,6 +203,7 @@ export class UsersService {
       isActive: user.isActive,
       emailVerified: user.emailVerified,
       twoFactorEnabled: user.twoFactorEnabled,
+      tokenVersion: user.tokenVersion,
       lastLoginAt: user.lastLoginAt,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,

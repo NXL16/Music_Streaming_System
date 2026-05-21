@@ -59,6 +59,8 @@ export class AuthController {
     await this.authService.logout({
       userId: user.userId,
       deviceId: user.deviceId,
+      accessJti: user.jti,
+      accessExp: user.exp,
     });
 
     return this.formatResponse(

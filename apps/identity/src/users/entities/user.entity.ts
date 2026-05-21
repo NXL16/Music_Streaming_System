@@ -10,6 +10,7 @@ export class UserEntity {
   isActive!: boolean;
   emailVerified!: boolean;
   twoFactorEnabled!: boolean;
+  tokenVersion!: number;
   lastLoginAt?: Date | null;
   createdAt!: Date;
   updatedAt!: Date;

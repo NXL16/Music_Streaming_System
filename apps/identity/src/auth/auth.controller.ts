@@ -49,7 +49,12 @@ export class AuthController {
       });
     }
 
-    await this.authService.logout(request.userId, request.deviceId);
+    await this.authService.logout(
+      request.userId,
+      request.deviceId,
+      request.accessJti,
+      request.accessExp,
+    );
     return {};
   }
 

@@ -6,8 +6,10 @@ import Redis from 'ioredis';
 import { createHash, randomUUID } from 'crypto';
 import {
   JwtPayload,
+  authAccessBlacklistKey,
   authDevicesKey,
   authRefreshKey,
+  authStateKey,
 } from '@musical/shared-types';
 import {
   AuthResponse,
@@ -21,6 +23,10 @@ import { RpcException } from '@nestjs/microservices';
 import { status } from '@grpc/grpc-js';
 import ms from 'ms';
 import { Prisma } from '../generated/prisma/client';
+import {
+  normalizeAndValidateLoginRequest,
+  normalizeAndValidateSignUpRequest,
+} from './auth.validation';
 
 @Injectable()
 export class AuthService {
@@ -32,7 +38,9 @@ export class AuthService {
   ) {}
 
   async signUp(request: SignUpRequest): Promise<AuthResponse> {
-    const { username, email, password, displayName, deviceId } = request;
+    const normalizedRequest = normalizeAndValidateSignUpRequest(request);
+    const { username, email, password, displayName, deviceId } =
+      normalizedRequest;
 
     try {
       const hashedPassword = await argon2.hash(password);
@@ -47,11 +55,10 @@ export class AuthService {
       const finalDeviceId = deviceId || randomUUID();
       const tokens = this.generateTokens(newUser, finalDeviceId);
 
-      await this.saveRefreshToken(
-        newUser.id,
-        tokens.refreshToken,
-        finalDeviceId,
-      );
+      await Promise.all([
+        this.saveRefreshToken(newUser.id, tokens.refreshToken, finalDeviceId),
+        this.saveAuthState(newUser),
+      ]);
 
       return tokens;
     } catch (error: unknown) {
@@ -77,7 +84,7 @@ export class AuthService {
 
       if (
         error instanceof Error &&
-        error.message === 'Failed to create user metadata'
+        error.message === 'Không thể tạo metadata người dùng'
       ) {
         throw new RpcException({
           code: status.INTERNAL,
@@ -94,7 +101,9 @@ export class AuthService {
   }
 
   async login(request: LoginRequest): Promise<AuthResponse> {
-    const { username, password, deviceId } = request;
+    const normalizedRequest = normalizeAndValidateLoginRequest(request);
+    const { username, password, deviceId } = normalizedRequest;
+
     const user = await this.usersService.findAuthUserByUsername(username);
 
     if (!user || !(await argon2.verify(user.password, password))) {
@@ -116,20 +125,33 @@ export class AuthService {
 
     await Promise.all([
       this.saveRefreshToken(user.id, tokens.refreshToken, finalDeviceId),
+      this.saveAuthState(user),
       this.usersService.updateLastLogin(user.id),
     ]);
 
     return tokens;
   }
 
-  async logout(userId: string, deviceId: string) {
+  async logout(
+    userId: string,
+    deviceId: string,
+    accessJti?: string,
+    accessExp?: number,
+  ) {
     const key = authRefreshKey(userId, deviceId);
     const deviceSetKey = authDevicesKey(userId);
 
-    await Promise.all([
-      this.redis.del(key),
-      this.redis.srem(deviceSetKey, deviceId),
-    ]);
+    const commands = this.redis
+      .pipeline()
+      .del(key)
+      .srem(deviceSetKey, deviceId);
+
+    if (accessJti && accessExp) {
+      const ttl = Math.max(accessExp - Math.floor(Date.now() / 1000), 1);
+      commands.set(authAccessBlacklistKey(accessJti), '1', 'EX', ttl);
+    }
+
+    await commands.exec();
   }
 
   async logoutAll(userId: string) {
@@ -150,6 +172,9 @@ export class AuthService {
     pipeline.del(deviceSetKey);
 
     await pipeline.exec();
+
+    const user = await this.usersService.incrementTokenVersion(userId);
+    await this.saveAuthState(user);
   }
 
   async refreshToken(token: string): Promise<AuthResponse> {
@@ -202,12 +227,19 @@ export class AuthService {
         });
       }
 
+      if (payload.tokenVersion !== user.tokenVersion) {
+        throw new RpcException({
+          code: status.UNAUTHENTICATED,
+          message: 'Phiên đăng nhập đã bị thu hồi',
+        });
+      }
+
       const tokens = this.generateTokens(user, payload.deviceId);
-      await this.saveRefreshToken(
-        user.id,
-        tokens.refreshToken,
-        payload.deviceId,
-      );
+
+      await Promise.all([
+        this.saveRefreshToken(user.id, tokens.refreshToken, payload.deviceId),
+        this.saveAuthState(user),
+      ]);
 
       return tokens;
     } catch (e: unknown) {
@@ -222,19 +254,34 @@ export class AuthService {
     }
   }
 
+  private async saveAuthState(user: UserEntity): Promise<void> {
+    await this.redis.set(
+      authStateKey(user.id),
+      JSON.stringify({
+        isActive: user.isActive,
+        role: user.role,
+        tokenVersion: user.tokenVersion,
+      }),
+    );
+  }
+
   private async saveRefreshToken(
     userId: string,
     token: string,
     deviceId: string,
   ) {
-    const rfExpiresIn = this.configService.get<string>(
+    const rfExpiresIn = this.configService.getOrThrow<string>(
       'JWT_REFRESH_EXPIRES_IN',
     );
 
-    if (!rfExpiresIn) throw new Error('JWT_REFRESH_EXPIRES_IN is not defined');
-
     const ttlMs = ms(rfExpiresIn as import('ms').StringValue);
     const ttl = Math.floor(ttlMs / 1000);
+
+    if (!Number.isFinite(ttl) || ttl <= 0) {
+      throw new Error(
+        'JWT_REFRESH_EXPIRES_IN phải là thời lượng hợp lệ và lớn hơn 0',
+      );
+    }
 
     const hashedToken = createHash('sha256').update(token).digest('hex');
     const key = authRefreshKey(userId, deviceId);
@@ -249,28 +296,32 @@ export class AuthService {
   }
 
   private generateTokens(user: UserEntity, deviceId: string): AuthResponse {
+    const accessJti = randomUUID();
+
     const payload = {
       sub: user.id,
       username: user.username,
       role: user.role,
       deviceId,
+      tokenVersion: user.tokenVersion,
     };
 
-    const accessTokenExpires = this.configService.get<string>(
+    const accessTokenExpires = this.configService.getOrThrow<string>(
       'JWT_ACCESS_EXPIRES_IN',
-    )!;
+    );
 
-    const refreshTokenExpires = this.configService.get<string>(
+    const refreshTokenExpires = this.configService.getOrThrow<string>(
       'JWT_REFRESH_EXPIRES_IN',
-    )!;
+    );
 
     const accessToken = this.jwtService.sign(payload, {
-      secret: this.configService.get<string>('JWT_ACCESS_SECRET'),
+      secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
       expiresIn: accessTokenExpires as SignOptions['expiresIn'],
+      jwtid: accessJti,
     });
 
     const refreshToken = this.jwtService.sign(payload, {
-      secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
+      secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
       expiresIn: refreshTokenExpires as SignOptions['expiresIn'],
     });
 
@@ -291,9 +342,12 @@ export class AuthService {
   }
 
   private extractSeconds(expiresIn: string): number {
-    if (!expiresIn) return 0;
-
     const duration = ms(expiresIn as import('ms').StringValue);
+
+    if (!Number.isFinite(duration) || duration <= 0) {
+      throw new Error('expiresIn phải là thời lượng hợp lệ và lớn hơn 0');
+    }
+
     return Math.floor(duration / 1000);
   }
 }
