@@ -40,6 +40,7 @@ message SongSummary {
   SongStatus status = 6;
   int32 duration_sec = 7;
   int64 created_at = 8;
+  string cover_url = 9;
 }
 
 // Full detail for playback
