@@ -1,5 +1,3 @@
-import { GrpcMethod, GrpcStreamMethod } from "@nestjs/microservices";
-
 // ========== IDENTITY PROTO ============
 export type {
   SignUpRequest,
@@ -7,18 +5,40 @@ export type {
   RefreshTokenRequest,
   LogoutRequest,
   LogoutAllRequest,
+  ListUserSessionsRequest,
+  ListUserSessionsResponse,
+  LogoutDeviceRequest,
+  GetProfileRequest,
+  UpdateProfileRequest,
+  ChangePasswordRequest,
+  ListUsersRequest,
+  ListUsersResponse,
+  SetUserStatusRequest,
+  RequestPasswordResetRequest,
+  ResetPasswordRequest,
+  RequestEmailVerificationRequest,
+  VerifyEmailRequest,
+  TokenIssueResponse,
+  BeginTwoFactorSetupRequest,
+  BeginTwoFactorSetupResponse,
+  ConfirmTwoFactorSetupRequest,
+  ConfirmTwoFactorSetupResponse,
+  DisableTwoFactorRequest,
+  RegenerateTwoFactorRecoveryCodesRequest,
+  TwoFactorRecoveryCodesResponse,
+  VerifyTwoFactorLoginRequest,
   AuthResponse,
   UserProfile,
   EmptyResponse,
   IdentityServiceClient,
   IdentityServiceController,
+  AdminUserActionRequest,
 } from "./generated/identity_service";
 
 export const IDENTITY = {
   PACKAGE: "identity_service",
   SERVICE: "IdentityService",
   PROTO_FILE: "identity_service.proto",
-  GRPC_URL: "0.0.0.0:8888",
 };
 
 // ========== SONG PROTO ============
@@ -47,9 +67,7 @@ export type {
   UpdateSongProcessingResultResponse,
 } from "./generated/song_service";
 
-// export {
-//   SongServiceControllerMethods,
-// } from "./generated/song_service";
+import { GrpcMethod, GrpcStreamMethod } from "@nestjs/microservices";
 
 export function SongServiceControllerMethods() {
   return function (constructor: Function) {
@@ -90,7 +108,6 @@ export function SongServiceControllerMethods() {
   };
 }
 
-// Thay vì dùng enum, dùng const object + as const
 export const SongStatus = {
   SONG_STATUS_UNSPECIFIED: 0,
   SONG_STATUS_PENDING: 1,
@@ -99,8 +116,6 @@ export const SongStatus = {
   SONG_STATUS_FAILED: 4,
   UNRECOGNIZED: -1,
 } as const;
-
-// Tạo type để các file khác vẫn dùng được kiểu dữ liệu
 export type SongStatus = (typeof SongStatus)[keyof typeof SongStatus];
 
 export const SONG = {

@@ -17,4 +17,4 @@ plugins:
       - outputServices=grpc-js
       - esModuleInterop=true
       - snakeToCamel=true
-      - useMetaData=true
+      - addGrpcMetadata=true

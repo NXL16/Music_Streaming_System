@@ -10,6 +10,24 @@ service IdentityService {
   rpc RefreshToken (RefreshTokenRequest) returns (AuthResponse);
   rpc Logout (LogoutRequest) returns (EmptyResponse);
   rpc LogoutAll (LogoutAllRequest) returns (EmptyResponse);
+  rpc ListUserSessions (ListUserSessionsRequest) returns (ListUserSessionsResponse);
+  rpc LogoutDevice (LogoutDeviceRequest) returns (EmptyResponse);
+  rpc GetProfile (GetProfileRequest) returns (UserProfile);
+  rpc UpdateProfile (UpdateProfileRequest) returns (UserProfile);
+  rpc ChangePassword (ChangePasswordRequest) returns (EmptyResponse);
+  rpc ListUsers (ListUsersRequest) returns (ListUsersResponse);
+  rpc SetUserStatus (SetUserStatusRequest) returns (UserProfile);
+  rpc AdminRevokeUserSessions (AdminUserActionRequest) returns (EmptyResponse);
+  rpc AdminResetUserTwoFactor (AdminUserActionRequest) returns (UserProfile);
+  rpc RequestPasswordReset (RequestPasswordResetRequest) returns (TokenIssueResponse);
+  rpc ResetPassword (ResetPasswordRequest) returns (EmptyResponse);
+  rpc RequestEmailVerification (RequestEmailVerificationRequest) returns (TokenIssueResponse);
+  rpc VerifyEmail (VerifyEmailRequest) returns (UserProfile);
+  rpc BeginTwoFactorSetup (BeginTwoFactorSetupRequest) returns (BeginTwoFactorSetupResponse);
+  rpc ConfirmTwoFactorSetup (ConfirmTwoFactorSetupRequest) returns (ConfirmTwoFactorSetupResponse);
+  rpc DisableTwoFactor (DisableTwoFactorRequest) returns (UserProfile);
+  rpc VerifyTwoFactorLogin (VerifyTwoFactorLoginRequest) returns (AuthResponse);
+  rpc RegenerateTwoFactorRecoveryCodes (RegenerateTwoFactorRecoveryCodesRequest) returns (TwoFactorRecoveryCodesResponse);
 }
 
 message SignUpRequest {
@@ -41,21 +59,157 @@ message LogoutAllRequest {
   string user_id = 1;
 }
 
+message ListUserSessionsRequest {
+  string          user_id           = 1;
+  optional string current_device_id = 2;
+}
+
+message SessionDevice {
+  string          device_id    = 1;
+  bool            is_current   = 2;
+  optional string ip_address   = 3;
+  optional string user_agent   = 4;
+  int64           last_seen_at = 5;
+}
+
+message ListUserSessionsResponse {
+  repeated SessionDevice sessions = 1;
+}
+
+message LogoutDeviceRequest {
+  string user_id   = 1;
+  string device_id = 2;
+}
+
+message GetProfileRequest {
+  string user_id = 1;
+}
+
+message UpdateProfileRequest {
+  string          user_id      = 1;
+  string          display_name = 2;
+  optional string avatar       = 3;
+  optional string bio          = 4;
+}
+
+message ChangePasswordRequest {
+  string user_id          = 1;
+  string current_password = 2;
+  string new_password     = 3;
+}
+
+message ListUsersRequest {
+  int32           page      = 1;
+  int32           limit     = 2;
+  optional string search    = 3;
+  optional string role      = 4;
+  optional bool   is_active = 5;
+}
+
+message ListUsersResponse {
+  repeated UserProfile users = 1;
+  int64                total = 2;
+  int32                page  = 3;
+  int32                limit = 4;
+}
+
+message SetUserStatusRequest {
+  string user_id   = 1;
+  bool   is_active = 2;
+}
+
+message AdminUserActionRequest {
+  string user_id = 1;
+}
+
+message RequestPasswordResetRequest {
+  string email = 1;
+}
+
+message ResetPasswordRequest {
+  string token        = 1;
+  string new_password = 2;
+}
+
+message RequestEmailVerificationRequest {
+  string user_id = 1;
+}
+
+message VerifyEmailRequest {
+  string token = 1;
+}
+
+message TokenIssueResponse {
+  string          message     = 1;
+  optional string debug_token = 2;
+}
+
+message BeginTwoFactorSetupRequest {
+  string user_id = 1;
+}
+
+message BeginTwoFactorSetupResponse {
+  string secret      = 1;
+  string otpauth_url = 2;
+}
+
+message ConfirmTwoFactorSetupRequest {
+  string user_id = 1;
+  string code    = 2;
+}
+
+message ConfirmTwoFactorSetupResponse {
+  UserProfile     user           = 1;
+  repeated string recovery_codes = 2;
+}
+
+message DisableTwoFactorRequest {
+  string          user_id       = 1;
+  string          password      = 2;
+  optional string code          = 3;
+  optional string recovery_code = 4;
+}
+
+message VerifyTwoFactorLoginRequest {
+  string          challenge_id  = 1;
+  optional string code          = 2;
+  optional string recovery_code = 3;
+}
+
+message RegenerateTwoFactorRecoveryCodesRequest {
+  string          user_id       = 1;
+  string          password      = 2;
+  optional string code          = 3;
+  optional string recovery_code = 4;
+}
+
+message TwoFactorRecoveryCodesResponse {
+  repeated string recovery_codes = 1;
+}
+
 message AuthResponse {
-  string      access_token  = 1;
-  string      refresh_token = 2;
-  string      device_id     = 3;
-  int64       expires_in    = 4;
-  UserProfile user          = 5;
+  string          access_token            = 1;
+  string          refresh_token           = 2;
+  string          device_id               = 3;
+  int64           expires_in              = 4;
+  UserProfile     user                    = 5;
+  bool            two_factor_required     = 6;
+  optional string two_factor_challenge_id = 7;
 }
 
 message UserProfile {
-  string user_id      = 1;
-  string username     = 2;
-  string email        = 3;
-  string display_name = 4;
-  string role         = 5;
-  int64  created_at   = 6;
+  string          user_id        = 1;
+  string          username       = 2;
+  string          email          = 3;
+  string          display_name   = 4;
+  string          role           = 5;
+  int64           created_at     = 6;
+  optional string avatar         = 7;
+  string          bio            = 8;
+  bool            is_active      = 9;
+  bool            email_verified = 10;
+  optional int64  last_login_at  = 11;
+  int64           updated_at     = 12;
 }
 
 message EmptyResponse {}
