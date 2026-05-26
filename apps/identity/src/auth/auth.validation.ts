@@ -1,10 +1,17 @@
 import { RpcException } from '@nestjs/microservices';
 import { status } from '@grpc/grpc-js';
-import type { LoginRequest, SignUpRequest } from '@musical/shared-proto';
+import type {
+  ChangePasswordRequest,
+  ListUsersRequest,
+  LoginRequest,
+  SignUpRequest,
+  UpdateProfileRequest,
+} from '@musical/shared-proto';
 
 const USERNAME_REGEX = /^[a-zA-Z0-9_]+$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).+$/;
+const MAX_BIO_LENGTH = 500;
 
 export function normalizeAndValidateSignUpRequest(
   request: SignUpRequest,
@@ -86,5 +93,104 @@ export function normalizeAndValidateLoginRequest(
   return {
     ...request,
     username,
+  };
+}
+
+export function validateNewPassword(password: string): void {
+  if (!password || password.length < 8) {
+    throw new RpcException({
+      code: status.INVALID_ARGUMENT,
+      message: 'Mật khẩu mới phải có ít nhất 8 ký tự',
+    });
+  }
+
+  if (!PASSWORD_REGEX.test(password)) {
+    throw new RpcException({
+      code: status.INVALID_ARGUMENT,
+      message:
+        'Mật khẩu mới phải chứa chữ hoa, chữ thường, số và ký tự đặc biệt',
+    });
+  }
+}
+
+export function normalizeAndValidateChangePasswordRequest(
+  request: ChangePasswordRequest,
+): ChangePasswordRequest {
+  if (!request.userId) {
+    throw new RpcException({
+      code: status.INVALID_ARGUMENT,
+      message: 'userId là bắt buộc',
+    });
+  }
+
+  if (!request.currentPassword) {
+    throw new RpcException({
+      code: status.INVALID_ARGUMENT,
+      message: 'Mật khẩu hiện tại là bắt buộc',
+    });
+  }
+
+  validateNewPassword(request.newPassword);
+
+  if (request.currentPassword === request.newPassword) {
+    throw new RpcException({
+      code: status.INVALID_ARGUMENT,
+      message: 'Mật khẩu mới phải khác mật khẩu hiện tại',
+    });
+  }
+
+  return request;
+}
+
+export function normalizeAndValidateUpdateProfileRequest(
+  request: UpdateProfileRequest,
+): UpdateProfileRequest {
+  const displayName = request.displayName?.trim();
+  const avatar = request.avatar?.trim();
+  const bio = request.bio?.trim();
+
+  if (!request.userId) {
+    throw new RpcException({
+      code: status.INVALID_ARGUMENT,
+      message: 'userId là bắt buộc',
+    });
+  }
+
+  if (!displayName || displayName.length < 2 || displayName.length > 100) {
+    throw new RpcException({
+      code: status.INVALID_ARGUMENT,
+      message: 'Tên hiển thị phải từ 2 đến 100 ký tự',
+    });
+  }
+
+  if (bio && bio.length > MAX_BIO_LENGTH) {
+    throw new RpcException({
+      code: status.INVALID_ARGUMENT,
+      message: 'Tiểu sử tối đa 500 ký tự',
+    });
+  }
+
+  return {
+    ...request,
+    displayName,
+    avatar: avatar || undefined,
+    bio: bio || undefined,
+  };
+}
+
+export function normalizeListUsersRequest(
+  request: ListUsersRequest,
+): ListUsersRequest {
+  const page = Math.max(Number(request.page || 1), 1);
+  const limit = Math.min(Math.max(Number(request.limit || 20), 1), 100);
+  const search = request.search?.trim().toLowerCase();
+  const role = request.role?.trim().toUpperCase();
+
+  return {
+    ...request,
+    page,
+    limit,
+    search: search || undefined,
+    role: role || undefined,
   };
 }

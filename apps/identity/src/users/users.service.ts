@@ -6,7 +6,8 @@ import {
   UserMetadataDocument,
 } from './schemas/user-metadata.schema';
 import { UserEntity } from './entities/user.entity';
-import { User as PrismaUser } from '../generated/prisma/client';
+import { Prisma, User as PrismaUser } from '../generated/prisma/client';
+import { UserRole } from '../generated/prisma/enums';
 import { PrismaService } from '../common/database/prisma.service';
 
 type MetadataLean = {
@@ -37,6 +38,33 @@ type UpdateUserInput = {
 
 type AuthUserRecord = PrismaUser;
 
+type ListUsersInput = {
+  page: number;
+  limit: number;
+  search?: string;
+  role?: string;
+  isActive?: boolean;
+};
+
+type ListUsersResult = {
+  users: UserEntity[];
+  total: number;
+};
+
+type RecoveryCodeInput = {
+  codeHash: string;
+};
+
+type CreateSecurityAuditLogInput = {
+  actorUserId?: string;
+  targetUserId?: string;
+  action: string;
+  status: 'SUCCESS' | 'FAILURE';
+  ipAddress?: string;
+  userAgent?: string;
+  metadata?: Prisma.InputJsonValue;
+};
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -45,6 +73,40 @@ export class UsersService {
     @InjectModel(UserMetadata.name)
     private readonly metadataModel: Model<UserMetadataDocument>,
   ) {}
+
+  async createSecurityAuditLog(
+    input: CreateSecurityAuditLogInput,
+  ): Promise<void> {
+    const securityAuditLogDelegate = (
+      this.prisma as PrismaService & {
+        securityAuditLog: {
+          create(args: {
+            data: {
+              actorUserId?: string;
+              targetUserId?: string;
+              action: string;
+              status: 'SUCCESS' | 'FAILURE';
+              ipAddress?: string;
+              userAgent?: string;
+              metadata?: Prisma.InputJsonValue;
+            };
+          }): Promise<unknown>;
+        };
+      }
+    ).securityAuditLog;
+
+    await securityAuditLogDelegate.create({
+      data: {
+        actorUserId: input.actorUserId,
+        targetUserId: input.targetUserId,
+        action: input.action,
+        status: input.status,
+        ipAddress: input.ipAddress,
+        userAgent: input.userAgent,
+        metadata: input.metadata,
+      },
+    });
+  }
 
   // ================================
   // CREATE USER
@@ -116,6 +178,167 @@ export class UsersService {
     });
   }
 
+  async findAuthUserById(id: string): Promise<AuthUserRecord | null> {
+    return this.prisma.user.findUnique({
+      where: { id },
+    });
+  }
+
+  async findAuthUserByEmail(email: string): Promise<AuthUserRecord | null> {
+    return this.prisma.user.findUnique({
+      where: { email },
+    });
+  }
+
+  async createPasswordResetToken(
+    userId: string,
+    tokenHash: string,
+    expiresAt: Date,
+  ): Promise<void> {
+    await this.prisma.$transaction([
+      this.prisma.passwordResetToken.updateMany({
+        where: { userId, usedAt: null },
+        data: { usedAt: new Date() },
+      }),
+      this.prisma.passwordResetToken.create({
+        data: {
+          userId,
+          tokenHash,
+          expiresAt,
+        },
+      }),
+    ]);
+  }
+
+  async consumePasswordResetToken(
+    tokenHash: string,
+  ): Promise<AuthUserRecord | null> {
+    const now = new Date();
+
+    return this.prisma.$transaction(async (tx) => {
+      const token = await tx.passwordResetToken.findUnique({
+        where: { tokenHash },
+        include: { user: true },
+      });
+
+      if (!token || token.usedAt || token.expiresAt <= now) {
+        return null;
+      }
+
+      const consumed = await tx.passwordResetToken.updateMany({
+        where: {
+          id: token.id,
+          usedAt: null,
+          expiresAt: { gt: now },
+        },
+        data: { usedAt: now },
+      });
+
+      if (consumed.count !== 1) {
+        return null;
+      }
+
+      return token.user;
+    });
+  }
+
+  async createEmailVerificationToken(
+    userId: string,
+    tokenHash: string,
+    expiresAt: Date,
+  ): Promise<void> {
+    await this.prisma.$transaction([
+      this.prisma.emailVerificationToken.updateMany({
+        where: { userId, usedAt: null },
+        data: { usedAt: new Date() },
+      }),
+      this.prisma.emailVerificationToken.create({
+        data: {
+          userId,
+          tokenHash,
+          expiresAt,
+        },
+      }),
+    ]);
+  }
+
+  async consumeEmailVerificationToken(
+    tokenHash: string,
+  ): Promise<UserEntity | null> {
+    const now = new Date();
+
+    return this.prisma.$transaction(async (tx) => {
+      const token = await tx.emailVerificationToken.findUnique({
+        where: { tokenHash },
+        include: { user: true },
+      });
+
+      if (!token || token.usedAt || token.expiresAt <= now) {
+        return null;
+      }
+
+      const consumed = await tx.emailVerificationToken.updateMany({
+        where: {
+          id: token.id,
+          usedAt: null,
+          expiresAt: { gt: now },
+        },
+        data: { usedAt: now },
+      });
+
+      if (consumed.count !== 1) {
+        return null;
+      }
+
+      const user = await tx.user.update({
+        where: { id: token.userId },
+        data: { emailVerified: true },
+      });
+
+      return this.mapToEntity(user, null);
+    });
+  }
+
+  async listUsers(input: ListUsersInput): Promise<ListUsersResult> {
+    const where: Prisma.UserWhereInput = {};
+
+    if (input.search) {
+      where.OR = [
+        { username: { contains: input.search, mode: 'insensitive' } },
+        { email: { contains: input.search, mode: 'insensitive' } },
+        { displayName: { contains: input.search, mode: 'insensitive' } },
+      ];
+    }
+
+    if (
+      input.role &&
+      Object.values(UserRole).includes(input.role as UserRole)
+    ) {
+      where.role = input.role as UserRole;
+    }
+
+    if (typeof input.isActive === 'boolean') {
+      where.isActive = input.isActive;
+    }
+
+    const skip = (input.page - 1) * input.limit;
+
+    const [users, total] = await this.prisma.$transaction([
+      this.prisma.user.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: input.limit,
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return {
+      users: users.map((user) => this.mapToEntity(user, null)),
+      total,
+    };
+  }
+
   // ================================
   // UPDATE USER (split DB)
   // ================================
@@ -173,8 +396,22 @@ export class UsersService {
   // ================================
   // CHANGE PASSWORD
   // ================================
-  async changePassword(id: string, newPassword: string): Promise<void> {
-    await this.prisma.user.update({
+  async setActive(id: string, isActive: boolean): Promise<UserEntity> {
+    const user = await this.prisma.user.update({
+      where: { id },
+      data: {
+        isActive,
+        tokenVersion: {
+          increment: 1,
+        },
+      },
+    });
+
+    return this.mapToEntity(user, null);
+  }
+
+  async changePassword(id: string, newPassword: string): Promise<UserEntity> {
+    const user = await this.prisma.user.update({
       where: { id },
       data: {
         password: newPassword,
@@ -184,6 +421,90 @@ export class UsersService {
         },
       },
     });
+
+    return this.mapToEntity(user, null);
+  }
+
+  async setTwoFactorPendingSecret(
+    id: string,
+    encryptedSecret: string,
+  ): Promise<UserEntity> {
+    const user = await this.prisma.user.update({
+      where: { id },
+      data: {
+        twoFactorSecret: encryptedSecret,
+        twoFactorEnabled: false,
+      },
+    });
+
+    return this.mapToEntity(user, null);
+  }
+
+  async enableTwoFactor(id: string): Promise<UserEntity> {
+    const user = await this.prisma.user.update({
+      where: { id },
+      data: {
+        twoFactorEnabled: true,
+      },
+    });
+
+    return this.mapToEntity(user, null);
+  }
+
+  async replaceTwoFactorRecoveryCodes(
+    userId: string,
+    codes: RecoveryCodeInput[],
+  ): Promise<void> {
+    await this.prisma.$transaction([
+      this.prisma.twoFactorRecoveryCode.deleteMany({
+        where: { userId },
+      }),
+      this.prisma.twoFactorRecoveryCode.createMany({
+        data: codes.map((code) => ({
+          userId,
+          codeHash: code.codeHash,
+        })),
+      }),
+    ]);
+  }
+
+  async consumeTwoFactorRecoveryCode(
+    userId: string,
+    codeHash: string,
+  ): Promise<boolean> {
+    const result = await this.prisma.twoFactorRecoveryCode.updateMany({
+      where: {
+        userId,
+        codeHash,
+        usedAt: null,
+      },
+      data: {
+        usedAt: new Date(),
+      },
+    });
+
+    return result.count === 1;
+  }
+
+  async clearTwoFactorRecoveryCodes(userId: string): Promise<void> {
+    await this.prisma.twoFactorRecoveryCode.deleteMany({
+      where: { userId },
+    });
+  }
+
+  async disableTwoFactor(id: string): Promise<UserEntity> {
+    const user = await this.prisma.user.update({
+      where: { id },
+      data: {
+        twoFactorEnabled: false,
+        twoFactorSecret: null,
+        tokenVersion: {
+          increment: 1,
+        },
+      },
+    });
+
+    return this.mapToEntity(user, null);
   }
 
   // ================================

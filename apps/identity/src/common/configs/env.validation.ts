@@ -8,8 +8,17 @@ type IdentityEnv = {
   REDIS_PASSWORD: string;
   JWT_ACCESS_SECRET: string;
   JWT_REFRESH_SECRET: string;
+  TWO_FACTOR_SECRET_KEY: string;
+  INTERNAL_GRPC_TOKEN: string;
+  IDENTITY_GRPC_URL: string;
   JWT_ACCESS_EXPIRES_IN: string;
   JWT_REFRESH_EXPIRES_IN: string;
+  RESEND_API_KEY: string;
+  MAIL_FROM: string;
+  PASSWORD_RESET_URL: string;
+  EMAIL_VERIFICATION_URL: string;
+  TOKEN_CLEANUP_INTERVAL_MINUTES?: string;
+  RECOVERY_CODE_RETENTION_DAYS?: string;
 };
 
 const REQUIRED_KEYS: Array<keyof IdentityEnv> = [
@@ -20,8 +29,15 @@ const REQUIRED_KEYS: Array<keyof IdentityEnv> = [
   'REDIS_PASSWORD',
   'JWT_ACCESS_SECRET',
   'JWT_REFRESH_SECRET',
+  'TWO_FACTOR_SECRET_KEY',
+  'INTERNAL_GRPC_TOKEN',
+  'IDENTITY_GRPC_URL',
   'JWT_ACCESS_EXPIRES_IN',
   'JWT_REFRESH_EXPIRES_IN',
+  'RESEND_API_KEY',
+  'MAIL_FROM',
+  'PASSWORD_RESET_URL',
+  'EMAIL_VERIFICATION_URL',
 ];
 
 export function validateEnv(config: Record<string, unknown>): IdentityEnv {
@@ -38,6 +54,10 @@ export function validateEnv(config: Record<string, unknown>): IdentityEnv {
 
   if (config.JWT_ACCESS_SECRET === config.JWT_REFRESH_SECRET) {
     throw new Error('JWT_ACCESS_SECRET và JWT_REFRESH_SECRET phải khác nhau');
+  }
+
+  if (String(config.INTERNAL_GRPC_TOKEN).length < 32) {
+    throw new Error('INTERNAL_GRPC_TOKEN phải có ít nhất 32 ký tự');
   }
 
   const accessTtlMs = ms(config.JWT_ACCESS_EXPIRES_IN as StringValue);
@@ -59,6 +79,28 @@ export function validateEnv(config: Record<string, unknown>): IdentityEnv {
     throw new Error(
       'JWT_REFRESH_EXPIRES_IN phải lớn hơn JWT_ACCESS_EXPIRES_IN',
     );
+  }
+
+  for (const key of ['PASSWORD_RESET_URL', 'EMAIL_VERIFICATION_URL'] as const) {
+    try {
+      new URL(config[key] as string);
+    } catch {
+      throw new Error(`${key} phải là URL hợp lệ`);
+    }
+  }
+
+  if (config.TOKEN_CLEANUP_INTERVAL_MINUTES !== undefined) {
+    const minutes = Number(config.TOKEN_CLEANUP_INTERVAL_MINUTES);
+    if (!Number.isInteger(minutes) || minutes <= 0) {
+      throw new Error('TOKEN_CLEANUP_INTERVAL_MINUTES phải là số nguyên dương');
+    }
+  }
+
+  if (config.RECOVERY_CODE_RETENTION_DAYS !== undefined) {
+    const days = Number(config.RECOVERY_CODE_RETENTION_DAYS);
+    if (!Number.isInteger(days) || days <= 0) {
+      throw new Error('RECOVERY_CODE_RETENTION_DAYS phải là số nguyên dương');
+    }
   }
 
   return config as IdentityEnv;

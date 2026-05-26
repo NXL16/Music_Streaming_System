@@ -5,6 +5,7 @@ import {
   UserMetadata,
   UserMetadataSchema,
 } from './schemas/user-metadata.schema';
+import { UsersController } from './users.controller';
 
 @Module({
   imports: [
@@ -12,7 +13,7 @@ import {
       { name: UserMetadata.name, schema: UserMetadataSchema },
     ]),
   ],
-  controllers: [],
+  controllers: [UsersController],
   providers: [UsersService],
   exports: [UsersService],
 })
