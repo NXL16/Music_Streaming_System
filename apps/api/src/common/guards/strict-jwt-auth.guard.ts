@@ -7,18 +7,14 @@ import {
 } from '@nestjs/common';
 import Redis from 'ioredis';
 import {
+  AuthState,
   JwtUser,
   authAccessBlacklistKey,
+  authDevicesKey,
   authStateKey,
 } from '@musical/shared-types';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { Inject } from '@nestjs/common';
-
-type AuthState = {
-  isActive: boolean;
-  role: string;
-  tokenVersion: number;
-};
 
 @Injectable()
 export class StrictJwtAuthGuard extends JwtAuthGuard implements CanActivate {
@@ -40,15 +36,23 @@ export class StrictJwtAuthGuard extends JwtAuthGuard implements CanActivate {
       });
     }
 
-    const [blacklisted, rawState] = await Promise.all([
+    const [blacklisted, rawState, deviceActive] = await Promise.all([
       this.redis.get(authAccessBlacklistKey(user.jti)),
       this.redis.get(authStateKey(user.userId)),
+      this.redis.sismember(authDevicesKey(user.userId), user.deviceId),
     ]);
 
     if (blacklisted) {
       throw new UnauthorizedException({
         code: 'AUTH_TOKEN_REVOKED',
         message: 'Phiên đăng nhập đã bị thu hồi',
+      });
+    }
+
+    if (!deviceActive) {
+      throw new UnauthorizedException({
+        code: 'AUTH_DEVICE_REVOKED',
+        message: 'Phiên đăng nhập của thiết bị đã bị thu hồi',
       });
     }
 
