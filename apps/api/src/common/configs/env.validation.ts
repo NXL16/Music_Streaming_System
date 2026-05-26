@@ -8,6 +8,7 @@ const REQUIRED_KEYS = [
   'STREAM_URL_TTL_SEC',
   'CDN_URL',
   'IDENTITY_GRPC_URL',
+  'INTERNAL_GRPC_TOKEN',
   'META_GRPC_URL',
   'REDIS_HOST',
   'REDIS_PORT',
@@ -25,6 +26,10 @@ export const validateEnv = (rawEnv: RawEnv): RawEnv => {
 
   if (missing.length > 0) {
     throw new Error(`Thiếu biến môi trường bắt buộc: ${missing.join(', ')}`);
+  }
+
+  if ((rawEnv.INTERNAL_GRPC_TOKEN as string).length < 32) {
+    throw new Error('INTERNAL_GRPC_TOKEN phải có ít nhất 32 ký tự');
   }
 
   const apiPort = rawEnv.API_PORT as string;

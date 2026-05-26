@@ -6,6 +6,8 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { IDENTITY } from '@musical/shared-proto';
 import { JwtStrategy } from '../common/strategies/jwt.strategy';
+import { StrictJwtAuthGuard } from '../common/guards/strict-jwt-auth.guard';
+import { PermissionsGuard } from '../common/guards/permissions.guard';
 
 @Module({
   imports: [
@@ -30,7 +32,7 @@ import { JwtStrategy } from '../common/strategies/jwt.strategy';
     ]),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, StrictJwtAuthGuard, PermissionsGuard],
   exports: [AuthService],
 })
 export class AuthModule {}
