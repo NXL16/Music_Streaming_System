@@ -37,6 +37,7 @@ import {
   RegenerateTwoFactorRecoveryCodesDto,
   VerifyTwoFactorLoginDto,
 } from './dto/two-factor.dto';
+import { GoogleLoginDto } from './dto/google-login.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -45,7 +46,11 @@ export class AuthController {
   @Post('signup')
   async signup(@Body() signupDto: SignupDto) {
     const data = await this.authService.signUp(signupDto);
-    return this.formatResponse(data, 'AUTH_SIGNUP_SUCCESS', 'Đăng ký thành công');
+    return this.formatResponse(
+      data,
+      'AUTH_SIGNUP_SUCCESS',
+      'Đăng ký thành công',
+    );
   }
 
   @Post('login')
@@ -65,6 +70,21 @@ export class AuthController {
       data,
       'AUTH_LOGIN_SUCCESS',
       'Đăng nhập thành công',
+    );
+  }
+
+  @Post('google/login')
+  @HttpCode(HttpStatus.OK)
+  async loginWithGoogle(@Body() dto: GoogleLoginDto) {
+    const data = await this.authService.loginWithGoogle({
+      idToken: dto.idToken,
+      deviceId: dto.deviceId,
+    });
+
+    return this.formatResponse(
+      data,
+      'AUTH_GOOGLE_LOGIN_SUCCESS',
+      'Đăng nhập Google thành công',
     );
   }
 
@@ -96,7 +116,8 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async verifyTwoFactorLogin(@Body() dto: VerifyTwoFactorLoginDto) {
     const credential = dto.credential?.trim();
-    const resolvedCode = dto.code ?? (credential?.match(/^\d{6}$/) ? credential : undefined);
+    const resolvedCode =
+      dto.code ?? (credential?.match(/^\d{6}$/) ? credential : undefined);
     const resolvedRecoveryCode =
       dto.recoveryCode ??
       (credential && !/^\d{6}$/.test(credential) ? credential : undefined);
@@ -417,8 +438,15 @@ export class AuthController {
   @UseGuards(StrictJwtAuthGuard, AdminGuard, PermissionsGuard)
   @Permissions('user.sessions.revoke')
   @HttpCode(HttpStatus.OK)
-  async adminRevokeUserSessions(@Param('userId') userId: string) {
-    await this.authService.adminRevokeUserSessions({ userId });
+  async adminRevokeUserSessions(
+    @Param('userId') userId: string,
+    @Req() req: Request,
+  ) {
+    const admin = req.user as JwtUser;
+    await this.authService.adminRevokeUserSessions({
+      actorUserId: admin.userId,
+      targetUserId: userId,
+    });
 
     return this.formatResponse(
       null,
@@ -431,8 +459,15 @@ export class AuthController {
   @UseGuards(StrictJwtAuthGuard, AdminGuard, PermissionsGuard)
   @Permissions('user.2fa.reset')
   @HttpCode(HttpStatus.OK)
-  async adminResetUserTwoFactor(@Param('userId') userId: string) {
-    const data = await this.authService.adminResetUserTwoFactor({ userId });
+  async adminResetUserTwoFactor(
+    @Param('userId') userId: string,
+    @Req() req: Request,
+  ) {
+    const admin = req.user as JwtUser;
+    const data = await this.authService.adminResetUserTwoFactor({
+      actorUserId: admin.userId,
+      targetUserId: userId,
+    });
 
     return this.formatResponse(
       data,

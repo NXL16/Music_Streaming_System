@@ -194,3 +194,29 @@ export function normalizeListUsersRequest(
     role: role || undefined,
   };
 }
+
+export type ResolvedTwoFactorCredential = {
+  code?: string;
+  recoveryCode?: string;
+  isRecoveryFlow: boolean;
+};
+
+export function resolveTwoFactorCredential(input: {
+  code?: string;
+  recoveryCode?: string;
+  credential?: string;
+}): ResolvedTwoFactorCredential {
+  const rawCode = input.code?.trim() ?? input.credential?.trim();
+  const rawRecoveryCode = input.recoveryCode?.trim();
+
+  const code = rawCode && /^\d{6}$/.test(rawCode) ? rawCode : undefined;
+  const recoveryCode =
+    rawRecoveryCode ??
+    (rawCode && !/^\d{6}$/.test(rawCode) ? rawCode : undefined);
+
+  return {
+    code,
+    recoveryCode,
+    isRecoveryFlow: Boolean(recoveryCode),
+  };
+}

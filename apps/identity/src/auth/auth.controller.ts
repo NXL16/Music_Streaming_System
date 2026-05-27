@@ -5,6 +5,7 @@ import { AuthService } from './auth.service';
 import type {
   SignUpRequest,
   LoginRequest,
+  LoginWithGoogleRequest,
   RefreshTokenRequest,
   LogoutRequest,
   LogoutAllRequest,
@@ -47,6 +48,16 @@ export class AuthController {
   @GrpcMethod('IdentityService', 'Login')
   async login(@Payload() request: LoginRequest): Promise<AuthResponse> {
     return this.authService.login(request);
+  }
+
+  @GrpcMethod('IdentityService', 'LoginWithGoogle')
+  async loginWithGoogle(
+    @Payload() request: LoginWithGoogleRequest,
+  ): Promise<AuthResponse> {
+    return this.authService.loginWithGoogleInternal({
+      idToken: request.idToken,
+      deviceId: request.deviceId,
+    });
   }
 
   @GrpcMethod('IdentityService', 'VerifyTwoFactorLogin')
@@ -149,14 +160,17 @@ export class AuthController {
   async adminRevokeUserSessions(
     @Payload() request: AdminUserActionRequest,
   ): Promise<EmptyResponse> {
-    if (!request.userId) {
+    if (!request.actorUserId || !request.targetUserId) {
       throw new RpcException({
         code: status.INVALID_ARGUMENT,
-        message: 'userId là bắt buộc',
+        message: 'actorUserId và targetUserId là bắt buộc',
       });
     }
 
-    await this.authService.adminRevokeUserSessions(request.userId);
+    await this.authService.adminRevokeUserSessions(
+      String(request.actorUserId),
+      String(request.targetUserId),
+    );
     return {};
   }
 
@@ -164,14 +178,17 @@ export class AuthController {
   async adminResetUserTwoFactor(
     @Payload() request: AdminUserActionRequest,
   ): Promise<UserProfile> {
-    if (!request.userId) {
+    if (!request.actorUserId || !request.targetUserId) {
       throw new RpcException({
         code: status.INVALID_ARGUMENT,
-        message: 'userId là bắt buộc',
+        message: 'actorUserId và targetUserId là bắt buộc',
       });
     }
 
-    const user = await this.authService.adminResetUserTwoFactor(request.userId);
+    const user = await this.authService.adminResetUserTwoFactor(
+      String(request.actorUserId),
+      String(request.targetUserId),
+    );
     return mapUserProfile(user);
   }
 
@@ -198,7 +215,9 @@ export class AuthController {
   }
 
   @GrpcMethod('IdentityService', 'VerifyEmail')
-  async verifyEmail(@Payload() request: VerifyEmailRequest): Promise<UserProfile> {
+  async verifyEmail(
+    @Payload() request: VerifyEmailRequest,
+  ): Promise<UserProfile> {
     const user = await this.authService.verifyEmail(request.token);
     return mapUserProfile(user);
   }
