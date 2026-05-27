@@ -7,7 +7,7 @@ import {
 } from './schemas/user-metadata.schema';
 import { UserEntity } from './entities/user.entity';
 import { Prisma, User as PrismaUser } from '../generated/prisma/client';
-import { UserRole } from '../generated/prisma/enums';
+import { OAuthProvider, UserRole } from '../generated/prisma/enums';
 import { PrismaService } from '../common/database/prisma.service';
 
 type MetadataLean = {
@@ -188,6 +188,60 @@ export class UsersService {
     return this.prisma.user.findUnique({
       where: { email },
     });
+  }
+
+  // ================================
+  // AUTH LOOKUP (WITH PASSWORD)
+  // ================================
+
+  async findUserByGoogleSub(providerSub: string): Promise<UserEntity | null> {
+    const account = await this.prisma.oAuthAccount.findUnique({
+      where: {
+        provider_providerSub: {
+          provider: OAuthProvider.GOOGLE,
+          providerSub,
+        },
+      },
+      select: { userId: true },
+    });
+
+    if (!account) return null;
+    return this.findById(account.userId, false);
+  }
+
+  async linkGoogleAccount(
+    userId: string,
+    providerSub: string,
+    emailAtProvider: string,
+  ): Promise<void> {
+    try {
+      await this.prisma.oAuthAccount.create({
+        data: {
+          provider: OAuthProvider.GOOGLE,
+          providerSub,
+          userId,
+          emailAtProvider,
+        },
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        return;
+      }
+
+      throw error;
+    }
+  }
+
+  async markEmailVerified(userId: string): Promise<UserEntity> {
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { emailVerified: true },
+    });
+
+    return this.mapToEntity(user, null);
   }
 
   async createPasswordResetToken(

@@ -14,6 +14,10 @@ enum UserRole {
     ADMIN
 }
 
+enum OAuthProvider {
+    GOOGLE
+}
+
 model User {
     id                   String    @id @default(uuid())
     username             String    @unique @db.VarChar(50)
@@ -34,6 +38,7 @@ model User {
     passwordResetTokens    PasswordResetToken[]
     emailVerifyTokens      EmailVerificationToken[]
     twoFactorRecoveryCodes TwoFactorRecoveryCode[]
+    oauthAccounts          OAuthAccount[]
 
     @@index([isActive, createdAt(sort: Desc)])
     @@index([role, isActive])
@@ -91,4 +96,18 @@ model SecurityAuditLog {
     @@index([actorUserId, createdAt(sort: Desc)])
     @@index([targetUserId, createdAt(sort: Desc)])
     @@index([action, createdAt(sort: Desc)])
+}
+
+model OAuthAccount {
+    id              String        @id @default(uuid())
+    provider        OAuthProvider
+    providerSub     String        @db.VarChar(191)
+    userId          String
+    emailAtProvider String?       @db.VarChar(255)
+    createdAt       DateTime      @default(now())
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@unique([provider, providerSub])
+    @@index([userId])
 }

@@ -57,6 +57,7 @@ import {
   verifyTotpCodeWithCounter,
 } from './auth-token.util';
 import { MailService } from '../common/mail/mail.service';
+import { OAuth2Client, TokenPayload } from 'google-auth-library';
 
 type TwoFactorChallenge = {
   userId: string;
@@ -123,6 +124,7 @@ const twoFactorOtpLastCounterKey = (userId: string): string =>
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  private readonly googleClient = new OAuth2Client();
 
   constructor(
     private readonly usersService: UsersService,
@@ -263,6 +265,133 @@ export class AuthService {
     return tokens;
   }
 
+  async loginWithGoogleInternal(input: {
+    idToken: string;
+    deviceId?: string;
+  }): Promise<AuthResponse> {
+    if (!input.idToken) {
+      throw new RpcException({
+        code: status.INVALID_ARGUMENT,
+        message: 'idToken là bắt buộc',
+      });
+    }
+
+    const clientId = this.configService.getOrThrow<string>('GOOGLE_CLIENT_ID');
+
+    let payload: TokenPayload | undefined;
+
+    try {
+      const ticket = await this.googleClient.verifyIdToken({
+        idToken: input.idToken,
+        audience: clientId,
+      });
+      payload = ticket.getPayload();
+    } catch {
+      throw new RpcException({
+        code: status.UNAUTHENTICATED,
+        message: 'Google token không hợp lệ',
+      });
+    }
+
+    if (!payload) {
+      throw new RpcException({
+        code: status.UNAUTHENTICATED,
+        message: 'Google token không hợp lệ',
+      });
+    }
+
+    const providerSub = payload.sub;
+    const emailRaw = payload.email;
+    const emailVerified = payload.email_verified;
+    const nameRaw = payload.name;
+
+    if (
+      typeof providerSub !== 'string' ||
+      providerSub.trim() === '' ||
+      typeof emailRaw !== 'string' ||
+      emailRaw.trim() === '' ||
+      emailVerified !== true
+    ) {
+      throw new RpcException({
+        code: status.UNAUTHENTICATED,
+        message: 'Google token không hợp lệ',
+      });
+    }
+
+    const email = emailRaw.trim().toLowerCase();
+    const displayName =
+      typeof nameRaw === 'string' && nameRaw.trim() !== ''
+        ? nameRaw.trim()
+        : email.split('@')[0];
+
+    let user = await this.usersService.findUserByGoogleSub(providerSub);
+
+    if (!user) {
+      const existing = await this.usersService.findAuthUserByEmail(email);
+
+      if (existing) {
+        await this.usersService.linkGoogleAccount(
+          existing.id,
+          providerSub,
+          email,
+        );
+        user = await this.usersService.findById(existing.id, false);
+
+        if (user && !user.emailVerified) {
+          user = await this.usersService.markEmailVerified(user.id);
+        }
+      } else {
+        const randomPassword = randomUUID();
+        const hashedPassword = await argon2.hash(randomPassword);
+
+        const base =
+          email
+            .split('@')[0]
+            .replace(/[^a-zA-Z0-9_]/g, '')
+            .toLowerCase() || 'user';
+        const username = `${base}_${randomUUID().slice(0, 8)}`;
+
+        user = await this.usersService.create({
+          username,
+          email,
+          password: hashedPassword,
+          displayName,
+        });
+
+        await this.usersService.linkGoogleAccount(user.id, providerSub, email);
+        if (!user.emailVerified) {
+          user = await this.usersService.markEmailVerified(user.id);
+        }
+      }
+    }
+
+    if (!user || !user.isActive) {
+      throw new RpcException({
+        code: status.PERMISSION_DENIED,
+        message: 'Tài khoản đã bị khóa',
+      });
+    }
+
+    const finalDeviceId = input.deviceId || randomUUID();
+    const tokens = this.generateTokens(user, finalDeviceId);
+
+    await Promise.all([
+      this.saveRefreshToken(user.id, tokens.refreshToken, finalDeviceId),
+      this.saveAuthState(user),
+      this.usersService.updateLastLogin(user.id),
+    ]);
+
+    await this.writeAuditLog({
+      actorUserId: user.id,
+      targetUserId: user.id,
+      action: 'AUTH_LOGIN_GOOGLE',
+      status: 'SUCCESS',
+      metadata: { email },
+    });
+
+    return tokens;
+  }
+
   async logout(
     userId: string,
     deviceId: string,
@@ -294,16 +423,23 @@ export class AuthService {
   }
 
   async logoutAll(userId: string) {
-    await this.deleteRefreshTokens(userId);
+    await this.revokeAllSessions(userId);
 
-    const user = await this.usersService.incrementTokenVersion(userId);
-    await this.saveAuthState(user);
     await this.writeAuditLog({
       actorUserId: userId,
       targetUserId: userId,
       action: 'AUTH_LOGOUT_ALL',
       status: 'SUCCESS',
     });
+  }
+
+  private async revokeAllSessions(userId: string): Promise<UserEntity> {
+    await this.deleteRefreshTokens(userId);
+
+    const user = await this.usersService.incrementTokenVersion(userId);
+    await this.saveAuthState(user);
+
+    return user;
   }
 
   async listUserSessions(
@@ -587,6 +723,13 @@ export class AuthService {
       this.deleteRefreshTokens(user.id),
       this.saveAuthState(updatedUser),
     ]);
+
+    await this.writeAuditLog({
+      actorUserId: user.id,
+      targetUserId: user.id,
+      action: 'AUTH_RESET_PASSWORD',
+      status: 'SUCCESS',
+    });
   }
 
   async requestEmailVerification(
@@ -654,6 +797,13 @@ export class AuthService {
     }
 
     await this.saveAuthState(user);
+    await this.writeAuditLog({
+      actorUserId: user.id,
+      targetUserId: user.id,
+      action: 'AUTH_VERIFY_EMAIL',
+      status: 'SUCCESS',
+    });
+
     return user;
   }
 
@@ -913,6 +1063,13 @@ export class AuthService {
       ),
     ]);
 
+    await this.writeAuditLog({
+      actorUserId: user.id,
+      targetUserId: user.id,
+      action: 'AUTH_REGENERATE_2FA_RECOVERY_CODES',
+      status: 'SUCCESS',
+    });
+
     return { recoveryCodes };
   }
 
@@ -924,11 +1081,23 @@ export class AuthService {
     }
 
     await this.saveAuthState(user);
+
+    await this.writeAuditLog({
+      actorUserId: userId,
+      targetUserId: userId,
+      action: 'AUTH_SET_USER_STATUS',
+      status: 'SUCCESS',
+      metadata: { isActive },
+    });
+
     return user;
   }
 
-  async adminRevokeUserSessions(userId: string): Promise<void> {
-    const user = await this.usersService.findAuthUserById(userId);
+  async adminRevokeUserSessions(
+    actorUserId: string,
+    targetUserId: string,
+  ): Promise<void> {
+    const user = await this.usersService.findAuthUserById(targetUserId);
     if (!user) {
       throw new RpcException({
         code: status.NOT_FOUND,
@@ -936,17 +1105,20 @@ export class AuthService {
       });
     }
 
-    await this.logoutAll(userId);
+    await this.revokeAllSessions(targetUserId);
     await this.writeAuditLog({
-      actorUserId: userId,
-      targetUserId: userId,
+      actorUserId,
+      targetUserId,
       action: 'ADMIN_REVOKE_USER_SESSIONS',
       status: 'SUCCESS',
     });
   }
 
-  async adminResetUserTwoFactor(userId: string): Promise<UserEntity> {
-    const user = await this.usersService.findAuthUserById(userId);
+  async adminResetUserTwoFactor(
+    actorUserId: string,
+    targetUserId: string,
+  ): Promise<UserEntity> {
+    const user = await this.usersService.findAuthUserById(targetUserId);
     if (!user) {
       throw new RpcException({
         code: status.NOT_FOUND,
@@ -954,15 +1126,16 @@ export class AuthService {
       });
     }
 
-    const updatedUser = await this.usersService.disableTwoFactor(userId);
+    const updatedUser = await this.usersService.disableTwoFactor(targetUserId);
     await Promise.all([
-      this.usersService.clearTwoFactorRecoveryCodes(userId),
-      this.deleteRefreshTokens(userId),
+      this.usersService.clearTwoFactorRecoveryCodes(targetUserId),
+      this.deleteRefreshTokens(targetUserId),
       this.saveAuthState(updatedUser),
     ]);
+
     await this.writeAuditLog({
-      actorUserId: userId,
-      targetUserId: userId,
+      actorUserId,
+      targetUserId,
       action: 'ADMIN_RESET_USER_2FA',
       status: 'SUCCESS',
     });

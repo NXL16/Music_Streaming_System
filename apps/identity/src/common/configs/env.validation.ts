@@ -19,6 +19,7 @@ type IdentityEnv = {
   EMAIL_VERIFICATION_URL: string;
   TOKEN_CLEANUP_INTERVAL_MINUTES?: string;
   RECOVERY_CODE_RETENTION_DAYS?: string;
+  GOOGLE_CLIENT_ID: string;
 };
 
 const REQUIRED_KEYS: Array<keyof IdentityEnv> = [
@@ -38,6 +39,7 @@ const REQUIRED_KEYS: Array<keyof IdentityEnv> = [
   'MAIL_FROM',
   'PASSWORD_RESET_URL',
   'EMAIL_VERIFICATION_URL',
+  'GOOGLE_CLIENT_ID',
 ];
 
 export function validateEnv(config: Record<string, unknown>): IdentityEnv {
