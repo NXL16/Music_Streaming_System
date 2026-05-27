@@ -2,6 +2,7 @@
 export type {
   SignUpRequest,
   LoginRequest,
+  LoginWithGoogleRequest,
   RefreshTokenRequest,
   LogoutRequest,
   LogoutAllRequest,

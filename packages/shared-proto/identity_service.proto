@@ -7,6 +7,7 @@ option go_package = "Music_Streaming_System/packages/shared-proto/identity";
 service IdentityService {
   rpc SignUp (SignUpRequest) returns (AuthResponse);
   rpc Login (LoginRequest) returns (AuthResponse);
+  rpc LoginWithGoogle (LoginWithGoogleRequest) returns (AuthResponse);
   rpc RefreshToken (RefreshTokenRequest) returns (AuthResponse);
   rpc Logout (LogoutRequest) returns (EmptyResponse);
   rpc LogoutAll (LogoutAllRequest) returns (EmptyResponse);
@@ -42,6 +43,11 @@ message LoginRequest {
   string          username  = 1;
   string          password  = 2;
   optional string device_id = 3;
+}
+
+message LoginWithGoogleRequest {
+  string          id_token  = 1;
+  optional string device_id = 2;
 }
 
 message RefreshTokenRequest {
@@ -119,7 +125,8 @@ message SetUserStatusRequest {
 }
 
 message AdminUserActionRequest {
-  string user_id = 1;
+  string actor_user_id  = 1;
+  string target_user_id = 2;
 }
 
 message RequestPasswordResetRequest {
