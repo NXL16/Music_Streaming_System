@@ -4,6 +4,7 @@ import type {
   AuthResponse,
   SignUpRequest,
   LoginRequest,
+  LoginWithGoogleRequest,
   RefreshTokenRequest,
   LogoutRequest,
   LogoutAllRequest,
@@ -70,6 +71,14 @@ export class AuthService implements OnModuleInit {
   async login(request: LoginRequest): Promise<AuthResponse> {
     return await firstValueFrom(
       this.identityService.login(request, this.metadata()),
+    );
+  }
+
+  async loginWithGoogle(
+    request: LoginWithGoogleRequest,
+  ): Promise<AuthResponse> {
+    return await firstValueFrom(
+      this.identityService.loginWithGoogle(request, this.metadata()),
     );
   }
 
