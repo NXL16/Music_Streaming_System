@@ -20,6 +20,7 @@ service IdentityService {
   rpc SetUserStatus (SetUserStatusRequest) returns (UserProfile);
   rpc AdminRevokeUserSessions (AdminUserActionRequest) returns (EmptyResponse);
   rpc AdminResetUserTwoFactor (AdminUserActionRequest) returns (UserProfile);
+  rpc SetUserRole (SetUserRoleRequest) returns (UserProfile);
   rpc RequestPasswordReset (RequestPasswordResetRequest) returns (TokenIssueResponse);
   rpc ResetPassword (ResetPasswordRequest) returns (EmptyResponse);
   rpc RequestEmailVerification (RequestEmailVerificationRequest) returns (TokenIssueResponse);
@@ -120,13 +121,20 @@ message ListUsersResponse {
 }
 
 message SetUserStatusRequest {
-  string user_id   = 1;
-  bool   is_active = 2;
+  string actor_user_id  = 1;
+  string target_user_id = 2;
+  bool   is_active      = 3;
 }
 
 message AdminUserActionRequest {
   string actor_user_id  = 1;
   string target_user_id = 2;
+}
+
+message SetUserRoleRequest {
+  string actor_user_id  = 1;
+  string target_user_id = 2;
+  string role           = 3;
 }
 
 message RequestPasswordResetRequest {

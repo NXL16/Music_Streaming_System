@@ -27,7 +27,9 @@ export const songCompletionLockKey = (songId: string): string =>
 export const UserRole = {
   USER: "USER",
   ARTIST: "ARTIST",
-  ADMIN: "ADMIN",
+  SUPER_ADMIN: "SUPER_ADMIN",
+  ADMIN_USER_OPS: "ADMIN_USER_OPS",
+  ADMIN_SECURITY_OPS: "ADMIN_SECURITY_OPS",
 } as const;
 export type UserRole = (typeof UserRole)[keyof typeof UserRole];
 
@@ -69,4 +71,6 @@ export interface AuthState {
   isActive: boolean;
   role: UserRole;
   tokenVersion: number;
+  emailVerified: boolean;
+  twoFactorEnabled: boolean;
 }

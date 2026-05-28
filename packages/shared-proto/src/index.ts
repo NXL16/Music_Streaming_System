@@ -34,6 +34,7 @@ export type {
   IdentityServiceClient,
   IdentityServiceController,
   AdminUserActionRequest,
+  SetUserRoleRequest,
 } from "./generated/identity_service";
 
 export const IDENTITY = {
