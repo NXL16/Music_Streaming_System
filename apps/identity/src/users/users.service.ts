@@ -77,25 +77,7 @@ export class UsersService {
   async createSecurityAuditLog(
     input: CreateSecurityAuditLogInput,
   ): Promise<void> {
-    const securityAuditLogDelegate = (
-      this.prisma as PrismaService & {
-        securityAuditLog: {
-          create(args: {
-            data: {
-              actorUserId?: string;
-              targetUserId?: string;
-              action: string;
-              status: 'SUCCESS' | 'FAILURE';
-              ipAddress?: string;
-              userAgent?: string;
-              metadata?: Prisma.InputJsonValue;
-            };
-          }): Promise<unknown>;
-        };
-      }
-    ).securityAuditLog;
-
-    await securityAuditLogDelegate.create({
+    await this.prisma.securityAuditLog.create({
       data: {
         actorUserId: input.actorUserId,
         targetUserId: input.targetUserId,
@@ -391,6 +373,18 @@ export class UsersService {
       users: users.map((user) => this.mapToEntity(user, null)),
       total,
     };
+  }
+
+  async updateRole(id: string, role: UserRole): Promise<UserEntity> {
+    const user = await this.prisma.user.update({
+      where: { id },
+      data: {
+        role,
+        tokenVersion: { increment: 1 },
+      },
+    });
+
+    return this.mapToEntity(user, null);
   }
 
   // ================================

@@ -41,10 +41,13 @@ import { RpcException } from '@nestjs/microservices';
 import { status } from '@grpc/grpc-js';
 import ms from 'ms';
 import { Prisma } from '../generated/prisma/client';
+import { UserRole as PrismaUserRole } from '../generated/prisma/enums';
 import {
   normalizeAndValidateLoginRequest,
   normalizeAndValidateChangePasswordRequest,
   normalizeAndValidateSignUpRequest,
+  resolveTwoFactorCredential,
+  validateNewPassword,
 } from './auth.validation';
 import { mapUserProfile } from '../users/user-profile.mapper';
 import {
@@ -81,6 +84,13 @@ const TWO_FACTOR_CHALLENGE_TTL_SECONDS = 300;
 const TWO_FACTOR_RECOVERY_CODE_COUNT = 10;
 const PASSWORD_RESET_TTL_MINUTES = 15;
 const EMAIL_VERIFICATION_TTL_HOURS = 24;
+
+const ADMIN_ROLES = [
+  'SUPER_ADMIN',
+  'ADMIN_USER_OPS',
+  'ADMIN_SECURITY_OPS',
+] as const;
+const ALLOWED_ADMIN_ROLES = new Set<string>(ADMIN_ROLES);
 
 const EMAIL_REQUEST_POLICY: RateLimitPolicy = {
   maxAttempts: 3,
@@ -121,10 +131,21 @@ const twoFactorConfirmLockKey = (userId: string): string =>
 const twoFactorOtpLastCounterKey = (userId: string): string =>
   `auth:2fa:otp:last:${userId}`;
 
+const twoFactorTrustedDeviceKey = (userId: string, deviceId: string): string =>
+  `auth:2fa:trusted:${userId}:${deviceId}`;
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   private readonly googleClient = new OAuth2Client();
+  private static readonly RATE_LIMIT_LUA = `
+    local attempts = redis.call("INCR", KEYS[1])
+    if attempts == 1 then
+      redis.call("EXPIRE", KEYS[1], tonumber(ARGV[1]))
+    end
+    local ttl = redis.call("TTL", KEYS[1])
+    return {attempts, ttl}
+  `;
 
   constructor(
     private readonly usersService: UsersService,
@@ -236,15 +257,22 @@ export class AuthService {
     const finalDeviceId = deviceId || randomUUID();
 
     if (user.twoFactorEnabled) {
-      const authUser = await this.usersService.findById(user.id, false);
-      if (!authUser) {
-        throw new RpcException({
-          code: status.UNAUTHENTICATED,
-          message: 'Thông tin đăng nhập không chính xác',
-        });
-      }
+      const require2fa = await this.shouldRequireTwoFactor(
+        user.id,
+        finalDeviceId,
+      );
 
-      return this.createTwoFactorChallenge(authUser, finalDeviceId);
+      if (require2fa) {
+        const authUser = await this.usersService.findById(user.id, false);
+        if (!authUser) {
+          throw new RpcException({
+            code: status.UNAUTHENTICATED,
+            message: 'Thông tin đăng nhập không chính xác',
+          });
+        }
+
+        return this.createTwoFactorChallenge(authUser, finalDeviceId);
+      }
     }
 
     const tokens = this.generateTokens(user, finalDeviceId);
@@ -373,6 +401,26 @@ export class AuthService {
     }
 
     const finalDeviceId = input.deviceId || randomUUID();
+
+    if (user.twoFactorEnabled) {
+      const require2fa = await this.shouldRequireTwoFactor(
+        user.id,
+        finalDeviceId,
+      );
+
+      if (require2fa) {
+        const authUser = await this.usersService.findById(user.id, false);
+        if (!authUser) {
+          throw new RpcException({
+            code: status.UNAUTHENTICATED,
+            message: 'Thông tin đăng nhập không chính xác',
+          });
+        }
+
+        return this.createTwoFactorChallenge(authUser, finalDeviceId);
+      }
+    }
+
     const tokens = this.generateTokens(user, finalDeviceId);
 
     await Promise.all([
@@ -509,19 +557,21 @@ export class AuthService {
 
     const result = await this.redis.eval(
       `
-      if redis.call("SISMEMBER", KEYS[1], ARGV[1]) == 0 then
-        return 0
-      end
+    if redis.call("SISMEMBER", KEYS[1], ARGV[1]) == 0 then
+      return 0
+    end
 
-      redis.call("DEL", KEYS[2])
-      redis.call("DEL", KEYS[3])
-      redis.call("SREM", KEYS[1], ARGV[1])
-      return 1
-    `,
-      3,
+    redis.call("DEL", KEYS[2]) -- refresh
+    redis.call("DEL", KEYS[3]) -- session
+    redis.call("DEL", KEYS[4]) -- trusted 2FA
+    redis.call("SREM", KEYS[1], ARGV[1])
+    return 1
+  `,
+      4,
       authDevicesKey(request.userId),
       authRefreshKey(request.userId, request.deviceId),
       authSessionKey(request.userId, request.deviceId),
+      twoFactorTrustedDeviceKey(request.userId, request.deviceId),
       request.deviceId,
     );
 
@@ -544,14 +594,14 @@ export class AuthService {
   async verifyTwoFactorLogin(
     request: VerifyTwoFactorLoginRequest,
   ): Promise<AuthResponse> {
-    const rawCode = request.code?.trim();
-    const rawRecoveryCode = request.recoveryCode?.trim();
-    const resolvedCode =
-      rawCode && /^\d{6}$/.test(rawCode) ? rawCode : undefined;
-    const resolvedRecoveryCode =
-      rawRecoveryCode ??
-      (rawCode && !/^\d{6}$/.test(rawCode) ? rawCode : undefined);
-    const isRecoveryFlow = Boolean(resolvedRecoveryCode);
+    const {
+      code: resolvedCode,
+      recoveryCode: resolvedRecoveryCode,
+      isRecoveryFlow,
+    } = resolveTwoFactorCredential({
+      code: request.code,
+      recoveryCode: request.recoveryCode,
+    });
 
     if (!request.challengeId || (!resolvedCode && !resolvedRecoveryCode)) {
       throw new RpcException({
@@ -607,6 +657,8 @@ export class AuthService {
       twoFactorChallengeKey(request.challengeId),
       authRateLimitKey('2fa-login', request.challengeId),
     );
+
+    await this.markDeviceAsTrusted(user.id, challenge.deviceId, user.role);
 
     const tokens = this.generateTokens(user, challenge.deviceId);
     await Promise.all([
@@ -700,7 +752,7 @@ export class AuthService {
       });
     }
 
-    validateResetPassword(request.newPassword);
+    validateNewPassword(request.newPassword);
 
     const user = await this.usersService.consumePasswordResetToken(
       hashToken(request.token),
@@ -948,7 +1000,13 @@ export class AuthService {
     );
 
     if (user.twoFactorEnabled && user.twoFactorSecret) {
-      if (!request.code && !request.recoveryCode) {
+      const { code: resolvedCode, recoveryCode: resolvedRecoveryCode } =
+        resolveTwoFactorCredential({
+          code: request.code,
+          recoveryCode: request.recoveryCode,
+        });
+
+      if (!resolvedCode && !resolvedRecoveryCode) {
         throw new RpcException({
           code: status.INVALID_ARGUMENT,
           message: 'Mã xác thực 2FA hoặc recovery code là bắt buộc',
@@ -958,8 +1016,8 @@ export class AuthService {
       const isValidVerification = await this.verifyTwoFactorCodeOrRecovery({
         userId: user.id,
         encryptedSecret: user.twoFactorSecret,
-        code: request.code,
-        recoveryCode: request.recoveryCode,
+        code: resolvedCode,
+        recoveryCode: resolvedRecoveryCode,
       });
 
       if (!isValidVerification) {
@@ -1017,14 +1075,14 @@ export class AuthService {
       TWO_FACTOR_VERIFY_POLICY,
     );
 
-    const rawCode = request.code?.trim();
-    const rawRecoveryCode = request.recoveryCode?.trim();
-    const resolvedCode =
-      rawCode && /^\d{6}$/.test(rawCode) ? rawCode : undefined;
-    const resolvedRecoveryCode =
-      rawRecoveryCode ??
-      (rawCode && !/^\d{6}$/.test(rawCode) ? rawCode : undefined);
-    const isRecoveryFlow = Boolean(resolvedRecoveryCode);
+    const {
+      code: resolvedCode,
+      recoveryCode: resolvedRecoveryCode,
+      isRecoveryFlow,
+    } = resolveTwoFactorCredential({
+      code: request.code,
+      recoveryCode: request.recoveryCode,
+    });
 
     if (!resolvedCode && !resolvedRecoveryCode) {
       throw new RpcException({
@@ -1073,18 +1131,31 @@ export class AuthService {
     return { recoveryCodes };
   }
 
-  async setUserStatus(userId: string, isActive: boolean): Promise<UserEntity> {
-    const user = await this.usersService.setActive(userId, isActive);
+  async setUserStatus(
+    actorUserId: string,
+    targetUserId: string,
+    isActive: boolean,
+  ): Promise<UserEntity> {
+    await this.assertAdminActor(actorUserId);
+
+    if (actorUserId === targetUserId && !isActive) {
+      throw new RpcException({
+        code: status.FAILED_PRECONDITION,
+        message: 'Không thể tự khóa tài khoản quản trị của chính mình',
+      });
+    }
+
+    const user = await this.usersService.setActive(targetUserId, isActive);
 
     if (!isActive) {
-      await this.deleteRefreshTokens(userId);
+      await this.deleteRefreshTokens(targetUserId);
     }
 
     await this.saveAuthState(user);
 
     await this.writeAuditLog({
-      actorUserId: userId,
-      targetUserId: userId,
+      actorUserId,
+      targetUserId,
       action: 'AUTH_SET_USER_STATUS',
       status: 'SUCCESS',
       metadata: { isActive },
@@ -1097,6 +1168,7 @@ export class AuthService {
     actorUserId: string,
     targetUserId: string,
   ): Promise<void> {
+    await this.assertAdminActor(actorUserId);
     const user = await this.usersService.findAuthUserById(targetUserId);
     if (!user) {
       throw new RpcException({
@@ -1118,6 +1190,7 @@ export class AuthService {
     actorUserId: string,
     targetUserId: string,
   ): Promise<UserEntity> {
+    await this.assertAdminActor(actorUserId);
     const user = await this.usersService.findAuthUserById(targetUserId);
     if (!user) {
       throw new RpcException({
@@ -1143,26 +1216,113 @@ export class AuthService {
     return updatedUser;
   }
 
+  async setUserRole(
+    actorUserId: string,
+    targetUserId: string,
+    role: string,
+  ): Promise<UserEntity> {
+    await this.assertAdminActor(actorUserId);
+    const normalizedRole = role.trim().toUpperCase();
+
+    if (
+      actorUserId === targetUserId &&
+      !ALLOWED_ADMIN_ROLES.has(normalizedRole)
+    ) {
+      throw new RpcException({
+        code: status.FAILED_PRECONDITION,
+        message: 'Không thể tự hạ quyền khỏi nhóm quản trị',
+      });
+    }
+
+    if (
+      ![
+        'USER',
+        'ARTIST',
+        'SUPER_ADMIN',
+        'ADMIN_USER_OPS',
+        'ADMIN_SECURITY_OPS',
+      ].includes(normalizedRole)
+    ) {
+      throw new RpcException({
+        code: status.INVALID_ARGUMENT,
+        message: 'role không hợp lệ',
+      });
+    }
+
+    const currentUser = await this.usersService.findAuthUserById(targetUserId);
+    if (!currentUser) {
+      throw new RpcException({
+        code: status.NOT_FOUND,
+        message: 'Người dùng không tồn tại',
+      });
+    }
+
+    if (ALLOWED_ADMIN_ROLES.has(normalizedRole)) {
+      if (!currentUser.isActive) {
+        throw new RpcException({
+          code: status.FAILED_PRECONDITION,
+          message: 'Tài khoản bị khóa',
+        });
+      }
+
+      if (!currentUser.emailVerified) {
+        throw new RpcException({
+          code: status.FAILED_PRECONDITION,
+          message: 'Người dùng phải xác thực email trước khi lên nhóm ADMIN',
+        });
+      }
+
+      if (!currentUser.twoFactorEnabled) {
+        throw new RpcException({
+          code: status.FAILED_PRECONDITION,
+          message: 'Người dùng phải bật 2FA trước khi lên nhóm ADMIN',
+        });
+      }
+    }
+
+    const updatedUser = await this.usersService.updateRole(
+      targetUserId,
+      normalizedRole as PrismaUserRole,
+    );
+
+    await this.saveAuthState(updatedUser);
+
+    await this.writeAuditLog({
+      actorUserId,
+      targetUserId,
+      action: 'AUTH_SET_USER_ROLE',
+      status: 'SUCCESS',
+      metadata: { role: normalizedRole },
+    });
+
+    return updatedUser;
+  }
+
   private async assertRateLimit(
     scope: string,
     identifier: string,
     policy: RateLimitPolicy,
   ): Promise<void> {
     const key = authRateLimitKey(scope, identifier);
-    const attempts = await this.redis.incr(key);
 
-    if (attempts === 1) {
-      await this.redis.expire(key, policy.windowSeconds);
-    }
+    const result = (await this.redis.eval(
+      AuthService.RATE_LIMIT_LUA,
+      1,
+      key,
+      String(policy.windowSeconds),
+    )) as [number, number];
+
+    const attempts = Number(result?.[0] ?? 0);
+    const ttl = Number(result?.[1] ?? -1);
 
     if (attempts > policy.maxAttempts) {
-      const ttl = await this.redis.ttl(key);
       if (ttl > 0) {
         const waitMinutes = Math.ceil(ttl / 60);
         const baseMessage = policy.message.replace(
           /,?\s*vui lòng thử lại sau.*$/i,
           '',
         );
+
         throw new RpcException({
           code: status.RESOURCE_EXHAUSTED,
           message: `${baseMessage}. Thử lại sau ${waitMinutes} phút`,
@@ -1185,6 +1345,7 @@ export class AuthService {
     for (const deviceId of deviceIds) {
       pipeline.del(authRefreshKey(userId, deviceId));
       pipeline.del(authSessionKey(userId, deviceId));
+      pipeline.del(twoFactorTrustedDeviceKey(userId, deviceId));
     }
 
     pipeline.del(deviceSetKey);
@@ -1276,6 +1437,8 @@ export class AuthService {
         isActive: user.isActive,
         role: user.role,
         tokenVersion: user.tokenVersion,
+        emailVerified: user.emailVerified,
+        twoFactorEnabled: user.twoFactorEnabled,
       } satisfies AuthState),
     );
   }
@@ -1385,6 +1548,45 @@ export class AuthService {
     };
   }
 
+  private async assertAdminActor(actorUserId: string): Promise<void> {
+    const actor = await this.usersService.findAuthUserById(actorUserId);
+
+    if (!actor) {
+      throw new RpcException({
+        code: status.PERMISSION_DENIED,
+        message: 'Không có quyền thực hiện thao tác này',
+      });
+    }
+
+    if (!ALLOWED_ADMIN_ROLES.has(actor.role)) {
+      throw new RpcException({
+        code: status.PERMISSION_DENIED,
+        message: 'Không có quyền thực hiện thao tác này',
+      });
+    }
+
+    if (!actor.isActive) {
+      throw new RpcException({
+        code: status.PERMISSION_DENIED,
+        message: 'Tài khoản quản trị đã bị khóa',
+      });
+    }
+
+    if (!actor.emailVerified) {
+      throw new RpcException({
+        code: status.PERMISSION_DENIED,
+        message: 'Tài khoản quản trị phải xác thực email',
+      });
+    }
+
+    if (!actor.twoFactorEnabled) {
+      throw new RpcException({
+        code: status.PERMISSION_DENIED,
+        message: 'Tài khoản quản trị phải bật 2FA',
+      });
+    }
+  }
+
   private encryptTwoFactorSecret(secret: string): string {
     return encryptSecret(
       secret,
@@ -1468,6 +1670,46 @@ export class AuthService {
     await this.redis.set(key, String(counter), 'EX', 120);
   }
 
+  private async shouldRequireTwoFactor(
+    userId: string,
+    deviceId: string,
+  ): Promise<boolean> {
+    const trusted = await this.redis.get(
+      twoFactorTrustedDeviceKey(userId, deviceId),
+    );
+    if (!trusted) return true;
+    return false;
+  }
+
+  private async markDeviceAsTrusted(
+    userId: string,
+    deviceId: string,
+    role: string,
+  ): Promise<void> {
+    const ttlSeconds = this.getTwoFactorTrustSeconds(role);
+    await this.redis.set(
+      twoFactorTrustedDeviceKey(userId, deviceId),
+      '1',
+      'EX',
+      ttlSeconds,
+    );
+  }
+
+  private getTwoFactorTrustSeconds(role: string): number {
+    // admin ngắn hơn để an toàn hơn
+    const isAdmin = ALLOWED_ADMIN_ROLES.has(role);
+
+    const daysRaw = isAdmin
+      ? (this.configService.get<string>('TWO_FACTOR_TRUST_DAYS_ADMIN') ?? '90')
+      : (this.configService.get<string>('TWO_FACTOR_TRUST_DAYS_USER') ?? '180');
+
+    const days = Number(daysRaw);
+    const safeDays =
+      Number.isFinite(days) && days > 0 ? days : isAdmin ? 90 : 180;
+
+    return Math.floor(safeDays * 24 * 60 * 60);
+  }
+
   private extractSeconds(expiresIn: string): number {
     const duration = ms(expiresIn as import('ms').StringValue);
 
@@ -1495,20 +1737,6 @@ export class AuthService {
       );
       this.logger.debug(String(error));
     }
-  }
-}
-
-function validateResetPassword(password: string): void {
-  if (
-    !password ||
-    password.length < 8 ||
-    !/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).+$/.test(password)
-  ) {
-    throw new RpcException({
-      code: status.INVALID_ARGUMENT,
-      message:
-        'Mật khẩu mới phải có ít nhất 8 ký tự và chứa chữ hoa, chữ thường, số, ký tự đặc biệt',
-    });
   }
 }
 

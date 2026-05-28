@@ -14,6 +14,7 @@ import type {
   LogoutDeviceRequest,
   ChangePasswordRequest,
   AdminUserActionRequest,
+  SetUserRoleRequest,
   RequestPasswordResetRequest,
   ResetPasswordRequest,
   RequestEmailVerificationRequest,
@@ -141,15 +142,16 @@ export class AuthController {
   async setUserStatus(
     @Payload() request: SetUserStatusRequest,
   ): Promise<UserProfile> {
-    if (!request.userId) {
+    if (!request.actorUserId || !request.targetUserId) {
       throw new RpcException({
         code: status.INVALID_ARGUMENT,
-        message: 'userId là bắt buộc',
+        message: 'actorUserId và targetUserId là bắt buộc',
       });
     }
 
     const user = await this.authService.setUserStatus(
-      request.userId,
+      String(request.actorUserId),
+      String(request.targetUserId),
       request.isActive,
     );
 
@@ -163,7 +165,7 @@ export class AuthController {
     if (!request.actorUserId || !request.targetUserId) {
       throw new RpcException({
         code: status.INVALID_ARGUMENT,
-        message: 'actorUserId và targetUserId là bắt buộc',
+        message: 'actorUserId & targetUserId là bắt buộc',
       });
     }
 
@@ -181,7 +183,7 @@ export class AuthController {
     if (!request.actorUserId || !request.targetUserId) {
       throw new RpcException({
         code: status.INVALID_ARGUMENT,
-        message: 'actorUserId và targetUserId là bắt buộc',
+        message: 'actorUserId & targetUserId là bắt buộc',
       });
     }
 
@@ -189,6 +191,26 @@ export class AuthController {
       String(request.actorUserId),
       String(request.targetUserId),
     );
+    return mapUserProfile(user);
+  }
+
+  @GrpcMethod('IdentityService', 'SetUserRole')
+  async setUserRole(
+    @Payload() request: SetUserRoleRequest,
+  ): Promise<UserProfile> {
+    if (!request.actorUserId || !request.targetUserId || !request.role) {
+      throw new RpcException({
+        code: status.INVALID_ARGUMENT,
+        message: 'actorUserId, targetUserId và role là bắt buộc',
+      });
+    }
+
+    const user = await this.authService.setUserRole(
+      request.actorUserId,
+      request.targetUserId,
+      request.role,
+    );
+
     return mapUserProfile(user);
   }
 
