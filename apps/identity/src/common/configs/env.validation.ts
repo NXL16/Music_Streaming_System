@@ -20,6 +20,8 @@ type IdentityEnv = {
   TOKEN_CLEANUP_INTERVAL_MINUTES?: string;
   RECOVERY_CODE_RETENTION_DAYS?: string;
   GOOGLE_CLIENT_ID: string;
+  TWO_FACTOR_TRUST_DAYS_USER?: string;
+  TWO_FACTOR_TRUST_DAYS_ADMIN?: string;
 };
 
 const REQUIRED_KEYS: Array<keyof IdentityEnv> = [
@@ -102,6 +104,20 @@ export function validateEnv(config: Record<string, unknown>): IdentityEnv {
     const days = Number(config.RECOVERY_CODE_RETENTION_DAYS);
     if (!Number.isInteger(days) || days <= 0) {
       throw new Error('RECOVERY_CODE_RETENTION_DAYS phải là số nguyên dương');
+    }
+  }
+
+  if (config.TWO_FACTOR_TRUST_DAYS_USER !== undefined) {
+    const days = Number(config.TWO_FACTOR_TRUST_DAYS_USER);
+    if (!Number.isInteger(days) || days <= 0) {
+      throw new Error('TWO_FACTOR_TRUST_DAYS_USER phải là số nguyên dương');
+    }
+  }
+
+  if (config.TWO_FACTOR_TRUST_DAYS_ADMIN !== undefined) {
+    const days = Number(config.TWO_FACTOR_TRUST_DAYS_ADMIN);
+    if (!Number.isInteger(days) || days <= 0) {
+      throw new Error('TWO_FACTOR_TRUST_DAYS_ADMIN phải là số nguyên dương');
     }
   }
 

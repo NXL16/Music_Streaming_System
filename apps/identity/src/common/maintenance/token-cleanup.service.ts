@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../database/prisma.service';
 
@@ -9,6 +14,7 @@ const DEFAULT_RECOVERY_CODE_RETENTION_DAYS = 30;
 export class TokenCleanupService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TokenCleanupService.name);
   private timer: NodeJS.Timeout | null = null;
+  private startupTimeout: NodeJS.Timeout | null = null;
   private running = false;
   private cleanupIntervalMs = DEFAULT_CLEANUP_INTERVAL_MINUTES * 60 * 1000;
   private recoveryCodeRetentionDays = DEFAULT_RECOVERY_CODE_RETENTION_DAYS;
@@ -26,7 +32,7 @@ export class TokenCleanupService implements OnModuleInit, OnModuleDestroy {
     );
 
     // Run once shortly after boot, then run on interval.
-    setTimeout(() => {
+    this.startupTimeout = setTimeout(() => {
       void this.runCleanup();
     }, 10_000);
 
@@ -43,6 +49,11 @@ export class TokenCleanupService implements OnModuleInit, OnModuleDestroy {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
+    }
+
+    if (this.startupTimeout) {
+      clearTimeout(this.startupTimeout);
+      this.startupTimeout = null;
     }
   }
 
@@ -79,7 +90,9 @@ export class TokenCleanupService implements OnModuleInit, OnModuleDestroy {
         ]);
 
       const totalDeleted =
-        passwordResetResult.count + emailVerifyResult.count + recoveryResult.count;
+        passwordResetResult.count +
+        emailVerifyResult.count +
+        recoveryResult.count;
 
       if (totalDeleted > 0) {
         this.logger.log(
