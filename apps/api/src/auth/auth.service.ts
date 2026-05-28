@@ -18,6 +18,7 @@ import type {
   ListUsersRequest,
   ListUsersResponse,
   SetUserStatusRequest,
+  SetUserRoleRequest,
   RequestPasswordResetRequest,
   ResetPasswordRequest,
   RequestEmailVerificationRequest,
@@ -165,6 +166,12 @@ export class AuthService implements OnModuleInit {
   ): Promise<UserProfile> {
     return await firstValueFrom(
       this.identityService.adminResetUserTwoFactor(request, this.metadata()),
+    );
+  }
+
+  async setUserRole(request: SetUserRoleRequest): Promise<UserProfile> {
+    return await firstValueFrom(
+      this.identityService.setUserRole(request, this.metadata()),
     );
   }
 

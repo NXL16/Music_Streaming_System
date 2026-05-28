@@ -1,5 +1,13 @@
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
 
 export class ListUsersQueryDto {
   @IsOptional()
@@ -23,9 +31,13 @@ export class ListUsersQueryDto {
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.toUpperCase() : value,
   )
-  @IsIn(['USER', 'ARTIST', 'ADMIN'], {
-    message: 'role phải là USER, ARTIST hoặc ADMIN',
-  })
+  @IsIn(
+    ['USER', 'ARTIST', 'SUPER_ADMIN', 'ADMIN_USER_OPS', 'ADMIN_SECURITY_OPS'],
+    {
+      message:
+        'role phải là USER, ARTIST, SUPER_ADMIN, ADMIN_USER_OPS hoặc ADMIN_SECURITY_OPS',
+    },
+  )
   role?: string;
 
   @IsOptional()

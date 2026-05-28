@@ -38,6 +38,7 @@ import {
   VerifyTwoFactorLoginDto,
 } from './dto/two-factor.dto';
 import { GoogleLoginDto } from './dto/google-login.dto';
+import { SetUserRoleDto } from './dto/set-user-role.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -115,17 +116,10 @@ export class AuthController {
   @Post('2fa/login')
   @HttpCode(HttpStatus.OK)
   async verifyTwoFactorLogin(@Body() dto: VerifyTwoFactorLoginDto) {
-    const credential = dto.credential?.trim();
-    const resolvedCode =
-      dto.code ?? (credential?.match(/^\d{6}$/) ? credential : undefined);
-    const resolvedRecoveryCode =
-      dto.recoveryCode ??
-      (credential && !/^\d{6}$/.test(credential) ? credential : undefined);
-
     const data = await this.authService.verifyTwoFactorLogin({
       challengeId: dto.challengeId,
-      code: resolvedCode,
-      recoveryCode: resolvedRecoveryCode,
+      code: dto.code ?? dto.credential,
+      recoveryCode: dto.recoveryCode,
     });
 
     return this.formatResponse(
@@ -296,18 +290,11 @@ export class AuthController {
     @Body() dto: RegenerateTwoFactorRecoveryCodesDto,
   ) {
     const user = req.user as JwtUser;
-    const credential = dto.credential?.trim();
-    const resolvedCode =
-      dto.code ?? (credential?.match(/^\d{6}$/) ? credential : undefined);
-    const resolvedRecoveryCode =
-      dto.recoveryCode ??
-      (credential && !/^\d{6}$/.test(credential) ? credential : undefined);
-
     const data = await this.authService.regenerateTwoFactorRecoveryCodes({
       userId: user.userId,
       password: dto.password,
-      code: resolvedCode,
-      recoveryCode: resolvedRecoveryCode,
+      code: dto.code ?? dto.credential,
+      recoveryCode: dto.recoveryCode,
     });
 
     return this.formatResponse(
@@ -421,9 +408,12 @@ export class AuthController {
   async setUserStatus(
     @Param('userId') userId: string,
     @Body() setUserStatusDto: SetUserStatusDto,
+    @Req() req: Request,
   ) {
+    const admin = req.user as JwtUser;
     const data = await this.authService.setUserStatus({
-      userId,
+      actorUserId: admin.userId,
+      targetUserId: userId,
       isActive: setUserStatusDto.isActive,
     });
 
@@ -473,6 +463,28 @@ export class AuthController {
       data,
       'AUTH_ADMIN_RESET_2FA_SUCCESS',
       'Đặt lại 2FA cho người dùng thành công',
+    );
+  }
+
+  @Patch('admin/users/:userId/role')
+  @UseGuards(StrictJwtAuthGuard, AdminGuard, PermissionsGuard)
+  @Permissions('user.role.update')
+  async setUserRole(
+    @Param('userId') userId: string,
+    @Body() dto: SetUserRoleDto,
+    @Req() req: Request,
+  ) {
+    const admin = req.user as JwtUser;
+    const data = await this.authService.setUserRole({
+      actorUserId: admin.userId,
+      targetUserId: userId,
+      role: dto.role,
+    });
+
+    return this.formatResponse(
+      data,
+      'AUTH_SET_USER_ROLE_SUCCESS',
+      'Cập nhật role người dùng thành công',
     );
   }
 

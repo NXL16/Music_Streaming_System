@@ -1,4 +1,10 @@
-import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { JwtUser } from '@musical/shared-types';
 import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
@@ -22,10 +28,22 @@ export class PermissionsGuard implements CanActivate {
     const user = request.user;
 
     if (!user) {
-      return false;
+      throw new UnauthorizedException({
+        code: 'AUTH_UNAUTHORIZED',
+        message: 'Bạn chưa đăng nhập',
+      });
     }
 
     const granted = ROLE_PERMISSIONS[user.role] ?? [];
-    return required.every((permission) => granted.includes(permission));
+    const ok = required.every((permission) => granted.includes(permission));
+
+    if (!ok) {
+      throw new ForbiddenException({
+        code: 'AUTH_FORBIDDEN',
+        message: 'Bạn không có quyền thực hiện thao tác này',
+      });
+    }
+
+    return true;
   }
 }
