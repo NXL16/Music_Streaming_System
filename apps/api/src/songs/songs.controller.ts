@@ -11,6 +11,8 @@ import {
   HttpCode,
   Req,
   UseGuards,
+  Headers,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { SongsService } from './songs.service';
 import type {
@@ -23,10 +25,14 @@ import { FinalizeUploadDto } from './dto/finalize-upload.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import type { Request } from 'express';
 import { JwtUser } from '@musical/shared-types';
+import { ConfigService } from '@nestjs/config';
 
 @Controller('songs')
 export class SongsController {
-  constructor(private readonly songsService: SongsService) {}
+  constructor(
+    private readonly songsService: SongsService,
+    private readonly configService: ConfigService,
+  ) {}
 
   @Post('request-upload')
   @UseGuards(JwtAuthGuard)
@@ -37,7 +43,22 @@ export class SongsController {
   }
 
   @Post('finalize-upload')
-  async finalizeUpload(@Body() finalizeDto: FinalizeUploadDto) {
+  @UseGuards(JwtAuthGuard)
+  async finalizeUpload(@Req() req: Request, @Body() finalizeDto: FinalizeUploadDto) {
+    const user = req.user as JwtUser;
+    return await this.songsService.finalizeUpload(finalizeDto, user.userId);
+  }
+
+  @Post('internal/finalize-upload')
+  async finalizeUploadInternal(
+    @Headers('x-internal-token') token: string | undefined,
+    @Body() finalizeDto: FinalizeUploadDto,
+  ) {
+    const expectedToken = this.configService.get<string>('FINALIZER_INTERNAL_TOKEN');
+    if (!expectedToken || token !== expectedToken) {
+      throw new UnauthorizedException('INVALID_INTERNAL_TOKEN');
+    }
+
     return await this.songsService.finalizeUpload(finalizeDto);
   }
 

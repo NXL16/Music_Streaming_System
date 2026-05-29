@@ -11,4 +11,4 @@ max_retries = 3
 retry_delay = 16
 
 [vars]
-API_FINALIZE_URL = "https://marcus-pseudoscalar-unsurprisedly.ngrok-free.dev/api/v1/songs/finalize-upload"
+API_FINALIZE_URL = "https://marcus-pseudoscalar-unsurprisedly.ngrok-free.dev/api/v1/songs/internal/finalize-upload"

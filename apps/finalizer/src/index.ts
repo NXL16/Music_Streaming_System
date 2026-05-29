@@ -1,5 +1,6 @@
 interface Env {
   API_FINALIZE_URL: string;
+  FINALIZER_INTERNAL_TOKEN: string;
 }
 
 type R2EventNotification = {
@@ -34,10 +35,10 @@ export default {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            "x-internal-token": env.FINALIZER_INTERNAL_TOKEN,
           },
           body: JSON.stringify({
-            checksum: checksum,
-            sourceObjectPath: event.object.key,
+            checksum,
           }),
         });
 

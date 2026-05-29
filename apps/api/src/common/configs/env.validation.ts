@@ -17,6 +17,7 @@ const REQUIRED_KEYS = [
   'R2_ACCESS_KEY',
   'R2_SECRET_KEY',
   'R2_BUCKET',
+  'FINALIZER_INTERNAL_TOKEN',
 ] as const;
 
 const isPositiveInteger = (value: string): boolean => /^\d+$/.test(value);
@@ -25,11 +26,15 @@ export const validateEnv = (rawEnv: RawEnv): RawEnv => {
   const missing = REQUIRED_KEYS.filter((key) => !rawEnv[key]);
 
   if (missing.length > 0) {
-    throw new Error(`Thiếu biến môi trường bắt buộc: ${missing.join(', ')}`);
+    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
   }
 
   if ((rawEnv.INTERNAL_GRPC_TOKEN as string).length < 32) {
-    throw new Error('INTERNAL_GRPC_TOKEN phải có ít nhất 32 ký tự');
+    throw new Error('INTERNAL_GRPC_TOKEN must be at least 32 characters');
+  }
+
+  if ((rawEnv.FINALIZER_INTERNAL_TOKEN as string).length < 32) {
+    throw new Error('FINALIZER_INTERNAL_TOKEN must be at least 32 characters');
   }
 
   const apiPort = rawEnv.API_PORT as string;
@@ -37,15 +42,15 @@ export const validateEnv = (rawEnv: RawEnv): RawEnv => {
   const streamUrlTtlSec = rawEnv.STREAM_URL_TTL_SEC as string;
 
   if (!isPositiveInteger(apiPort)) {
-    throw new Error('API_PORT phải là số nguyên dương');
+    throw new Error('API_PORT must be a positive integer');
   }
 
   if (!isPositiveInteger(redisPort)) {
-    throw new Error('REDIS_PORT phải là số nguyên dương');
+    throw new Error('REDIS_PORT must be a positive integer');
   }
 
   if (!isPositiveInteger(streamUrlTtlSec)) {
-    throw new Error('STREAM_URL_TTL_SEC phải là số nguyên dương');
+    throw new Error('STREAM_URL_TTL_SEC must be a positive integer');
   }
 
   return rawEnv;
