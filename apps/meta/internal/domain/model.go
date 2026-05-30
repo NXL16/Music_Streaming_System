@@ -1,5 +1,7 @@
 package domain
 
+import "time"
+
 type SongMetadata struct {
 	SongID                string    `bson:"song_id"`
 	Duration              float64   `bson:"duration"`
@@ -10,6 +12,9 @@ type SongMetadata struct {
 	InitRange             ByteRange `bson:"init_range"`
 	Segments              []Segment `bson:"segments"`
 	Waveform              []float32 `bson:"waveform"`
+	Version               int64     `bson:"version"`
+	CreatedAt             time.Time `bson:"created_at"`
+	UpdatedAt             time.Time `bson:"updated_at"`
 }
 
 type ByteRange struct {
