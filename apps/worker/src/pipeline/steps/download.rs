@@ -1,41 +1,62 @@
 use crate::pipeline::context::PipelineContext;
 use anyhow::Context;
-use std::sync::OnceLock;
+use bytes::Bytes;
+use futures_util::stream::try_unfold;
+use tokio::io::AsyncReadExt;
 
-fn shared_http_client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .pool_idle_timeout(std::time::Duration::from_secs(30))
-            .pool_max_idle_per_host(16)
-            .timeout(std::time::Duration::from_secs(120))
-            .tcp_keepalive(std::time::Duration::from_secs(30))
-            .build()
-            .expect("failed to build shared reqwest client")
-    })
+fn parse_max_source_size_bytes() -> usize {
+    std::env::var("WORKER_MAX_SOURCE_SIZE_BYTES")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(250 * 1024 * 1024)
 }
 
 pub async fn download(ctx: &mut PipelineContext) -> anyhow::Result<()> {
-    let file_url = ctx
-        .job
-        .file_url
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("missing file_url"))?;
+    let r2_path = &ctx.job.r2_path;
+    let client = crate::r2::client::create_r2_client()
+        .await
+        .context("failed to initialize R2 client")?;
+    let bucket = std::env::var("R2_BUCKET").context("R2_BUCKET env is not set")?;
 
-    let res = shared_http_client()
-        .get(file_url)
+    let object = client
+        .get_object()
+        .bucket(&bucket)
+        .key(r2_path)
         .send()
         .await
-        .context("failed to download source file")?;
+        .with_context(|| format!("failed to download source file: key={r2_path}"))?;
 
-    if !res.status().is_success() {
-        return Err(anyhow::anyhow!(
-            "source download failed with status {}",
-            res.status()
-        ));
+    let max_size = parse_max_source_size_bytes();
+    if let Some(content_len) = object.content_length() {
+        if content_len > 0 && (content_len as usize) > max_size {
+            return Err(anyhow::anyhow!(
+                "source object too large: {} bytes > limit {} bytes",
+                content_len,
+                max_size
+            ));
+        }
+        if content_len > 0 {
+            ctx.source_size_bytes = Some(content_len as usize);
+        }
     }
 
-    ctx.input_stream = Some(Box::pin(res.bytes_stream()));
+    let reader = object.body.into_async_read();
+    let source = try_unfold(reader, |mut reader| async move {
+        let mut buf = vec![0_u8; 64 * 1024];
+        let n = reader
+            .read(&mut buf)
+            .await
+            .map_err(|e| anyhow::anyhow!("R2 stream read error: {e}"))?;
+
+        if n == 0 {
+            return Ok(None);
+        }
+
+        buf.truncate(n);
+        Ok(Some((Bytes::from(buf), reader)))
+    });
+    ctx.input_stream = Some(Box::pin(source));
 
     Ok(())
 }

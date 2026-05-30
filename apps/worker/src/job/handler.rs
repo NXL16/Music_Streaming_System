@@ -1,4 +1,5 @@
 use crate::pipeline::ingest::run_pipeline;
+use crate::observability::log::log_event;
 use crate::queue::job::JobPayload;
 use crate::redis::{RedisPublisher, SongCompletionEvent};
 use std::sync::Arc;
@@ -9,6 +10,7 @@ pub async fn handle_with_options(
     master_secret_key: Arc<Vec<u8>>,
 ) -> anyhow::Result<()> {
     let song_id = job.song_id.clone();
+    log_event("info", "job_started", &[("song_id", song_id.clone())]);
     let mut redis = RedisPublisher::new().await?;
 
     match run_pipeline(job, master_secret_key).await {
@@ -30,6 +32,7 @@ pub async fn handle_with_options(
             };
 
             redis.publish_song_completion(event).await?;
+            log_event("info", "job_completed", &[("song_id", song_id.clone()), ("status", "success".to_string())]);
         }
         Err(e) => {
             if publish_error_event {
@@ -45,6 +48,7 @@ pub async fn handle_with_options(
                 };
                 let _ = redis.publish_song_completion(event).await;
             }
+            log_event("error", "job_completed", &[("song_id", song_id.clone()), ("status", "error".to_string()), ("error", e.to_string())]);
 
             return Err(e);
         }
