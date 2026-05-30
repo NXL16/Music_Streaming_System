@@ -65,10 +65,20 @@ export class CompletionService
         const processedKey = songCompletionProcessedKey(event.song_id);
         const lockKey = songCompletionLockKey(event.song_id);
 
-        // skip if already processed
+        // dedupe by outcome:
+        // - success is terminal and always wins.
+        // - error can be upgraded later by a success event.
         const already = await this.redis.get(processedKey);
-        if (already) {
-          this.logger.log(`Skipping already-processed song ${event.song_id}`);
+        if (already === 'success') {
+          this.logger.log(
+            `Skipping already-successful song ${event.song_id} (incoming=${event.status})`,
+          );
+          continue;
+        }
+        if (already === 'error' && event.status === 'error') {
+          this.logger.log(
+            `Skipping duplicate error event for song ${event.song_id}`,
+          );
           continue;
         }
 
@@ -85,8 +95,8 @@ export class CompletionService
         try {
           await this.songsService.applyWorkerCompletion(event);
 
-          // mark processed for 1 day (avoid double processing)
-          await this.redis.set(processedKey, '1', 'EX', 60 * 60 * 24);
+          // mark outcome for 1 day.
+          await this.redis.set(processedKey, event.status, 'EX', 60 * 60 * 24);
 
           this.logger.log(
             `Processed worker completion event for song ${event.song_id} (${event.status})`,
@@ -124,7 +134,7 @@ export class CompletionService
               };
 
               await this.songsService.applyWorkerCompletion(failureEvent);
-              await this.redis.set(processedKey, '1', 'EX', 60 * 60 * 24);
+              await this.redis.set(processedKey, 'error', 'EX', 60 * 60 * 24);
             } catch (innerErr) {
               this.logger.error(
                 'Failed to mark song as failed after max retries',
