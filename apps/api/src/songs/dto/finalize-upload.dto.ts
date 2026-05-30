@@ -1,15 +1,13 @@
-import { IsString, IsOptional } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class FinalizeUploadDto {
   @IsString()
   @IsOptional()
+  @IsNotEmpty()
   songId?: string;
 
   @IsString()
   @IsOptional()
-  song_id?: string;
-
-  @IsString()
-  @IsOptional()
+  @IsNotEmpty()
   checksum?: string;
 }

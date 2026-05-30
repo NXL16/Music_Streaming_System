@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 @Injectable()
@@ -50,5 +55,14 @@ export class R2Service {
     return await getSignedUrl(this.client, command, {
       expiresIn: expiresInSeconds,
     });
+  }
+
+  async headObject(objectKey: string) {
+    const command = new HeadObjectCommand({
+      Bucket: this.bucket,
+      Key: objectKey,
+    });
+
+    return await this.client.send(command);
   }
 }
