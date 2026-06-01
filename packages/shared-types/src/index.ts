@@ -3,6 +3,7 @@
 // ==========================================
 export const TRANSCODE_QUEUE = "transcode_queue" as const;
 export const SONG_COMPLETION_QUEUE = "song_completion_queue" as const;
+export const SONG_ASSET_CLEANUP_QUEUE = "song_asset_cleanup_queue" as const;
 
 export const authRefreshKey = (userId: string, deviceId: string): string =>
   `auth:refresh:${userId}:${deviceId}`;

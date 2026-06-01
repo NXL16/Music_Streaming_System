@@ -56,6 +56,8 @@ export type {
   GetSongIngestInfoRequest,
   GetSongIngestInfoResponse,
   FavoriteRequest,
+  RemoveSongOwnershipRequest,
+  RemoveSongOwnershipResponse,
   ListSongsRequest,
   FavoriteResponse,
   SongServiceClient,
@@ -82,6 +84,7 @@ export function SongServiceControllerMethods() {
       "updateSongProcessingResult",
       "addFavorite",
       "removeFavorite",
+      "removeSongOwnership",
       "getPlaylist",
     ];
     for (const method of grpcMethods) {

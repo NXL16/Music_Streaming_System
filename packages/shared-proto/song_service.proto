@@ -19,6 +19,7 @@ service SongService {
   // User library
   rpc AddFavorite(FavoriteRequest) returns (FavoriteResponse);
   rpc RemoveFavorite(FavoriteRequest) returns (FavoriteResponse);
+  rpc RemoveSongOwnership(RemoveSongOwnershipRequest) returns (RemoveSongOwnershipResponse);
   rpc GetPlaylist(GetPlaylistRequest) returns (GetPlaylistResponse);
 }
 
@@ -162,6 +163,15 @@ message FavoriteRequest {
 }
 
 message FavoriteResponse {
+  bool success = 1;
+}
+
+message RemoveSongOwnershipRequest {
+  string user_id = 1;
+  string song_id = 2;
+}
+
+message RemoveSongOwnershipResponse {
   bool success = 1;
 }
 
