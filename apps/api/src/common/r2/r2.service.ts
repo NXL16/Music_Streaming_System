@@ -57,12 +57,20 @@ export class R2Service {
     });
   }
 
-  async headObject(objectKey: string) {
+  async headObject(objectKey: string): Promise<{
+    contentLength: number;
+    eTag: string;
+  }> {
     const command = new HeadObjectCommand({
       Bucket: this.bucket,
       Key: objectKey,
     });
 
-    return await this.client.send(command);
+    const response = await this.client.send(command);
+
+    return {
+      contentLength: Number(response.ContentLength ?? 0),
+      eTag: (response.ETag ?? '').replace(/"/g, ''),
+    };
   }
 }

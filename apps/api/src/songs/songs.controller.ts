@@ -42,13 +42,6 @@ export class SongsController {
     return await this.songsService.requestUpload(requestDto, user.userId);
   }
 
-  @Post('finalize-upload')
-  @UseGuards(JwtAuthGuard)
-  async finalizeUpload(@Req() req: Request, @Body() finalizeDto: FinalizeUploadDto) {
-    const user = req.user as JwtUser;
-    return await this.songsService.finalizeUpload(finalizeDto, user.userId);
-  }
-
   @Post('internal/finalize-upload')
   async finalizeUploadInternal(
     @Headers('x-internal-token') token: string | undefined,
@@ -80,11 +73,43 @@ export class SongsController {
     return await this.songsService.listSongs(request);
   }
 
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  async findMine(
+    @Req() req: Request,
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+    @Query('search') search?: string,
+    @Query('artist') artist?: string,
+  ) {
+    const user = req.user as JwtUser;
+    const request: ListSongsRequest = {
+      limit: limit ? Number(limit) : 10,
+      cursor: cursor || '',
+      search: search || '',
+      artist: artist || '',
+      onlyPublic: false,
+      requesterUserId: user.userId,
+    };
+    return await this.songsService.listSongs(request);
+  }
+
   @Get(':id')
-  async findOne(@Param('id') id: string, @Query('userId') userId?: string) {
+  async findOnePublic(@Param('id') id: string) {
     const request: GetSongRequest = {
       songId: id,
-      requesterUserId: userId || '',
+      requesterUserId: '',
+    };
+    return await this.songsService.getSong(request);
+  }
+
+  @Get('private/:id')
+  @UseGuards(JwtAuthGuard)
+  async findOnePrivate(@Req() req: Request, @Param('id') id: string) {
+    const user = req.user as JwtUser;
+    const request: GetSongRequest = {
+      songId: id,
+      requesterUserId: user.userId,
     };
     return await this.songsService.getSong(request);
   }
@@ -105,5 +130,12 @@ export class SongsController {
     @Body('userId') userId: string,
   ) {
     return await this.songsService.removeFavorite({ userId, songId });
+  }
+
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard)
+  async deleteSong(@Req() req: Request, @Param('id') songId: string) {
+    const user = req.user as JwtUser;
+    return await this.songsService.unlinkSong(songId, user.userId);
   }
 }
