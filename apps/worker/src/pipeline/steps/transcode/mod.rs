@@ -12,6 +12,7 @@ use futures_util::StreamExt;
 use sha2::{Digest, Sha256};
 use std::env;
 use std::process::Stdio;
+use std::time::Instant;
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -56,6 +57,7 @@ mod tests {
 }
 
 pub async fn transcode(ctx: &mut PipelineContext) -> anyhow::Result<()> {
+    let pipeline_started_at = Instant::now();
     let input = ctx
         .input_stream
         .take()
@@ -163,6 +165,7 @@ pub async fn transcode(ctx: &mut PipelineContext) -> anyhow::Result<()> {
     let mut total_bytes = 0usize;
     let mut buf = vec![0_u8; 64 * 1024];
 
+    let stream_started_at = Instant::now();
     let pipeline_result: anyhow::Result<()> = async {
         loop {
             let n = ffmpeg_stdout
@@ -173,17 +176,17 @@ pub async fn transcode(ctx: &mut PipelineContext) -> anyhow::Result<()> {
                 break;
             }
 
-            let mut chunk = buf[..n].to_vec();
-            parser.push(&chunk);
-
-            cipher.apply_keystream(&mut chunk);
-            uploader.push_chunk(&chunk).await?;
+            let chunk = &mut buf[..n];
+            parser.push(chunk);
+            cipher.apply_keystream(chunk);
+            uploader.push_chunk(chunk).await?;
             total_bytes += n;
         }
 
         Ok(())
     }
     .await;
+    let stream_elapsed = stream_started_at.elapsed();
 
     let result: anyhow::Result<()> = async {
         let input_checksum = stdin_task.await.context("ffmpeg stdin task join failed")??;
@@ -209,7 +212,9 @@ pub async fn transcode(ctx: &mut PipelineContext) -> anyhow::Result<()> {
             return Err(anyhow::anyhow!("ffmpeg exited with status {}", status));
         }
 
+        let finalize_started_at = Instant::now();
         uploader.finalize().await?;
+        let finalize_elapsed = finalize_started_at.elapsed();
 
         let effective_timescale = parser.timescale.unwrap_or(TIMESCALE_FALLBACK);
         let inferred_min_duration = parser
@@ -240,6 +245,7 @@ pub async fn transcode(ctx: &mut PipelineContext) -> anyhow::Result<()> {
                 }
             };
 
+        let metadata_started_at = Instant::now();
         metadata_client::update_technical_meta(
             ctx.job.song_id.clone(),
             final_duration,
@@ -253,18 +259,32 @@ pub async fn transcode(ctx: &mut PipelineContext) -> anyhow::Result<()> {
             init_range_end,
         )
         .await?;
+        let metadata_elapsed = metadata_started_at.elapsed();
 
         ctx.duration = Some(final_duration);
         ctx.encrypted_size_bytes = Some(total_bytes);
         ctx.output_key = Some(output_key);
+        let total_elapsed = pipeline_started_at.elapsed();
+        let upload_mbps = if total_elapsed.as_secs_f64() > 0.0 {
+            (total_bytes as f64 * 8.0) / total_elapsed.as_secs_f64() / 1_000_000.0
+        } else {
+            0.0
+        };
         eprintln!(
-            "pipeline song_id={} metric=upload mode={} parts={} retries={} output_bytes={} duration_sec={:.3}",
+            "pipeline song_id={} metric=upload mode={} parts={} retries={} peak_inflight={} output_bytes={} duration_sec={:.3} throughput_mbps={:.3} stage_stream_ms={} stage_finalize_ms={} stage_metadata_ms={} stage_total_ms={}",
             ctx.job.song_id,
             if uploader.used_single_put { "single_put" } else { "multipart" },
             uploader.uploaded_parts,
             uploader.total_upload_retries,
+            uploader.peak_inflight_parts,
             total_bytes,
             final_duration
+            ,
+            upload_mbps,
+            stream_elapsed.as_millis(),
+            finalize_elapsed.as_millis(),
+            metadata_elapsed.as_millis(),
+            total_elapsed.as_millis()
         );
         Ok(())
     }
