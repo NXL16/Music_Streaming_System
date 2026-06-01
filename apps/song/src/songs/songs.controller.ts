@@ -17,6 +17,8 @@ import {
   UpdateSongProcessingResultResponse,
   FavoriteRequest,
   FavoriteResponse,
+  RemoveSongOwnershipRequest,
+  RemoveSongOwnershipResponse,
   GetPlaylistRequest,
   GetPlaylistResponse,
 } from '@musical/shared-proto';
@@ -64,6 +66,12 @@ export class SongsController implements SongServiceController {
 
   async removeFavorite(request: FavoriteRequest): Promise<FavoriteResponse> {
     return this.songsService.removeFavorite(request);
+  }
+
+  async removeSongOwnership(
+    request: RemoveSongOwnershipRequest,
+  ): Promise<RemoveSongOwnershipResponse> {
+    return this.songsService.removeSongOwnership(request);
   }
 
   async getPlaylist(request: GetPlaylistRequest): Promise<GetPlaylistResponse> {

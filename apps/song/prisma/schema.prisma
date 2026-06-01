@@ -28,9 +28,44 @@ model Song {
     tags              String[] @default([])
     createdAt         DateTime @default(now()) @db.Timestamptz
     updatedAt         DateTime @updatedAt @db.Timestamptz
+    owners            SongOwner[]
 
     @@index([status, createdAt])
     @@index([title])
     @@index([uploaderId])
     @@map("songs")
+}
+
+model SongOwner {
+    id        String   @id @default(uuid())
+    songId    String   @db.VarChar(128)
+    userId    String   @db.VarChar(128)
+    isPublic  Boolean  @default(true)
+    title     String   @default("") @db.VarChar(255)
+    artist    String   @default("") @db.VarChar(255)
+    album     String   @default("") @db.VarChar(255)
+    coverUrl  String   @default("") @db.VarChar(500)
+    createdAt DateTime @default(now()) @db.Timestamptz
+    updatedAt DateTime @updatedAt @db.Timestamptz
+
+    song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+    @@unique([songId, userId])
+    @@index([userId])
+    @@index([userId, isPublic])
+    @@map("song_owners")
+}
+
+model AssetCleanupOutbox {
+    id                String   @id @default(uuid())
+    songId            String   @unique @db.VarChar(128)
+    sourceObjectPath  String   @default("") @db.VarChar(500)
+    encryptedFilePath String   @default("") @db.VarChar(500)
+    attempts          Int      @default(0)
+    lastError         String   @default("") @db.VarChar(1000)
+    createdAt         DateTime @default(now()) @db.Timestamptz
+    updatedAt         DateTime @updatedAt @db.Timestamptz
+
+    @@index([createdAt])
+    @@map("asset_cleanup_outbox")
 }

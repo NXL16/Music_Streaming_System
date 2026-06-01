@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { RpcException } from '@nestjs/microservices';
 import { status } from '@grpc/grpc-js';
+import type Redis from 'ioredis';
 import {
   GetSongRequest,
   GetSongResponse,
@@ -14,6 +15,8 @@ import {
   UpdateSongProcessingResultResponse,
   FavoriteRequest,
   FavoriteResponse,
+  RemoveSongOwnershipRequest,
+  RemoveSongOwnershipResponse,
   GetPlaylistRequest,
   GetPlaylistResponse,
   SongStatus,
@@ -23,28 +26,29 @@ import {
   GetSongIngestInfoRequest,
   GetSongIngestInfoResponse,
 } from '@musical/shared-proto';
+import { SONG_ASSET_CLEANUP_QUEUE } from '@musical/shared-types';
 import { PrismaService } from '../database/prisma.service';
 import { Prisma, PrismaClient } from '../generated/prisma/client';
 
 const songSummarySelect = {
   id: true,
-  title: true,
-  artist: true,
-  album: true,
-  coverUrl: true,
-  isPublic: true,
   status: true,
   durationSec: true,
   createdAt: true,
+  owners: {
+    select: {
+      userId: true,
+      isPublic: true,
+      title: true,
+      artist: true,
+      album: true,
+      coverUrl: true,
+    },
+  },
 } as const;
 
 const songDetailSelect = {
   id: true,
-  title: true,
-  artist: true,
-  album: true,
-  uploaderId: true,
-  isPublic: true,
   status: true,
   encryptedFilePath: true,
   durationSec: true,
@@ -53,6 +57,16 @@ const songDetailSelect = {
   format: true,
   createdAt: true,
   updatedAt: true,
+  owners: {
+    select: {
+      userId: true,
+      isPublic: true,
+      title: true,
+      artist: true,
+      album: true,
+      coverUrl: true,
+    },
+  },
 } as const;
 
 const songIngestSelect = {
@@ -87,12 +101,32 @@ type WorkerSongCompletionEvent = {
   error_message?: string | null;
 };
 
+type AssetCleanupOutboxRepo = {
+  upsert(args: {
+    where: { songId: string };
+    update: {
+      sourceObjectPath: string;
+      encryptedFilePath: string;
+      lastError: string;
+    };
+    create: {
+      songId: string;
+      sourceObjectPath: string;
+      encryptedFilePath: string;
+      lastError: string;
+    };
+  }): Promise<unknown>;
+};
+
 @Injectable()
 export class SongsService {
   private readonly logger = new Logger(SongsService.name);
   private readonly prisma: PrismaClient;
 
-  constructor(prismaService: PrismaService) {
+  constructor(
+    prismaService: PrismaService,
+    @Inject('REDIS_INSTANCE') private readonly redis: Redis,
+  ) {
     this.prisma = prismaService;
   }
 
@@ -121,6 +155,58 @@ export class SongsService {
         });
       }
 
+      const existingSong = await this.prisma.song.findUnique({
+        where: { checksum: request.checksum },
+        select: songIngestSelect,
+      });
+
+      if (existingSong) {
+        const existingOwner = await this.prisma.songOwner.findUnique({
+          where: {
+            songId_userId: {
+              songId: existingSong.id,
+              userId: request.uploaderId,
+            },
+          },
+          select: { id: true },
+        });
+
+        if (existingOwner) {
+          throw new RpcException({
+            code: status.ALREADY_EXISTS,
+            message: 'SONG_ALREADY_IN_LIBRARY',
+          });
+        }
+
+        await this.prisma.songOwner.upsert({
+          where: {
+            songId_userId: {
+              songId: existingSong.id,
+              userId: request.uploaderId,
+            },
+          },
+          update: {
+            isPublic: request.isPublic ?? true,
+            title: request.title,
+            artist: request.artist,
+            album: request.album,
+          },
+          create: {
+            songId: existingSong.id,
+            userId: request.uploaderId,
+            isPublic: request.isPublic ?? true,
+            title: request.title,
+            artist: request.artist,
+            album: request.album,
+          },
+        });
+
+        return {
+          song: this.mapEntityToIngestInfo(existingSong),
+          ingestJobId: existingSong.id,
+        };
+      }
+
       const savedSong = await this.prisma.song.create({
         data: {
           title: request.title,
@@ -132,6 +218,15 @@ export class SongsService {
           checksum: request.checksum,
           fileSizeBytes: BigInt(request.fileSizeBytes ?? 0),
           status: SongStatus.SONG_STATUS_PENDING,
+          owners: {
+            create: {
+              userId: request.uploaderId,
+              isPublic: request.isPublic ?? true,
+              title: request.title,
+              artist: request.artist,
+              album: request.album,
+            },
+          },
         },
         select: songIngestSelect,
       });
@@ -147,6 +242,57 @@ export class SongsService {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
+        const existing = await this.prisma.song.findUnique({
+          where: { checksum: request.checksum },
+          select: songIngestSelect,
+        });
+        if (existing) {
+          const existingOwner = await this.prisma.songOwner.findUnique({
+            where: {
+              songId_userId: {
+                songId: existing.id,
+                userId: request.uploaderId,
+              },
+            },
+            select: { id: true },
+          });
+
+          if (existingOwner) {
+            throw new RpcException({
+              code: status.ALREADY_EXISTS,
+              message: 'SONG_ALREADY_IN_LIBRARY',
+            });
+          }
+
+          await this.prisma.songOwner.upsert({
+            where: {
+              songId_userId: {
+                songId: existing.id,
+                userId: request.uploaderId,
+              },
+            },
+            update: {
+              isPublic: request.isPublic ?? true,
+              title: request.title,
+              artist: request.artist,
+              album: request.album,
+            },
+            create: {
+              songId: existing.id,
+              userId: request.uploaderId,
+              isPublic: request.isPublic ?? true,
+              title: request.title,
+              artist: request.artist,
+              album: request.album,
+            },
+          });
+
+          return {
+            song: this.mapEntityToIngestInfo(existing),
+            ingestJobId: existing.id,
+          };
+        }
+
         throw new RpcException({
           code: status.ALREADY_EXISTS,
           message: 'CHECKSUM_ALREADY_EXISTS',
@@ -205,10 +351,18 @@ export class SongsService {
     if (!song) {
       this.throwNotFound('SONG_NOT_FOUND');
     }
-    if (!song.isPublic && song.uploaderId !== request.requesterUserId) {
+
+    const requesterUserId = request.requesterUserId?.trim() || '';
+    const ownerProfile =
+      (requesterUserId
+        ? song.owners.find((owner) => owner.userId === requesterUserId)
+        : undefined) ?? song.owners.find((owner) => owner.isPublic);
+
+    if (!ownerProfile) {
       this.throwPermissionDenied('SONG_ACCESS_DENIED');
     }
-    return { song: this.mapEntityToDetail(song) };
+
+    return { song: this.mapEntityToDetail(song, ownerProfile) };
   }
 
   async getSongByChecksum(
@@ -256,26 +410,33 @@ export class SongsService {
     const search = request.search?.trim();
     const artist = request.artist?.trim();
 
-    const filters: Prisma.SongWhereInput[] = [
-      { status: SongStatus.SONG_STATUS_READY },
-    ];
+    const filters: Prisma.SongWhereInput[] = [{ status: SongStatus.SONG_STATUS_READY }];
+    const requesterUserId = request.requesterUserId?.trim() || '';
+    const ownerFilter: Prisma.SongOwnerWhereInput = request.onlyPublic
+      ? { isPublic: true }
+      : requesterUserId
+        ? { userId: requesterUserId }
+        : { isPublic: true };
 
-    if (request.onlyPublic) {
-      filters.push({ isPublic: true });
-    }
-
+    const ownerSearchFilters: Prisma.SongOwnerWhereInput[] = [ownerFilter];
     if (artist) {
-      filters.push({ artist: { contains: artist, mode: 'insensitive' } });
+      ownerSearchFilters.push({
+        artist: { contains: artist, mode: 'insensitive' },
+      });
     }
-
     if (search) {
-      filters.push({
+      ownerSearchFilters.push({
         OR: [
           { title: { contains: search, mode: 'insensitive' } },
           { album: { contains: search, mode: 'insensitive' } },
         ],
       });
     }
+    filters.push({
+      owners: {
+        some: ownerSearchFilters.length === 1 ? ownerSearchFilters[0] : { AND: ownerSearchFilters },
+      },
+    });
 
     if (cursor) {
       filters.push({
@@ -299,7 +460,8 @@ export class SongsService {
 
     return {
       songs: resultSongs.map(
-        (song): SongSummary => this.mapEntityToSummary(song),
+        (song): SongSummary =>
+          this.mapEntityToSummary(song, requesterUserId, request.onlyPublic),
       ),
       nextCursor: hasMore
         ? this.buildCursor(resultSongs[resultSongs.length - 1])
@@ -316,6 +478,90 @@ export class SongsService {
   removeFavorite(request: FavoriteRequest): Promise<FavoriteResponse> {
     this.logger.log(`User ${request.userId} unliked song ${request.songId}`);
     return Promise.resolve({ success: true });
+  }
+
+  async removeSongOwnership(
+    request: RemoveSongOwnershipRequest,
+  ): Promise<RemoveSongOwnershipResponse> {
+    if (!request.userId) {
+      this.throwInvalidArgument('USER_ID_REQUIRED');
+    }
+    if (!request.songId) {
+      this.throwInvalidArgument('SONG_ID_REQUIRED');
+    }
+
+    let cleanupPayload:
+      | {
+          song_id: string;
+          source_object_path: string;
+          encrypted_file_path: string;
+        }
+      | undefined;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.songOwner.deleteMany({
+        where: {
+          songId: request.songId,
+          userId: request.userId,
+        },
+      });
+
+      const ownerCount = await tx.songOwner.count({
+        where: { songId: request.songId },
+      });
+
+      if (ownerCount === 0) {
+        const song = await tx.song.findUnique({
+          where: { id: request.songId },
+          select: {
+            id: true,
+            sourceObjectPath: true,
+            encryptedFilePath: true,
+          },
+        });
+
+        await tx.song.deleteMany({
+          where: { id: request.songId },
+        });
+
+        if (song) {
+          cleanupPayload = {
+            song_id: song.id,
+            source_object_path: song.sourceObjectPath || '',
+            encrypted_file_path: song.encryptedFilePath || '',
+          };
+        }
+      }
+    });
+
+    if (cleanupPayload) {
+      try {
+        await this.redis.lpush(
+          SONG_ASSET_CLEANUP_QUEUE,
+          JSON.stringify(cleanupPayload),
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : String(error);
+        await this.outboxRepo().upsert({
+          where: { songId: cleanupPayload.song_id },
+          update: {
+            sourceObjectPath: cleanupPayload.source_object_path,
+            encryptedFilePath: cleanupPayload.encrypted_file_path,
+            lastError: message,
+          },
+          create: {
+            songId: cleanupPayload.song_id,
+            sourceObjectPath: cleanupPayload.source_object_path,
+            encryptedFilePath: cleanupPayload.encrypted_file_path,
+            lastError: message,
+          },
+        });
+      }
+    }
+
+    this.logger.log(`User ${request.userId} unlinked ownership for song ${request.songId}`);
+    return { success: true };
   }
 
   getPlaylist(request: GetPlaylistRequest): Promise<GetPlaylistResponse> {
@@ -349,28 +595,40 @@ export class SongsService {
     });
   }
 
-  private mapEntityToSummary(entity: SongSummaryEntity): SongSummary {
+  private mapEntityToSummary(
+    entity: SongSummaryEntity,
+    requesterUserId: string,
+    onlyPublic: boolean,
+  ): SongSummary {
+    const ownerProfile =
+      (!onlyPublic && requesterUserId
+        ? entity.owners.find((owner) => owner.userId === requesterUserId)
+        : undefined) ?? entity.owners.find((owner) => owner.isPublic) ?? entity.owners[0];
+
     return {
       id: entity.id,
-      title: entity.title,
-      artist: entity.artist,
-      album: entity.album,
-      coverUrl: entity.coverUrl || '',
-      isPublic: entity.isPublic,
+      title: ownerProfile?.title || '',
+      artist: ownerProfile?.artist || '',
+      album: ownerProfile?.album || '',
+      coverUrl: ownerProfile?.coverUrl || '',
+      isPublic: ownerProfile?.isPublic ?? false,
       status: entity.status,
       durationSec: entity.durationSec || 0,
       createdAt: entity.createdAt.getTime(),
     };
   }
 
-  private mapEntityToDetail(entity: SongDetailEntity): SongDetail {
+  private mapEntityToDetail(
+    entity: SongDetailEntity,
+    ownerProfile: SongDetailEntity['owners'][number],
+  ): SongDetail {
     return {
       id: entity.id,
-      title: entity.title,
-      artist: entity.artist,
-      album: entity.album,
-      uploaderId: entity.uploaderId,
-      isPublic: entity.isPublic,
+      title: ownerProfile.title || '',
+      artist: ownerProfile.artist || '',
+      album: ownerProfile.album || '',
+      uploaderId: ownerProfile.userId,
+      isPublic: ownerProfile.isPublic,
       status: entity.status,
       encryptedFilePath: entity.encryptedFilePath || '',
       durationSec: entity.durationSec || 0,
@@ -409,6 +667,12 @@ export class SongsService {
 
   private buildProcessedObjectPath(songId: string) {
     return `processed/${songId}.m4a`;
+  }
+
+  private outboxRepo(): AssetCleanupOutboxRepo {
+    return (
+      this.prisma as unknown as { assetCleanupOutbox: AssetCleanupOutboxRepo }
+    ).assetCleanupOutbox;
   }
 
   private throwInvalidArgument(message: string): never {
