@@ -43,6 +43,10 @@ const songSummarySelect = {
       artist: true,
       album: true,
       coverUrl: true,
+      createdAt: true,
+    },
+    orderBy: {
+      createdAt: 'asc',
     },
   },
 } as const;
@@ -65,6 +69,10 @@ const songDetailSelect = {
       artist: true,
       album: true,
       coverUrl: true,
+      createdAt: true,
+    },
+    orderBy: {
+      createdAt: 'asc',
     },
   },
 } as const;
@@ -209,11 +217,6 @@ export class SongsService {
 
       const savedSong = await this.prisma.song.create({
         data: {
-          title: request.title,
-          artist: request.artist,
-          album: request.album,
-          uploaderId: request.uploaderId,
-          isPublic: request.isPublic ?? true,
           sourceObjectPath: request.sourceObjectPath,
           checksum: request.checksum,
           fileSizeBytes: BigInt(request.fileSizeBytes ?? 0),
