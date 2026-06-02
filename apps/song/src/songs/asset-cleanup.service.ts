@@ -51,6 +51,7 @@ export class AssetCleanupService
   private readonly maxRetries: number;
   private readonly baseBackoffMs: number;
   private readonly r2: S3Client;
+  private readonly blockingRedis: Redis;
   private running = false;
 
   constructor(
@@ -58,6 +59,7 @@ export class AssetCleanupService
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
   ) {
+    this.blockingRedis = this.redis.duplicate();
     this.bucket = this.configService.getOrThrow<string>('R2_BUCKET');
     this.maxRetries = this.readNumber('SONG_ASSET_CLEANUP_MAX_RETRIES', 5, 1);
     this.baseBackoffMs = this.readNumber(
@@ -82,14 +84,21 @@ export class AssetCleanupService
     void this.consumeLoop();
   }
 
-  onModuleDestroy(): void {
+  async onModuleDestroy(): Promise<void> {
     this.running = false;
+
+    await this.blockingRedis.quit().catch(() => {
+      this.blockingRedis.disconnect(false);
+    });
   }
 
   private async consumeLoop(): Promise<void> {
     while (this.running) {
       try {
-        const result = await this.redis.blpop(SONG_ASSET_CLEANUP_QUEUE, 5);
+        const result = await this.blockingRedis.blpop(
+          SONG_ASSET_CLEANUP_QUEUE,
+          5,
+        );
         if (result) {
           const [, message] = result;
           const job = JSON.parse(message) as AssetCleanupJob;
@@ -113,7 +122,9 @@ export class AssetCleanupService
     try {
       await this.deleteIfPresent(job.source_object_path);
       await this.deleteIfPresent(job.encrypted_file_path);
-      this.logger.log(`Asset cleanup completed for song ${job.song_id}`);
+      this.logger.log(
+        `Asset cleanup completed for song ${job.song_id} bucket=${this.bucket} source=${job.source_object_path || '<empty>'} encrypted=${job.encrypted_file_path || '<empty>'}`,
+      );
     } catch (error) {
       const retryCount = job.retry_count ?? 0;
       if (retryCount >= this.maxRetries) {
@@ -151,6 +162,9 @@ export class AssetCleanupService
         await this.outboxRepo().delete({
           where: { id: row.id },
         });
+        this.logger.log(
+          `Asset cleanup outbox completed for song ${row.songId} bucket=${this.bucket} source=${row.sourceObjectPath || '<empty>'} encrypted=${row.encryptedFilePath || '<empty>'}`,
+        );
       } catch (error) {
         const nextAttempts = row.attempts + 1;
         const message =
@@ -172,6 +186,7 @@ export class AssetCleanupService
   private async deleteIfPresent(objectKey?: string) {
     const key = objectKey?.trim();
     if (!key) return;
+    this.logger.log(`Deleting R2 object bucket=${this.bucket} key=${key}`);
     await this.r2.send(
       new DeleteObjectCommand({
         Bucket: this.bucket,

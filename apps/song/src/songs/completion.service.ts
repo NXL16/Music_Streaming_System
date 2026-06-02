@@ -30,12 +30,15 @@ export class CompletionService
   implements OnApplicationBootstrap, OnModuleDestroy
 {
   private readonly logger = new Logger(CompletionService.name);
+  private readonly blockingRedis: Redis;
   private running = false;
 
   constructor(
     @Inject('REDIS_INSTANCE') private readonly redis: Redis,
     private readonly songsService: SongsService,
-  ) {}
+  ) {
+    this.blockingRedis = this.redis.duplicate();
+  }
 
   onApplicationBootstrap() {
     this.running = true;
@@ -45,15 +48,15 @@ export class CompletionService
   async onModuleDestroy(): Promise<void> {
     this.running = false;
 
-    await this.redis.quit().catch(() => {
-      this.redis.disconnect(false);
+    await this.blockingRedis.quit().catch(() => {
+      this.blockingRedis.disconnect(false);
     });
   }
 
   private async consumeLoop(): Promise<void> {
     while (this.running) {
       try {
-        const result = await this.redis.blpop(SONG_COMPLETION_QUEUE, 0);
+        const result = await this.blockingRedis.blpop(SONG_COMPLETION_QUEUE, 5);
 
         if (!result) {
           continue;

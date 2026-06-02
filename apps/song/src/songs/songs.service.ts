@@ -353,10 +353,9 @@ export class SongsService {
     }
 
     const requesterUserId = request.requesterUserId?.trim() || '';
-    const ownerProfile =
-      (requesterUserId
-        ? song.owners.find((owner) => owner.userId === requesterUserId)
-        : undefined) ?? song.owners.find((owner) => owner.isPublic);
+    const ownerProfile = requesterUserId
+      ? song.owners.find((owner) => owner.userId === requesterUserId)
+      : song.owners.find((owner) => owner.isPublic);
 
     if (!ownerProfile) {
       this.throwPermissionDenied('SONG_ACCESS_DENIED');
@@ -540,6 +539,9 @@ export class SongsService {
           SONG_ASSET_CLEANUP_QUEUE,
           JSON.stringify(cleanupPayload),
         );
+        this.logger.log(
+          `Queued asset cleanup for song ${cleanupPayload.song_id} source=${cleanupPayload.source_object_path || '<empty>'} encrypted=${cleanupPayload.encrypted_file_path || '<empty>'}`,
+        );
       } catch (error) {
         const message =
           error instanceof Error ? error.message : String(error);
@@ -557,6 +559,9 @@ export class SongsService {
             lastError: message,
           },
         });
+        this.logger.warn(
+          `Stored asset cleanup outbox for song ${cleanupPayload.song_id} after queue failure: ${message}`,
+        );
       }
     }
 
