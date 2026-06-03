@@ -6,6 +6,7 @@ import { ThrottlerExceptionFilter } from './common/filters/throttler-exception.f
 import { ValidationExceptionFilter } from './common/filters/validation-exception.filter';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { GrpcExceptionFilter } from './common/filters/grpc-exception.filter';
+import cookieParser from 'cookie-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -15,6 +16,8 @@ async function bootstrap() {
   const host = configService.getOrThrow<string>('API_HOST');
   const port = Number(configService.getOrThrow<string>('API_PORT'));
   const prefix = configService.getOrThrow<string>('API_PREFIX');
+
+  app.use(cookieParser());
 
   if (corsOrigin.trim() === '*') {
     throw new Error('CORS_ORIGIN không được là "*" khi credentials được bật');

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -9,10 +10,14 @@ import {
   Post,
   Query,
   Req,
+  Res,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { JwtUser } from '@musical/shared-types';
+import type { AuthResponse } from '@musical/shared-proto';
+import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
@@ -42,13 +47,22 @@ import { SetUserRoleDto } from './dto/set-user-role.dto';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  private static readonly REFRESH_COOKIE_NAME = 'refresh_token';
+
+  constructor(
+    private readonly authService: AuthService,
+    private readonly configService: ConfigService,
+  ) {}
 
   @Post('signup')
-  async signup(@Body() signupDto: SignupDto) {
+  async signup(
+    @Body() signupDto: SignupDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const data = await this.authService.signUp(signupDto);
+    this.setRefreshTokenCookie(res, data);
     return this.formatResponse(
-      data,
+      this.withoutRefreshToken(data),
       'AUTH_SIGNUP_SUCCESS',
       'Đăng ký thành công',
     );
@@ -56,19 +70,24 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  async login(@Body() loginDto: LoginDto) {
+  async login(
+    @Body() loginDto: LoginDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const data = await this.authService.login(loginDto);
 
     if (data.twoFactorRequired) {
       return this.formatResponse(
-        data,
+        this.withoutRefreshToken(data),
         'AUTH_2FA_REQUIRED',
         'Vui lòng nhập mã xác thực 2FA để hoàn tất đăng nhập',
       );
     }
 
+    this.setRefreshTokenCookie(res, data);
+
     return this.formatResponse(
-      data,
+      this.withoutRefreshToken(data),
       'AUTH_LOGIN_SUCCESS',
       'Đăng nhập thành công',
     );
@@ -76,14 +95,19 @@ export class AuthController {
 
   @Post('google/login')
   @HttpCode(HttpStatus.OK)
-  async loginWithGoogle(@Body() dto: GoogleLoginDto) {
+  async loginWithGoogle(
+    @Body() dto: GoogleLoginDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const data = await this.authService.loginWithGoogle({
       idToken: dto.idToken,
       deviceId: dto.deviceId,
     });
 
+    this.setRefreshTokenCookie(res, data);
+
     return this.formatResponse(
-      data,
+      this.withoutRefreshToken(data),
       'AUTH_GOOGLE_LOGIN_SUCCESS',
       'Đăng nhập Google thành công',
     );
@@ -91,10 +115,26 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  async refresh(@Body('refreshToken') refreshToken: string) {
+  async refresh(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const cookies = req.cookies as unknown as
+      | Record<string, string | undefined>
+      | undefined;
+    const refreshToken = cookies?.[AuthController.REFRESH_COOKIE_NAME];
+
+    if (!refreshToken) {
+      throw new UnauthorizedException({
+        code: 'REFRESH_TOKEN_MISSING',
+        message: 'Refresh token không tồn tại',
+      });
+    }
+
     const data = await this.authService.refreshToken({ refreshToken });
+    this.setRefreshTokenCookie(res, data);
     return this.formatResponse(
-      data,
+      this.withoutRefreshToken(data),
       'AUTH_REFRESH_SUCCESS',
       'Làm mới token thành công',
     );
@@ -115,15 +155,20 @@ export class AuthController {
 
   @Post('2fa/login')
   @HttpCode(HttpStatus.OK)
-  async verifyTwoFactorLogin(@Body() dto: VerifyTwoFactorLoginDto) {
+  async verifyTwoFactorLogin(
+    @Body() dto: VerifyTwoFactorLoginDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const data = await this.authService.verifyTwoFactorLogin({
       challengeId: dto.challengeId,
       code: dto.code ?? dto.credential,
       recoveryCode: dto.recoveryCode,
     });
 
+    this.setRefreshTokenCookie(res, data);
+
     return this.formatResponse(
-      data,
+      this.withoutRefreshToken(data),
       'AUTH_2FA_LOGIN_SUCCESS',
       'Xác thực 2FA thành công',
     );
@@ -307,7 +352,10 @@ export class AuthController {
   @Post('logout')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  async logout(@Req() req: Request) {
+  async logout(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const user = req.user as JwtUser;
     await this.authService.logout({
       userId: user.userId,
@@ -315,6 +363,8 @@ export class AuthController {
       accessJti: user.jti,
       accessExp: user.exp,
     });
+
+    this.clearRefreshTokenCookie(res);
 
     return this.formatResponse(
       null,
@@ -344,6 +394,14 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async logoutDevice(@Req() req: Request, @Body() dto: LogoutDeviceDto) {
     const user = req.user as JwtUser;
+
+    if (dto.deviceId === user.deviceId) {
+      throw new BadRequestException({
+        code: 'CURRENT_DEVICE_LOGOUT_NOT_ALLOWED',
+        message: 'Không thể đăng xuất thiết bị hiện tại',
+      });
+    }
+
     await this.authService.logoutDevice({
       userId: user.userId,
       deviceId: dto.deviceId,
@@ -359,9 +417,14 @@ export class AuthController {
   @Post('logout-all')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  async logoutAll(@Req() req: Request) {
+  async logoutAll(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const user = req.user as JwtUser;
     await this.authService.logoutAll({ userId: user.userId });
+
+    this.clearRefreshTokenCookie(res);
 
     return this.formatResponse(
       null,
@@ -496,5 +559,60 @@ export class AuthController {
       message,
       timestamp: new Date().toISOString(),
     };
+  }
+
+  private setRefreshTokenCookie(res: Response, data: AuthResponse) {
+    if (!data.refreshToken || data.twoFactorRequired) {
+      return;
+    }
+
+    res.cookie(AuthController.REFRESH_COOKIE_NAME, data.refreshToken, {
+      httpOnly: true,
+      secure: this.refreshCookieSecure(),
+      sameSite: 'lax',
+      path: this.refreshCookiePath(),
+      maxAge: this.refreshCookieMaxAgeMs(),
+    });
+  }
+
+  private clearRefreshTokenCookie(res: Response) {
+    res.clearCookie(AuthController.REFRESH_COOKIE_NAME, {
+      httpOnly: true,
+      secure: this.refreshCookieSecure(),
+      sameSite: 'lax',
+      path: this.refreshCookiePath(),
+    });
+  }
+
+  private withoutRefreshToken(data: AuthResponse) {
+    return {
+      accessToken: data.accessToken,
+      deviceId: data.deviceId,
+      expiresIn: data.expiresIn,
+      user: data.user,
+      twoFactorRequired: data.twoFactorRequired,
+      twoFactorChallengeId: data.twoFactorChallengeId,
+    };
+  }
+
+  private refreshCookiePath() {
+    const prefix = this.configService.get<string>('API_PREFIX') ?? '';
+    const normalizedPrefix = prefix.replace(/^\/+|\/+$/g, '');
+
+    return normalizedPrefix
+      ? `/${normalizedPrefix}/auth/refresh`
+      : '/auth/refresh';
+  }
+
+  private refreshCookieSecure() {
+    return this.configService.get<string>('AUTH_REFRESH_COOKIE_SECURE') === 'true';
+  }
+
+  private refreshCookieMaxAgeMs() {
+    const maxAgeDays = Number(
+      this.configService.getOrThrow<string>('AUTH_REFRESH_COOKIE_MAX_AGE_DAYS'),
+    );
+
+    return maxAgeDays * 24 * 60 * 60 * 1000;
   }
 }
