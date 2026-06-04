@@ -22,10 +22,10 @@ import type {
 } from '@musical/shared-proto';
 import { RequestUploadDto } from './dto/request-upload.dto';
 import { FinalizeUploadDto } from './dto/finalize-upload.dto';
-import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import type { Request } from 'express';
 import { JwtUser } from '@musical/shared-types';
 import { ConfigService } from '@nestjs/config';
+import { StrictJwtAuthGuard } from '../common/guards/strict-jwt-auth.guard';
 
 @Controller('songs')
 export class SongsController {
@@ -35,7 +35,7 @@ export class SongsController {
   ) {}
 
   @Post('request-upload')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(StrictJwtAuthGuard)
   @HttpCode(HttpStatus.CREATED)
   async requestUpload(@Req() req: Request, @Body() requestDto: RequestUploadDto) {
     const user = req.user as JwtUser;
@@ -74,7 +74,7 @@ export class SongsController {
   }
 
   @Get('me')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(StrictJwtAuthGuard)
   async findMine(
     @Req() req: Request,
     @Query('limit') limit?: string,
@@ -104,7 +104,7 @@ export class SongsController {
   }
 
   @Get('private/:id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(StrictJwtAuthGuard)
   async findOnePrivate(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as JwtUser;
     const request: GetSongRequest = {
@@ -133,7 +133,7 @@ export class SongsController {
   }
 
   @Delete(':id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(StrictJwtAuthGuard)
   async deleteSong(@Req() req: Request, @Param('id') songId: string) {
     const user = req.user as JwtUser;
     return await this.songsService.unlinkSong(songId, user.userId);
