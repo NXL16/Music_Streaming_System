@@ -6,6 +6,7 @@ import { getApiErrorMessage } from "@/lib/api/api-error";
 import { login } from "@/lib/auth/auth.api";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { getOrCreateDeviceId } from "@/lib/auth/device-id";
+import { saveTwoFactorChallengeId } from "@/lib/auth/two-factor-challenge-store";
 
 type LoginForm = {
   username: string;
@@ -47,9 +48,11 @@ export function useLoginForm() {
       });
 
       if (result.data.twoFactorRequired) {
-        router.push(
-          `/login/2fa?challengeId=${result.data.twoFactorChallengeId}`,
-        );
+        if (result.data.twoFactorChallengeId) {
+          saveTwoFactorChallengeId(result.data.twoFactorChallengeId);
+        }
+
+        router.push("/login/2fa");
         return;
       }
 

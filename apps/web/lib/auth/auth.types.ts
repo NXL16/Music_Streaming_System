@@ -43,3 +43,8 @@ export type LoginPayload = {
   password: string;
   deviceId?: string;
 };
+
+export type TwoFactorLoginPayload = {
+  challengeId: string;
+  credential: string;
+};

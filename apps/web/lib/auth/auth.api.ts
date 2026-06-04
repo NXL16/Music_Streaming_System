@@ -4,6 +4,7 @@ import type {
   AuthSession,
   LoginPayload,
   SignupPayload,
+  TwoFactorLoginPayload,
 } from "./auth.types";
 
 export async function signup(payload: SignupPayload) {
@@ -18,6 +19,15 @@ export async function signup(payload: SignupPayload) {
 export async function login(payload: LoginPayload) {
   const response = await http.post<ApiResponse<AuthSession>>(
     "/auth/login",
+    payload,
+  );
+
+  return response.data;
+}
+
+export async function verifyTwoFactorLogin(payload: TwoFactorLoginPayload) {
+  const response = await http.post<ApiResponse<AuthSession>>(
+    "/auth/2fa/login",
     payload,
   );
 
