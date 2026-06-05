@@ -1,7 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { ProtectedOnly } from "@/components/auth/protected-only";
+import { ChangePasswordDialog } from "@/components/profile/change-password-dialog";
+import { EditProfileDialog } from "@/components/profile/edit-profile-dialog";
+import { SessionsPanel } from "@/components/profile/sessions-panel";
 import { useProfile } from "@/lib/auth/use-profile";
 import { formatDateTime } from "@/lib/format/date";
 
@@ -26,6 +30,8 @@ function ProfileField({
 
 export default function ProfilePage() {
   const { user, loading, error } = useProfile();
+  const [editOpen, setEditOpen] = useState(false);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const avatarLetter = (user?.displayName || user?.username || "U")
     .charAt(0)
     .toUpperCase();
@@ -63,6 +69,22 @@ export default function ProfilePage() {
                   </p>
                 ) : null}
 
+                <button
+                  type="button"
+                  onClick={() => setEditOpen(true)}
+                  className="inline-flex justify-center rounded-2xl border border-[#ead4bd] px-5 py-3 font-bold transition hover:border-[#c45f36]"
+                >
+                  Edit profile
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setChangePasswordOpen(true)}
+                  className="inline-flex justify-center rounded-2xl border border-[#ead4bd] px-5 py-3 font-bold transition hover:border-[#c45f36]"
+                >
+                  Change password
+                </button>
+
                 <Link
                   href="/dashboard"
                   className="inline-flex justify-center rounded-2xl bg-[#23170f] px-5 py-3 font-bold text-white transition hover:bg-[#3a2a1f]"
@@ -83,9 +105,7 @@ export default function ProfilePage() {
                 <p className="text-xs font-bold uppercase tracking-[0.24em] text-[#b65f38]">
                   Username
                 </p>
-                <p className="mt-2 wrap-break-word font-black">
-                  {user?.username}
-                </p>
+                <p className="mt-2 wrap-break-word font-black">{user?.username}</p>
               </div>
 
               <div className="rounded-3xl bg-[#f7efe5] px-5 py-4">
@@ -149,7 +169,19 @@ export default function ProfilePage() {
               </p>
             </aside>
           </div>
+
+          <SessionsPanel />
         </section>
+
+        <EditProfileDialog
+          open={editOpen}
+          onClose={() => setEditOpen(false)}
+        />
+
+        <ChangePasswordDialog
+          open={changePasswordOpen}
+          onClose={() => setChangePasswordOpen(false)}
+        />
       </main>
     </ProtectedOnly>
   );

@@ -62,3 +62,30 @@ export type ResetPasswordPayload = {
   token: string;
   newPassword: string;
 };
+
+export type UpdateProfilePayload = {
+  displayName: string;
+  avatar?: string;
+  bio?: string;
+};
+
+export type ChangePasswordPayload = {
+  currentPassword: string;
+  newPassword: string;
+};
+
+export type SessionDevice = {
+  deviceId: string;
+  isCurrent: boolean;
+  ipAddress?: string;
+  userAgent?: string;
+  lastSeenAt: number;
+};
+
+export type ListSessionsResponse = {
+  sessions: SessionDevice[];
+};
+
+export type LogoutDevicePayload = {
+  deviceId: string;
+};

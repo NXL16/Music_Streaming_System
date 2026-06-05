@@ -9,6 +9,10 @@ import type {
   GoogleLoginPayload,
   ForgotPasswordPayload,
   ResetPasswordPayload,
+  UpdateProfilePayload,
+  ChangePasswordPayload,
+  ListSessionsResponse,
+  LogoutDevicePayload,
 } from "./auth.types";
 
 export async function signup(payload: SignupPayload) {
@@ -53,6 +57,24 @@ export async function getProfile() {
   return response.data;
 }
 
+export async function updateProfile(payload: UpdateProfilePayload) {
+  const response = await http.patch<ApiResponse<UserProfile>>(
+    "/auth/me",
+    payload,
+  );
+
+  return response.data;
+}
+
+export async function changePassword(payload: ChangePasswordPayload) {
+  const response = await http.post<ApiResponse<Record<string, never>>>(
+    "/auth/change-password",
+    payload,
+  );
+
+  return response.data;
+}
+
 export async function refreshSession() {
   const response = await http.post<ApiResponse<AuthSession>>("/auth/refresh");
 
@@ -80,6 +102,29 @@ export async function resetPassword(payload: ResetPasswordPayload) {
 export async function logout() {
   const response =
     await http.post<ApiResponse<Record<string, never>>>("/auth/logout");
+
+  return response.data;
+}
+
+export async function listSessions() {
+  const response =
+    await http.get<ApiResponse<ListSessionsResponse>>("/auth/sessions");
+
+  return response.data;
+}
+
+export async function logoutDevice(payload: LogoutDevicePayload) {
+  const response = await http.post<ApiResponse<Record<string, never>>>(
+    "/auth/logout-device",
+    payload,
+  );
+
+  return response.data;
+}
+
+export async function logoutAll() {
+  const response =
+    await http.post<ApiResponse<Record<string, never>>>("/auth/logout-all");
 
   return response.data;
 }
