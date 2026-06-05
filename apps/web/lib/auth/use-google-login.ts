@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { getApiErrorMessage } from "@/lib/api/api-error";
 import { loginWithGoogle } from "@/lib/auth/auth.api";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { getOrCreateDeviceId } from "@/lib/auth/device-id";
@@ -44,17 +43,14 @@ export function useGoogleLogin() {
   const setSession = useAuthStore((state) => state.setSession);
 
   const [googleLoading, setGoogleLoading] = useState(false);
-  const [googleError, setGoogleError] = useState("");
 
   async function startGoogleLogin() {
-    setGoogleError("");
     setGoogleLoading(true);
 
     try {
       const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 
       if (!clientId) {
-        setGoogleError("Missing Google client id.");
         setGoogleLoading(false);
         return;
       }
@@ -68,7 +64,7 @@ export function useGoogleLogin() {
         callback: async (response: GoogleCodeResponse) => {
           try {
             if (!response.code) {
-              setGoogleError("Google login failed.");
+              setGoogleLoading(false);
               return;
             }
 
@@ -89,32 +85,25 @@ export function useGoogleLogin() {
             setSession(result.data.accessToken, result.data.user);
             router.push("/");
           } catch (error) {
-            setGoogleError(
-              getApiErrorMessage(
-                error,
-                "Google login failed. Please try again.",
-              ),
-            );
+            console.error("Google login callback failed", error);
           } finally {
             setGoogleLoading(false);
           }
         },
-        error_callback: (popupError) => {
-          setGoogleError(popupError.type ?? "Google popup failed.");
+        error_callback: () => {
           setGoogleLoading(false);
         },
       });
 
       codeClient?.requestCode();
-    } catch {
-      setGoogleError("Cannot open Google login.");
+    } catch (error) {
+      console.error("Cannot start Google login", error);
       setGoogleLoading(false);
     }
   }
 
   return {
     googleLoading,
-    googleError,
     startGoogleLogin,
   };
 }

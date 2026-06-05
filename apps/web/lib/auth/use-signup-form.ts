@@ -54,7 +54,7 @@ export function useSignupForm() {
       router.push("/");
     } catch (error) {
       setError(
-        getApiErrorMessage(error, "Đăng nhập thất bại, vui lòng thử lại"),
+        getApiErrorMessage(error, "Đăng ký thất bại, vui lòng thử lại"),
       );
     } finally {
       setLoading(false);
