@@ -89,3 +89,7 @@ export type ListSessionsResponse = {
 export type LogoutDevicePayload = {
   deviceId: string;
 };
+
+export type VerifyEmailPayload = {
+  token: string;
+};

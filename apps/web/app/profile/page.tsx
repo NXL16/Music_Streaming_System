@@ -6,6 +6,7 @@ import { ProtectedOnly } from "@/components/auth/protected-only";
 import { ChangePasswordDialog } from "@/components/profile/change-password-dialog";
 import { EditProfileDialog } from "@/components/profile/edit-profile-dialog";
 import { SessionsPanel } from "@/components/profile/sessions-panel";
+import { useEmailVerificationRequest } from "@/lib/auth/use-email-verification-request";
 import { useProfile } from "@/lib/auth/use-profile";
 import { formatDateTime } from "@/lib/format/date";
 
@@ -30,6 +31,7 @@ function ProfileField({
 
 export default function ProfilePage() {
   const { user, loading, error } = useProfile();
+  const verificationRequest = useEmailVerificationRequest();
   const [editOpen, setEditOpen] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const avatarLetter = (user?.displayName || user?.username || "U")
@@ -115,6 +117,20 @@ export default function ProfilePage() {
                 <p className="mt-2 font-black">
                   {user?.emailVerified ? "Đã xác thực" : "Chưa xác thực"}
                 </p>
+                {!user?.emailVerified ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void verificationRequest.sendVerificationEmail()
+                    }
+                    disabled={verificationRequest.loading}
+                    className="mt-4 rounded-2xl bg-[#23170f] px-4 py-2 text-sm font-bold text-white transition hover:bg-[#3a2a1f] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {verificationRequest.loading
+                      ? "Đang gửi..."
+                      : "Gửi email xác thực"}
+                  </button>
+                ) : null}
               </div>
 
               <div className="rounded-3xl bg-[#f7efe5] px-5 py-4">
@@ -126,6 +142,18 @@ export default function ProfilePage() {
                 </p>
               </div>
             </div>
+
+            {verificationRequest.message ? (
+              <div className="mt-5 rounded-2xl bg-green-50 px-4 py-3 text-sm text-green-700">
+                {verificationRequest.message}
+              </div>
+            ) : null}
+
+            {verificationRequest.error ? (
+              <div className="mt-5 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
+                {verificationRequest.error}
+              </div>
+            ) : null}
           </div>
 
           <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_360px]">

@@ -13,6 +13,7 @@ import type {
   ChangePasswordPayload,
   ListSessionsResponse,
   LogoutDevicePayload,
+  VerifyEmailPayload,
 } from "./auth.types";
 
 export async function signup(payload: SignupPayload) {
@@ -125,6 +126,23 @@ export async function logoutDevice(payload: LogoutDevicePayload) {
 export async function logoutAll() {
   const response =
     await http.post<ApiResponse<Record<string, never>>>("/auth/logout-all");
+
+  return response.data;
+}
+
+export async function requestEmailVerification() {
+  const response = await http.post<ApiResponse<Record<string, never>>>(
+    "/auth/email/request-verification",
+  );
+
+  return response.data;
+}
+
+export async function verifyEmail(payload: VerifyEmailPayload) {
+  const response = await http.post<ApiResponse<UserProfile>>(
+    "/auth/email/verify",
+    payload,
+  );
 
   return response.data;
 }
