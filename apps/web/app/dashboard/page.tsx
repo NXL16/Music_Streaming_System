@@ -23,12 +23,21 @@ export default function DashboardPage() {
             Trang này chỉ user đã đăng nhập mới xem được.
           </p>
 
-          <Link
-            href="/"
-            className="mt-8 inline-flex rounded-2xl bg-[#23170f] px-5 py-3 font-bold text-white transition hover:bg-[#3a2a1f]"
-          >
-            Về trang chủ
-          </Link>
+          <div className="mt-8 flex flex-wrap gap-3">
+            <Link
+              href="/profile"
+              className="inline-flex rounded-2xl bg-[#23170f] px-5 py-3 font-bold text-white transition hover:bg-[#3a2a1f]"
+            >
+              Xem hồ sơ
+            </Link>
+
+            <Link
+              href="/"
+              className="inline-flex rounded-2xl border border-[#ead4bd] px-5 py-3 font-bold transition hover:border-[#c45f36]"
+            >
+              Về trang chủ
+            </Link>
+          </div>
         </section>
       </main>
     </ProtectedOnly>

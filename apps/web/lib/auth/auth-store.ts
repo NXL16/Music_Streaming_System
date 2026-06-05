@@ -10,6 +10,7 @@ type AuthStore = {
   status: AuthStatus;
   user: UserProfile | null;
   setSession: (accessToken: string, user: UserProfile) => void;
+  setUser: (user: UserProfile) => void;
   clearSession: () => void;
   setGuest: () => void;
 };
@@ -22,6 +23,12 @@ export const useAuthStore = create<AuthStore>((set) => ({
     setAccessToken(accessToken);
     set({
       status: "authenticated",
+      user,
+    });
+  },
+
+  setUser: (user) => {
+    set({
       user,
     });
   },

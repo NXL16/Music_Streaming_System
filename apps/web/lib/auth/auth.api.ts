@@ -2,6 +2,7 @@ import { http } from "@/lib/api/http";
 import type {
   ApiResponse,
   AuthSession,
+  UserProfile,
   SignupPayload,
   LoginPayload,
   TwoFactorLoginPayload,
@@ -42,6 +43,12 @@ export async function verifyTwoFactorLogin(payload: TwoFactorLoginPayload) {
     "/auth/2fa/login",
     payload,
   );
+
+  return response.data;
+}
+
+export async function getProfile() {
+  const response = await http.get<ApiResponse<UserProfile>>("/auth/me");
 
   return response.data;
 }
