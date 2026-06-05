@@ -220,17 +220,17 @@ export class AuthService {
 
   async login(request: LoginRequest): Promise<AuthResponse> {
     const normalizedRequest = normalizeAndValidateLoginRequest(request);
-    const { username, password, deviceId } = normalizedRequest;
+    const { identifier, password, deviceId } = normalizedRequest;
 
-    await this.assertRateLimit('login', username, LOGIN_POLICY);
+    await this.assertRateLimit('login', identifier, LOGIN_POLICY);
 
-    const user = await this.usersService.findAuthUserByUsername(username);
+    const user = await this.usersService.findAuthUserByIdentifier(identifier);
 
     if (!user || !(await argon2.verify(user.password, password))) {
       await this.writeAuditLog({
         action: 'AUTH_LOGIN',
         status: 'FAILURE',
-        metadata: { username },
+        metadata: { identifier },
       });
       throw new RpcException({
         code: status.UNAUTHENTICATED, // Mã 16: Lỗi xác thực
@@ -238,7 +238,7 @@ export class AuthService {
       });
     }
 
-    await this.redis.del(authRateLimitKey('login', username));
+    await this.redis.del(authRateLimitKey('login', identifier));
 
     if (!user.isActive) {
       await this.writeAuditLog({

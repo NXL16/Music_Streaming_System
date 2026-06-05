@@ -74,12 +74,32 @@ export function normalizeAndValidateSignUpRequest(
 export function normalizeAndValidateLoginRequest(
   request: LoginRequest,
 ): LoginRequest {
-  const username = request.username?.trim().toLowerCase();
+  const identifier = request.identifier?.trim().toLowerCase();
 
-  if (!username || username.length < 3 || username.length > 50) {
+  if (!identifier) {
     throw new RpcException({
       code: status.INVALID_ARGUMENT,
-      message: 'Username không hợp lệ',
+      message: 'Vui lòng nhập email hoặc tên đăng nhập',
+    });
+  }
+
+  const isEmail = identifier.includes('@');
+
+  if (isEmail) {
+    if (identifier.length > 255 || !EMAIL_REGEX.test(identifier)) {
+      throw new RpcException({
+        code: status.INVALID_ARGUMENT,
+        message: 'Email không hợp lệ',
+      });
+    }
+  } else if (
+    identifier.length < 3 ||
+    identifier.length > 50 ||
+    !USERNAME_REGEX.test(identifier)
+  ) {
+    throw new RpcException({
+      code: status.INVALID_ARGUMENT,
+      message: 'Tên đăng nhập không hợp lệ',
     });
   }
 
@@ -92,7 +112,7 @@ export function normalizeAndValidateLoginRequest(
 
   return {
     ...request,
-    username,
+    identifier,
   };
 }
 

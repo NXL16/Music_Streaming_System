@@ -152,11 +152,13 @@ export class UsersService {
   // ================================
   // AUTH LOOKUP (WITH PASSWORD)
   // ================================
-  async findAuthUserByUsername(
-    username: string,
+  async findAuthUserByIdentifier(
+    identifier: string,
   ): Promise<AuthUserRecord | null> {
-    return this.prisma.user.findUnique({
-      where: { username },
+    return this.prisma.user.findFirst({
+      where: {
+        OR: [{ username: identifier }, { email: identifier }],
+      },
     });
   }
 

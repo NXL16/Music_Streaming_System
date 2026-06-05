@@ -9,12 +9,12 @@ import { getOrCreateDeviceId } from "@/lib/auth/device-id";
 import { saveTwoFactorChallengeId } from "@/lib/auth/two-factor-challenge-store";
 
 type LoginForm = {
-  username: string;
+  identifier: string;
   password: string;
 };
 
 const initialLoginForm: LoginForm = {
-  username: "",
+  identifier: "",
   password: "",
 };
 

@@ -3,6 +3,7 @@
 import { GuestOnly } from "@/components/auth/guest-only";
 import { useLoginForm } from "@/lib/auth/use-login-form";
 import { useGoogleLogin } from "@/lib/auth/use-google-login";
+import Link from "next/link";
 
 export default function LoginPage() {
   const { form, error, loading, updateField, handleSubmit } = useLoginForm();
@@ -33,16 +34,29 @@ export default function LoginPage() {
           >
             <h2 className="text-2xl font-bold">Login</h2>
 
-            <label className="mt-6 block text-sm font-semibold">Username</label>
+            <label className="mt-6 block text-sm font-semibold">
+              Username or email
+            </label>
             <input
               className="mt-2 w-full rounded-2xl border border-[#ead4bd] px-4 py-3 outline-none focus:border-[#c45f36]"
-              value={form.username}
-              onChange={(event) => updateField("username", event.target.value)}
+              value={form.identifier}
+              onChange={(event) =>
+                updateField("identifier", event.target.value)
+              }
               required
-              minLength={3}
             />
 
-            <label className="mt-4 block text-sm font-semibold">Password</label>
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <label className="block text-sm font-semibold">Password</label>
+
+              <Link
+                href="/forgot-password"
+                className="text-sm font-semibold text-[#b65f38] hover:underline"
+              >
+                Forgot password?
+              </Link>
+            </div>
+
             <input
               type="password"
               className="mt-2 w-full rounded-2xl border border-[#ead4bd] px-4 py-3 outline-none focus:border-[#c45f36]"
