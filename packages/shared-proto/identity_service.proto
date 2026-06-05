@@ -47,8 +47,9 @@ message LoginRequest {
 }
 
 message LoginWithGoogleRequest {
-  string          id_token  = 1;
-  optional string device_id = 2;
+  string          id_token           = 1;
+  optional string device_id          = 2;
+  optional string authorization_code = 3;
 }
 
 message RefreshTokenRequest {

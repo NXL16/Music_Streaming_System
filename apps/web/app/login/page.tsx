@@ -2,9 +2,11 @@
 
 import { GuestOnly } from "@/components/auth/guest-only";
 import { useLoginForm } from "@/lib/auth/use-login-form";
+import { useGoogleLogin } from "@/lib/auth/use-google-login";
 
 export default function LoginPage() {
   const { form, error, loading, updateField, handleSubmit } = useLoginForm();
+  const { googleLoading, startGoogleLogin } = useGoogleLogin();
 
   return (
     <GuestOnly>
@@ -60,6 +62,19 @@ export default function LoginPage() {
               className="mt-6 w-full rounded-2xl bg-[#23170f] px-5 py-3 font-bold text-white transition hover:bg-[#3a2a1f] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? "Logging in..." : "Login"}
+            </button>
+
+            <div className="my-2 flex justify-center text-gray-500 font-bold">
+              or
+            </div>
+
+            <button
+              type="button"
+              onClick={startGoogleLogin}
+              disabled={googleLoading}
+              className="w-full rounded-2xl border border-[#ead4bd] px-5 py-3 font-bold transition hover:border-[#c45f36] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {googleLoading ? "Opening Google..." : "Continue with Google"}
             </button>
           </form>
         </section>

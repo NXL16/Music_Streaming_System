@@ -57,6 +57,7 @@ export class AuthController {
   ): Promise<AuthResponse> {
     return this.authService.loginWithGoogleInternal({
       idToken: request.idToken,
+      authorizationCode: request.authorizationCode,
       deviceId: request.deviceId,
     });
   }

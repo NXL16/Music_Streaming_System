@@ -20,6 +20,8 @@ type IdentityEnv = {
   TOKEN_CLEANUP_INTERVAL_MINUTES?: string;
   RECOVERY_CODE_RETENTION_DAYS?: string;
   GOOGLE_CLIENT_ID: string;
+  GOOGLE_CLIENT_SECRET: string;
+  GOOGLE_OAUTH_REDIRECT_URI: string;
   TWO_FACTOR_TRUST_DAYS_USER?: string;
   TWO_FACTOR_TRUST_DAYS_ADMIN?: string;
 };
@@ -42,6 +44,8 @@ const REQUIRED_KEYS: Array<keyof IdentityEnv> = [
   'PASSWORD_RESET_URL',
   'EMAIL_VERIFICATION_URL',
   'GOOGLE_CLIENT_ID',
+  'GOOGLE_CLIENT_SECRET',
+  'GOOGLE_OAUTH_REDIRECT_URI',
 ];
 
 export function validateEnv(config: Record<string, unknown>): IdentityEnv {

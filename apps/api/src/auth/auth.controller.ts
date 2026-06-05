@@ -100,7 +100,8 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const data = await this.authService.loginWithGoogle({
-      idToken: dto.idToken,
+      idToken: dto.idToken ?? '',
+      authorizationCode: dto.authorizationCode ?? dto.code,
       deviceId: dto.deviceId,
     });
 
@@ -352,10 +353,7 @@ export class AuthController {
   @Post('logout')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  async logout(
-    @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-  ) {
+  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const user = req.user as JwtUser;
     await this.authService.logout({
       userId: user.userId,
@@ -605,7 +603,9 @@ export class AuthController {
   }
 
   private refreshCookieSecure() {
-    return this.configService.get<string>('AUTH_REFRESH_COOKIE_SECURE') === 'true';
+    return (
+      this.configService.get<string>('AUTH_REFRESH_COOKIE_SECURE') === 'true'
+    );
   }
 
   private refreshCookieMaxAgeMs() {

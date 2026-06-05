@@ -294,25 +294,42 @@ export class AuthService {
   }
 
   async loginWithGoogleInternal(input: {
-    idToken: string;
+    idToken?: string;
+    authorizationCode?: string;
     deviceId?: string;
   }): Promise<AuthResponse> {
-    if (!input.idToken) {
+    if (!input.idToken && !input.authorizationCode) {
       throw new RpcException({
         code: status.INVALID_ARGUMENT,
-        message: 'idToken là bắt buộc',
+        message: 'Google credential là bắt buộc',
       });
     }
 
     const clientId = this.configService.getOrThrow<string>('GOOGLE_CLIENT_ID');
 
+    let idToken = input.idToken;
+
+    if (!idToken && input.authorizationCode) {
+      idToken = await this.exchangeGoogleAuthorizationCode(
+        input.authorizationCode,
+      );
+    }
+
+    if (!idToken) {
+      throw new RpcException({
+        code: status.UNAUTHENTICATED,
+        message: 'Google token không hợp lệ',
+      });
+    }
+
     let payload: TokenPayload | undefined;
 
     try {
       const ticket = await this.googleClient.verifyIdToken({
-        idToken: input.idToken,
+        idToken,
         audience: clientId,
       });
+
       payload = ticket.getPayload();
     } catch {
       throw new RpcException({
@@ -1718,6 +1735,33 @@ export class AuthService {
     }
 
     return Math.floor(duration / 1000);
+  }
+
+  private async exchangeGoogleAuthorizationCode(code: string): Promise<string> {
+    const clientId = this.configService.getOrThrow<string>('GOOGLE_CLIENT_ID');
+    const clientSecret = this.configService.getOrThrow<string>(
+      'GOOGLE_CLIENT_SECRET',
+    );
+    const redirectUri = this.configService.getOrThrow<string>(
+      'GOOGLE_OAUTH_REDIRECT_URI',
+    );
+
+    const oauthClient = new OAuth2Client(clientId, clientSecret, redirectUri);
+
+    try {
+      const { tokens } = await oauthClient.getToken(code);
+
+      if (!tokens.id_token) {
+        throw new Error('Missing Google id_token');
+      }
+
+      return tokens.id_token;
+    } catch {
+      throw new RpcException({
+        code: status.UNAUTHENTICATED,
+        message: 'Google authorization code không hợp lệ',
+      });
+    }
   }
 
   private async writeAuditLog(params: {

@@ -2,9 +2,10 @@ import { http } from "@/lib/api/http";
 import type {
   ApiResponse,
   AuthSession,
-  LoginPayload,
   SignupPayload,
+  LoginPayload,
   TwoFactorLoginPayload,
+  GoogleLoginPayload,
 } from "./auth.types";
 
 export async function signup(payload: SignupPayload) {
@@ -19,6 +20,15 @@ export async function signup(payload: SignupPayload) {
 export async function login(payload: LoginPayload) {
   const response = await http.post<ApiResponse<AuthSession>>(
     "/auth/login",
+    payload,
+  );
+
+  return response.data;
+}
+
+export async function loginWithGoogle(payload: GoogleLoginPayload) {
+  const response = await http.post<ApiResponse<AuthSession>>(
+    "/auth/google/login",
     payload,
   );
 

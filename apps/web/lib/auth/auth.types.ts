@@ -48,3 +48,8 @@ export type TwoFactorLoginPayload = {
   challengeId: string;
   credential: string;
 };
+
+export type GoogleLoginPayload = {
+  code: string;
+  deviceId?: string;
+};
