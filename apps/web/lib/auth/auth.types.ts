@@ -39,7 +39,7 @@ export type SignupPayload = {
 };
 
 export type LoginPayload = {
-  username: string;
+  identifier: string;
   password: string;
   deviceId?: string;
 };
@@ -52,4 +52,13 @@ export type TwoFactorLoginPayload = {
 export type GoogleLoginPayload = {
   code: string;
   deviceId?: string;
+};
+
+export type ForgotPasswordPayload = {
+  email: string;
+};
+
+export type ResetPasswordPayload = {
+  token: string;
+  newPassword: string;
 };

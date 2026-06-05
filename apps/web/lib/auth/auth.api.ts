@@ -6,6 +6,8 @@ import type {
   LoginPayload,
   TwoFactorLoginPayload,
   GoogleLoginPayload,
+  ForgotPasswordPayload,
+  ResetPasswordPayload,
 } from "./auth.types";
 
 export async function signup(payload: SignupPayload) {
@@ -46,6 +48,24 @@ export async function verifyTwoFactorLogin(payload: TwoFactorLoginPayload) {
 
 export async function refreshSession() {
   const response = await http.post<ApiResponse<AuthSession>>("/auth/refresh");
+
+  return response.data;
+}
+
+export async function forgotPassword(payload: ForgotPasswordPayload) {
+  const response = await http.post<ApiResponse<{ success: boolean }>>(
+    "/auth/password/forgot",
+    payload,
+  );
+
+  return response.data;
+}
+
+export async function resetPassword(payload: ResetPasswordPayload) {
+  const response = await http.post<ApiResponse<Record<string, never>>>(
+    "/auth/password/reset",
+    payload,
+  );
 
   return response.data;
 }
