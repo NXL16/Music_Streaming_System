@@ -13,6 +13,7 @@ export function mapUserProfile(user: UserEntity): UserProfile {
     bio: user.bio ?? '',
     isActive: user.isActive,
     emailVerified: user.emailVerified,
+    twoFactorEnabled: user.twoFactorEnabled,
     lastLoginAt: user.lastLoginAt?.getTime(),
     updatedAt: user.updatedAt.getTime(),
   };

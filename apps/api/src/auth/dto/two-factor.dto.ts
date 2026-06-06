@@ -32,11 +32,6 @@ export class VerifyTwoFactorLoginDto {
 
   @IsOptional()
   @IsString()
-  @IsNotEmpty({ message: 'Mã xác thực là bắt buộc' })
-  credential?: string;
-
-  @IsOptional()
-  @IsString()
   @Matches(/^\d{6}$/, { message: totpCodeMessage })
   code?: string;
 
@@ -50,11 +45,6 @@ export class RegenerateTwoFactorRecoveryCodesDto {
   @IsString()
   @IsNotEmpty({ message: 'Mật khẩu là bắt buộc' })
   password!: string;
-
-  @IsOptional()
-  @IsString()
-  @IsNotEmpty({ message: 'Mã xác thực là bắt buộc' })
-  credential?: string;
 
   @IsOptional()
   @IsString()

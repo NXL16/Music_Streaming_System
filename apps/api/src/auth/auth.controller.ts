@@ -162,7 +162,7 @@ export class AuthController {
   ) {
     const data = await this.authService.verifyTwoFactorLogin({
       challengeId: dto.challengeId,
-      code: dto.code ?? dto.credential,
+      code: dto.code,
       recoveryCode: dto.recoveryCode,
     });
 
@@ -339,7 +339,7 @@ export class AuthController {
     const data = await this.authService.regenerateTwoFactorRecoveryCodes({
       userId: user.userId,
       password: dto.password,
-      code: dto.code ?? dto.credential,
+      code: dto.code,
       recoveryCode: dto.recoveryCode,
     });
 

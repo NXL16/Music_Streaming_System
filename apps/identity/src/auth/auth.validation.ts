@@ -224,19 +224,13 @@ export type ResolvedTwoFactorCredential = {
 export function resolveTwoFactorCredential(input: {
   code?: string;
   recoveryCode?: string;
-  credential?: string;
 }): ResolvedTwoFactorCredential {
-  const rawCode = input.code?.trim() ?? input.credential?.trim();
-  const rawRecoveryCode = input.recoveryCode?.trim();
-
-  const code = rawCode && /^\d{6}$/.test(rawCode) ? rawCode : undefined;
-  const recoveryCode =
-    rawRecoveryCode ??
-    (rawCode && !/^\d{6}$/.test(rawCode) ? rawCode : undefined);
+  const code = input.code?.trim();
+  const recoveryCode = input.recoveryCode?.trim();
 
   return {
-    code,
-    recoveryCode,
+    code: code || undefined,
+    recoveryCode: recoveryCode || undefined,
     isRecoveryFlow: Boolean(recoveryCode),
   };
 }
