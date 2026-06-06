@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { getApiErrorMessage } from "@/lib/api/api-error";
 import { verifyTwoFactorLogin } from "@/lib/auth/auth.api";
 import { useAuthStore } from "@/lib/auth/auth-store";
+import { resolveTwoFactorVerificationInput } from "@/lib/auth/two-factor-verification";
 import {
   clearTwoFactorChallengeId,
   getTwoFactorChallengeId,
@@ -14,7 +15,7 @@ export function useTwoFactorLoginForm() {
   const router = useRouter();
   const setSession = useAuthStore((state) => state.setSession);
 
-  const [credential, setCredential] = useState("");
+  const [verificationInput, setVerificationInput] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -41,7 +42,7 @@ export function useTwoFactorLoginForm() {
 
       const result = await verifyTwoFactorLogin({
         challengeId,
-        credential,
+        ...resolveTwoFactorVerificationInput(verificationInput),
       });
 
       clearTwoFactorChallengeId();
@@ -55,10 +56,10 @@ export function useTwoFactorLoginForm() {
   }
 
   return {
-    credential,
     error,
     loading,
-    setCredential,
+    verificationInput,
     handleSubmit,
+    setVerificationInput,
   };
 }

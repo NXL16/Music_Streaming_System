@@ -4,8 +4,13 @@ import { GuestOnly } from "@/components/auth/guest-only";
 import { useTwoFactorLoginForm } from "@/lib/auth/use-two-factor-login-form";
 
 export default function TwoFactorLoginPage() {
-  const { credential, error, loading, setCredential, handleSubmit } =
-    useTwoFactorLoginForm();
+  const {
+    error,
+    loading,
+    verificationInput,
+    handleSubmit,
+    setVerificationInput,
+  } = useTwoFactorLoginForm();
 
   return (
     <GuestOnly>
@@ -18,18 +23,19 @@ export default function TwoFactorLoginPage() {
           <h1 className="mt-4 text-3xl font-black">Enter 2FA code</h1>
 
           <p className="mt-3 text-sm text-[#705846]">
-            Open your authenticator app and enter the 6-digit code.
+            Enter your 6-digit authenticator code or a recovery code.
           </p>
 
           <form onSubmit={handleSubmit} className="mt-6">
-            <label className="block text-sm font-semibold">2FA code</label>
+            <label className="block text-sm font-semibold">
+              2FA code or recovery code
+            </label>
             <input
-              inputMode="numeric"
-              pattern="[0-9]{6}"
-              maxLength={6}
-              className="mt-2 w-full rounded-2xl border border-[#ead4bd] px-4 py-3 text-center text-2xl font-black tracking-[0.35em] outline-none focus:border-[#c45f36]"
-              value={credential}
-              onChange={(event) => setCredential(event.target.value)}
+              autoComplete="one-time-code"
+              className="mt-2 w-full rounded-2xl border border-[#ead4bd] px-4 py-3 text-center text-xl font-black tracking-[0.18em] outline-none focus:border-[#c45f36]"
+              value={verificationInput}
+              onChange={(event) => setVerificationInput(event.target.value)}
+              placeholder="123456 or XXXX-XXXX-XXXX-XXXX"
               required
             />
 

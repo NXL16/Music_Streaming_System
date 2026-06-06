@@ -14,6 +14,12 @@ import type {
   ListSessionsResponse,
   LogoutDevicePayload,
   VerifyEmailPayload,
+  BeginTwoFactorSetupResponse,
+  ConfirmTwoFactorSetupPayload,
+  ConfirmTwoFactorSetupResponse,
+  DisableTwoFactorPayload,
+  RegenerateTwoFactorRecoveryCodesPayload,
+  TwoFactorRecoveryCodesResponse,
 } from "./auth.types";
 
 export async function signup(payload: SignupPayload) {
@@ -46,6 +52,45 @@ export async function loginWithGoogle(payload: GoogleLoginPayload) {
 export async function verifyTwoFactorLogin(payload: TwoFactorLoginPayload) {
   const response = await http.post<ApiResponse<AuthSession>>(
     "/auth/2fa/login",
+    payload,
+  );
+
+  return response.data;
+}
+
+export async function beginTwoFactorSetup() {
+  const response = await http.post<ApiResponse<BeginTwoFactorSetupResponse>>(
+    "/auth/2fa/setup",
+  );
+
+  return response.data;
+}
+
+export async function confirmTwoFactorSetup(
+  payload: ConfirmTwoFactorSetupPayload,
+) {
+  const response = await http.post<ApiResponse<ConfirmTwoFactorSetupResponse>>(
+    "/auth/2fa/confirm",
+    payload,
+  );
+
+  return response.data;
+}
+
+export async function disableTwoFactor(payload: DisableTwoFactorPayload) {
+  const response = await http.post<ApiResponse<UserProfile>>(
+    "/auth/2fa/disable",
+    payload,
+  );
+
+  return response.data;
+}
+
+export async function regenerateTwoFactorRecoveryCodes(
+  payload: RegenerateTwoFactorRecoveryCodesPayload,
+) {
+  const response = await http.post<ApiResponse<TwoFactorRecoveryCodesResponse>>(
+    "/auth/2fa/recovery-codes/regenerate",
     payload,
   );
 

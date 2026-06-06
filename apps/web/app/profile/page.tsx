@@ -6,6 +6,7 @@ import { ProtectedOnly } from "@/components/auth/protected-only";
 import { ChangePasswordDialog } from "@/components/profile/change-password-dialog";
 import { EditProfileDialog } from "@/components/profile/edit-profile-dialog";
 import { SessionsPanel } from "@/components/profile/sessions-panel";
+import { TwoFactorPanel } from "@/components/profile/two-factor-panel";
 import { useEmailVerificationRequest } from "@/lib/auth/use-email-verification-request";
 import { useProfile } from "@/lib/auth/use-profile";
 import { formatDateTime } from "@/lib/format/date";
@@ -102,7 +103,7 @@ export default function ProfilePage() {
               </div>
             ) : null}
 
-            <div className="mt-6 grid gap-4 md:grid-cols-3">
+            <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-3xl bg-[#f7efe5] px-5 py-4">
                 <p className="text-xs font-bold uppercase tracking-[0.24em] text-[#b65f38]">
                   Username
@@ -141,6 +142,8 @@ export default function ProfilePage() {
                   {user?.isActive ? "Đang hoạt động" : "Đã khóa"}
                 </p>
               </div>
+
+              <TwoFactorPanel user={user} />
             </div>
 
             {verificationRequest.message ? (

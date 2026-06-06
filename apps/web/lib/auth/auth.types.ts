@@ -17,6 +17,7 @@ export type UserProfile = {
   bio: string;
   isActive: boolean;
   emailVerified: boolean;
+  twoFactorEnabled: boolean;
   lastLoginAt?: number;
   updatedAt: number;
 };
@@ -46,7 +47,38 @@ export type LoginPayload = {
 
 export type TwoFactorLoginPayload = {
   challengeId: string;
-  credential: string;
+  code?: string;
+  recoveryCode?: string;
+};
+
+export type BeginTwoFactorSetupResponse = {
+  secret: string;
+  otpauthUrl: string;
+};
+
+export type ConfirmTwoFactorSetupPayload = {
+  code: string;
+};
+
+export type ConfirmTwoFactorSetupResponse = {
+  user: UserProfile;
+  recoveryCodes: string[];
+};
+
+export type DisableTwoFactorPayload = {
+  password: string;
+  code?: string;
+  recoveryCode?: string;
+};
+
+export type RegenerateTwoFactorRecoveryCodesPayload = {
+  password: string;
+  code?: string;
+  recoveryCode?: string;
+};
+
+export type TwoFactorRecoveryCodesResponse = {
+  recoveryCodes: string[];
 };
 
 export type GoogleLoginPayload = {
