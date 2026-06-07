@@ -1,13 +1,7 @@
 import type { Metadata } from "next";
-import { Geist_Mono } from "next/font/google";
 import { AuthProvider } from "@/components/auth/auth-provider";
-import "./globals.css";
 import "./sf-pro.css";
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin", "latin-ext"],
-});
+import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Musical App",
@@ -20,10 +14,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="vi"
-      className={`${geistMono.variable} h-full antialiased`}
-    >
+    <html lang="vi" className="h-full antialiased">
       <body className="min-h-full flex flex-col">
         <AuthProvider>{children}</AuthProvider>
       </body>
