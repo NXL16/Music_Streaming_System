@@ -1,9 +1,16 @@
 @import "tailwindcss";
 
 :root {
+  --apple-music-font: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --default-font-family: var(--apple-music-font);
+  --font-sans: var(--apple-music-font);
+}
+
+:root {
   --background: #ffffff;
   --foreground: #171717;
   --z-web-chrome: 1000;
+  --z-default: 1;
 
   --systemPrimary: rgb(29, 29, 31);
   --systemSecondary: rgba(60, 60, 67, 0.6);
@@ -17,45 +24,148 @@
   --glassMaterialBackground: rgba(255, 255, 255, 0.72);
   --glassMaterialInnerStrokeCombined: rgba(0, 0, 0, 0.12);
   --glassMaterialShadowColor: rgba(0, 0, 0, 0.1);
+
+  --glassMaterialInnerStroke: rgba(0, 0, 0, 0.05);
+  --glassMaterialInnerStrokeAlpha: 0.05;
+
   --navigation-border-color: var(--glassMaterialInnerStrokeCombined);
   --navigation-shadow-color: rgba(0, 0, 0, 0.1);
+  --web-navigation-width: 260px;
 
   --navigation-item-height: 36px;
   --navigation-item-icon-size: 24px;
-
   --title-navigation: 400 14px / 20px var(--apple-music-font);
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--apple-music-font);
-  --font-mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-    "Liberation Mono", "Courier New", monospace;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --systemPrimary: rgb(245, 245, 247);
+    --background: #1f1f1f;
+    --foreground: #ffffff;
+
+    --systemPrimary: hsla(0, 0%, 100%, .92);
     --systemSecondary: rgba(235, 235, 245, 0.6);
+    --systemPrimary-vibrant: #f5f5f7;
+    --systemBlue: #0a84ff;
+    --keyColor: #fa2d48;
 
     --mobileNavigationBG: rgba(31, 31, 34, 0.8);
     --navSidebarBG: rgba(38, 38, 41, 0.82);
-    --navSidebarSelectedState: rgba(255, 255, 255, 0.14);
+    --navSidebarSelectedState: hsla(0, 0%, 100%, .05);
+    --navigation-border-color: var(--glassMaterialInnerStrokeCombined);
     --labelDivider: rgba(255, 255, 255, 0.12);
 
     --glassMaterialBackground: rgba(38, 38, 40, 0.6);
     --glassMaterialInnerStrokeCombined: hsla(0, 0%, 100%, 0.2);
     --glassMaterialShadowColor: rgba(0, 0, 0, 0.2);
-    --navigation-border-color: var(--glassMaterialInnerStrokeCombined);
+
+    --glassMaterialInnerStroke: #fff;
+    --glassMaterialInnerStrokeAlpha: 0.2;
+
     --navigation-shadow-color: rgba(0, 0, 0, 0.2);
+    --web-navigation-width: 260px;
+    --z-web-chrome: 9901;
+    --z-default: 1;
   }
 }
 
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--apple-music-font);
+  --font-mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+html,
 body {
+  font-family: var(--apple-music-font);
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--apple-music-font);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+apple-tv-plus-player,
+apple-music-video-player,
+amp-chrome-player,
+amp-footer-player,
+apple-music-card-player,
+amp-lyrics,
+amp-user-menu,
+amp-playback-controls-unified,
+apple-music-artwork-lockup,
+apple-music-progress,
+apple-music-volume,
+amp-add-to-library,
+amp-jump-to-live-control,
+amp-playback-controls-autoplay,
+amp-playback-controls-mute,
+amp-volume-control-unified,
+apple-music-radio-column-player,
+amp-ambient-video,
+amp-artwork,
+amp-background-video,
+amp-eq-bars,
+amp-footer-player-metadata,
+amp-footer-player-progress,
+amp-loading-spinner,
+amp-lyrics-display-header,
+amp-playback-controls-pip,
+amp-playback-time,
+amp-podcast-keyboard-controls,
+amp-sign-in,
+amp-transition,
+amp-lyrics-display-footer,
+amp-lyrics-display-instrumental-line,
+amp-lyrics-display-synced-line,
+amp-lyrics-display-time-synced,
+amp-lyrics-display-static,
+amp-chrome-volume,
+amp-embed-notification,
+amp-skip-intro,
+amp-up-next,
+apple-music-artwork,
+amp-more-menu,
+amp-more-menu-item,
+amp-user-avatar,
+amp-volume-control,
+amp-playback-controls-progress-range,
+amp-icon,
+amp-playback-controls-skip,
+amp-playback-controls-play,
+amp-lcd-metadata,
+amp-playback-controls-item-skip,
+amp-playback-controls-repeat,
+amp-playback-controls-shuffle,
+amp-marquee-text,
+amp-lcd,
+amp-podcast-playback-controls,
+apple-music-playback-controls,
+amp-playback-controls-speed,
+amp-lcd-progress,
+amp-overlay,
+amp-playback-controls-progress,
+amp-product-placement-overlay-ui,
+amp-pse-overlay-ui,
+amp-rating-overlay-ui,
+amp-contextual-menu-button,
+amp-contextual-menu,
+amp-contextual-menu-item,
+amp-contextual-menu-scrim,
+amp-video-player-internal,
+amp-window-takeover,
+amp-captions-control,
+amp-tv-overlay,
+amp-airplay-control,
+amp-audio-tracks-control,
+amp-playback-controls-exit,
+amp-playback-controls-full-screen,
+amp-video-keyboard-controls,
+amp-video-player {
+  visibility: hidden;
+}
+
+[hydrated] {
+  visibility: inherit;
 }
 
 .cinema-splash {
