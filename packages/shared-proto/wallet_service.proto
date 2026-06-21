@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package wallet_service;
+
+option go_package = "Music_Streaming_System/packages/shared-proto/wallet";
+
+service WalletService {
+  rpc CreateWallet (CreateWalletRequest) returns (CreateWalletResponse);
+  rpc GetBalance (GetBalanceRequest) returns (GetBalanceResponse);
+  rpc DebitWallet (DebitWalletRequest) returns (DebitWalletResponse);
+  rpc CreateDepositOrder (DepositOrderRequest) returns (DepositOrderResponse);
+}
+
+message CreateWalletRequest {
+  string user_id = 1;
+}
+
+message CreateWalletResponse {
+  string status  = 1;
+  string message = 2;
+}
+
+message GetBalanceRequest { string user_id = 1; }
+
+message GetBalanceResponse { int64 coin_balance = 1; int64 frozen_balance = 2; }
+
+message DebitWalletRequest {
+  string user_id         = 1;
+  int64  amount          = 2;
+  string idempotency_key = 3;
+  string description     = 4;
+}
+
+message DebitWalletResponse { string transaction_id = 1; string status = 2; }
+
+message DepositOrderRequest { string user_id = 1; int64 amount_vnd = 2; }
+
+message DepositOrderResponse { string order_id = 1; string payment_url = 2; }
