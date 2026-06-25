@@ -4,10 +4,12 @@ import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { UsersModule } from '../users/users.module';
+import { WalletClientModule } from '../wallet/wallet-client.module';
 
 @Module({
   imports: [
     UsersModule,
+    WalletClientModule,
     JwtModule.registerAsync({
       useFactory: (configService: ConfigService) => ({
         secret: configService.get<string>('JWT_ACCESS_SECRET'),

@@ -61,6 +61,7 @@ import {
 } from './auth-token.util';
 import { MailService } from '../common/mail/mail.service';
 import { OAuth2Client, TokenPayload } from 'google-auth-library';
+import { WalletClientService } from '../wallet/wallet-client.service';
 
 type TwoFactorChallenge = {
   userId: string;
@@ -152,6 +153,7 @@ export class AuthService {
     private jwtService: JwtService,
     private configService: ConfigService,
     private readonly mailService: MailService,
+    private readonly walletClientService: WalletClientService,
     @Inject('REDIS_INSTANCE') private readonly redis: Redis,
   ) {}
 
@@ -169,6 +171,8 @@ export class AuthService {
         password: hashedPassword,
         displayName,
       });
+
+      await this.walletClientService.createWalletForUser(newUser.id);
 
       const finalDeviceId = deviceId || randomUUID();
       const tokens = this.generateTokens(newUser, finalDeviceId);
@@ -404,6 +408,8 @@ export class AuthService {
         });
 
         await this.usersService.linkGoogleAccount(user.id, providerSub, email);
+        await this.walletClientService.createWalletForUser(user.id);
+
         if (!user.emailVerified) {
           user = await this.usersService.markEmailVerified(user.id);
         }
