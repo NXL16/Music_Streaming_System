@@ -145,3 +145,17 @@ export const METADATA = {
   SERVICE: "MetadataService",
   PROTO_FILE: "metadata_service.proto",
 };
+
+// ========== WALLET PROTO ============
+export type {
+  WalletServiceClient,
+  DepositOrderRequest,
+  DepositOrderResponse,
+  GetBalanceResponse,
+} from "./generated/wallet_service";
+
+export const WALLET = {
+  PACKAGE: "wallet_service",
+  SERVICE: "WalletService",
+  PROTO_FILE: "wallet_service.proto",
+};

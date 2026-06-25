@@ -43,7 +43,10 @@ func main() {
 	walletService := service.NewWalletService(repo, db, cfg)
 
 	grpcHandler := deliveryGRPC.NewWalletGRPCHandler(walletService)
-	httpHandler := deliveryHTTP.NewMomoHTTPHandler(walletService)
+
+	// Khởi tạo các HTTP Handler cho MoMo và NF Bank
+	momoHandler := deliveryHTTP.NewMomoHTTPHandler(walletService)
+	nfbankHandler := deliveryHTTP.NewNFBankHandler(walletService, cfg)
 
 	stopChan := make(chan os.Signal, 1)
 	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
@@ -65,7 +68,9 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
 
-	router.POST("/v1/wallet/webhook/momo", httpHandler.HandleWebhook)
+	// Đăng ký các Route endpoint nhận webhook từ các đối tác cổng thanh toán
+	router.POST("/v1/wallet/webhook/momo", momoHandler.HandleWebhook)
+	router.POST("/v1/wallet/webhook/nfbank", nfbankHandler.HandleWebhook) // <-- Tuyến đường mới cho NF Bank
 
 	httpServer := &http.Server{
 		Addr:    cfg.HTTPPort,

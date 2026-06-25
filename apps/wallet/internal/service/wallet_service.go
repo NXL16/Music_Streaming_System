@@ -40,20 +40,18 @@ func (s *WalletService) GetConfig() *config.Config {
 	return s.cfg
 }
 
-// CreateWallet: Tạo ví mới cho user
+// CreateWallet
 func (s *WalletService) CreateWallet(ctx context.Context, req *walletpb.CreateWalletRequest) (*walletpb.CreateWalletResponse, error) {
 	if req.UserId == "" {
 		return nil, errors.New("user_id cannot be empty")
 	}
 
-	// Mở Transaction
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	// 1. Tạo ví trống với signature tạm thời
 	newWallet := &domain.Wallet{
 		UserID:        req.UserId,
 		CoinBalance:   0,
@@ -64,29 +62,27 @@ func (s *WalletService) CreateWallet(ctx context.Context, req *walletpb.CreateWa
 		Signature:     "TEMPORARY_SIGNATURE",
 	}
 
-	// 2. Insert vào DB để lấy ID thật do Postgres cấp dạng UUID
 	realID, err := s.repo.CreateWalletTx(ctx, tx, newWallet)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to insert wallet: %w", err)
 	}
 
-	// Nếu user đã có ví rồi (bị trùng do ON CONFLICT trả về id rỗng)
 	if realID == "" {
-		return nil, errors.New("Wallet already exists for this user")
+		return &walletpb.CreateWalletResponse{
+			Status:  "SUCCESS",
+			Message: "Wallet already exists",
+		}, nil
 	}
 
 	newWallet.ID = realID
 
-	// 3. Bây giờ đã có realID thật từ Postgres, tiến hành ký Signature chuẩn 100%
 	finalSignature := s.generateSignature(newWallet.ID, newWallet.UserID, newWallet.CoinBalance, newWallet.FrozenBalance, newWallet.Version, newWallet.CurrencyType, newWallet.Status)
 
-	// 4. Cập nhật chữ ký xịn này ngược lại vào dòng vừa tạo
 	err = s.repo.UpdateBalanceTx(ctx, tx, newWallet.ID, newWallet.CoinBalance, newWallet.Version, finalSignature, newWallet.Version)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to update final signature: %w", err)
 	}
 
-	// Đóng gói transaction thành công
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("Failed to commit tx: %w", err)
 	}
@@ -99,6 +95,10 @@ func (s *WalletService) CreateWallet(ctx context.Context, req *walletpb.CreateWa
 
 // GetBalance: Lấy số dư ví của User và xác thực chữ ký dữ liệu
 func (s *WalletService) GetBalance(ctx context.Context, req *walletpb.GetBalanceRequest) (*walletpb.GetBalanceResponse, error) {
+	if req.UserId == "" {
+		return nil, errors.New("user_id cannot be empty")
+	}
+
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, fmt.Errorf("Failed to begin read transaction: %w", err)
@@ -113,7 +113,6 @@ func (s *WalletService) GetBalance(ctx context.Context, req *walletpb.GetBalance
 		return nil, err
 	}
 
-	// Kiểm tra xem dữ liệu trong DB có bị sửa trộm không
 	if !s.verifySignature(wallet) {
 		return nil, errors.New("Critical error: Wallet data tampering detected")
 	}
@@ -124,7 +123,7 @@ func (s *WalletService) GetBalance(ctx context.Context, req *walletpb.GetBalance
 	}, nil
 }
 
-// DebitWallet: Trừ tiền từ ví (Thanh toán nội bộ bằng Coin) áp dụng Khóa bi quan và Idempotency Check
+// DebitWallet: Trừ tiền từ ví (Thanh toán nội bộ bằng Coin)
 func (s *WalletService) DebitWallet(ctx context.Context, req *walletpb.DebitWalletRequest) (*walletpb.DebitWalletResponse, error) {
 	if req.Amount <= 0 {
 		return nil, errors.New("Amount must be greater than zero")
@@ -133,19 +132,16 @@ func (s *WalletService) DebitWallet(ctx context.Context, req *walletpb.DebitWall
 		return nil, errors.New("idempotency_key is required")
 	}
 
-	// Khởi động Database Transaction
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to start write tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	// Bước A: Kiểm tra Idempotency chống trùng lặp giao dịch
 	var existID string
 	var existTxType string
 	err = tx.QueryRowContext(ctx, "SELECT id, transaction_type FROM wallet_transactions WHERE idempotency_key = $1", req.IdempotencyKey).Scan(&existID, &existTxType)
 	if err == nil {
-		// Đã xử lý thành công giao dịch này trước đó, trả về kết quả cũ luôn
 		return &walletpb.DebitWalletResponse{
 			TransactionId: fmt.Sprintf("TX-%s-%s", existTxType, existID),
 			Status:        "SUCCESS",
@@ -154,7 +150,6 @@ func (s *WalletService) DebitWallet(ctx context.Context, req *walletpb.DebitWall
 		return nil, fmt.Errorf("Failed to check idempotency key: %w", err)
 	}
 
-	// Bước B: Đọc ví và Lock dòng dữ liệu (Pessimistic Locking - SELECT FOR UPDATE)
 	wallet, err := s.repo.GetByUserIdForUpdateTx(ctx, tx, req.UserId)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -163,29 +158,24 @@ func (s *WalletService) DebitWallet(ctx context.Context, req *walletpb.DebitWall
 		return nil, fmt.Errorf("Failed to get wallet: %w", err)
 	}
 
-	// Bước C: Xác thực chữ ký an toàn dữ liệu
 	if !s.verifySignature(wallet) {
 		return nil, errors.New("Critical: Secure signature validation failed")
 	}
 
-	// Bước D: Check số dư tài khoản
 	if wallet.CoinBalance < req.Amount {
 		return nil, errors.New("Insufficient balance")
 	}
 
-	// Bước E: Tính toán dữ liệu mới
 	balanceBefore := wallet.CoinBalance
 	balanceAfter := wallet.CoinBalance - req.Amount
 	newVersion := wallet.Version + 1
 	newSignature := s.generateSignature(wallet.ID, wallet.UserID, balanceAfter, wallet.FrozenBalance, newVersion, wallet.CurrencyType, wallet.Status)
 
-	// Bước F: Update số dư ví tiền
 	err = s.repo.UpdateBalanceTx(ctx, tx, wallet.ID, balanceAfter, newVersion, newSignature, wallet.Version)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to update user balance: %w", err)
 	}
 
-	// Bước G: Ghi sổ cái lịch sử giao dịch (Ledger Log)
 	txLog := &domain.TransactionLog{
 		WalletID:        wallet.ID,
 		Amount:          req.Amount,
@@ -200,7 +190,6 @@ func (s *WalletService) DebitWallet(ctx context.Context, req *walletpb.DebitWall
 		return nil, fmt.Errorf("Failed to log wallet transaction: %w", err)
 	}
 
-	// Hoàn tất giao dịch thành công dữ liệu được commit vĩnh viễn vào DB
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("Failed to commit transaction: %w", err)
 	}
@@ -211,14 +200,41 @@ func (s *WalletService) DebitWallet(ctx context.Context, req *walletpb.DebitWall
 	}, nil
 }
 
-// CreateDepositOrder: Lưu đơn hàng nạp và gọi API sang MoMo để lấy link QR thanh toán
+// ==============================================================================
+// CORE GATEWAY ROUTER SECTION (IMPLEMENTING STRATEGY PATTERN / PAYMENT METHOD)
+// ==============================================================================
+
+// CreateDepositOrder: Hàm gRPC chính nhận diện và điều hướng cổng thanh toán tương ứng
+func (s *WalletService) CreateDepositOrder(ctx context.Context, req *walletpb.DepositOrderRequest) (*walletpb.DepositOrderResponse, error) {
+	if req.UserId == "" {
+		return nil, errors.New("user_id cannot be empty")
+	}
+
+	if req.AmountVnd <= 0 {
+		return nil, errors.New("Deposit amount must be greater than zero")
+	}
+
+	switch req.PaymentMethod {
+	case "MOMO":
+		return s.createMomoDepositOrder(ctx, req)
+	case "NFBANK":
+		return s.createNFBankDepositOrder(ctx, req)
+	default:
+		return nil, fmt.Errorf("Unsupported payment method: %s", req.PaymentMethod)
+	}
+}
+
+// ==============================================================================
+// MOMO PAYMENT GATEWAY IMPLEMENTATION
+// ==============================================================================
+
 type MomoRequest struct {
 	PartnerCode string `json:"partnerCode"`
 	RequestType string `json:"requestType"`
 	IPNUrl      string `json:"ipnUrl"`
 	RedirectUrl string `json:"redirectUrl"`
 	OrderId     string `json:"orderId"`
-	Amount      int64  `json:"amount"`
+	Amount      string `json:"amount"`
 	OrderInfo   string `json:"orderInfo"`
 	RequestId   string `json:"requestId"`
 	ExtraData   string `json:"extraData"`
@@ -232,12 +248,7 @@ type MomoResponse struct {
 	Message    string `json:"message"`
 }
 
-func (s *WalletService) CreateDepositOrder(ctx context.Context, req *walletpb.DepositOrderRequest) (*walletpb.DepositOrderResponse, error) {
-	if req.AmountVnd <= 0 {
-		return nil, errors.New("Deposit amount must be greater than zero")
-	}
-
-	// 1. Kiểm tra ví người dùng
+func (s *WalletService) createMomoDepositOrder(ctx context.Context, req *walletpb.DepositOrderRequest) (*walletpb.DepositOrderResponse, error) {
 	wallet, err := s.repo.GetByUserIdTx(ctx, nil, req.UserId)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -246,7 +257,6 @@ func (s *WalletService) CreateDepositOrder(ctx context.Context, req *walletpb.De
 		return nil, fmt.Errorf("Failed to find wallet: %w", err)
 	}
 
-	// 2. Lấy tỷ giá quy đổi coin động từ bảng coin_rates (nếu không có sẽ dùng fallback 1000 VND = 1 Coin)
 	var rateVnd int64 = 1000
 	var rateCoin int64 = 1
 	err = s.db.QueryRowContext(ctx, "SELECT amount_vnd, coin_amount FROM coin_rates WHERE is_active = true AND effective_at <= NOW() ORDER BY effective_at DESC LIMIT 1").Scan(&rateVnd, &rateCoin)
@@ -257,7 +267,6 @@ func (s *WalletService) CreateDepositOrder(ctx context.Context, req *walletpb.De
 	coinAmount := (req.AmountVnd * rateCoin) / rateVnd
 	orderCode := fmt.Sprintf("MOMO-%d", time.Now().UnixNano())
 
-	// 3. Tạo bản ghi đơn hàng nạp với trạng thái PENDING
 	order := &domain.BankPaymentOrder{
 		UserID:            req.UserId,
 		WalletID:          wallet.ID,
@@ -273,7 +282,6 @@ func (s *WalletService) CreateDepositOrder(ctx context.Context, req *walletpb.De
 		return nil, fmt.Errorf("Failed to save payment order: %w", err)
 	}
 
-	// 4. Chuẩn bị gọi đối tác MoMo thanh toán
 	orderInfo := fmt.Sprintf("Nạp %d Coin vào hệ thống Music Streaming", coinAmount)
 	requestId := orderCode
 	extraData := ""
@@ -281,35 +289,25 @@ func (s *WalletService) CreateDepositOrder(ctx context.Context, req *walletpb.De
 
 	rawSignature := fmt.Sprintf(
 		"accessKey=%s&amount=%s&extraData=%s&ipnUrl=%s&orderId=%s&orderInfo=%s&partnerCode=%s&redirectUrl=%s&requestId=%s&requestType=%s",
-		s.cfg.MomoAccessKey,
-		amountStr,
-		extraData,
-		s.cfg.MomoNotifyURL,
-		orderCode,
-		orderInfo,
-		s.cfg.MomoPartnerCode,
-		s.cfg.MomoRedirectURL,
-		requestId,
-		"captureWallet",
+		s.cfg.MomoAccessKey, amountStr, extraData, s.cfg.MomoNotifyURL, orderCode, orderInfo, s.cfg.MomoPartnerCode, s.cfg.MomoRedirectURL, requestId, "captureWallet",
 	)
 
 	h := hmac.New(sha256.New, []byte(s.cfg.MomoSecretKey))
 	h.Write([]byte(rawSignature))
 	momoSignature := hex.EncodeToString(h.Sum(nil))
 
-	momoBody := map[string]interface{}{
-		"partnerCode": s.cfg.MomoPartnerCode,
-		"accessKey":   s.cfg.MomoAccessKey,
-		"requestId":   requestId,
-		"amount":      amountStr,
-		"orderId":     orderCode,
-		"orderInfo":   orderInfo,
-		"redirectUrl": s.cfg.MomoRedirectURL,
-		"ipnUrl":      s.cfg.MomoNotifyURL,
-		"extraData":   extraData,
-		"requestType": "captureWallet",
-		"signature":   momoSignature,
-		"lang":        "vi",
+	momoBody := MomoRequest{
+		PartnerCode: s.cfg.MomoPartnerCode,
+		RequestId:   requestId,
+		Amount:      amountStr,
+		OrderId:     orderCode,
+		OrderInfo:   orderInfo,
+		RedirectUrl: s.cfg.MomoRedirectURL,
+		IPNUrl:      s.cfg.MomoNotifyURL,
+		ExtraData:   extraData,
+		RequestType: "captureWallet",
+		Signature:   momoSignature,
+		Lang:        "vi",
 	}
 
 	jsonValue, _ := json.Marshal(momoBody)
@@ -331,12 +329,11 @@ func (s *WalletService) CreateDepositOrder(ctx context.Context, req *walletpb.De
 	}
 
 	return &walletpb.DepositOrderResponse{
-		OrderId:    orderCode, // Trả về orderCode để client đối soát và lưu
+		OrderId:    orderCode,
 		PaymentUrl: momoResp.PayUrl,
 	}, nil
 }
 
-// ProcessDepositWebhook: Nhận phản hồi kết quả từ MoMo (IPN), cập nhật trạng thái đơn và cộng tiền ví thật
 func (s *WalletService) ProcessDepositWebhook(ctx context.Context, orderID string, amountVnd int64, resultCode int) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -344,7 +341,6 @@ func (s *WalletService) ProcessDepositWebhook(ctx context.Context, orderID strin
 	}
 	defer tx.Rollback()
 
-	// 1. Truy vấn thông tin đơn hàng trong database theo mã order_code (Sử dụng tx)
 	order, err := s.repo.GetDepositOrderByCodeTx(ctx, tx, orderID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -353,54 +349,44 @@ func (s *WalletService) ProcessDepositWebhook(ctx context.Context, orderID strin
 		return fmt.Errorf("Failed to check payment order: %w", err)
 	}
 
-	// 2. Cơ chế Webhook Idempotency: Nếu đơn hàng đã hoàn thành trước đó (thành công hoặc thất bại)
-	// Ta trả về nil (success) để báo cho MoMo ngừng gửi retry webhook.
 	if order.Status == domain.OrderStatusSuccess || order.Status == domain.OrderStatusFailed {
 		return nil
 	}
 
-	// Phân loại trạng thái mới
 	status := domain.OrderStatusFailed
 	if resultCode == 0 {
 		status = domain.OrderStatusSuccess
 	}
 
-	// 3. Cập nhật trạng thái đơn hàng (sử dụng tx)
 	err = s.repo.UpdateDepositOrderStatusByCodeTx(ctx, tx, order.OrderCode, status)
 	if err != nil {
 		return fmt.Errorf("Failed to update order status: %w", err)
 	}
 
-	// Nếu MoMo báo giao dịch thất bại, chỉ đổi trạng thái đơn nạp và dừng xử lý cộng tiền
 	if resultCode != 0 {
 		return tx.Commit()
 	}
 
-	// 4. Lấy thông tin ví và thực hiện khóa bản ghi (Row-level lock - SELECT FOR UPDATE)
 	wallet, err := s.repo.GetByUserIdForUpdateTx(ctx, tx, order.UserID)
 	if err != nil {
 		return fmt.Errorf("Failed to lock user wallet for deposit: %w", err)
 	}
 
-	// Xác thực tính toàn vẹn của chữ ký dòng trước khi tăng số dư
 	if !s.verifySignature(wallet) {
 		return errors.New("Critical: Secure signature validation failed during deposit")
 	}
 
-	// Tính toán các tham số mới cho số dư và bảo mật chữ ký
 	balanceBefore := wallet.CoinBalance
 	balanceAfter := wallet.CoinBalance + order.CoinAmount
 	newVersion := wallet.Version + 1
 	newSignature := s.generateSignature(wallet.ID, wallet.UserID, balanceAfter, wallet.FrozenBalance, newVersion, wallet.CurrencyType, wallet.Status)
 
-	// Ghi nhận số tiền mới vào DB
 	err = s.repo.UpdateBalanceTx(ctx, tx, wallet.ID, balanceAfter, newVersion, newSignature, wallet.Version)
 	if err != nil {
 		return fmt.Errorf("Deposit transaction conflict, failed to update balance: %w", err)
 	}
 
-	// Ghi lại biến động số dư vào Sổ cái lịch sử giao dịch (Ledger)
-	refID := order.ID // Khóa ngoại reference_id
+	refID := order.ID
 	txLog := &domain.TransactionLog{
 		WalletID:        wallet.ID,
 		Amount:          order.CoinAmount,
@@ -410,8 +396,190 @@ func (s *WalletService) ProcessDepositWebhook(ctx context.Context, orderID strin
 		Status:          "SUCCESS",
 		ReferenceType:   "MOMO_ORDER",
 		ReferenceID:     &refID,
-		IdempotencyKey:  order.OrderCode, // Sử dụng mã order_code làm khóa Idempotency
+		IdempotencyKey:  order.OrderCode,
 		Description:     fmt.Sprintf("Nạp thành công %d Coin từ MoMo", order.CoinAmount),
+	}
+	if err := s.repo.CreateTransactionTx(ctx, tx, txLog); err != nil {
+		return fmt.Errorf("Failed to log deposit transaction: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// ==============================================================================
+// NF BANK PAYMENT GATEWAY IMPLEMENTATION
+// ==============================================================================
+
+type NFBankCreateRequest struct {
+	PartnerCode string `json:"partnerCode"`
+	AccessKey   string `json:"accessKey"`
+	RequestId   string `json:"requestId"`
+	Amount      int64  `json:"amount"`
+	OrderId     string `json:"orderId"`
+	OrderInfo   string `json:"orderInfo"`
+	RedirectUrl string `json:"redirectUrl"`
+	IpnUrl      string `json:"ipnUrl"`
+	ExtraData   string `json:"extraData"`
+	Signature   string `json:"signature"`
+}
+
+type NFBankCreateResponse struct {
+	ResultCode int    `json:"resultCode"`
+	Message    string `json:"message"`
+	PayUrl     string `json:"payUrl"`
+}
+
+func (s *WalletService) createNFBankDepositOrder(ctx context.Context, req *walletpb.DepositOrderRequest) (*walletpb.DepositOrderResponse, error) {
+	wallet, err := s.repo.GetByUserIdTx(ctx, nil, req.UserId)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("Wallet not found for this user")
+		}
+		return nil, fmt.Errorf("Failed to find wallet: %w", err)
+	}
+
+	var rateVnd int64 = 1000
+	var rateCoin int64 = 1
+	err = s.db.QueryRowContext(ctx, "SELECT amount_vnd, coin_amount FROM coin_rates WHERE is_active = true AND effective_at <= NOW() ORDER BY effective_at DESC LIMIT 1").Scan(&rateVnd, &rateCoin)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("Failed to fetch exchange rates: %w", err)
+	}
+
+	coinAmount := (req.AmountVnd * rateCoin) / rateVnd
+	orderCode := fmt.Sprintf("NFBANK-%d", time.Now().UnixNano())
+
+	order := &domain.BankPaymentOrder{
+		UserID:            req.UserId,
+		WalletID:          wallet.ID,
+		OrderCode:         orderCode,
+		AmountVnd:         req.AmountVnd,
+		CoinAmount:        coinAmount,
+		BankAccountNumber: "",
+		BankTxReference:   "",
+		Status:            domain.OrderStatusPending,
+		CallbackLogs:      "",
+	}
+	if err := s.repo.CreateDepositOrderTx(ctx, nil, order); err != nil {
+		return nil, fmt.Errorf("Failed to save payment order: %w", err)
+	}
+
+	orderInfo := fmt.Sprintf("Nạp %d Coin vào hệ thống Music Streaming qua NF-Bank", coinAmount)
+	requestId := fmt.Sprintf("REQ_%s", orderCode)
+
+	extraMap := map[string]string{"userId": req.UserId}
+	extraDataBytes, _ := json.Marshal(extraMap)
+	extraData := string(extraDataBytes)
+
+	rawSignature := fmt.Sprintf(
+		"accessKey=%s&amount=%d&extraData=%s&ipnUrl=%s&orderId=%s&orderInfo=%s&partnerCode=%s&redirectUrl=%s&requestId=%s",
+		s.cfg.NFBankAccessKey, req.AmountVnd, extraData, s.cfg.NFBankNotifyURL, orderCode, orderInfo, s.cfg.NFBankPartnerCode, s.cfg.NFBankRedirectURL, requestId,
+	)
+
+	h := hmac.New(sha256.New, []byte(s.cfg.NFBankSecretKey))
+	h.Write([]byte(rawSignature))
+	nfBankSignature := hex.EncodeToString(h.Sum(nil))
+
+	nfBankBody := NFBankCreateRequest{
+		PartnerCode: s.cfg.NFBankPartnerCode,
+		AccessKey:   s.cfg.NFBankAccessKey,
+		RequestId:   requestId,
+		Amount:      req.AmountVnd,
+		OrderId:     orderCode,
+		OrderInfo:   orderInfo,
+		RedirectUrl: s.cfg.NFBankRedirectURL,
+		IpnUrl:      s.cfg.NFBankNotifyURL,
+		ExtraData:   extraData,
+		Signature:   nfBankSignature,
+	}
+
+	jsonValue, _ := json.Marshal(nfBankBody)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post(fmt.Sprintf("%s/payments/create", s.cfg.NFBankAPIURL), "application/json", bytes.NewBuffer(jsonValue))
+	if err != nil {
+		return nil, fmt.Errorf("Network error connecting to NF Bank API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var nfBankResp NFBankCreateResponse
+	if err := json.NewDecoder(resp.Body).Decode(&nfBankResp); err != nil {
+		return nil, fmt.Errorf("Failed to decode NF Bank response: %w", err)
+	}
+
+	if nfBankResp.ResultCode != 0 {
+		return nil, fmt.Errorf("NF Bank gateway rejected request: %s", nfBankResp.Message)
+	}
+
+	return &walletpb.DepositOrderResponse{
+		OrderId:    orderCode,
+		PaymentUrl: nfBankResp.PayUrl,
+	}, nil
+}
+
+func (s *WalletService) ProcessNFBankDepositWebhook(ctx context.Context, orderID string, amountVnd int64, resultCode int) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("Failed to start webhook tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	order, err := s.repo.GetDepositOrderByCodeTx(ctx, tx, orderID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("Payment order not found with code: %s", orderID)
+		}
+		return fmt.Errorf("Failed to check payment order: %w", err)
+	}
+
+	if order.Status == domain.OrderStatusSuccess || order.Status == domain.OrderStatusFailed {
+		return nil
+	}
+
+	status := domain.OrderStatusFailed
+	if resultCode == 0 {
+		status = domain.OrderStatusSuccess
+	}
+
+	err = s.repo.UpdateDepositOrderStatusByCodeTx(ctx, tx, order.OrderCode, status)
+	if err != nil {
+		return fmt.Errorf("Failed to update order status: %w", err)
+	}
+
+	if resultCode != 0 {
+		return tx.Commit()
+	}
+
+	wallet, err := s.repo.GetByUserIdForUpdateTx(ctx, tx, order.UserID)
+	if err != nil {
+		return fmt.Errorf("Failed to lock user wallet for deposit: %w", err)
+	}
+
+	if !s.verifySignature(wallet) {
+		return errors.New("Critical: Secure signature validation failed during deposit")
+	}
+
+	balanceBefore := wallet.CoinBalance
+	balanceAfter := wallet.CoinBalance + order.CoinAmount
+	newVersion := wallet.Version + 1
+	newSignature := s.generateSignature(wallet.ID, wallet.UserID, balanceAfter, wallet.FrozenBalance, newVersion, wallet.CurrencyType, wallet.Status)
+
+	err = s.repo.UpdateBalanceTx(ctx, tx, wallet.ID, balanceAfter, newVersion, newSignature, wallet.Version)
+	if err != nil {
+		return fmt.Errorf("Deposit transaction conflict, failed to update balance: %w", err)
+	}
+
+	refID := order.ID
+	txLog := &domain.TransactionLog{
+		WalletID:        wallet.ID,
+		Amount:          order.CoinAmount,
+		BalanceBefore:   balanceBefore,
+		BalanceAfter:    balanceAfter,
+		TransactionType: domain.TxTypeCredit,
+		Status:          "SUCCESS",
+		ReferenceType:   "NFBANK_ORDER",
+		ReferenceID:     &refID,
+		IdempotencyKey:  order.OrderCode,
+		Description:     fmt.Sprintf("Nạp thành công %d Coin từ NF-Bank", order.CoinAmount),
 	}
 	if err := s.repo.CreateTransactionTx(ctx, tx, txLog); err != nil {
 		return fmt.Errorf("Failed to log deposit transaction: %w", err)
