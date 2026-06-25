@@ -9,6 +9,8 @@ import { validateEnv } from './common/configs/env.validation';
 import { AuthModule } from './auth/auth.module';
 import { StreamModule } from './stream/stream.module';
 import { MetadataModule } from './metadata/metadata.module';
+import { WalletModule } from './wallet/wallet.module';
+import { RoomModule } from './room/room.module';
 
 @Module({
   imports: [
@@ -26,6 +28,10 @@ import { MetadataModule } from './metadata/metadata.module';
       inject: ['REDIS_INSTANCE'],
       useFactory: (redis: Redis) => getThrottlerConfig(redis),
     }),
+
+    WalletModule,
+
+    RoomModule,
   ],
 })
 export class AppModule {}
