@@ -11,6 +11,7 @@ import { StreamModule } from './stream/stream.module';
 import { MetadataModule } from './metadata/metadata.module';
 import { WalletModule } from './wallet/wallet.module';
 import { RoomModule } from './room/room.module';
+import { RecommendationsModule } from './recommendations/recommendations.module';
 
 @Module({
   imports: [
@@ -23,15 +24,13 @@ import { RoomModule } from './room/room.module';
     RedisModule,
     StreamModule,
     MetadataModule,
-
     ThrottlerModule.forRootAsync({
       inject: ['REDIS_INSTANCE'],
       useFactory: (redis: Redis) => getThrottlerConfig(redis),
     }),
-
     WalletModule,
-
     RoomModule,
+    RecommendationsModule,
   ],
 })
 export class AppModule {}
