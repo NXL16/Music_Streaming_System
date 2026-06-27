@@ -1,0 +1,124 @@
+syntax = "proto3";
+
+package recommendation_service;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "Music_Streaming_System/packages/shared-proto/recommendation";
+
+service RecommendationService {
+  rpc GetHomeRecommendations(GetHomeRecommendationsRequest) returns (GetHomeRecommendationsResponse);
+  rpc GetRecommendationSection(GetRecommendationSectionRequest) returns (GetHomeRecommendationsResponse);
+  rpc RefreshRecommendationSection(RefreshRecommendationSectionRequest) returns (GetHomeRecommendationsResponse);
+  rpc ReplaceHomeRecommendations(ReplaceHomeRecommendationsRequest) returns (GetHomeRecommendationsResponse);
+}
+
+message GetHomeRecommendationsRequest {
+  string user_id  = 1;
+  string name     = 2;
+  string locale   = 3;
+  string timezone = 4;
+  string platform = 5;
+}
+
+message GetRecommendationSectionRequest {
+  string user_id    = 1;
+  string section_id = 2;
+  string name       = 3;
+  string locale     = 4;
+  string timezone   = 5;
+}
+
+message RefreshRecommendationSectionRequest {
+  string user_id    = 1;
+  string section_id = 2;
+  string name       = 3;
+  string locale     = 4;
+  string timezone   = 5;
+}
+
+message ReplaceHomeRecommendationsRequest {
+  string                                  user_id   = 1;
+  string                                  name      = 2;
+  string                                  locale    = 3;
+  string                                  timezone  = 4;
+  string                                  platform  = 5;
+  repeated PersonalRecommendationResource sections = 6;
+  repeated CatalogResource                resources = 7;
+}
+
+message RecommendationRef {
+  string id   = 1;
+  string type = 2;
+  string href = 3;
+}
+
+message RecommendationRelationship {
+  string                     href = 1;
+  repeated RecommendationRef data = 2;
+}
+
+message RecommendationRelationships {
+  RecommendationRelationship contents        = 1;
+  RecommendationRelationship primary_content = 2;
+}
+
+message RecommendationDisplay {
+  string          kind        = 1;
+  repeated string decorations = 2;
+}
+
+message DisplayTitle {
+  string string_for_display = 1;
+}
+
+message PersonalRecommendationAttributes {
+  RecommendationDisplay display                 = 1;
+  bool                  has_see_all             = 2;
+  bool                  is_group_recommendation = 3;
+  string                kind                    = 4;
+  string                next_update_date        = 5;
+  repeated string       resource_types          = 6;
+  DisplayTitle          title                   = 7;
+  DisplayTitle          title_without_name      = 8;
+  int32                 version                 = 9;
+}
+
+message PersonalRecommendationResource {
+  string                               id            = 1;
+  string                               type          = 2;
+  string                               href          = 3;
+  PersonalRecommendationAttributes     attributes    = 4;
+  RecommendationRelationships          relationships = 5;
+}
+
+message CatalogResource {
+  string                 id         = 1;
+  string                 type       = 2;
+  string                 href       = 3;
+  google.protobuf.Struct attributes = 4;
+  google.protobuf.Struct relationships = 5;
+}
+
+message RecommendationResources {
+  map<string, PersonalRecommendationResource> personal_recommendation = 1;
+  map<string, CatalogResource>                albums                  = 2;
+  map<string, CatalogResource>                playlists               = 3;
+  map<string, CatalogResource>                stations                = 4;
+  map<string, CatalogResource>                editorial_items         = 5;
+  map<string, CatalogResource>                artists                 = 6;
+  map<string, CatalogResource>                songs                   = 7;
+}
+
+message RecommendationMeta {
+  string name     = 1;
+  string locale   = 2;
+  string timezone = 3;
+  string platform = 4;
+}
+
+message GetHomeRecommendationsResponse {
+  repeated RecommendationRef data      = 1;
+  RecommendationResources    resources = 2;
+  RecommendationMeta         meta      = 3;
+}

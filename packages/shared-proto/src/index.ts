@@ -159,3 +159,64 @@ export const WALLET = {
   SERVICE: "WalletService",
   PROTO_FILE: "wallet_service.proto",
 };
+
+// ========== RECOMMENDATION PROTO ============
+export type {
+  GetHomeRecommendationsRequest,
+  GetRecommendationSectionRequest,
+  RefreshRecommendationSectionRequest,
+  ReplaceHomeRecommendationsRequest,
+  GetHomeRecommendationsResponse,
+  RecommendationRef,
+  RecommendationRelationship,
+  RecommendationRelationships,
+  RecommendationDisplay,
+  DisplayTitle,
+  PersonalRecommendationAttributes,
+  PersonalRecommendationResource,
+  CatalogResource,
+  RecommendationResources,
+  RecommendationMeta,
+  RecommendationServiceClient,
+  RecommendationServiceController,
+} from "./generated/recommendation_service";
+
+export function RecommendationServiceControllerMethods() {
+  return function (constructor: Function) {
+    const grpcMethods: string[] = [
+      "getHomeRecommendations",
+      "getRecommendationSection",
+      "refreshRecommendationSection",
+      "replaceHomeRecommendations",
+    ];
+    for (const method of grpcMethods) {
+      const descriptor: any = Reflect.getOwnPropertyDescriptor(
+        constructor.prototype,
+        method,
+      );
+      GrpcMethod("RecommendationService", method)(
+        constructor.prototype[method],
+        method,
+        descriptor,
+      );
+    }
+    const grpcStreamMethods: string[] = [];
+    for (const method of grpcStreamMethods) {
+      const descriptor: any = Reflect.getOwnPropertyDescriptor(
+        constructor.prototype,
+        method,
+      );
+      GrpcStreamMethod("RecommendationService", method)(
+        constructor.prototype[method],
+        method,
+        descriptor,
+      );
+    }
+  };
+}
+
+export const RECOMMENDATION = {
+  PACKAGE: "recommendation_service",
+  SERVICE: "RecommendationService",
+  PROTO_FILE: "recommendation_service.proto",
+};
