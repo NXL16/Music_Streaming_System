@@ -16,7 +16,7 @@ export function GuestOnly({ children }: { children: React.ReactNode }) {
 
   if (status === "checking" || status === "authenticated") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#f7efe5] text-[#23170f]">
+      <main className="flex min-h-screen items-center justify-center bg-[#f5f5f7] text-[#1d1d1f]">
         <p className="text-sm font-semibold uppercase tracking-[0.3em]">
           Đang kiểm tra phiên đăng nhập...
         </p>

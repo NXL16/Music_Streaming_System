@@ -11,7 +11,11 @@ function shortDeviceId(deviceId: string) {
   return `${deviceId.slice(0, 8)}...${deviceId.slice(-4)}`;
 }
 
-export function SessionsPanel() {
+type SessionsPanelProps = {
+  className?: string;
+};
+
+export function SessionsPanel({ className = "mt-6" }: SessionsPanelProps) {
   const {
     sessions,
     loading,
@@ -24,14 +28,16 @@ export function SessionsPanel() {
   } = useSessions();
 
   return (
-    <section className="mt-6 rounded-4xl border border-[#ead4bd] bg-white p-6 shadow-[0_24px_80px_rgba(95,55,25,0.1)] md:p-8">
+    <section
+      className={`${className} rounded-4xl border border-[#e5e5ea] bg-white p-6 shadow-[0_24px_80px_rgba(95,55,25,0.1)] md:p-8`}
+    >
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <p className="text-sm font-bold uppercase tracking-[0.35em] text-[#b65f38]">
+          <p className="text-sm font-bold uppercase tracking-[0.35em] text-[#fa233b]">
             Sessions
           </p>
           <h2 className="mt-2 text-3xl font-black">Thiết bị đăng nhập</h2>
-          <p className="mt-2 text-[#705846]">
+          <p className="mt-2 text-[#6e6e73]">
             Quản lý các phiên đăng nhập và đăng xuất thiết bị khác khi cần.
           </p>
         </div>
@@ -41,7 +47,7 @@ export function SessionsPanel() {
             type="button"
             onClick={() => void reload()}
             disabled={loading}
-            className="rounded-2xl border border-[#ead4bd] px-5 py-3 font-bold transition hover:border-[#c45f36] disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-2xl border border-[#e5e5ea] px-5 py-3 font-bold transition hover:border-[#fa233b] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {loading ? "Đang tải..." : "Refresh"}
           </button>
@@ -50,7 +56,7 @@ export function SessionsPanel() {
             type="button"
             onClick={() => void revokeAllSessions()}
             disabled={logoutAllLoading}
-            className="rounded-2xl bg-[#23170f] px-5 py-3 font-bold text-white transition hover:bg-[#3a2a1f] disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-2xl bg-[#1d1d1f] px-5 py-3 font-bold text-white transition hover:bg-[#333336] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {logoutAllLoading ? "Đang đăng xuất..." : "Logout all"}
           </button>
@@ -65,7 +71,7 @@ export function SessionsPanel() {
 
       <div className="mt-6 space-y-4">
         {sessions.length === 0 && !loading ? (
-          <div className="rounded-3xl border border-[#ead4bd] bg-[#fffaf4] px-5 py-4 text-sm font-semibold text-[#705846]">
+          <div className="rounded-3xl border border-[#e5e5ea] bg-[#f5f5f7] px-5 py-4 text-sm font-semibold text-[#6e6e73]">
             Chưa có phiên đăng nhập nào.
           </div>
         ) : null}
@@ -73,7 +79,7 @@ export function SessionsPanel() {
         {sessions.map((session) => (
           <div
             key={session.deviceId}
-            className="rounded-3xl border border-[#ead4bd] bg-[#fffaf4] p-5"
+            className="rounded-3xl border border-[#e5e5ea] bg-[#f5f5f7] p-5"
           >
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="min-w-0">
@@ -83,23 +89,23 @@ export function SessionsPanel() {
                   </p>
 
                   {session.isCurrent ? (
-                    <span className="rounded-full bg-[#23170f] px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-white">
+                    <span className="rounded-full bg-[#1d1d1f] px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-white">
                       Current
                     </span>
                   ) : null}
                 </div>
 
-                <p className="mt-2 wrap-break-word text-sm font-semibold text-[#705846]">
+                <p className="mt-2 wrap-break-word text-sm font-semibold text-[#6e6e73]">
                   {session.userAgent || "Unknown user agent"}
                 </p>
 
-                <div className="mt-3 grid gap-2 text-sm text-[#705846] sm:grid-cols-2">
+                <div className="mt-3 grid gap-2 text-sm text-[#6e6e73] sm:grid-cols-2">
                   <p>
-                    <span className="font-bold text-[#23170f]">IP:</span>{" "}
+                    <span className="font-bold text-[#1d1d1f]">IP:</span>{" "}
                     {session.ipAddress || "Unknown"}
                   </p>
                   <p>
-                    <span className="font-bold text-[#23170f]">Last seen:</span>{" "}
+                    <span className="font-bold text-[#1d1d1f]">Last seen:</span>{" "}
                     {formatDateTime(session.lastSeenAt)}
                   </p>
                 </div>
@@ -111,7 +117,7 @@ export function SessionsPanel() {
                 disabled={
                   session.isCurrent || actionDeviceId === session.deviceId
                 }
-                className="rounded-2xl border border-[#ead4bd] px-4 py-2 font-bold transition hover:border-[#c45f36] disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-2xl border border-[#e5e5ea] px-4 py-2 font-bold transition hover:border-[#fa233b] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {actionDeviceId === session.deviceId
                   ? "Đăng xuất..."
@@ -126,3 +132,6 @@ export function SessionsPanel() {
     </section>
   );
 }
+
+
+

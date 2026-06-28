@@ -82,8 +82,12 @@ export function useGoogleLogin() {
               return;
             }
 
-            setSession(result.data.accessToken, result.data.user);
-            router.push("/");
+            setSession(
+              result.data.accessToken,
+              result.data.user,
+              result.data.expiresIn,
+            );
+            router.push("/home");
           } catch (error) {
             console.error("Google login callback failed", error);
           } finally {

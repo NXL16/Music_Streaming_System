@@ -121,12 +121,6 @@ export async function changePassword(payload: ChangePasswordPayload) {
   return response.data;
 }
 
-export async function refreshSession() {
-  const response = await http.post<ApiResponse<AuthSession>>("/auth/refresh");
-
-  return response.data;
-}
-
 export async function forgotPassword(payload: ForgotPasswordPayload) {
   const response = await http.post<ApiResponse<{ success: boolean }>>(
     "/auth/password/forgot",

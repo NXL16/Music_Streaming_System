@@ -46,7 +46,11 @@ export function useTwoFactorLoginForm() {
       });
 
       clearTwoFactorChallengeId();
-      setSession(result.data.accessToken, result.data.user);
+      setSession(
+        result.data.accessToken,
+        result.data.user,
+        result.data.expiresIn,
+      );
       router.push("/");
     } catch (error) {
       setError(getApiErrorMessage(error, "Ma 2FA khong hop le."));

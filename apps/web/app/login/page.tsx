@@ -1,9 +1,10 @@
 "use client";
 
-import { GuestOnly } from "@/components/auth/guest-only";
-import { useLoginForm } from "@/lib/auth/use-login-form";
-import { useGoogleLogin } from "@/lib/auth/use-google-login";
 import Link from "next/link";
+import { AuthPageShell } from "@/components/auth/auth-page-shell";
+import { GuestOnly } from "@/components/auth/guest-only";
+import { useGoogleLogin } from "@/lib/auth/use-google-login";
+import { useLoginForm } from "@/lib/auth/use-login-form";
 
 export default function LoginPage() {
   const { form, error, loading, updateField, handleSubmit } = useLoginForm();
@@ -11,88 +12,80 @@ export default function LoginPage() {
 
   return (
     <GuestOnly>
-      <main className="min-h-screen bg-[#f7efe5] px-6 py-10 text-[#23170f]">
-        <section className="mx-auto grid max-w-5xl gap-8 lg:grid-cols-[1fr_420px]">
-          <div className="flex flex-col justify-center">
-            <p className="text-sm font-bold uppercase tracking-[0.35em] text-[#b65f38]">
-              Welcome Back
-            </p>
+      <AuthPageShell
+        eyebrow="Welcome Back"
+        title="Listen, upload, and manage your music."
+        description="Sign in to open your library. Refresh token stays protected in an HttpOnly cookie."
+      >
+        <form onSubmit={handleSubmit}>
+          <h2 className="text-2xl font-bold tracking-[-0.04em]">Sign in</h2>
 
-            <h1 className="mt-5 max-w-xl text-5xl font-black leading-tight">
-              Log in to continue managing your music library.
-            </h1>
+          <label className="mt-6 block text-sm font-semibold text-[#1d1d1f]">
+            Username or email
+          </label>
+          <input
+            className="mt-2 w-full rounded-2xl bg-[#f5f5f7] px-4 py-3 outline-none ring-1 ring-[#d2d2d7] focus:ring-[#fa233b]"
+            value={form.identifier}
+            onChange={(event) => updateField("identifier", event.target.value)}
+            required
+          />
 
-            <p className="mt-5 max-w-lg text-lg text-[#705846]">
-              Access token is kept in memory. Refresh token is stored in an
-              HttpOnly cookie by the browser.
-            </p>
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <label className="block text-sm font-semibold text-[#1d1d1f]">
+              Password
+            </label>
+            <Link
+              href="/forgot-password"
+              className="text-sm font-semibold text-[#fa233b] hover:underline"
+            >
+              Forgot password?
+            </Link>
           </div>
 
-          <form
-            onSubmit={handleSubmit}
-            className="rounded-4xl border border-[#ead4bd] bg-white p-7 shadow-[0_24px_80px_rgba(95,55,25,0.16)]"
+          <input
+            type="password"
+            className="mt-2 w-full rounded-2xl bg-[#f5f5f7] px-4 py-3 outline-none ring-1 ring-[#d2d2d7] focus:ring-[#fa233b]"
+            value={form.password}
+            onChange={(event) => updateField("password", event.target.value)}
+            required
+          />
+
+          {error ? (
+            <div className="mt-5 rounded-2xl bg-[#fff1f3] px-4 py-3 text-sm font-medium text-[#d91d32]">
+              {error}
+            </div>
+          ) : null}
+
+          <button
+            disabled={loading}
+            className="mt-6 w-full rounded-full bg-[#fa233b] px-5 py-3 font-bold text-white transition hover:bg-[#d91d32] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <h2 className="text-2xl font-bold">Login</h2>
+            {loading ? "Signing in..." : "Sign in"}
+          </button>
 
-            <label className="mt-6 block text-sm font-semibold">
-              Username or email
-            </label>
-            <input
-              className="mt-2 w-full rounded-2xl border border-[#ead4bd] px-4 py-3 outline-none focus:border-[#c45f36]"
-              value={form.identifier}
-              onChange={(event) =>
-                updateField("identifier", event.target.value)
-              }
-              required
-            />
+          <div className="my-4 flex items-center gap-3 text-sm font-semibold text-[#86868b]">
+            <div className="h-px flex-1 bg-[#e5e5ea]" />
+            or
+            <div className="h-px flex-1 bg-[#e5e5ea]" />
+          </div>
 
-            <div className="mt-4 flex items-center justify-between gap-3">
-              <label className="block text-sm font-semibold">Password</label>
+          <button
+            type="button"
+            onClick={startGoogleLogin}
+            disabled={googleLoading}
+            className="w-full rounded-full bg-[#f2f2f7] px-5 py-3 font-bold text-[#1d1d1f] transition hover:bg-[#e5e5ea] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {googleLoading ? "Opening Google..." : "Continue with Google"}
+          </button>
 
-              <Link
-                href="/forgot-password"
-                className="text-sm font-semibold text-[#b65f38] hover:underline"
-              >
-                Forgot password?
-              </Link>
-            </div>
-
-            <input
-              type="password"
-              className="mt-2 w-full rounded-2xl border border-[#ead4bd] px-4 py-3 outline-none focus:border-[#c45f36]"
-              value={form.password}
-              onChange={(event) => updateField("password", event.target.value)}
-              required
-            />
-
-            {error ? (
-              <div className="mt-5 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
-                {error}
-              </div>
-            ) : null}
-
-            <button
-              disabled={loading}
-              className="mt-6 w-full rounded-2xl bg-[#23170f] px-5 py-3 font-bold text-white transition hover:bg-[#3a2a1f] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {loading ? "Logging in..." : "Login"}
-            </button>
-
-            <div className="my-2 flex justify-center text-gray-500 font-bold">
-              or
-            </div>
-
-            <button
-              type="button"
-              onClick={startGoogleLogin}
-              disabled={googleLoading}
-              className="w-full rounded-2xl border border-[#ead4bd] px-5 py-3 font-bold transition hover:border-[#c45f36] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {googleLoading ? "Opening Google..." : "Continue with Google"}
-            </button>
-          </form>
-        </section>
-      </main>
+          <p className="mt-5 text-center text-sm text-[#6e6e73]">
+            New here?{" "}
+            <Link href="/signup" className="font-semibold text-[#fa233b]">
+              Create an account
+            </Link>
+          </p>
+        </form>
+      </AuthPageShell>
     </GuestOnly>
   );
 }

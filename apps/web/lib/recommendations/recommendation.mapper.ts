@@ -1,0 +1,302 @@
+import type {
+  MediaCardArtist,
+  MediaCardProps,
+} from "@/components/media/media-card.types";
+import type {
+  Artwork,
+  CatalogResource,
+  CatalogResourceAttributes,
+  EditorialVideoAsset,
+  RecommendationRef,
+  RecommendationResponse,
+} from "./recommendation.types";
+
+export type HomeShelf = {
+  id: string;
+  title: string;
+  displayKind: "MusicNotesHeroShelf" | "MusicCoverShelf";
+  sourceDisplayKind: string;
+  items: MediaCardProps[];
+};
+
+function artworkUrl(template: string, width: number, height = width) {
+  return template
+    .replaceAll("{w}", String(width))
+    .replaceAll("{h}", String(height))
+    .replaceAll("{f}", "webp");
+}
+
+function resolveResource(
+  response: RecommendationResponse,
+  ref: RecommendationRef,
+): CatalogResource | undefined {
+  const resources = response.resources;
+  if (!resources) return undefined;
+
+  switch (ref.type) {
+    case "albums":
+      return resources.albums[ref.id];
+    case "playlists":
+      return resources.playlists[ref.id];
+    case "stations":
+      return resources.stations[ref.id];
+    case "artists":
+      return resources.artists[ref.id];
+    case "songs":
+      return resources.songs[ref.id];
+    case "editorial-items":
+      return resources.editorialItems[ref.id];
+    default:
+      return undefined;
+  }
+}
+
+const PORTRAIT_VIDEO_KEYS = [
+  "motionTallVideo3x4",
+  "motionDetailTall",
+] as const;
+
+function selectHeroVideo(
+  resource: CatalogResource,
+): EditorialVideoAsset | undefined {
+  const editorialVideo = resource.attributes?.editorialVideo;
+  if (!editorialVideo) return undefined;
+
+  for (const key of PORTRAIT_VIDEO_KEYS) {
+    const asset = editorialVideo[key];
+    if (asset?.video) return asset;
+  }
+
+  return undefined;
+}
+
+function getDisplayKind(
+  sourceKind: string,
+): HomeShelf["displayKind"] | undefined {
+  if (
+    sourceKind === "MusicNotesHeroShelf" ||
+    sourceKind === "MusicSuperHeroShelf"
+  ) {
+    return "MusicNotesHeroShelf";
+  }
+
+  if (
+    sourceKind === "MusicCoverShelf" ||
+    sourceKind === "MusicConcertsEmptyShelf"
+  ) {
+    return "MusicCoverShelf";
+  }
+
+  return undefined;
+}
+
+function getSectionRefs(
+  contents: RecommendationRef[] | undefined,
+  primaryContent: RecommendationRef[] | undefined,
+) {
+  const seen = new Set<string>();
+
+  return [...(contents ?? []), ...(primaryContent ?? [])].filter((ref) => {
+    const key = `${ref.type}:${ref.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function closestArtwork(
+  artworks: Record<string, Artwork | undefined> | undefined,
+  targetRatio: number,
+  tolerance = Number.POSITIVE_INFINITY,
+) {
+  if (!artworks) return undefined;
+
+  return Object.values(artworks)
+    .filter(
+      (artwork): artwork is Artwork =>
+        Boolean(
+          artwork?.url &&
+            artwork.width > 0 &&
+            artwork.height > 0 &&
+            Math.abs(artwork.width / artwork.height - targetRatio) <= tolerance,
+        ),
+    )
+    .sort(
+      (left, right) =>
+        Math.abs(left.width / left.height - targetRatio) -
+        Math.abs(right.width / right.height - targetRatio),
+    )[0];
+}
+
+function selectArtwork(
+  attributes: CatalogResourceAttributes,
+  videoAsset: EditorialVideoAsset | undefined,
+  isHero: boolean,
+) {
+  const editorialArtwork = attributes.editorialArtwork;
+  const artworkCandidates = {
+    ...editorialArtwork,
+    standardArtwork: attributes.artwork,
+    videoPreview: videoAsset?.previewFrame,
+  };
+
+  if (isHero) {
+    return (
+      videoAsset?.previewFrame ??
+      editorialArtwork?.superHeroTall ??
+      editorialArtwork?.staticDetailTall ??
+      closestArtwork(artworkCandidates, 3 / 4, 0.08) ??
+      closestArtwork(artworkCandidates, 3 / 4)
+    );
+  }
+
+  return (
+    editorialArtwork?.staticDetailSquare ??
+    closestArtwork(
+      {
+        standardArtwork: attributes.artwork,
+        videoPreview: videoAsset?.previewFrame,
+      },
+      1,
+      0.08,
+    ) ??
+    closestArtwork(editorialArtwork, 1, 0.08) ??
+    closestArtwork(artworkCandidates, 1)
+  );
+}
+
+function getSubtitle(attributes: CatalogResourceAttributes) {
+  if (attributes.artistName) return attributes.artistName;
+  if (attributes.curatorName) return attributes.curatorName;
+
+  return Array.isArray(attributes.artistNames)
+    ? attributes.artistNames.join(", ")
+    : (attributes.artistNames ?? "");
+}
+
+function getArtists(
+  response: RecommendationResponse,
+  resource: CatalogResource,
+): MediaCardArtist[] {
+  const artistRefs = resource.relationships?.artists?.data ?? [];
+  const artistResources = response.resources?.artists;
+  if (!artistResources) return [];
+
+  return artistRefs.flatMap((artistRef) => {
+    const artist = artistResources[artistRef.id];
+    const name = artist?.attributes?.name;
+    const url = artist?.attributes?.url;
+
+    if (!artist || !name || !url) return [];
+
+    return [
+      {
+        id: artist.id,
+        name,
+        url,
+      },
+    ];
+  });
+}
+
+function getCardType(
+  resourceType: string,
+  isHero: boolean,
+): MediaCardProps["cardType"] {
+  if (isHero) return "hero";
+  if (resourceType === "stations") return "station";
+  return "collection";
+}
+
+export function mapHomeRecommendations(
+  response: RecommendationResponse,
+): HomeShelf[] {
+  if (!response.resources) return [];
+
+  return response.data.flatMap((sectionRef) => {
+    if (sectionRef.type !== "personal-recommendation") return [];
+
+    const section = response.resources?.personalRecommendation[sectionRef.id];
+    const sourceDisplayKind = section?.attributes?.display?.kind;
+    if (!section || !sourceDisplayKind) return [];
+
+    const displayKind = getDisplayKind(sourceDisplayKind);
+    if (!displayKind) return [];
+
+    const isHero =
+      sourceDisplayKind === "MusicNotesHeroShelf" ||
+      sourceDisplayKind === "MusicSuperHeroShelf";
+    const refs = getSectionRefs(
+      section.relationships?.contents?.data,
+      section.relationships?.primaryContent?.data,
+    );
+
+    const items = refs.flatMap((ref) => {
+      const resource = resolveResource(response, ref);
+      if (!resource?.attributes) return [];
+
+      const videoAsset = isHero ? selectHeroVideo(resource) : undefined;
+      const artwork = selectArtwork(resource.attributes, videoAsset, isHero);
+      if (!artwork?.url) return [];
+
+      const color = `#${artwork.bgColor?.replace(/^#/, "") || "2c2c2e"}`;
+      const subtitle = getSubtitle(resource.attributes);
+      const notes = resource.attributes.plainEditorialNotes;
+
+      return [
+        {
+          id: `${resource.type}-${resource.id}`,
+          resourceId: resource.id,
+          resourceType: resource.type,
+          cardType: getCardType(resource.type, isHero),
+          title: resource.attributes.name ?? notes?.name ?? "Untitled",
+          subtitle,
+          slug: resource.attributes.url,
+          artists: getArtists(response, resource),
+          imageUrl: isHero
+            ? artworkUrl(artwork.url, 600, 800)
+            : artworkUrl(artwork.url, 632),
+          imageSrcSet: isHero
+            ? [
+                [450, 600],
+                [600, 800],
+                [900, 1200],
+              ]
+                .map(
+                  ([width, height]) =>
+                    `${artworkUrl(artwork.url, width, height)} ${width}w`,
+                )
+                .join(",")
+            : [296, 316, 592, 632]
+                .map((size) => `${artworkUrl(artwork.url, size)} ${size}w`)
+                .join(","),
+          artworkColors: { bg: color, main: color },
+          ...(videoAsset?.video ? { videoSrc: videoAsset.video } : {}),
+          typeTag: notes?.tag ?? notes?.name,
+          description:
+            notes?.short ??
+            notes?.standard ??
+            resource.attributes.description?.short ??
+            resource.attributes.description?.standard ??
+            subtitle,
+          altText: artwork.alt ?? resource.attributes.name,
+        },
+      ];
+    });
+
+    if (!items.length) return [];
+
+    return [
+      {
+        id: section.id,
+        title:
+          section.attributes?.title?.stringForDisplay ??
+          section.attributes?.titleWithoutName?.stringForDisplay ??
+          "For You",
+        displayKind,
+        sourceDisplayKind,
+        items,
+      },
+    ];
+  });
+}

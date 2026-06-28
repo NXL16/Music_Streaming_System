@@ -16,25 +16,29 @@
     "@radix-ui/react-slider": "^1.3.6",
     "axios": "^1.16.1",
     "clsx": "^2.1.1",
+    "framer-motion": "^12.40.0",
+    "hls.js": "^1.6.16",
     "lucide-react": "^1.14.0",
+    "motion": "^12.40.0",
     "next": "16.2.2",
     "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-hook-form": "^7.72.1",
+    "styled-components": "^6.4.3",
     "tailwind-merge": "^3.6.0",
     "zustand": "^5.0.13"
   },
   "devDependencies": {
     "@musical/ts-config": "workspace:*",
-    "@tailwindcss/postcss": "^4",
+    "@tailwindcss/postcss": "^4.3.1",
     "@types/node": "^20",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.2",
-    "tailwindcss": "^4",
+    "tailwindcss": "^4.3.1",
     "typescript": "^5"
   }
 }

@@ -56,8 +56,12 @@ export function useLoginForm() {
         return;
       }
 
-      setSession(result.data.accessToken, result.data.user);
-      router.push("/");
+      setSession(
+        result.data.accessToken,
+        result.data.user,
+        result.data.expiresIn,
+      );
+      router.push("/home");
     } catch (error) {
       setError(
         getApiErrorMessage(error, "Đăng nhập thất bại, vui lòng thử lại"),

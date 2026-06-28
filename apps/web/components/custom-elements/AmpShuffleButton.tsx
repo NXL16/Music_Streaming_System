@@ -16,9 +16,7 @@ export default function AmpShuffleButton() {
     if (!el) return;
 
     let shadow = el.shadowRoot;
-    if (!shadow) {
-      shadow = el.attachShadow({ mode: "open" });
-    }
+    if (!shadow) shadow = el.attachShadow({ mode: "open" });
 
     if (
       "adoptedStyleSheets" in document &&
