@@ -27,7 +27,7 @@ export default function CollectionCard(props: CollectionCardProps) {
           <div className="rounded-[inherit] h-full opacity-(--scrimOpacity,0) absolute top-0 transition-(--global-transition) w-full z-[calc(var(--z-default)+1)]">
             {props.slug ? (
               <Link
-                className="text-transparent block h-full absolute w-full z-(--z-default)"
+                className="text-transparent block h-full absolute w-full z-(--z-default) wrap-break-word"
                 href={props.slug}
               >
                 {props.title}
