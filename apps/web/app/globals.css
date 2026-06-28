@@ -540,6 +540,33 @@ html[dir=rtl] .chrome-volume__slider.svelte-13xdpwq.svelte-13xdpwq {
   scrollbar-width: none;
 }
 
+.shelf-grid__list[data-scroll-active="false"] {
+  overflow: clip;
+  scroll-snap-type: none;
+}
+
+.shelf-grid__list[data-scroll-active="true"] {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+}
+
+.shelf-grid__list[data-dragging="true"] {
+  scroll-snap-type: none;
+  user-select: none;
+}
+
+@media (hover:hover) and (pointer:fine) {
+  .shelf-grid__list[data-scroll-active="true"][data-draggable="true"] {
+    cursor: grab;
+  }
+
+  .shelf-grid__list[data-dragging="true"],
+  .shelf-grid__list[data-dragging="true"] * {
+    cursor: grabbing !important;
+  }
+}
+
 @media (max-width:999px) {
   .shelf-grid__list.svelte-ranejh {
     margin-inline-end: 0;

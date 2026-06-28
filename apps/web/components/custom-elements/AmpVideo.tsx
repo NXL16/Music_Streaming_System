@@ -3,9 +3,9 @@
 import { useEffect, useRef, useState, type ElementType } from "react";
 import Hls from "hls.js";
 
-const MAX_CONCURRENT_VIDEOS = 6;
-const MAX_WARM_VIDEOS = 6;
-const WARM_RETENTION_MS = 4_000;
+const MAX_CONCURRENT_VIDEOS = 7;
+const MAX_WARM_VIDEOS = 7;
+const WARM_RETENTION_MS = 3_000;
 const SCROLL_IDLE_MS = 160;
 
 type PageScrollListener = (isScrolling: boolean) => void;
@@ -202,14 +202,14 @@ export default function AmbientVideo({ src }: AmbientVideoProps) {
     if (!scrollContainer) return;
 
     return subscribeToPageScroll(scrollContainer, (scrolling) => {
-        isPageScrollingRef.current = scrolling;
+      isPageScrollingRef.current = scrolling;
 
-        if (scrolling) {
-          suspendPlaybackRef.current();
-        } else if (isNearViewportRef.current) {
-          resumePlaybackRef.current();
-        }
-      });
+      if (scrolling) {
+        suspendPlaybackRef.current();
+      } else if (isNearViewportRef.current) {
+        resumePlaybackRef.current();
+      }
+    });
   }, []);
 
   useEffect(() => {
