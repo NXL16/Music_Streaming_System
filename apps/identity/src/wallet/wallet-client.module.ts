@@ -1,8 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { join } from 'path';
-import { WALLET } from '@musical/shared-proto';
+import { resolveProtoPath, WALLET } from '@musical/shared-proto';
 import { WalletClientService } from './wallet-client.service';
 
 @Module({
@@ -17,11 +16,7 @@ import { WalletClientService } from './wallet-client.service';
           options: {
             url: config.getOrThrow<string>('WALLET_GRPC_URL'),
             package: WALLET.PACKAGE,
-            protoPath: join(
-              __dirname,
-              '../../../../../packages/shared-proto',
-              WALLET.PROTO_FILE,
-            ),
+            protoPath: resolveProtoPath(WALLET.PROTO_FILE),
             loader: { longs: Number },
           },
         }),

@@ -1,9 +1,14 @@
 import { Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { join } from 'path';
-import { RECOMMENDATION } from '@musical/shared-proto';
-import { RecommendationsController } from './recommendations.controller';
+import {
+  RECOMMENDATION,
+  resolveProtoPath,
+} from '@musical/shared-proto';
+import {
+  RecommendationAdminController,
+  RecommendationsController,
+} from './recommendations.controller';
 import { RecommendationsService } from './recommendations.service';
 
 @Module({
@@ -19,18 +24,14 @@ import { RecommendationsService } from './recommendations.service';
           options: {
             url: config.getOrThrow<string>('RECOMMENDATION_GRPC_URL'),
             package: RECOMMENDATION.PACKAGE,
-            protoPath: join(
-              __dirname,
-              '../../../../packages/shared-proto',
-              RECOMMENDATION.PROTO_FILE,
-            ),
+            protoPath: resolveProtoPath(RECOMMENDATION.PROTO_FILE),
             loader: { longs: Number },
           },
         }),
       },
     ]),
   ],
-  controllers: [RecommendationsController],
+  controllers: [RecommendationsController, RecommendationAdminController],
   providers: [RecommendationsService],
 })
 export class RecommendationsModule {}

@@ -1,10 +1,9 @@
 import { Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { join } from 'path';
 import { MetadataController } from './metadata.controller';
 import { MetadataService } from './metadata.service';
-import { METADATA } from '@musical/shared-proto';
+import { METADATA, resolveProtoPath } from '@musical/shared-proto';
 
 @Module({
   imports: [
@@ -19,11 +18,7 @@ import { METADATA } from '@musical/shared-proto';
           options: {
             url: config.getOrThrow<string>('META_GRPC_URL'),
             package: METADATA.PACKAGE,
-            protoPath: join(
-              __dirname,
-              '../../../../packages/shared-proto',
-              METADATA.PROTO_FILE,
-            ),
+            protoPath: resolveProtoPath(METADATA.PROTO_FILE),
             loader: { longs: Number },
           },
         }),

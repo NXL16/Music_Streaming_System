@@ -1,9 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import { join } from 'path';
 import { SongsController } from './songs.controller';
 import { SongsService } from './songs.service';
 import { R2Module } from '../common/r2/r2.module';
+import { CatalogController } from './catalog.controller';
+import { resolveProtoPath, SONG } from '@musical/shared-proto';
 
 @Module({
   imports: [
@@ -13,18 +14,15 @@ import { R2Module } from '../common/r2/r2.module';
         name: 'SONG_SERVICE',
         transport: Transport.GRPC,
         options: {
-          package: 'song_service',
-          protoPath: join(
-            __dirname,
-            '../../../../packages/shared-proto/song_service.proto',
-          ),
+          package: SONG.PACKAGE,
+          protoPath: resolveProtoPath(SONG.PROTO_FILE),
           url: '0.0.0.0:7777',
           loader: { longs: Number },
         },
       },
     ]),
   ],
-  controllers: [SongsController],
+  controllers: [SongsController, CatalogController],
   providers: [SongsService],
   exports: [SongsService],
 })

@@ -2,8 +2,10 @@ import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
-import { join } from 'path';
-import { RECOMMENDATION } from '@musical/shared-proto';
+import {
+  RECOMMENDATION,
+  resolveProtoPath,
+} from '@musical/shared-proto';
 import { PrismaService } from './database/prisma.service';
 import { Logger } from '@nestjs/common';
 
@@ -17,11 +19,7 @@ async function bootstrap() {
       transport: Transport.GRPC,
       options: {
         package: RECOMMENDATION.PACKAGE,
-        protoPath: join(
-          __dirname,
-          '../../../../packages/shared-proto',
-          RECOMMENDATION.PROTO_FILE,
-        ),
+        protoPath: resolveProtoPath(RECOMMENDATION.PROTO_FILE),
         url: grpcUrl,
         loader: { longs: Number },
       },

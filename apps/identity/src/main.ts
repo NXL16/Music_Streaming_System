@@ -2,8 +2,7 @@ import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
-import { join } from 'path';
-import { IDENTITY } from '@musical/shared-proto';
+import { IDENTITY, resolveProtoPath } from '@musical/shared-proto';
 import { PrismaService } from './common/database/prisma.service';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -18,11 +17,7 @@ async function bootstrap() {
       transport: Transport.GRPC,
       options: {
         package: IDENTITY.PACKAGE,
-        protoPath: join(
-          __dirname,
-          '../../../../packages/shared-proto',
-          IDENTITY.PROTO_FILE,
-        ),
+        protoPath: resolveProtoPath(IDENTITY.PROTO_FILE),
         url: grpcUrl,
         loader: { longs: Number },
       },

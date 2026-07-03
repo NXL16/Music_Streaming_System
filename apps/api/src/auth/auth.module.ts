@@ -1,10 +1,9 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import { join } from 'path';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
-import { IDENTITY } from '@musical/shared-proto';
+import { IDENTITY, resolveProtoPath } from '@musical/shared-proto';
 import { JwtStrategy } from '../common/strategies/jwt.strategy';
 import { StrictJwtAuthGuard } from '../common/guards/strict-jwt-auth.guard';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
@@ -19,11 +18,7 @@ import { PermissionsGuard } from '../common/guards/permissions.guard';
           transport: Transport.GRPC,
           options: {
             package: IDENTITY.PACKAGE,
-            protoPath: join(
-              __dirname,
-              '../../../../packages/shared-proto/',
-              IDENTITY.PROTO_FILE,
-            ),
+            protoPath: resolveProtoPath(IDENTITY.PROTO_FILE),
             url: configService.getOrThrow<string>('IDENTITY_GRPC_URL'),
             loader: { longs: Number },
           },
