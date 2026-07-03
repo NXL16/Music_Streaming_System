@@ -18,3 +18,4 @@ plugins:
       - esModuleInterop=true
       - snakeToCamel=true
       - addGrpcMetadata=true
+      - exportCommonSymbols=false

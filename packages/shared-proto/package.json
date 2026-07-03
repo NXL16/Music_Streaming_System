@@ -2,9 +2,36 @@
   "name": "@musical/shared-proto",
   "version": "1.0.0",
   "private": true,
-  "main": "src/index.ts",
-  "types": "src/index.ts",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "*.proto"
+  ],
+  "scripts": {
+    "generate": "buf generate && pnpm run build",
+    "build": "tsc -p tsconfig.json",
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
+  },
   "dependencies": {
-    "protobufjs": "^7.5.8"
+    "@bufbuild/protobuf": "^2.12.0",
+    "@grpc/grpc-js": "^1.14.3",
+    "@nestjs/microservices": "^11.1.19",
+    "protobufjs": "^7.5.8",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@musical/ts-config": "workspace:*",
+    "@types/node": "^24.0.0",
+    "typescript": "^6.0.2"
   }
 }

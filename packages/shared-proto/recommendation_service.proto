@@ -11,6 +11,27 @@ service RecommendationService {
   rpc GetRecommendationSection(GetRecommendationSectionRequest) returns (GetHomeRecommendationsResponse);
   rpc RefreshRecommendationSection(RefreshRecommendationSectionRequest) returns (GetHomeRecommendationsResponse);
   rpc ReplaceHomeRecommendations(ReplaceHomeRecommendationsRequest) returns (GetHomeRecommendationsResponse);
+  rpc PublishRecommendationPage(PublishRecommendationPageRequest) returns (GetHomeRecommendationsResponse);
+  rpc GetRecommendationPageForAdmin(GetRecommendationPageForAdminRequest) returns (GetHomeRecommendationsResponse);
+}
+
+enum RecommendationPageScope {
+  RECOMMENDATION_PAGE_SCOPE_UNSPECIFIED = 0;
+  RECOMMENDATION_PAGE_SCOPE_GLOBAL      = 1;
+  RECOMMENDATION_PAGE_SCOPE_USER        = 2;
+}
+
+enum RecommendationPageStatus {
+  RECOMMENDATION_PAGE_STATUS_UNSPECIFIED = 0;
+  RECOMMENDATION_PAGE_STATUS_DRAFT       = 1;
+  RECOMMENDATION_PAGE_STATUS_PUBLISHED   = 2;
+  RECOMMENDATION_PAGE_STATUS_ARCHIVED    = 3;
+}
+
+enum RecommendationPresentationMode {
+  RECOMMENDATION_PRESENTATION_MODE_UNSPECIFIED = 0;
+  RECOMMENDATION_PRESENTATION_MODE_AUTO        = 1;
+  RECOMMENDATION_PRESENTATION_MODE_FIXED       = 2;
 }
 
 message GetHomeRecommendationsRequest {
@@ -45,12 +66,36 @@ message ReplaceHomeRecommendationsRequest {
   string                                  platform  = 5;
   repeated PersonalRecommendationResource sections = 6;
   repeated CatalogResource                resources = 7;
+  RecommendationPageScope                 scope = 8;
+  RecommendationPageStatus                status = 9;
+  string                                  actor_user_id = 10;
+}
+
+message PublishRecommendationPageRequest {
+  string                  user_id      = 1;
+  string                  name         = 2;
+  string                  locale       = 3;
+  string                  timezone     = 4;
+  string                  platform     = 5;
+  RecommendationPageScope scope        = 6;
+  string                  actor_user_id = 7;
 }
 
 message RecommendationRef {
   string id   = 1;
   string type = 2;
   string href = 3;
+}
+
+message GetRecommendationPageForAdminRequest {
+  string                   user_id       = 1;
+  string                   name          = 2;
+  string                   locale        = 3;
+  string                   timezone      = 4;
+  string                   platform      = 5;
+  RecommendationPageScope  scope         = 6;
+  RecommendationPageStatus status        = 7;
+  string                   actor_user_id = 8;
 }
 
 message RecommendationRelationship {
@@ -82,6 +127,7 @@ message PersonalRecommendationAttributes {
   DisplayTitle          title                   = 7;
   DisplayTitle          title_without_name      = 8;
   int32                 version                 = 9;
+  RecommendationPresentationMode presentation_mode = 10;
 }
 
 message PersonalRecommendationResource {

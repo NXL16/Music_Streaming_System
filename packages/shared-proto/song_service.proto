@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package song_service;
 
+import "google/protobuf/struct.proto";
+
 option go_package = "Music_Streaming_System/packages/shared-proto/song";
 
 // Song service theo kiến trúc v5 (fMP4 + microservices)
@@ -21,6 +23,16 @@ service SongService {
   rpc RemoveFavorite(FavoriteRequest) returns (FavoriteResponse);
   rpc RemoveSongOwnership(RemoveSongOwnershipRequest) returns (RemoveSongOwnershipResponse);
   rpc GetPlaylist(GetPlaylistRequest) returns (GetPlaylistResponse);
+
+  // Public catalog APIs used by album/playlist detail pages.
+  rpc GetCatalogAlbum(GetCatalogAlbumRequest) returns (CatalogResponse);
+  rpc GetCatalogPlaylist(GetCatalogPlaylistRequest) returns (CatalogResponse);
+  rpc GetCatalogPlaylistTracks(GetCatalogPlaylistRequest) returns (CatalogResponse);
+  rpc GetCatalogResources(GetCatalogResourcesRequest) returns (CatalogResponse);
+
+  // Internal ingestion API. The service validates and normalizes the payload
+  // into relational catalog tables instead of persisting the source JSON.
+  rpc ImportCatalogPayload(ImportCatalogPayloadRequest) returns (ImportCatalogPayloadResponse);
 }
 
 enum SongStatus {
@@ -191,4 +203,199 @@ message GetPlaylistRequest {
 
 message GetPlaylistResponse {
   Playlist playlist = 1;
+}
+
+message GetCatalogAlbumRequest {
+  string storefront = 1;
+  string album_id = 2;
+}
+
+message GetCatalogPlaylistRequest {
+  string storefront = 1;
+  string playlist_id = 2;
+}
+
+message CatalogResourceIdentifier {
+  string type = 1;
+  string id = 2;
+}
+
+message GetCatalogResourcesRequest {
+  string storefront = 1;
+  repeated CatalogResourceIdentifier resources = 2;
+}
+
+message CatalogReferenceMeta {
+  double popularity = 1;
+}
+
+message CatalogReference {
+  string id = 1;
+  string type = 2;
+  string href = 3;
+  CatalogReferenceMeta meta = 4;
+}
+
+message CatalogArtwork {
+  string url = 1;
+  string bg_color = 2;
+  string text_color1 = 3;
+  string text_color2 = 4;
+  string text_color3 = 5;
+  string text_color4 = 6;
+  int32 width = 7;
+  int32 height = 8;
+  bool has_p3 = 9;
+}
+
+message CatalogPlayParams {
+  string id = 1;
+  string kind = 2;
+  string version_hash = 3;
+}
+
+message CatalogPreview {
+  string url = 1;
+}
+
+message CatalogRelationship {
+  string href = 1;
+  repeated CatalogReference data = 2;
+}
+
+message CatalogSongRelationships {
+  CatalogRelationship albums = 1;
+  CatalogRelationship artists = 2;
+  CatalogRelationship composers = 3;
+}
+
+message CatalogAlbumRelationships {
+  CatalogRelationship artists = 1;
+  CatalogRelationship tracks = 2;
+}
+
+message CatalogPlaylistRelationships {
+  CatalogRelationship tracks = 1;
+}
+
+message CatalogArtistAttributes {
+  string name = 1;
+  string url = 2;
+  CatalogArtwork artwork = 3;
+  repeated string genre_names = 4;
+}
+
+message CatalogSongAttributes {
+  string album_name = 1;
+  string artist_name = 2;
+  CatalogArtwork artwork = 3;
+  string audio_locale = 4;
+  repeated string audio_traits = 5;
+  string composer_name = 6;
+  string content_rating = 7;
+  int32 disc_number = 8;
+  int32 duration_in_millis = 9;
+  repeated string genre_names = 10;
+  bool has_lyrics = 11;
+  bool has_time_synced_lyrics = 12;
+  string isrc = 13;
+  string name = 14;
+  CatalogPlayParams play_params = 15;
+  repeated CatalogPreview previews = 16;
+  string release_date = 17;
+  int32 track_number = 18;
+  string url = 19;
+}
+
+message CatalogAlbumAttributes {
+  string artist_name = 1;
+  CatalogArtwork artwork = 2;
+  repeated string audio_traits = 3;
+  string content_rating = 4;
+  string copyright = 5;
+  repeated string genre_names = 6;
+  bool is_compilation = 7;
+  bool is_complete = 8;
+  bool is_prerelease = 9;
+  bool is_single = 10;
+  string name = 11;
+  CatalogPlayParams play_params = 12;
+  string record_label = 13;
+  string release_date = 14;
+  int32 track_count = 15;
+  string upc = 16;
+  string url = 17;
+  google.protobuf.Struct editorial_artwork = 18;
+}
+
+message CatalogPlaylistAttributes {
+  CatalogArtwork artwork = 1;
+  repeated string audio_traits = 2;
+  string curator_name = 3;
+  string description_short = 4;
+  string description_standard = 5;
+  string name = 6;
+  CatalogPlayParams play_params = 7;
+  string playlist_type = 8;
+  string last_modified_date = 9;
+  string url = 10;
+  google.protobuf.Struct editorial_artwork = 11;
+  google.protobuf.Struct editorial_video = 12;
+}
+
+message CatalogArtistResource {
+  string id = 1;
+  string type = 2;
+  string href = 3;
+  CatalogArtistAttributes attributes = 4;
+}
+
+message CatalogSongResource {
+  string id = 1;
+  string type = 2;
+  string href = 3;
+  CatalogSongAttributes attributes = 4;
+  CatalogSongRelationships relationships = 5;
+}
+
+message CatalogAlbumResource {
+  string id = 1;
+  string type = 2;
+  string href = 3;
+  CatalogAlbumAttributes attributes = 4;
+  CatalogAlbumRelationships relationships = 5;
+}
+
+message CatalogPlaylistResource {
+  string id = 1;
+  string type = 2;
+  string href = 3;
+  CatalogPlaylistAttributes attributes = 4;
+  CatalogPlaylistRelationships relationships = 5;
+}
+
+message CatalogResources {
+  map<string, CatalogAlbumResource> albums = 1;
+  map<string, CatalogPlaylistResource> playlists = 2;
+  map<string, CatalogSongResource> songs = 3;
+  map<string, CatalogArtistResource> artists = 4;
+}
+
+message CatalogResponse {
+  repeated CatalogReference data = 1;
+  CatalogResources resources = 2;
+}
+
+message ImportCatalogPayloadRequest {
+  string storefront = 1;
+  string payload_json = 2;
+  string resource_type = 3;
+  string resource_id = 4;
+}
+
+message ImportCatalogPayloadResponse {
+  int32 albums_imported = 1;
+  int32 playlists_imported = 2;
+  int32 songs_imported = 3;
+  int32 artists_imported = 4;
 }
