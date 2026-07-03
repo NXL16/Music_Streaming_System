@@ -4,7 +4,9 @@
   "private": true,
   "main": "index.js",
   "scripts": {
+    "predev": "pnpm proto:gen",
     "dev": "turbo run dev --parallel",
+    "prebuild": "pnpm proto:gen",
     "build": "turbo run build",
     "test": "turbo run test",
     "lint": "turbo run lint",
@@ -18,7 +20,7 @@
     "docker:up": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/scripts/docker-up-redis.ps1",
     "docker:down": "docker rm -f my-redis",
     "docker:logs": "docker logs -f my-redis",
-    "proto:gen": "cd packages/shared-proto && buf generate"
+    "proto:gen": "pnpm --dir packages/shared-proto generate"
   },
   "keywords": [],
   "author": "",
