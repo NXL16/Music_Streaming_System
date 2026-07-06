@@ -4,6 +4,8 @@ import type { ReactNode } from "react";
 import { AppPlayerBar } from "@/components/layout/app-player-bar";
 import AppSidebar from "@/components/layout/app-sidebar";
 import { ProtectedOnly } from "@/components/auth/protected-only";
+import { usePlayerStore } from "@/lib/player/use-player-store";
+import { AppFooter } from "./app-footer";
 
 type AuthenticatedAppShellProps = {
   children?: ReactNode;
@@ -12,10 +14,14 @@ type AuthenticatedAppShellProps = {
 export function AuthenticatedAppShell({
   children,
 }: AuthenticatedAppShellProps) {
+  const drawerOpen = usePlayerStore((state) => state.drawerOpen);
+
   return (
     <ProtectedOnly>
       <div className="min-h-full">
-        <div className="grid grid-cols-[260px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_auto_auto] gap-0 h-screen [grid-template-areas:'structure-header_structure-main-section''structure-upsell_structure-upsell''structure-locale-switcher_structure-locale-switcher']">
+        <div
+          className={`grid grid-cols-[260px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_auto_auto] gap-0 h-screen [grid-template-areas:'structure-header_structure-main-section''structure-upsell_structure-upsell''structure-locale-switcher_structure-locale-switcher'] ${drawerOpen ? "is-drawer-open" : ""}`}
+        >
           <AppSidebar />
 
           <AppPlayerBar />
@@ -29,6 +35,8 @@ export function AuthenticatedAppShell({
                 {children}
               </div>
             </main>
+
+            <AppFooter />
           </div>
         </div>
       </div>
