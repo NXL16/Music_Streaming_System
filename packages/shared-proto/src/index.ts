@@ -1,7 +1,10 @@
+import { resolve } from "node:path";
+
 export * from "./generated/identity_service";
 export * from "./generated/song_service";
 export * from "./generated/wallet_service";
 export * from "./generated/recommendation_service";
+export * from "./generated/asset_service";
 
 export {
   type SeekPoint,
@@ -49,7 +52,18 @@ export const RECOMMENDATION = {
   PROTO_FILE: "recommendation_service.proto",
 } as const;
 
+export const ASSET = {
+  PACKAGE: "asset_service",
+  SERVICE: "AssetService",
+  PROTO_FILE: "asset_service.proto",
+} as const;
+
+export const GRPC_LOADER_OPTIONS = {
+  arrays: true,
+  objects: true,
+  longs: Number,
+} as const;
+
 export function resolveProtoPath(protoFile: string): string {
   return resolve(__dirname, "..", protoFile);
 }
-import { resolve } from "node:path";

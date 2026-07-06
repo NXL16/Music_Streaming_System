@@ -1,0 +1,162 @@
+syntax = "proto3";
+
+package asset_service;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "Music_Streaming_System/packages/shared-proto/asset";
+
+service AssetService {
+  rpc RequestAssetUpload(RequestAssetUploadRequest) returns (RequestAssetUploadResponse);
+  rpc FinalizeAssetUpload(FinalizeAssetUploadRequest) returns (AssetResponse);
+  rpc GetAsset(GetAssetRequest) returns (AssetResponse);
+  rpc ListAssets(ListAssetsRequest) returns (ListAssetsResponse);
+  rpc DeleteAsset(DeleteAssetRequest) returns (DeleteAssetResponse);
+  rpc UpdateAssetProcessingResult(UpdateAssetProcessingResultRequest) returns (AssetResponse);
+  rpc RegisterAssetUsages(SyncAssetUsagesRequest) returns (RegisterAssetUsagesResponse);
+  rpc ReconcileAssetUsages(SyncAssetUsagesRequest) returns (SyncAssetUsagesResponse);
+  rpc ListAssetUsages(GetAssetRequest) returns (ListAssetUsagesResponse);
+}
+
+enum AssetKind {
+  ASSET_KIND_UNSPECIFIED = 0;
+  ASSET_KIND_IMAGE = 1;
+  ASSET_KIND_VIDEO = 2;
+}
+
+enum AssetPurpose {
+  ASSET_PURPOSE_UNSPECIFIED = 0;
+  ASSET_PURPOSE_ARTWORK = 1;
+  ASSET_PURPOSE_EDITORIAL_VIDEO = 2;
+}
+
+enum AssetStatus {
+  ASSET_STATUS_UNSPECIFIED = 0;
+  ASSET_STATUS_PENDING_UPLOAD = 1;
+  ASSET_STATUS_PROCESSING = 2;
+  ASSET_STATUS_READY = 3;
+  ASSET_STATUS_FAILED = 4;
+  ASSET_STATUS_DELETED = 5;
+}
+
+message RequestAssetUploadRequest {
+  string actor_user_id = 1;
+  AssetKind kind = 2;
+  AssetPurpose purpose = 3;
+  string filename = 4;
+  string content_type = 5;
+  string checksum = 6;
+  int64 size_bytes = 7;
+}
+
+message RequestAssetUploadResponse {
+  Asset asset = 1;
+  string upload_url = 2;
+  bool instant = 3;
+}
+
+message FinalizeAssetUploadRequest {
+  string asset_id = 1;
+  string actor_user_id = 2;
+}
+
+message GetAssetRequest {
+  string asset_id = 1;
+}
+
+message ListAssetsRequest {
+  string actor_user_id = 1;
+  AssetKind kind = 2;
+  AssetPurpose purpose = 3;
+  AssetStatus status = 4;
+  string cursor = 5;
+  int32 limit = 6;
+}
+
+message ListAssetsResponse {
+  repeated Asset assets = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message DeleteAssetRequest {
+  string asset_id = 1;
+  string actor_user_id = 2;
+}
+
+message DeleteAssetResponse {
+  bool success = 1;
+}
+
+message UpdateAssetProcessingResultRequest {
+  string asset_id = 1;
+  bool success = 2;
+  string public_url = 3;
+  int32 width = 4;
+  int32 height = 5;
+  int32 duration_millis = 6;
+  google.protobuf.Struct variants = 7;
+  string error_message = 8;
+}
+
+message AssetResponse {
+  Asset asset = 1;
+}
+
+message AssetUsageAssignment {
+  string slot = 1;
+  string asset_id = 2;
+  AssetKind expected_kind = 3;
+  AssetPurpose expected_purpose = 4;
+}
+
+message SyncAssetUsagesRequest {
+  string owner_service = 1;
+  string owner_type = 2;
+  string owner_id = 3;
+  repeated AssetUsageAssignment usages = 4;
+}
+
+message RegisterAssetUsagesResponse {
+  repeated Asset assets = 1;
+}
+
+message SyncAssetUsagesResponse {
+  bool success = 1;
+}
+
+message AssetUsage {
+  string id = 1;
+  string asset_id = 2;
+  string owner_service = 3;
+  string owner_type = 4;
+  string owner_id = 5;
+  string slot = 6;
+  string created_at = 7;
+  string updated_at = 8;
+}
+
+message ListAssetUsagesResponse {
+  repeated AssetUsage usages = 1;
+}
+
+message Asset {
+  string id = 1;
+  AssetKind kind = 2;
+  AssetPurpose purpose = 3;
+  AssetStatus status = 4;
+  string filename = 5;
+  string content_type = 6;
+  string checksum = 7;
+  int64 size_bytes = 8;
+  string source_object_key = 9;
+  string public_url = 10;
+  int32 width = 11;
+  int32 height = 12;
+  int32 duration_millis = 13;
+  google.protobuf.Struct variants = 14;
+  string error_message = 15;
+  string created_by = 16;
+  string created_at = 17;
+  string updated_at = 18;
+}
