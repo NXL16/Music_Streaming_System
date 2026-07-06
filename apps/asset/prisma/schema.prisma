@@ -1,0 +1,90 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum AssetKind {
+  IMAGE
+  VIDEO
+}
+
+enum AssetPurpose {
+  ARTWORK
+  EDITORIAL_VIDEO
+}
+
+enum AssetStatus {
+  PENDING_UPLOAD
+  PROCESSING
+  READY
+  FAILED
+  DELETED
+}
+
+model Asset {
+  id             String       @id @default(uuid())
+  kind           AssetKind
+  purpose        AssetPurpose
+  status         AssetStatus  @default(PENDING_UPLOAD)
+  filename       String       @db.VarChar(255)
+  contentType    String       @db.VarChar(128)
+  checksum       String       @db.Char(64)
+  sizeBytes      BigInt
+  sourceObjectKey String      @db.VarChar(1000)
+  publicUrl      String       @default("") @db.VarChar(2000)
+  width          Int          @default(0)
+  height         Int          @default(0)
+  durationMillis Int          @default(0)
+  variants       Json?
+  errorMessage   String       @default("") @db.VarChar(2000)
+  createdBy      String       @db.VarChar(128)
+  createdAt      DateTime     @default(now()) @db.Timestamptz
+  updatedAt      DateTime     @updatedAt @db.Timestamptz
+
+  processingJob AssetProcessingJob?
+  usages        AssetUsage[]
+
+  @@unique([kind, purpose, checksum])
+  @@index([status, kind, purpose, createdAt])
+  @@index([createdBy, createdAt])
+  @@map("assets")
+}
+
+model AssetUsage {
+  id           String   @id @default(uuid())
+  assetId      String
+  ownerService String   @db.VarChar(64)
+  ownerType    String   @db.VarChar(64)
+  ownerId      String   @db.VarChar(128)
+  slot         String   @db.VarChar(64)
+  createdAt    DateTime @default(now()) @db.Timestamptz
+  updatedAt    DateTime @updatedAt @db.Timestamptz
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@unique([ownerService, ownerType, ownerId, slot, assetId])
+  @@index([assetId, ownerService, ownerType])
+  @@index([ownerService, ownerType, ownerId])
+  @@map("asset_usages")
+}
+
+model AssetProcessingJob {
+  id          String   @id @default(uuid())
+  assetId     String   @unique
+  attempts    Int      @default(0)
+  availableAt DateTime @default(now()) @db.Timestamptz
+  lockedAt    DateTime? @db.Timestamptz
+  lastError   String   @default("") @db.VarChar(2000)
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([availableAt, lockedAt])
+  @@map("asset_processing_jobs")
+}
