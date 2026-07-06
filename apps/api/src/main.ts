@@ -7,9 +7,10 @@ import { ValidationExceptionFilter } from './common/filters/validation-exception
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { GrpcExceptionFilter } from './common/filters/grpc-exception.filter';
 import cookieParser from 'cookie-parser';
+import { NestExpressApplication } from '@nestjs/platform-express';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const configService = app.get(ConfigService);
 
   const corsOrigin = configService.get<string>('CORS_ORIGIN')!;
@@ -17,6 +18,7 @@ async function bootstrap() {
   const port = Number(configService.getOrThrow<string>('API_PORT'));
   const prefix = configService.getOrThrow<string>('API_PREFIX');
 
+  app.useBodyParser('json', { limit: '20mb' });
   app.use(cookieParser());
 
   if (corsOrigin.trim() === '*') {
@@ -48,7 +50,7 @@ async function bootstrap() {
   );
 
   await app.listen(port, () =>
-    Logger.log(`API Getway is running at http://${host}:${port}/${prefix}`),
+    Logger.log(`API Gateway is running at http://${host}:${port}/${prefix}`),
   );
 }
 

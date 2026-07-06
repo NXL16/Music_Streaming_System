@@ -3,7 +3,11 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MetadataController } from './metadata.controller';
 import { MetadataService } from './metadata.service';
-import { METADATA, resolveProtoPath } from '@musical/shared-proto';
+import {
+  GRPC_LOADER_OPTIONS,
+  METADATA,
+  resolveProtoPath,
+} from '@musical/shared-proto';
 
 @Module({
   imports: [
@@ -19,7 +23,7 @@ import { METADATA, resolveProtoPath } from '@musical/shared-proto';
             url: config.getOrThrow<string>('META_GRPC_URL'),
             package: METADATA.PACKAGE,
             protoPath: resolveProtoPath(METADATA.PROTO_FILE),
-            loader: { longs: Number },
+            loader: GRPC_LOADER_OPTIONS,
           },
         }),
       },

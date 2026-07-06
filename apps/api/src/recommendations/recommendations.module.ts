@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import {
+  GRPC_LOADER_OPTIONS,
   RECOMMENDATION,
   resolveProtoPath,
 } from '@musical/shared-proto';
@@ -25,7 +26,7 @@ import { RecommendationsService } from './recommendations.service';
             url: config.getOrThrow<string>('RECOMMENDATION_GRPC_URL'),
             package: RECOMMENDATION.PACKAGE,
             protoPath: resolveProtoPath(RECOMMENDATION.PROTO_FILE),
-            loader: { longs: Number },
+            loader: GRPC_LOADER_OPTIONS,
           },
         }),
       },

@@ -3,8 +3,16 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
 import { SongsController } from './songs.controller';
 import { SongsService } from './songs.service';
 import { R2Module } from '../common/r2/r2.module';
-import { CatalogController } from './catalog.controller';
-import { resolveProtoPath, SONG } from '@musical/shared-proto';
+import { PlaylistsController } from './playlists.controller';
+import {
+  CatalogAdminController,
+  CatalogController,
+} from './catalog.controller';
+import {
+  GRPC_LOADER_OPTIONS,
+  SONG,
+  resolveProtoPath,
+} from '@musical/shared-proto';
 
 @Module({
   imports: [
@@ -17,12 +25,17 @@ import { resolveProtoPath, SONG } from '@musical/shared-proto';
           package: SONG.PACKAGE,
           protoPath: resolveProtoPath(SONG.PROTO_FILE),
           url: '0.0.0.0:7777',
-          loader: { longs: Number },
+          loader: GRPC_LOADER_OPTIONS,
         },
       },
     ]),
   ],
-  controllers: [SongsController, CatalogController],
+  controllers: [
+    SongsController,
+    PlaylistsController,
+    CatalogController,
+    CatalogAdminController,
+  ],
   providers: [SongsService],
   exports: [SongsService],
 })

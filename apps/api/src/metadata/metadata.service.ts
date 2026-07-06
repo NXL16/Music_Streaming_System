@@ -36,13 +36,12 @@ const META_CACHE_MAX_ITEMS = 1000;
 
 @Injectable()
 export class MetadataService implements OnModuleInit {
-  private metadataClient: MetadataServiceClient;
+  private metadataClient!: MetadataServiceClient;
   private readonly streamDataCache = new Map<string, CacheEntry>();
 
-  constructor(@Inject('METADATA_SERVICE') private readonly client: ClientGrpc) {
-    this.metadataClient =
-      this.client.getService<MetadataServiceClient>('MetadataService');
-  }
+  constructor(
+    @Inject('METADATA_SERVICE') private readonly client: ClientGrpc,
+  ) {}
 
   onModuleInit() {
     this.metadataClient =
@@ -81,7 +80,8 @@ export class MetadataService implements OnModuleInit {
         duration: segment.durationTs,
         startTimeSec: segment.startTimeSec,
       })),
-      encryptionStartOffset: data.encryptionStartOffset || data.mediaOffset || 0,
+      encryptionStartOffset:
+        data.encryptionStartOffset || data.mediaOffset || 0,
       waveform: data.waveform || [],
     };
 

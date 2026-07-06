@@ -114,22 +114,31 @@ export class SongsController {
     return await this.songsService.getSong(request);
   }
 
-  @Patch('processing-result')
-  async updateStatus(@Body() updateDto: UpdateSongProcessingResultRequest) {
+  @Patch('internal/processing-result')
+  async updateStatus(
+    @Headers('x-internal-token') token: string | undefined,
+    @Body() updateDto: UpdateSongProcessingResultRequest,
+  ) {
+    const expectedToken = this.configService.get<string>('FINALIZER_INTERNAL_TOKEN');
+    if (!expectedToken || token !== expectedToken) {
+      throw new UnauthorizedException('INVALID_INTERNAL_TOKEN');
+    }
+
     return await this.songsService.updateSongProcessingResult(updateDto);
   }
 
   @Post(':id/favorite')
-  async favorite(@Param('id') songId: string, @Body('userId') userId: string) {
-    return await this.songsService.addFavorite({ userId, songId });
+  @UseGuards(StrictJwtAuthGuard)
+  async favorite(@Req() req: Request, @Param('id') songId: string) {
+    const user = req.user as JwtUser;
+    return await this.songsService.addFavorite({ userId: user.userId, songId });
   }
 
   @Delete(':id/favorite')
-  async unfavorite(
-    @Param('id') songId: string,
-    @Body('userId') userId: string,
-  ) {
-    return await this.songsService.removeFavorite({ userId, songId });
+  @UseGuards(StrictJwtAuthGuard)
+  async unfavorite(@Req() req: Request, @Param('id') songId: string) {
+    const user = req.user as JwtUser;
+    return await this.songsService.removeFavorite({ userId: user.userId, songId });
   }
 
   @Delete(':id')

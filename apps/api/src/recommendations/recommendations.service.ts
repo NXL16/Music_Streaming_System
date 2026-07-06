@@ -5,7 +5,10 @@ import {
   GetHomeRecommendationsRequest,
   GetHomeRecommendationsResponse,
   GetRecommendationSectionRequest,
+  GetRecommendationPageForAdminRequest,
+  PublishRecommendationPageRequest,
   RecommendationServiceClient,
+  ReplaceHomeRecommendationsRequest,
   RefreshRecommendationSectionRequest,
 } from '@musical/shared-proto';
 import { firstValueFrom } from 'rxjs';
@@ -70,6 +73,45 @@ export class RecommendationsService implements OnModuleInit {
     return this.normalizeResponse(
       await firstValueFrom(
         this.recommendationClient.refreshRecommendationSection(
+          request,
+          this.metadata(),
+        ),
+      ),
+    );
+  }
+
+  async replaceHomeRecommendations(
+    request: ReplaceHomeRecommendationsRequest,
+  ): Promise<GetHomeRecommendationsResponse> {
+    return this.normalizeResponse(
+      await firstValueFrom(
+        this.recommendationClient.replaceHomeRecommendations(
+          request,
+          this.metadata(),
+        ),
+      ),
+    );
+  }
+
+  async publishRecommendationPage(
+    request: PublishRecommendationPageRequest,
+  ): Promise<GetHomeRecommendationsResponse> {
+    return this.normalizeResponse(
+      await firstValueFrom(
+        this.recommendationClient.publishRecommendationPage(
+          request,
+          this.metadata(),
+        ),
+      ),
+    );
+  }
+
+  async getRecommendationPageForAdmin(
+    request: GetRecommendationPageForAdminRequest,
+  ): Promise<GetHomeRecommendationsResponse> {
+    return this.normalizeResponse(
+      await firstValueFrom(
+        this.recommendationClient.getRecommendationPageForAdmin(
           request,
           this.metadata(),
         ),

@@ -1,36 +1,34 @@
 import { Module } from '@nestjs/common';
-import { ClientsModule, Transport } from '@nestjs/microservices';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { WalletController } from './wallet.controller';
-import { WalletService } from './wallet.service';
+import { ClientsModule, Transport } from '@nestjs/microservices';
 import {
+  ASSET,
   GRPC_LOADER_OPTIONS,
   resolveProtoPath,
-  WALLET,
 } from '@musical/shared-proto';
+import { AssetsController } from './assets.controller';
+import { AssetsService } from './assets.service';
 
 @Module({
   imports: [
-    ConfigModule,
     ClientsModule.registerAsync([
       {
-        name: 'WALLET_SERVICE',
+        name: 'ASSET_SERVICE',
         imports: [ConfigModule],
         inject: [ConfigService],
         useFactory: (config: ConfigService) => ({
           transport: Transport.GRPC,
           options: {
-            url: config.getOrThrow<string>('WALLET_GRPC_URL'),
-            package: WALLET.PACKAGE,
-            protoPath: resolveProtoPath(WALLET.PROTO_FILE),
+            url: config.getOrThrow<string>('ASSET_GRPC_URL'),
+            package: ASSET.PACKAGE,
+            protoPath: resolveProtoPath(ASSET.PROTO_FILE),
             loader: GRPC_LOADER_OPTIONS,
           },
         }),
       },
     ]),
   ],
-  controllers: [WalletController],
-  providers: [WalletService],
-  exports: [WalletService],
+  controllers: [AssetsController],
+  providers: [AssetsService],
 })
-export class WalletModule {}
+export class AssetsModule {}

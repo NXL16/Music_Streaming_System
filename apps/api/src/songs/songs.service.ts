@@ -31,6 +31,30 @@ import {
   GetPlaylistRequest,
   GetPlaylistResponse,
   SongStatus,
+  GetCatalogAlbumRequest,
+  GetCatalogPlaylistRequest,
+  CatalogResponse,
+  SaveCatalogArtistDraftRequest,
+  SaveCatalogSongDraftRequest,
+  SaveCatalogAlbumDraftRequest,
+  SaveCatalogPlaylistDraftRequest,
+  CatalogDraftInfo,
+  GetCatalogDraftRequest,
+  CatalogDraftDetail,
+  ListCatalogDraftsRequest,
+  ListCatalogDraftsResponse,
+  PublishCatalogDraftRequest,
+  DeleteCatalogDraftRequest,
+  DeleteCatalogDraftResponse,
+  CreateUserPlaylistRequest,
+  UpdateUserPlaylistRequest,
+  DeleteUserPlaylistRequest,
+  DeleteUserPlaylistResponse,
+  ListUserPlaylistsRequest,
+  ListUserPlaylistsResponse,
+  PlaylistTrackRequest,
+  PlaylistTrackResponse,
+  UserPlaylistInfo,
 } from '@musical/shared-proto';
 import { firstValueFrom } from 'rxjs';
 import { R2Service } from '../common/r2/r2.service';
@@ -114,6 +138,150 @@ export class SongsService implements OnModuleInit {
 
   async getPlaylist(data: GetPlaylistRequest): Promise<GetPlaylistResponse> {
     return await firstValueFrom(this.songServiceClient.getPlaylist(data));
+  }
+
+  async createUserPlaylist(
+    data: CreateUserPlaylistRequest,
+  ): Promise<UserPlaylistInfo> {
+    return await firstValueFrom(this.songServiceClient.createUserPlaylist(data));
+  }
+
+  async updateUserPlaylist(
+    data: UpdateUserPlaylistRequest,
+  ): Promise<UserPlaylistInfo> {
+    return await firstValueFrom(this.songServiceClient.updateUserPlaylist(data));
+  }
+
+  async deleteUserPlaylist(
+    data: DeleteUserPlaylistRequest,
+  ): Promise<DeleteUserPlaylistResponse> {
+    return await firstValueFrom(this.songServiceClient.deleteUserPlaylist(data));
+  }
+
+  async listUserPlaylists(
+    data: ListUserPlaylistsRequest,
+  ): Promise<ListUserPlaylistsResponse> {
+    return await firstValueFrom(this.songServiceClient.listUserPlaylists(data));
+  }
+
+  async addTrackToPlaylist(
+    data: PlaylistTrackRequest,
+  ): Promise<PlaylistTrackResponse> {
+    return await firstValueFrom(this.songServiceClient.addTrackToPlaylist(data));
+  }
+
+  async removeTrackFromPlaylist(
+    data: PlaylistTrackRequest,
+  ): Promise<PlaylistTrackResponse> {
+    return await firstValueFrom(
+      this.songServiceClient.removeTrackFromPlaylist(data),
+    );
+  }
+
+  async getCatalogAlbum(
+    data: GetCatalogAlbumRequest,
+  ): Promise<CatalogResponse> {
+    return await firstValueFrom(this.songServiceClient.getCatalogAlbum(data));
+  }
+
+  async getCatalogPlaylist(
+    data: GetCatalogPlaylistRequest,
+  ): Promise<CatalogResponse> {
+    return await firstValueFrom(
+      this.songServiceClient.getCatalogPlaylist(data),
+    );
+  }
+
+  async getCatalogPlaylistTracks(
+    data: GetCatalogPlaylistRequest,
+  ): Promise<CatalogResponse> {
+    return await firstValueFrom(
+      this.songServiceClient.getCatalogPlaylistTracks(data),
+    );
+  }
+
+  async saveCatalogArtistDraft(
+    data: SaveCatalogArtistDraftRequest,
+  ): Promise<CatalogDraftInfo> {
+    return firstValueFrom(
+      this.songServiceClient.saveCatalogArtistDraft(data),
+    );
+  }
+
+  async saveCatalogSongDraft(
+    data: SaveCatalogSongDraftRequest,
+  ): Promise<CatalogDraftInfo> {
+    return firstValueFrom(
+      this.songServiceClient.saveCatalogSongDraft({
+        ...data,
+        editorialArtwork: this.wrapStructInput(data.editorialArtwork),
+        extendedAssetUrls: this.wrapStructInput(data.extendedAssetUrls),
+        offers: this.wrapStructInputs(data.offers),
+      }),
+    );
+  }
+
+  async saveCatalogAlbumDraft(
+    data: SaveCatalogAlbumDraftRequest,
+  ): Promise<CatalogDraftInfo> {
+    return firstValueFrom(
+      this.songServiceClient.saveCatalogAlbumDraft({
+        ...data,
+        editorialArtwork: this.wrapStructInput(data.editorialArtwork),
+        editorialNotes: this.wrapStructInput(data.editorialNotes),
+        editorialVideo: this.wrapStructInput(data.editorialVideo),
+        offers: this.wrapStructInputs(data.offers),
+      }),
+    );
+  }
+
+  async saveCatalogPlaylistDraft(
+    data: SaveCatalogPlaylistDraftRequest,
+  ): Promise<CatalogDraftInfo> {
+    return firstValueFrom(
+      this.songServiceClient.saveCatalogPlaylistDraft({
+        ...data,
+        editorialArtwork: this.wrapStructInput(data.editorialArtwork),
+        editorialNotes: this.wrapStructInput(data.editorialNotes),
+        editorialVideo: this.wrapStructInput(data.editorialVideo),
+        plainEditorialCard: this.wrapStructInput(data.plainEditorialCard),
+        plainEditorialNotes: this.wrapStructInput(data.plainEditorialNotes),
+      }),
+    );
+  }
+
+  async getCatalogDraft(
+    data: GetCatalogDraftRequest,
+  ): Promise<CatalogDraftDetail> {
+    const response = await firstValueFrom(
+      this.songServiceClient.getCatalogDraft(data),
+    );
+    return {
+      ...response,
+      payload: this.unwrapStructOutput(response.payload),
+    };
+  }
+
+  async listCatalogDrafts(
+    data: ListCatalogDraftsRequest,
+  ): Promise<ListCatalogDraftsResponse> {
+    return firstValueFrom(this.songServiceClient.listCatalogDrafts(data));
+  }
+
+  async publishCatalogDraft(
+    data: PublishCatalogDraftRequest,
+  ): Promise<CatalogResponse> {
+    return firstValueFrom(
+      this.songServiceClient.publishCatalogDraft(data),
+    );
+  }
+
+  async deleteCatalogDraft(
+    data: DeleteCatalogDraftRequest,
+  ): Promise<DeleteCatalogDraftResponse> {
+    return firstValueFrom(
+      this.songServiceClient.deleteCatalogDraft(data),
+    );
   }
 
   async requestUpload(request: RequestUploadDto, userId: string) {
@@ -207,6 +375,95 @@ export class SongsService implements OnModuleInit {
     }
   }
 
+  private wrapStructInput(
+    value: Record<string, unknown> | undefined,
+  ): Record<string, unknown> | undefined {
+    if (!value) return undefined;
+    if (
+      typeof value.fields === 'object' &&
+      value.fields !== null &&
+      !Array.isArray(value.fields)
+    ) {
+      return value;
+    }
+    return {
+      fields: Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [
+          key,
+          this.wrapStructValue(item),
+        ]),
+      ),
+    };
+  }
+
+  private wrapStructInputs(
+    values: Array<Record<string, unknown>> | undefined,
+  ): Array<Record<string, unknown>> {
+    return (values ?? []).map((value) => this.wrapStructInput(value) ?? {});
+  }
+
+  private wrapStructValue(value: unknown): Record<string, unknown> {
+    if (value === null || value === undefined) return { nullValue: 0 };
+    if (Array.isArray(value)) {
+      return {
+        listValue: {
+          values: value.map((item) => this.wrapStructValue(item)),
+        },
+      };
+    }
+    if (typeof value === 'object') {
+      return {
+        structValue: this.wrapStructInput(
+          value as Record<string, unknown>,
+        ),
+      };
+    }
+    if (typeof value === 'string') return { stringValue: value };
+    if (typeof value === 'number') return { numberValue: value };
+    if (typeof value === 'boolean') return { boolValue: value };
+    return { nullValue: 0 };
+  }
+
+  private unwrapStructOutput(
+    value: Record<string, unknown> | undefined,
+  ): Record<string, unknown> | undefined {
+    if (!value) return undefined;
+    const fields = value.fields;
+    if (
+      typeof fields !== 'object' ||
+      fields === null ||
+      Array.isArray(fields)
+    ) {
+      return value;
+    }
+    return Object.fromEntries(
+      Object.entries(fields).map(([key, item]) => [
+        key,
+        this.unwrapStructValue(item),
+      ]),
+    );
+  }
+
+  private unwrapStructValue(value: unknown): unknown {
+    if (typeof value !== 'object' || value === null) return null;
+    const item = value as Record<string, unknown>;
+    if ('stringValue' in item) return item.stringValue;
+    if ('numberValue' in item) return item.numberValue;
+    if ('boolValue' in item) return item.boolValue;
+    if ('structValue' in item) {
+      return this.unwrapStructOutput(
+        item.structValue as Record<string, unknown>,
+      );
+    }
+    if ('listValue' in item) {
+      const list = item.listValue as { values?: unknown[] };
+      return (list.values ?? []).map((entry) =>
+        this.unwrapStructValue(entry),
+      );
+    }
+    return null;
+  }
+
   private async buildExistingUploadResponse(
     songId: string,
     alreadyInLibrary: boolean,
@@ -227,7 +484,7 @@ export class SongsService implements OnModuleInit {
       });
     }
 
-    if (existingStatus === SongStatus.SONG_STATUS_PROCESSING) {
+    if (existingStatus === Number(SongStatus.SONG_STATUS_PROCESSING)) {
       return {
         songId: ingest.song.id,
         instant: false,
@@ -236,7 +493,7 @@ export class SongsService implements OnModuleInit {
       };
     }
 
-    if (existingStatus === SongStatus.SONG_STATUS_PENDING) {
+    if (existingStatus === Number(SongStatus.SONG_STATUS_PENDING)) {
       try {
         const objectMeta = await this.r2Service.headObject(
           ingest.song.sourceObjectPath,
@@ -268,7 +525,7 @@ export class SongsService implements OnModuleInit {
       }
     }
 
-    if (existingStatus === SongStatus.SONG_STATUS_READY) {
+    if (existingStatus === Number(SongStatus.SONG_STATUS_READY)) {
       try {
         await this.r2Service.headObject(ingest.song.sourceObjectPath);
       } catch (error) {
@@ -390,11 +647,11 @@ export class SongsService implements OnModuleInit {
 
       const currentStatus = Number(song.song.status);
 
-      if (currentStatus === SongStatus.SONG_STATUS_PROCESSING) {
+      if (currentStatus === Number(SongStatus.SONG_STATUS_PROCESSING)) {
         return { status: 'PROCESSING' };
       }
 
-      if (currentStatus === SongStatus.SONG_STATUS_READY) {
+      if (currentStatus === Number(SongStatus.SONG_STATUS_READY)) {
         return { status: 'READY' };
       }
 

@@ -12,6 +12,7 @@ import { MetadataModule } from './metadata/metadata.module';
 import { WalletModule } from './wallet/wallet.module';
 import { RoomModule } from './room/room.module';
 import { RecommendationsModule } from './recommendations/recommendations.module';
+import { AssetsModule } from './assets/assets.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { RecommendationsModule } from './recommendations/recommendations.module'
     WalletModule,
     RoomModule,
     RecommendationsModule,
+    AssetsModule,
   ],
 })
 export class AppModule {}
