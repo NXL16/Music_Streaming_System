@@ -1,0 +1,15 @@
+name = "stream-worker"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+minify = true
+
+routes = [
+    { pattern = "cdn.404hz.me", custom_domain = true }
+]
+
+[[r2_buckets]]
+binding = "MUSIC_BUCKET"
+bucket_name = "music-hls-bucket"
+
+[vars]
+ALLOWED_ORIGIN = "http://localhost:3000"
