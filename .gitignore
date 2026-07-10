@@ -23,6 +23,7 @@ build/
 .next/
 .turbo/
 .wrangler/
+.tmp/
 target/
 Cargo.lock
 
