@@ -11,50 +11,29 @@ const CACHE_HEADERS: Record<string, string> = {
   "Cache-Control": `public, s-maxage=${EDGE_TTL}, max-age=${EDGE_TTL}, stale-while-revalidate=${EDGE_TTL}, immutable`,
 };
 
-function parseRange(
-  header: string,
-  totalSize: number,
-): { start: number; end: number } | null {
-  const standard = header.match(/^bytes=(\d+)-(\d*)$/);
-  if (standard) {
-    const start = parseInt(standard[1], 10);
-    const end = standard[2] ? parseInt(standard[2], 10) : totalSize - 1;
-    if (start > end || start >= totalSize) return null;
-    return { start, end: Math.min(end, totalSize - 1) };
-  }
-
-  const suffix = header.match(/^bytes=-(\d+)$/);
-  if (suffix) {
-    const len = parseInt(suffix[1], 10);
-    if (len === 0) return null;
-    return { start: Math.max(0, totalSize - len), end: totalSize - 1 };
-  }
-
-  return null;
+function isCacheableRange(range: string): boolean {
+  // MSE makes single byte-range requests. Do not cache multi-ranges, which
+  // create high-cardinality cache keys without helping normal playback.
+  return range.length <= 128 && /^bytes=(?:\d+-\d*|-\d+)$/.test(range);
 }
 
-async function warmFullCache(
-  cache: Cache,
-  cacheUrl: string,
-  bucket: R2Bucket,
-  objectKey: string,
-): Promise<void> {
-  const existing = await cache.match(cacheUrl);
-  if (existing) return;
+function rangeCacheKey(cacheUrl: string, range: string): Request {
+  const keyUrl = new URL(cacheUrl);
+  keyUrl.searchParams.set("__stream_range", range);
+  return new Request(keyUrl.toString());
+}
 
-  const object = await bucket.get(objectKey);
-  if (!object) return;
-
-  await cache.put(
-    cacheUrl,
-    new Response(object.body, {
-      headers: {
-        ...CACHE_HEADERS,
-        "Content-Length": String(object.size),
-        "ETag": object.etag,
-      },
-    }),
-  );
+function serverTiming(
+  startedAt: number,
+  cacheStatus: "HIT" | "MISS" | "BYPASS",
+  r2DurationMs = 0,
+): string {
+  const totalDurationMs = performance.now() - startedAt;
+  return [
+    `stream;dur=${totalDurationMs.toFixed(1)}`,
+    `r2;dur=${r2DurationMs.toFixed(1)}`,
+    `edge-cache;desc="${cacheStatus}"`,
+  ].join(", ");
 }
 
 export default {
@@ -68,7 +47,8 @@ export default {
       "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
       "Access-Control-Allow-Headers": "Range, If-None-Match",
       "Access-Control-Expose-Headers":
-        "Content-Range, Content-Length, Accept-Ranges, ETag",
+        "Content-Range, Content-Length, Accept-Ranges, ETag, Server-Timing, X-Stream-Cache",
+      "Timing-Allow-Origin": env.ALLOWED_ORIGIN,
     };
 
     if (request.method === "OPTIONS") {
@@ -98,6 +78,7 @@ export default {
     const cache = caches.default;
     const cacheUrl = `${url.origin}/${songId}`;
     const ifNoneMatch = request.headers.get("If-None-Match");
+    const startedAt = performance.now();
 
     // --- HEAD: prefer cache, fallback R2 ---
     if (request.method === "HEAD") {
@@ -107,7 +88,11 @@ export default {
         if (ifNoneMatch && ifNoneMatch === etag) {
           return new Response(null, {
             status: 304,
-            headers: { ...cors, ETag: etag, "Cache-Control": CACHE_HEADERS["Cache-Control"] },
+            headers: {
+              ...cors,
+              ETag: etag,
+              "Cache-Control": CACHE_HEADERS["Cache-Control"],
+            },
           });
         }
         return new Response(null, {
@@ -140,16 +125,21 @@ export default {
       });
     }
 
-    // --- GET: single cache lookup for both 304 and body serving ---
-    const cached = await cache.match(cacheUrl);
     const rangeHeader = request.headers.get("Range");
+    // A full cached object cannot efficiently serve a byte seek: reading it
+    // just to discard most bytes hurts latency and Worker memory.
+    const cached = rangeHeader ? undefined : await cache.match(cacheUrl);
 
     if (ifNoneMatch && cached) {
       const cachedETag = cached.headers.get("ETag");
       if (cachedETag && ifNoneMatch === cachedETag) {
         return new Response(null, {
           status: 304,
-          headers: { ...cors, ETag: cachedETag, "Cache-Control": CACHE_HEADERS["Cache-Control"] },
+          headers: {
+            ...cors,
+            ETag: cachedETag,
+            "Cache-Control": CACHE_HEADERS["Cache-Control"],
+          },
         });
       }
     }
@@ -180,7 +170,11 @@ export default {
         await object.body.cancel();
         return new Response(null, {
           status: 304,
-          headers: { ...cors, ETag: object.etag, "Cache-Control": CACHE_HEADERS["Cache-Control"] },
+          headers: {
+            ...cors,
+            ETag: object.etag,
+            "Cache-Control": CACHE_HEADERS["Cache-Control"],
+          },
         });
       }
 
@@ -194,37 +188,53 @@ export default {
         },
       });
 
-      ctx.waitUntil(cache.put(cacheUrl, response.clone()));
+      ctx.waitUntil(
+        cache.put(cacheUrl, response.clone()).catch(() => undefined),
+      );
       return response;
     }
 
-    // Range GET — slice from cache if warm
-    if (cached) {
-      const fullSize = parseInt(cached.headers.get("Content-Length") || "0");
-      if (fullSize > 0) {
-        const parsed = parseRange(rangeHeader, fullSize);
-        if (parsed) {
-          const { start, end } = parsed;
-          const fullBody = await cached.arrayBuffer();
+    // Range GET — cache encrypted byte ranges independently. A hit avoids the
+    // R2 read entirely for repeated seeks and MSE preloads.
+    const cacheKey = isCacheableRange(rangeHeader)
+      ? rangeCacheKey(cacheUrl, rangeHeader)
+      : undefined;
+    const cachedRange = cacheKey ? await cache.match(cacheKey) : undefined;
 
-          return new Response(fullBody.slice(start, end + 1), {
-            status: 206,
-            headers: {
-              ...cors,
-              ...CACHE_HEADERS,
-              "Content-Length": String(end - start + 1),
-              "Content-Range": `bytes ${start}-${end}/${fullSize}`,
-              ETag: cached.headers.get("ETag") || "",
-            },
-          });
-        }
+    if (cachedRange) {
+      const etag = cachedRange.headers.get("ETag") || "";
+      if (ifNoneMatch && etag && ifNoneMatch === etag) {
+        return new Response(null, {
+          status: 304,
+          headers: {
+            ...cors,
+            ETag: etag,
+            "Cache-Control": CACHE_HEADERS["Cache-Control"],
+            "Server-Timing": serverTiming(startedAt, "HIT"),
+            "X-Stream-Cache": "HIT",
+          },
+        });
       }
+
+      return new Response(cachedRange.body, {
+        status: 206,
+        headers: {
+          ...cors,
+          ...CACHE_HEADERS,
+          "Content-Length": cachedRange.headers.get("Content-Length") || "0",
+          "Content-Range": cachedRange.headers.get("Content-Range") || "",
+          ETag: etag,
+          "Server-Timing": serverTiming(startedAt, "HIT"),
+          "X-Stream-Cache": "HIT",
+        },
+      });
     }
 
-    // Range cache miss → R2 with native range read
+    const r2StartedAt = performance.now();
     const object = await env.MUSIC_BUCKET.get(objectKey, {
       range: request.headers,
     });
+    const r2DurationMs = performance.now() - r2StartedAt;
     if (!object) {
       return new Response("Not Found", {
         status: 404,
@@ -250,9 +260,7 @@ export default {
       end = totalSize - 1;
     }
 
-    ctx.waitUntil(warmFullCache(cache, cacheUrl, env.MUSIC_BUCKET, objectKey));
-
-    return new Response(body, {
+    const response = new Response(body, {
       status: 206,
       headers: {
         ...cors,
@@ -260,7 +268,31 @@ export default {
         "Content-Length": String(end - start + 1),
         "Content-Range": `bytes ${start}-${end}/${totalSize}`,
         ETag: object.etag,
+        "Server-Timing": serverTiming(
+          startedAt,
+          cacheKey ? "MISS" : "BYPASS",
+          r2DurationMs,
+        ),
+        "X-Stream-Cache": cacheKey ? "MISS" : "BYPASS",
       },
     });
+
+    if (cacheKey) {
+      // Store as 200 internally: Cache API handling for partial (206) responses
+      // varies, while the response returned to the media client remains 206.
+      const cachedResponse = response.clone();
+      ctx.waitUntil(
+        cache
+          .put(
+            cacheKey,
+            new Response(cachedResponse.body, {
+              headers: cachedResponse.headers,
+            }),
+          )
+          .catch(() => undefined),
+      );
+    }
+
+    return response;
   },
 };
