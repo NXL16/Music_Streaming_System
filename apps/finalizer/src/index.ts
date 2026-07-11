@@ -20,33 +20,35 @@ export default {
     batch: MessageBatch<R2EventNotification>,
     env: Env,
   ): Promise<void> {
-    for (const message of batch.messages) {
-      const event = message.body as R2EventNotification;
-      const keyParts = event.object.key.split("/");
-      if (keyParts.length < 2 || keyParts[0] !== "quarantine") {
-        message.ack();
-        continue;
-      }
+    await Promise.all(
+      batch.messages.map(async (message) => {
+        const event = message.body as R2EventNotification;
+        const keyParts = event.object.key.split("/");
+        if (keyParts.length < 2 || keyParts[0] !== "quarantine") {
+          message.ack();
+          return;
+        }
 
-      const checksum = keyParts[1];
+        const checksum = keyParts[1];
 
-      try {
-        const res = await fetch(env.API_FINALIZE_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-internal-token": env.FINALIZER_INTERNAL_TOKEN,
-          },
-          body: JSON.stringify({
-            checksum,
-          }),
-        });
+        try {
+          const res = await fetch(env.API_FINALIZE_URL, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-internal-token": env.FINALIZER_INTERNAL_TOKEN,
+            },
+            body: JSON.stringify({
+              checksum,
+            }),
+          });
 
-        if (!res.ok) throw new Error(`API ${res.status}`);
-        message.ack();
-      } catch {
-        message.retry();
-      }
-    }
+          if (!res.ok) throw new Error(`API ${res.status}`);
+          message.ack();
+        } catch {
+          message.retry();
+        }
+      }),
+    );
   },
 };
