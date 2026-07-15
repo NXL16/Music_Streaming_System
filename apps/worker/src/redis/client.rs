@@ -1,7 +1,6 @@
 use anyhow::Result;
-use redis::aio::Connection;
+use redis::aio::ConnectionManager;
 use serde::Serialize;
-use std::env;
 
 #[derive(Debug, Serialize)]
 pub struct SongCompletionEvent {
@@ -17,15 +16,16 @@ pub struct SongCompletionEvent {
 }
 
 pub struct RedisPublisher {
-    conn: Connection,
+    conn: ConnectionManager,
 }
 
 impl RedisPublisher {
-    pub async fn new() -> Result<Self> {
-        let redis_url = resolve_redis_url();
-        let client = redis::Client::open(redis_url)?;
-        let conn = client.get_async_connection().await?;
-        Ok(Self { conn })
+    /// Build a publisher from a shared `ConnectionManager`. The manager is
+    /// cloneable and multiplexes over a single auto-reconnecting connection,
+    /// so callers should clone the shared manager once per job rather than
+    /// opening a fresh connection each time.
+    pub fn from_manager(manager: ConnectionManager) -> Self {
+        Self { conn: manager }
     }
 
     pub async fn publish_song_completion(&mut self, event: SongCompletionEvent) -> Result<()> {
@@ -38,19 +38,4 @@ impl RedisPublisher {
 
         Ok(())
     }
-}
-
-fn resolve_redis_url() -> String {
-    if let Ok(url) = env::var("REDIS_URL") {
-        if !url.trim().is_empty() {
-            return url;
-        }
-    }
-
-    let host = env::var("REDIS_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-    let port = env::var("REDIS_PORT").unwrap_or_else(|_| "6379".to_string());
-    let password = env::var("REDIS_PASSWORD").unwrap_or_default();
-    let encoded = urlencoding::encode(&password);
-
-    format!("redis://:{}@{}:{}", encoded, host, port)
 }

@@ -3,6 +3,11 @@ use crate::proto::metadata_service::{SeekPoint, Segment};
 pub const SEEKTABLE_VERSION: i32 = 2;
 pub const TIMESCALE_FALLBACK: i32 = 44_100;
 pub const FRAGMENT_DURATION_SECONDS: f64 = 2.0;
+/// Upper bound on how large the incremental box-parse buffer may grow. A single
+/// fragmented-mp4 box (moov/moof/mdat) is normally well under this. If a box
+/// declares a size larger than this — or its bytes never fully arrive — the
+/// buffer would otherwise grow without bound, so we cap it and error out.
+pub const MAX_PARSE_BUFFER_BYTES: usize = 64 * 1024 * 1024;
 
 fn read_u32_be(data: &[u8], offset: usize) -> Option<u32> {
     let bytes = data.get(offset..offset + 4)?;
@@ -148,9 +153,9 @@ impl IncrementalMetaParser {
         }
     }
 
-    pub fn push(&mut self, chunk: &[u8]) {
+    pub fn push(&mut self, chunk: &[u8]) -> anyhow::Result<()> {
         if chunk.is_empty() {
-            return;
+            return Ok(());
         }
 
         self.buffer.extend_from_slice(chunk);
@@ -222,6 +227,15 @@ impl IncrementalMetaParser {
             self.buffer.drain(..box_size);
             self.consumed_prefix += box_size;
         }
+
+        if self.buffer.len() > MAX_PARSE_BUFFER_BYTES {
+            return Err(anyhow::anyhow!(
+                "stream index parse buffer exceeded {} bytes (malformed or oversized mp4 box)",
+                MAX_PARSE_BUFFER_BYTES
+            ));
+        }
+
+        Ok(())
     }
 }
 
@@ -343,7 +357,7 @@ mod tests {
         data.extend(make_box(b"mdat", 64));
 
         let mut parser = IncrementalMetaParser::new();
-        parser.push(&data);
+        parser.push(&data).expect("push should not exceed cap");
 
         assert_eq!(parser.seek_points.len(), 2);
         assert_eq!(parser.seek_points[0].byte_offset, moof1_start);

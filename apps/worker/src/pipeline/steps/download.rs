@@ -14,9 +14,7 @@ fn parse_max_source_size_bytes() -> usize {
 
 pub async fn download(ctx: &mut PipelineContext) -> anyhow::Result<()> {
     let r2_path = &ctx.job.r2_path;
-    let client = crate::r2::client::create_r2_client()
-        .await
-        .context("failed to initialize R2 client")?;
+    let client = &ctx.r2_client;
     let bucket = std::env::var("R2_BUCKET").context("R2_BUCKET env is not set")?;
 
     let object = client

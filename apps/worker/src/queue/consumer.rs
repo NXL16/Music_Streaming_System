@@ -2,6 +2,7 @@ use crate::job::handler::handle_with_options;
 use crate::observability::log::log_event;
 use crate::observability::metrics::RuntimeMetrics;
 use crate::queue::job::JobPayload;
+use aws_sdk_s3::Client as R2Client;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tokio::sync::Semaphore;
@@ -9,6 +10,8 @@ use tokio::time::{Duration, sleep};
 
 pub struct Consumer {
     client: redis::Client,
+    publisher_conn: redis::aio::ConnectionManager,
+    r2_client: R2Client,
     queue_name: String,
     max_concurrency: usize,
     job_max_retries: u32,
@@ -28,8 +31,16 @@ impl Consumer {
         metrics: Arc<RuntimeMetrics>,
     ) -> anyhow::Result<Self> {
         let client = redis::Client::open(redis_url)?;
+        // Shared, auto-reconnecting, multiplexed connection used only for
+        // non-blocking publisher LPUSHes. The BLPOP job-polling loop keeps its
+        // own dedicated connection (see `run`) so blocking commands never share
+        // this multiplexed connection.
+        let publisher_conn = redis::aio::ConnectionManager::new(client.clone()).await?;
+        let r2_client = crate::r2::client::create_r2_client().await?;
         Ok(Self {
             client,
+            publisher_conn,
+            r2_client,
             queue_name,
             max_concurrency,
             job_max_retries,
@@ -112,12 +123,14 @@ impl Consumer {
             let backoff_ms = self.retry_backoff_ms;
             let master_secret_key = Arc::clone(&self.master_secret_key);
             let metrics = Arc::clone(&self.metrics);
+            let r2_client = self.r2_client.clone();
+            let publisher_conn = self.publisher_conn.clone();
             metrics.jobs_started.fetch_add(1, Ordering::Relaxed);
 
             tokio::spawn(async move {
                 let _permit = permit;
                 let song_id = job.song_id.clone();
-                if let Err(err) = process_with_retry(job, retries, backoff_ms, master_secret_key, Arc::clone(&metrics)).await {
+                if let Err(err) = process_with_retry(job, retries, backoff_ms, master_secret_key, r2_client, publisher_conn, Arc::clone(&metrics)).await {
                     metrics.jobs_failed.fetch_add(1, Ordering::Relaxed);
                     log_event("error", "job_failed_permanently", &[("song_id", song_id), ("error", err.to_string())]);
                 } else {
@@ -135,13 +148,15 @@ async fn process_with_retry(
     max_retries: u32,
     retry_backoff_ms: u64,
     master_secret_key: Arc<Vec<u8>>,
+    r2_client: R2Client,
+    publisher_conn: redis::aio::ConnectionManager,
     metrics: Arc<RuntimeMetrics>,
 ) -> anyhow::Result<()> {
     let total_attempts = max_retries.saturating_add(1);
 
     for attempt in 1..=total_attempts {
         let publish_error_event = attempt == total_attempts;
-        match handle_with_options(job.clone(), publish_error_event, Arc::clone(&master_secret_key)).await {
+        match handle_with_options(job.clone(), publish_error_event, Arc::clone(&master_secret_key), r2_client.clone(), publisher_conn.clone()).await {
             Ok(_) => return Ok(()),
             Err(err) => {
                 if attempt == total_attempts {

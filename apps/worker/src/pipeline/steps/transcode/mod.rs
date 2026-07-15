@@ -63,9 +63,7 @@ pub async fn transcode(ctx: &mut PipelineContext) -> anyhow::Result<()> {
         .take()
         .ok_or_else(|| anyhow::anyhow!("Transcode step: no input stream found in context"))?;
 
-    let client = crate::r2::client::create_r2_client()
-        .await
-        .context("failed to initialize R2 client")?;
+    let client = ctx.r2_client.clone();
     let bucket = env::var("R2_BUCKET").context("R2_BUCKET env is not set")?;
     let output_key = format!("processed/{}.m4a", ctx.job.song_id);
 
@@ -177,7 +175,7 @@ pub async fn transcode(ctx: &mut PipelineContext) -> anyhow::Result<()> {
             }
 
             let chunk = &mut buf[..n];
-            parser.push(chunk);
+            parser.push(chunk)?;
             cipher.apply_keystream(chunk);
             uploader.push_chunk(chunk).await?;
             total_bytes += n;
