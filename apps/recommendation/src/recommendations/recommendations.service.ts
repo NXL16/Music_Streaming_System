@@ -4,7 +4,12 @@ import {
   GetHomeRecommendationsRequest,
   GetHomeRecommendationsResponse,
   GetRecommendationSectionRequest,
+  GetRecommendationPageForAdminRequest,
   PersonalRecommendationResource,
+  PublishRecommendationPageRequest,
+  RecommendationPageScope,
+  RecommendationPageStatus,
+  RecommendationPresentationMode,
   RecommendationRef,
   RecommendationResources,
   ReplaceHomeRecommendationsRequest,
@@ -13,7 +18,15 @@ import {
 import { PrismaService } from '../database/prisma.service';
 import { RpcException } from '@nestjs/microservices';
 import { status } from '@grpc/grpc-js';
-import { Prisma } from '../generated/prisma/client';
+import {
+  Prisma,
+  RecommendationPageScope as PrismaPageScope,
+  RecommendationPageStatus as PrismaPageStatus,
+  RecommendationPresentationMode as PrismaPresentationMode,
+} from '../generated/prisma/client';
+import { RecommendationCatalogService } from './recommendation-catalog.service';
+import { ListeningService, TasteProfile } from '../listening/listening.service';
+import { randomUUID } from 'node:crypto';
 
 const SUPPORTED_RESOURCE_TYPES = new Set([
   'albums',
@@ -30,6 +43,21 @@ const MAX_ITEMS_PER_SECTION = 500;
 const MAX_JSON_FIELD_BYTES = 1_000_000;
 const MAX_ARRAY_ITEMS = 100;
 const MAX_TEXT_LENGTH = 100_000;
+const GLOBAL_SCOPE_KEY = 'GLOBAL';
+const GLOBAL_TIMEZONE = '*';
+const DEFAULT_DISPLAY_KIND = 'MusicCoverShelf';
+const HOME_PREVIEW_ITEM_LIMIT = 16;
+const SYSTEM_DAILY_MIX_ID_PATTERN = /^daily-mix-[a-f0-9]{32}(?:-\d+)?$/;
+const SYSTEM_STATION_ID_PATTERN = /^station-for-you-[a-f0-9]{32}-\d+$/;
+const SUPPORTED_DISPLAY_KINDS = new Set([
+  'MusicCircleCoverShelf',
+  'MusicConcertsEmptyShelf',
+  'MusicCoverGrid',
+  'MusicCoverShelf',
+  'MusicNotesHeroShelf',
+  'MusicSocialCardShelf',
+  'MusicSuperHeroShelf',
+]);
 
 type RecommendationItemRecord = {
   resourceType: string;
@@ -69,7 +97,7 @@ type RecommendationItemRecord = {
     upc: string;
     isCompilation: boolean;
     isComplete: boolean;
-    isMasteredForItunes: boolean;
+    isStudioMastered: boolean;
     isPrerelease: boolean;
     isSingle: boolean;
     playlistType: string;
@@ -88,6 +116,7 @@ type RecommendationItemRecord = {
     editorialArtwork: unknown;
     editorialVideo: unknown;
     plainEditorialCard: unknown;
+    attributes: unknown;
     relationships: unknown;
     raw: unknown;
   } | null;
@@ -97,6 +126,7 @@ type RecommendationSectionRecord = {
   externalId: string;
   title: string;
   titleWithoutName: string;
+  presentationMode: string;
   displayKind: string;
   displayDecorations: string[];
   sectionKind: string;
@@ -108,69 +138,243 @@ type RecommendationSectionRecord = {
   items: RecommendationItemRecord[];
 };
 
+type RecommendationPageResourceRecord = Pick<
+  RecommendationItemRecord,
+  'resourceType' | 'resourceId' | 'resource'
+> & {
+  sortOrder: number;
+};
+
+type RecommendationScoreSnapshot = {
+  resourceId: string;
+  resourceType: string;
+  artistName: string;
+  genreNames: string[];
+  releaseDate: string;
+};
+
+type UserSongSignal = {
+  playCount: number;
+  skipCount: number;
+  lastPlayedAt: Date;
+};
+
 @Injectable()
 export class RecommendationsService {
   private readonly logger = new Logger(RecommendationsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly catalogService: RecommendationCatalogService,
+    private readonly listeningService: ListeningService,
+  ) {}
+
+  async upsertCatalogResources(resources: CatalogResource[]): Promise<number> {
+    const catalogResources = resources.filter(
+      (resource) => resource.id && resource.type && resource.attributes,
+    );
+    if (catalogResources.length === 0) return 0;
+
+    await this.executePersistence(() =>
+      this.prisma.$transaction((tx) =>
+        this.upsertResourceSnapshots(tx, catalogResources, false),
+      ),
+    );
+
+    return catalogResources.length;
+  }
 
   async getHomeRecommendations(
     request: GetHomeRecommendationsRequest,
+    preloadedGlobalResponse?: GetHomeRecommendationsResponse,
   ): Promise<GetHomeRecommendationsResponse> {
-    const page = await this.executePersistence(() =>
-      this.prisma.recommendationPage.findUnique({
-        where: {
-          userId_name_locale_timezone: {
-            userId: request.userId,
-            name: request.name || 'listen-now',
-            locale: request.locale || 'en-GB',
-            timezone: request.timezone || '+07:00',
+    const name = request.name || 'listen-now';
+    const locale = request.locale || 'en-GB';
+    const requestedTimezone = request.timezone || '+07:00';
+
+    let response: GetHomeRecommendationsResponse;
+
+    if (preloadedGlobalResponse) {
+      response = preloadedGlobalResponse;
+    } else {
+      const page = await this.executePersistence(() =>
+        this.prisma.recommendationPage.findFirst({
+          where: {
+            status: PrismaPageStatus.PUBLISHED,
+            name,
+            locale,
+            scopeKey: GLOBAL_SCOPE_KEY,
+            timezone: GLOBAL_TIMEZONE,
           },
-        },
-        include: {
-          sections: {
-            orderBy: { sortOrder: 'asc' },
-            include: {
-              items: {
-                orderBy: { sortOrder: 'asc' },
-                include: { resource: true },
+          include: {
+            sections: {
+              orderBy: { sortOrder: 'asc' },
+              include: {
+                items: {
+                  orderBy: { sortOrder: 'asc' },
+                  include: { resource: true },
+                },
               },
             },
+            resourceLinks: {
+              orderBy: { sortOrder: 'asc' },
+              include: { resource: true },
+            },
           },
-        },
-      }),
-    );
+        }),
+      );
 
-    if (!page) {
-      return this.emptyResponse(request);
+      if (!page) {
+        return this.emptyResponse(request);
+      }
+
+      response = this.homeResponseForPage(
+        page.name,
+        page.locale,
+        page.sections as RecommendationSectionRecord[],
+        page.resourceLinks as RecommendationPageResourceRecord[],
+        requestedTimezone,
+        request.platform || 'web',
+      );
     }
 
-    const sections = page.sections as RecommendationSectionRecord[];
+    if (request.userId) {
+      const userPage = await this.executePersistence(() =>
+        this.prisma.recommendationPage.findFirst({
+          where: {
+            status: PrismaPageStatus.PUBLISHED,
+            name,
+            locale,
+            scopeKey: this.userScopeKey(request.userId),
+            timezone: requestedTimezone,
+          },
+          include: {
+            sections: {
+              orderBy: { sortOrder: 'asc' },
+              include: {
+                items: {
+                  orderBy: { sortOrder: 'asc' },
+                  include: { resource: true },
+                },
+              },
+            },
+            resourceLinks: {
+              orderBy: { sortOrder: 'asc' },
+              include: { resource: true },
+            },
+          },
+        }),
+      );
+
+      if (userPage) {
+        response = this.mergeHomeResponses(
+          response,
+          this.homeResponseForPage(
+            userPage.name,
+            userPage.locale,
+            userPage.sections as RecommendationSectionRecord[],
+            userPage.resourceLinks as RecommendationPageResourceRecord[],
+            requestedTimezone,
+            request.platform || 'web',
+          ),
+        );
+      }
+    }
+
+    return request.userId
+      ? this.personalizeHomeResponse(response, request.userId, name)
+      : this.deduplicateHomePreviewResources(response);
+  }
+
+  private homeResponseForPage(
+    name: string,
+    locale: string,
+    sections: RecommendationSectionRecord[],
+    resourceLinks: RecommendationPageResourceRecord[],
+    timezone: string,
+    platform: string,
+  ): GetHomeRecommendationsResponse {
+    return {
+      data: sections.map((section) => this.sectionRef(section, name)),
+      resources: this.buildResources(sections, name, resourceLinks),
+      meta: { name, locale, timezone, platform },
+    };
+  }
+
+  private mergeHomeResponses(
+    globalResponse: GetHomeRecommendationsResponse,
+    userResponse: GetHomeRecommendationsResponse,
+  ): GetHomeRecommendationsResponse {
+    if (!globalResponse.resources || !userResponse.resources) {
+      return userResponse.resources ? userResponse : globalResponse;
+    }
+
+    const hero = globalResponse.data.find(
+      (ref) => ref.id === 'global-featured-albums',
+    );
+    const userSectionKeys = new Set(
+      userResponse.data.map((ref) => `${ref.type}:${ref.id}`),
+    );
+    const userSections = userResponse.data.filter(
+      (ref) => `${ref.type}:${ref.id}` !== `${hero?.type}:${hero?.id}`,
+    );
+    const globalFallback = globalResponse.data.filter((ref) => {
+      const key = `${ref.type}:${ref.id}`;
+      return key !== `${hero?.type}:${hero?.id}` && !userSectionKeys.has(key);
+    });
 
     return {
-      data: sections.map((section) => this.sectionRef(section, page.name)),
-      resources: this.buildResources(sections, page.name),
-      meta: {
-        name: page.name,
-        locale: page.locale,
-        timezone: page.timezone,
-        platform: request.platform || 'web',
+      data: hero ? [hero, ...userSections, ...globalFallback] : [
+        ...userSections,
+        ...globalFallback,
+      ],
+      resources: {
+        personalRecommendation: {
+          ...globalResponse.resources.personalRecommendation,
+          ...userResponse.resources.personalRecommendation,
+        },
+        albums: { ...globalResponse.resources.albums, ...userResponse.resources.albums },
+        playlists: {
+          ...globalResponse.resources.playlists,
+          ...userResponse.resources.playlists,
+        },
+        stations: {
+          ...globalResponse.resources.stations,
+          ...userResponse.resources.stations,
+        },
+        editorialItems: {
+          ...globalResponse.resources.editorialItems,
+          ...userResponse.resources.editorialItems,
+        },
+        artists: { ...globalResponse.resources.artists, ...userResponse.resources.artists },
+        songs: { ...globalResponse.resources.songs, ...userResponse.resources.songs },
       },
+      meta: globalResponse.meta,
     };
   }
 
   async getRecommendationSection(
     request: GetRecommendationSectionRequest,
   ): Promise<GetHomeRecommendationsResponse> {
-    const section = await this.executePersistence(() =>
-      this.prisma.recommendationSection.findFirst({
+    const requestedTimezone = request.timezone || '+07:00';
+    const scopeFilters = request.userId
+      ? [
+          {
+            scopeKey: this.userScopeKey(request.userId),
+            timezone: requestedTimezone,
+          },
+          { scopeKey: GLOBAL_SCOPE_KEY, timezone: GLOBAL_TIMEZONE },
+        ]
+      : [{ scopeKey: GLOBAL_SCOPE_KEY, timezone: GLOBAL_TIMEZONE }];
+    const sections = await this.executePersistence(() =>
+      this.prisma.recommendationSection.findMany({
         where: {
           externalId: request.sectionId,
           page: {
-            userId: request.userId,
+            status: PrismaPageStatus.PUBLISHED,
             name: request.name || 'listen-now',
             locale: request.locale || 'en-GB',
-            timezone: request.timezone || '+07:00',
+            OR: scopeFilters,
           },
         },
         include: {
@@ -180,8 +384,17 @@ export class RecommendationsService {
             include: { resource: true },
           },
         },
+        take: 2,
       }),
     );
+    const section =
+      sections.find(
+        (candidate) =>
+          candidate.page.scopeKey === this.userScopeKey(request.userId),
+      ) ??
+      sections.find(
+        (candidate) => candidate.page.scopeKey === GLOBAL_SCOPE_KEY,
+      );
 
     if (!section) {
       throw new RpcException({
@@ -196,34 +409,109 @@ export class RecommendationsService {
       meta: {
         name: section.page.name,
         locale: section.page.locale,
-        timezone: section.page.timezone,
+        timezone: requestedTimezone,
         platform: 'web',
       },
     };
   }
 
-  refreshRecommendationSection(
+  async refreshRecommendationSection(
     request: RefreshRecommendationSectionRequest,
   ): Promise<GetHomeRecommendationsResponse> {
-    void request;
-    return Promise.reject(
-      new RpcException({
-        code: status.UNIMPLEMENTED,
-        message: 'Recommendation refresh is not configured',
-      }),
+    const response = await this.getRecommendationSection(request);
+    const resources = response.resources;
+    const section =
+      resources?.personalRecommendation?.[request.sectionId];
+    const relationships = section?.relationships;
+    const contentsRelationship = relationships?.contents;
+    const contents = contentsRelationship?.data;
+    if (
+      !resources ||
+      !section ||
+      !relationships ||
+      !contentsRelationship ||
+      !contents ||
+      contents.length < 2
+    ) {
+      return response;
+    }
+
+    const refreshWindow = Math.floor(Date.now() / 60_000);
+    const rankedContents = [...contents].sort(
+      (left, right) =>
+        this.coldStartScore(
+          request.userId,
+          request.sectionId,
+          left.id,
+          refreshWindow,
+        ) -
+        this.coldStartScore(
+          request.userId,
+          request.sectionId,
+          right.id,
+          refreshWindow,
+        ),
     );
+
+    return {
+      ...response,
+      resources: {
+        ...resources,
+        personalRecommendation: {
+          ...resources.personalRecommendation,
+          [request.sectionId]: {
+            ...section,
+            relationships: {
+              ...relationships,
+              contents: {
+                ...contentsRelationship,
+                data: rankedContents,
+              },
+            },
+          },
+        },
+      },
+    };
   }
 
   async replaceHomeRecommendations(
     request: ReplaceHomeRecommendationsRequest,
   ): Promise<GetHomeRecommendationsResponse> {
-    this.validateReplacement(request);
+    const normalizedRequest = this.normalizeReplacementRequest(request);
+    this.validateReplacement(normalizedRequest);
+    const hydratedRequest =
+      await this.hydrateCatalogResources(normalizedRequest);
+    this.validateReplacement(hydratedRequest);
+    await this.assertReferencedResourcesExist(hydratedRequest);
 
-    const name = request.name || 'listen-now';
-    const locale = request.locale || 'en-GB';
-    const timezone = request.timezone || '+07:00';
+    const name = hydratedRequest.name || 'listen-now';
+    const locale = hydratedRequest.locale || 'en-GB';
+    const requestedTimezone = hydratedRequest.timezone || '+07:00';
+    const pageScope = this.pageScope(hydratedRequest.scope);
+    const timezone = this.pageTimezone(pageScope, requestedTimezone);
+    const pageStatus = this.pageStatus(hydratedRequest.status);
+    const userId =
+      pageScope === PrismaPageScope.USER ? hydratedRequest.userId : null;
+    const scopeKey =
+      pageScope === PrismaPageScope.USER
+        ? this.userScopeKey(hydratedRequest.userId)
+        : GLOBAL_SCOPE_KEY;
+    const preserveImportedRaw = !hydratedRequest.actorUserId;
+    const pageResourceRefs = this.pageResourceRefs(hydratedRequest);
 
-    const pageLockKey = [request.userId, name, locale, timezone].join('\u001f');
+    if (hydratedRequest.resources.length > 0) {
+      await this.executePersistence(() =>
+        this.prisma.$transaction((tx) =>
+          this.upsertResourceSnapshots(
+            tx,
+            hydratedRequest.resources,
+            preserveImportedRaw,
+          ),
+        ),
+      );
+    }
+
+    const pageLockKey = [scopeKey, name, locale, timezone].join('\u001f');
 
     await this.executePersistence(() =>
       this.prisma.$transaction(
@@ -234,61 +522,91 @@ export class RecommendationsService {
             )::text AS "lock"
           `;
 
-          for (const resource of request.resources) {
-            const data = this.resourceSnapshotData(resource);
-
-            await tx.recommendationResourceSnapshot.upsert({
-              where: {
-                resourceType_resourceId: {
-                  resourceType: resource.type,
-                  resourceId: resource.id,
-                },
-              },
-              create: {
-                resourceType: resource.type,
-                resourceId: resource.id,
-                ...data,
-              },
-              update: data,
-            });
-          }
-
           const page = await tx.recommendationPage.upsert({
             where: {
-              userId_name_locale_timezone: {
-                userId: request.userId,
+              scopeKey_name_locale_timezone_status: {
+                scopeKey,
                 name,
                 locale,
                 timezone,
+                status: pageStatus,
               },
             },
             create: {
-              userId: request.userId,
+              scope: pageScope,
+              scopeKey,
+              userId,
+              status: pageStatus,
               name,
               locale,
               timezone,
+              publishedAt:
+                pageStatus === PrismaPageStatus.PUBLISHED
+                  ? new Date()
+                  : null,
+              createdBy: hydratedRequest.actorUserId,
+              updatedBy: hydratedRequest.actorUserId,
             },
-            update: {},
+            update: {
+              scope: pageScope,
+              userId,
+              status: pageStatus,
+              publishedAt:
+                pageStatus === PrismaPageStatus.PUBLISHED
+                  ? new Date()
+                  : null,
+              updatedBy: hydratedRequest.actorUserId,
+            },
           });
+
+          await tx.recommendationPageResource.deleteMany({
+            where: { pageId: page.id },
+          });
+
+          if (pageResourceRefs.length) {
+            await tx.recommendationPageResource.createMany({
+              data: pageResourceRefs.map((resource, sortOrder) => ({
+                pageId: page.id,
+                resourceType: resource.type,
+                resourceId: resource.id,
+                sortOrder,
+              })),
+            });
+          }
 
           await tx.recommendationSection.deleteMany({
             where: { pageId: page.id },
           });
 
-          for (const [sectionIndex, section] of request.sections.entries()) {
+          const allSectionItems: Array<{
+            sectionId: string;
+            resourceType: string;
+            resourceId: string;
+            sortOrder: number;
+            isPrimary: boolean;
+          }> = [];
+
+          for (const [sectionIndex, section] of hydratedRequest.sections.entries()) {
             const attributes = section.attributes!;
             const relationships = section.relationships;
             const contents = relationships?.contents?.data ?? [];
             const primaryContent = relationships?.primaryContent?.data ?? [];
+            const presentationMode = this.presentationMode(
+              attributes.presentationMode,
+            );
 
-            await tx.recommendationSection.create({
+            const created = await tx.recommendationSection.create({
               data: {
                 pageId: page.id,
                 externalId: section.id,
                 title: attributes.title?.stringForDisplay ?? '',
                 titleWithoutName:
                   attributes.titleWithoutName?.stringForDisplay ?? '',
-                displayKind: attributes.display!.kind,
+                presentationMode,
+                displayKind:
+                  presentationMode === PrismaPresentationMode.FIXED
+                    ? attributes.display?.kind ?? ''
+                    : '',
                 displayDecorations: attributes.display?.decorations ?? [],
                 sectionKind: attributes.kind || 'music-recommendations',
                 resourceTypes: attributes.resourceTypes,
@@ -297,28 +615,40 @@ export class RecommendationsService {
                 sortOrder: sectionIndex,
                 nextUpdateAt: this.parseDate(attributes.nextUpdateDate),
                 version: attributes.version || 1,
-                attributes: this.toInputJson(attributes),
+                attributes: preserveImportedRaw
+                  ? this.toInputJson(attributes)
+                  : Prisma.DbNull,
                 relationships: relationships
                   ? this.toInputJson(relationships)
                   : Prisma.DbNull,
-                raw: this.toInputJson(section),
-                items: {
-                  create: [
-                    ...contents.map((item, itemIndex) => ({
-                      resourceType: item.type,
-                      resourceId: item.id,
-                      sortOrder: itemIndex,
-                      isPrimary: false,
-                    })),
-                    ...primaryContent.map((item, itemIndex) => ({
-                      resourceType: item.type,
-                      resourceId: item.id,
-                      sortOrder: itemIndex,
-                      isPrimary: true,
-                    })),
-                  ],
-                },
+                raw: preserveImportedRaw
+                  ? this.toInputJson(section)
+                  : Prisma.DbNull,
               },
+              select: { id: true },
+            });
+
+            allSectionItems.push(
+              ...contents.map((item, itemIndex) => ({
+                sectionId: created.id,
+                resourceType: item.type,
+                resourceId: item.id,
+                sortOrder: itemIndex,
+                isPrimary: false,
+              })),
+              ...primaryContent.map((item, itemIndex) => ({
+                sectionId: created.id,
+                resourceType: item.type,
+                resourceId: item.id,
+                sortOrder: itemIndex,
+                isPrimary: true,
+              })),
+            );
+          }
+
+          if (allSectionItems.length > 0) {
+            await tx.recommendationSectionItem.createMany({
+              data: allSectionItems,
             });
           }
         },
@@ -329,11 +659,137 @@ export class RecommendationsService {
       ),
     );
 
-    return this.getHomeRecommendations({
+    return this.getRecommendationPage(
+      scopeKey,
+      pageStatus,
+      {
+        userId: hydratedRequest.userId,
+        name,
+        locale,
+        timezone: requestedTimezone,
+        platform: hydratedRequest.platform || 'web',
+      },
+    );
+  }
+
+  async publishRecommendationPage(
+    request: PublishRecommendationPageRequest,
+  ): Promise<GetHomeRecommendationsResponse> {
+    const name = request.name || 'listen-now';
+    const locale = request.locale || 'en-GB';
+    const pageScope = this.pageScope(request.scope);
+    const requestedTimezone = request.timezone || '+07:00';
+    const timezone = this.pageTimezone(pageScope, requestedTimezone);
+
+    this.requireText(request.actorUserId, 'actor_user_id', 128);
+    if (pageScope === PrismaPageScope.USER) {
+      this.requireText(request.userId, 'user_id', 128);
+    }
+
+    const scopeKey =
+      pageScope === PrismaPageScope.USER
+        ? this.userScopeKey(request.userId)
+        : GLOBAL_SCOPE_KEY;
+    const pageLockKey = [scopeKey, name, locale, timezone].join('\u001f');
+
+    const published = await this.executePersistence(() =>
+      this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw<Array<{ lock: string | null }>>`
+          SELECT pg_advisory_xact_lock(
+            hashtextextended(${pageLockKey}, 0)
+          )::text AS "lock"
+        `;
+
+        const draft = await tx.recommendationPage.findUnique({
+          where: {
+            scopeKey_name_locale_timezone_status: {
+              scopeKey,
+              name,
+              locale,
+              timezone,
+              status: PrismaPageStatus.DRAFT,
+            },
+          },
+          select: { id: true },
+        });
+
+        if (!draft) {
+          return tx.recommendationPage.findUnique({
+            where: {
+              scopeKey_name_locale_timezone_status: {
+                scopeKey,
+                name,
+                locale,
+                timezone,
+                status: PrismaPageStatus.PUBLISHED,
+              },
+            },
+            select: { id: true },
+          });
+        }
+
+        await tx.recommendationPage.deleteMany({
+          where: {
+            scopeKey,
+            name,
+            locale,
+            timezone,
+            status: PrismaPageStatus.PUBLISHED,
+          },
+        });
+
+        return tx.recommendationPage.update({
+          where: { id: draft.id },
+          data: {
+            status: PrismaPageStatus.PUBLISHED,
+            publishedAt: new Date(),
+            updatedBy: request.actorUserId,
+          },
+          select: { id: true },
+        });
+      }),
+    );
+
+    if (!published) {
+      throw new RpcException({
+        code: status.NOT_FOUND,
+        message: 'Recommendation page not found',
+      });
+    }
+
+    return this.getRecommendationPage(
+      scopeKey,
+      PrismaPageStatus.PUBLISHED,
+      {
+        userId: request.userId,
+        name,
+        locale,
+        timezone: requestedTimezone,
+        platform: request.platform || 'web',
+      },
+    );
+  }
+
+  async getRecommendationPageForAdmin(
+    request: GetRecommendationPageForAdminRequest,
+  ): Promise<GetHomeRecommendationsResponse> {
+    this.requireText(request.actorUserId, 'actor_user_id', 128);
+    const scope = this.pageScope(request.scope);
+    const statusValue = this.pageStatus(request.status);
+    if (scope === PrismaPageScope.USER) {
+      this.requireText(request.userId, 'user_id', 128);
+    }
+
+    const scopeKey =
+      scope === PrismaPageScope.USER
+        ? this.userScopeKey(request.userId)
+        : GLOBAL_SCOPE_KEY;
+
+    return this.getRecommendationPage(scopeKey, statusValue, {
       userId: request.userId,
-      name,
-      locale,
-      timezone,
+      name: request.name || 'listen-now',
+      locale: request.locale || 'en-GB',
+      timezone: request.timezone || '+07:00',
       platform: request.platform || 'web',
     });
   }
@@ -353,9 +809,115 @@ export class RecommendationsService {
     };
   }
 
+  private normalizeReplacementRequest(
+    request: ReplaceHomeRecommendationsRequest,
+  ): ReplaceHomeRecommendationsRequest {
+    return {
+      ...request,
+      resources: this.list(request.resources),
+      sections: this.list(request.sections).map((section) => ({
+        ...section,
+        attributes: section.attributes
+          ? {
+              ...section.attributes,
+              resourceTypes: this.list(section.attributes.resourceTypes),
+              display: section.attributes.display
+                ? {
+                    ...section.attributes.display,
+                    decorations: this.list(
+                      section.attributes.display.decorations,
+                    ),
+                  }
+                : undefined,
+            }
+          : undefined,
+        relationships: section.relationships
+          ? {
+              ...section.relationships,
+              contents: section.relationships.contents
+                ? {
+                    ...section.relationships.contents,
+                    data: this.list(section.relationships.contents.data),
+                  }
+                : undefined,
+              primaryContent: section.relationships.primaryContent
+                ? {
+                    ...section.relationships.primaryContent,
+                    data: this.list(
+                      section.relationships.primaryContent.data,
+                    ),
+                  }
+                : undefined,
+            }
+          : undefined,
+      })),
+    };
+  }
+
+  private async getRecommendationPage(
+    scopeKey: string,
+    pageStatus: PrismaPageStatus,
+    request: GetHomeRecommendationsRequest,
+  ): Promise<GetHomeRecommendationsResponse> {
+    const page = await this.executePersistence(() =>
+      this.prisma.recommendationPage.findUnique({
+        where: {
+          scopeKey_name_locale_timezone_status: {
+            scopeKey,
+            name: request.name || 'listen-now',
+            locale: request.locale || 'en-GB',
+            timezone:
+              scopeKey === GLOBAL_SCOPE_KEY
+                ? GLOBAL_TIMEZONE
+                : request.timezone || '+07:00',
+            status: pageStatus,
+          },
+        },
+        include: {
+          sections: {
+            orderBy: { sortOrder: 'asc' },
+            include: {
+              items: {
+                orderBy: { sortOrder: 'asc' },
+                include: { resource: true },
+              },
+            },
+          },
+          resourceLinks: {
+            orderBy: { sortOrder: 'asc' },
+            include: { resource: true },
+          },
+        },
+      }),
+    );
+
+    if (!page) {
+      throw new RpcException({
+        code: status.NOT_FOUND,
+        message: 'Recommendation page not found',
+      });
+    }
+
+    const sections = page.sections as RecommendationSectionRecord[];
+    const resourceLinks =
+      page.resourceLinks as RecommendationPageResourceRecord[];
+
+    return {
+      data: sections.map((section) => this.sectionRef(section, page.name)),
+      resources: this.buildResources(sections, page.name, resourceLinks),
+      meta: {
+        name: page.name,
+        locale: page.locale,
+        timezone: request.timezone || '+07:00',
+        platform: request.platform || 'web',
+      },
+    };
+  }
+
   private buildResources(
     sections: RecommendationSectionRecord[],
     pageName: string,
+    pageResources?: RecommendationPageResourceRecord[],
   ): RecommendationResources {
     const resources = this.emptyResources();
 
@@ -363,13 +925,17 @@ export class RecommendationsService {
       resources.personalRecommendation[section.externalId] =
         this.mapSectionResource(section, pageName);
 
-      for (const item of section.items) {
-        const catalogResource = this.mapCatalogResource(item);
-        const bucket = this.getCatalogBucket(resources, item.resourceType);
+    }
 
-        if (bucket) {
-          bucket[item.resourceId] = catalogResource;
-        }
+    const catalogRecords =
+      pageResources ?? sections.flatMap((section) => section.items);
+
+    for (const record of catalogRecords) {
+      const catalogResource = this.mapCatalogResource(record);
+      const bucket = this.getCatalogBucket(resources, record.resourceType);
+
+      if (bucket) {
+        bucket[record.resourceId] = catalogResource;
       }
     }
 
@@ -386,6 +952,583 @@ export class RecommendationsService {
       artists: {},
       songs: {},
     };
+  }
+
+  private async personalizeHomeResponse(
+    response: GetHomeRecommendationsResponse,
+    userId: string,
+    pageName: string,
+  ): Promise<GetHomeRecommendationsResponse> {
+    if (!response.resources) return response;
+
+    const profile = await this.listeningService.getUserTasteProfile(userId);
+    const resources = this.cloneResources(response.resources);
+    const scoreContext = await this.buildScoreContext(userId, response, profile);
+    const personalRecommendation = { ...resources.personalRecommendation };
+
+    for (const [sectionId, section] of Object.entries(personalRecommendation)) {
+      const contents = section.relationships?.contents;
+      const refs = contents?.data;
+      if (!contents || !refs || refs.length < 2) continue;
+
+      const rankedRefs = [...refs].sort(
+        (left, right) =>
+          this.scoreRecommendationRef(right, scoreContext) -
+          this.scoreRecommendationRef(left, scoreContext),
+      );
+
+      personalRecommendation[sectionId] = {
+        ...section,
+        relationships: {
+          ...section.relationships,
+          primaryContent: section.relationships?.primaryContent ?? {
+            href: this.sectionRelationshipHref(
+              sectionId,
+              pageName,
+              'primary-content',
+            ),
+            data: [],
+          },
+          contents: {
+            ...contents,
+            data: rankedRefs,
+          },
+        },
+      };
+    }
+
+    resources.personalRecommendation = personalRecommendation;
+    const recentRef = await this.addRuntimeRecentlyPlayedSection(
+      userId,
+      pageName,
+      resources,
+    );
+
+    return this.deduplicateHomePreviewResources({
+      ...response,
+      data: recentRef
+        ? this.insertAfterHeroShelf(response.data, recentRef)
+        : response.data,
+      resources,
+    });
+  }
+
+  private insertAfterHeroShelf(
+    refs: RecommendationRef[],
+    insertedRef: RecommendationRef,
+  ): RecommendationRef[] {
+    const filtered = refs.filter((ref) => ref.id !== insertedRef.id);
+    const heroIndex = filtered.findIndex((ref) => ref.id === 'global-featured-albums');
+    if (heroIndex < 0) return [insertedRef, ...filtered];
+
+    return [
+      ...filtered.slice(0, heroIndex + 1),
+      insertedRef,
+      ...filtered.slice(heroIndex + 1),
+    ];
+  }
+
+  private cloneResources(resources: RecommendationResources): RecommendationResources {
+    return {
+      personalRecommendation: { ...resources.personalRecommendation },
+      albums: { ...resources.albums },
+      playlists: { ...resources.playlists },
+      stations: { ...resources.stations },
+      editorialItems: { ...resources.editorialItems },
+      artists: { ...resources.artists },
+      songs: { ...resources.songs },
+    };
+  }
+
+  private deduplicateHomePreviewResources(
+    response: GetHomeRecommendationsResponse,
+  ): GetHomeRecommendationsResponse {
+    if (!response.resources) return response;
+
+    const usedPreviewResources = new Set<string>();
+    const personalRecommendation = {
+      ...response.resources.personalRecommendation,
+    };
+    const data: RecommendationRef[] = [];
+
+    for (const sectionRef of response.data) {
+      const section = personalRecommendation[sectionRef.id];
+      const contents = section?.relationships?.contents;
+      const refs = contents?.data;
+      if (!section || !contents || !refs?.length) {
+        data.push(sectionRef);
+        continue;
+      }
+
+      if (sectionRef.id === 'user-recently-played') {
+        data.push(sectionRef);
+        continue;
+      }
+
+      const preview: RecommendationRef[] = [];
+      const sectionResources = new Set<string>();
+
+      for (const ref of refs) {
+        const key = this.resourceKey(ref.type, ref.id);
+        if (sectionResources.has(key)) continue;
+        sectionResources.add(key);
+
+        if (preview.length < HOME_PREVIEW_ITEM_LIMIT) {
+          if (usedPreviewResources.has(key)) {
+            continue;
+          }
+          preview.push(ref);
+        }
+      }
+
+      if (preview.length === 0) continue;
+
+      for (const ref of preview) {
+        usedPreviewResources.add(this.resourceKey(ref.type, ref.id));
+      }
+
+      personalRecommendation[sectionRef.id] = {
+        ...section,
+        relationships: {
+          ...section.relationships,
+          primaryContent: section.relationships?.primaryContent ?? {
+            href: '',
+            data: [],
+          },
+          contents: {
+            ...contents,
+            data: preview,
+          },
+        },
+      };
+      data.push(sectionRef);
+    }
+
+    const nextResources = {
+      ...response.resources,
+      personalRecommendation,
+    };
+
+    return {
+      ...response,
+      data,
+      resources: this.pruneHomeCatalogResources(nextResources, data),
+    };
+  }
+
+  /**
+   * Home initially renders only each shelf preview. Do not serialize resource
+   * records that are reachable only from the section's overflow list; that
+   * list is loaded by the section endpoint when the user asks to see more.
+   */
+  private pruneHomeCatalogResources(
+    resources: RecommendationResources,
+    sectionRefs: RecommendationRef[],
+  ): RecommendationResources {
+    const referenced = new Set<string>();
+    for (const sectionRef of sectionRefs) {
+      const section = resources.personalRecommendation[sectionRef.id];
+      for (const ref of [
+        ...(section?.relationships?.contents?.data ?? []),
+        ...(section?.relationships?.primaryContent?.data ?? []),
+      ]) {
+        referenced.add(this.resourceKey(ref.type, ref.id));
+      }
+    }
+
+    const selectReferenced = <T extends CatalogResource>(
+      type: string,
+      bucket: Record<string, T>,
+    ): Record<string, T> =>
+      Object.fromEntries(
+        Object.entries(bucket).filter(([id]) =>
+          referenced.has(this.resourceKey(type, id)),
+        ),
+      );
+
+    return {
+      ...resources,
+      albums: selectReferenced('albums', resources.albums),
+      playlists: selectReferenced('playlists', resources.playlists),
+      stations: selectReferenced('stations', resources.stations),
+      editorialItems: selectReferenced(
+        'editorial-items',
+        resources.editorialItems,
+      ),
+      songs: selectReferenced('songs', resources.songs),
+      // Artist records are intentionally retained: referenced album/song cards
+      // use them to turn only published artist names into links.
+      artists: resources.artists,
+    };
+  }
+
+  private async addRuntimeRecentlyPlayedSection(
+    userId: string,
+    pageName: string,
+    resources: RecommendationResources,
+  ): Promise<RecommendationRef | null> {
+    const recent = await this.listeningService.getRecentlyPlayed(userId, 30);
+    if (recent.length === 0) return null;
+
+    const albumLastPlayed = new Map<
+      string,
+      { albumId: string; albumName: string; lastPlayedAt: Date }
+    >();
+    const playlistLastPlayed = new Map<string, Date>();
+    const stationLastPlayed = new Map<string, Date>();
+    const songLastPlayed = new Map<string, Date>();
+
+    for (const item of recent) {
+      // Station is the listening context displayed in history. Its individual
+      // tracks still shape the taste profile, but never become separate cards.
+      if (item.stationId) {
+        const existing = stationLastPlayed.get(item.stationId);
+        if (!existing || item.lastPlayedAt > existing) {
+          stationLastPlayed.set(item.stationId, item.lastPlayedAt);
+        }
+        continue;
+      }
+
+      if (item.playlistId) {
+        const existing = playlistLastPlayed.get(item.playlistId);
+        if (!existing || item.lastPlayedAt > existing) {
+          playlistLastPlayed.set(item.playlistId, item.lastPlayedAt);
+        }
+        continue;
+      }
+
+      if (item.albumId || item.albumName) {
+        const key = item.albumId ? `id:${item.albumId}` : `name:${item.albumName}`;
+        const existing = albumLastPlayed.get(key);
+        if (!existing || item.lastPlayedAt > existing.lastPlayedAt) {
+          albumLastPlayed.set(key, {
+            albumId: item.albumId,
+            albumName: item.albumName,
+            lastPlayedAt: item.lastPlayedAt,
+          });
+        }
+      } else {
+        songLastPlayed.set(item.songId, item.lastPlayedAt);
+      }
+    }
+
+    const albumIds = [...new Set(
+      [...albumLastPlayed.values()]
+        .map((item) => item.albumId)
+        .filter(Boolean),
+    )];
+    const legacyAlbumNames = [...new Set(
+      [...albumLastPlayed.values()]
+        .filter((item) => !item.albumId)
+        .map((item) => item.albumName)
+        .filter(Boolean),
+    )];
+    const playlistIds = [...playlistLastPlayed.keys()];
+    const stationIds = [...stationLastPlayed.keys()];
+    const albumSnapshots = albumIds.length || legacyAlbumNames.length
+      ? await this.prisma.recommendationResourceSnapshot.findMany({
+          where: {
+            resourceType: 'albums',
+            OR: [
+              ...(albumIds.length ? [{ resourceId: { in: albumIds } }] : []),
+              ...(legacyAlbumNames.length
+                ? [{ name: { in: legacyAlbumNames } }]
+                : []),
+            ],
+          },
+        })
+      : [];
+    const songSnapshots = songLastPlayed.size
+      ? await this.prisma.recommendationResourceSnapshot.findMany({
+          where: {
+            resourceType: 'songs',
+            resourceId: { in: [...songLastPlayed.keys()] },
+          },
+        })
+      : [];
+    const playlistSnapshots = playlistIds.length
+      ? await this.prisma.recommendationResourceSnapshot.findMany({
+          where: {
+            resourceType: 'playlists',
+            resourceId: { in: playlistIds },
+            playlistType: 'system-personalized',
+          },
+      })
+      : [];
+    const stationSnapshots = stationIds.length
+      ? await this.prisma.recommendationResourceSnapshot.findMany({
+          where: {
+            resourceType: 'stations',
+            resourceId: { in: stationIds },
+            stationKind: 'system-personalized',
+          },
+        })
+      : [];
+
+    const albumSnapshotsById = new Map(
+      albumSnapshots.map((snapshot) => [snapshot.resourceId, snapshot]),
+    );
+    const albumSnapshotsByLegacyName = new Map(
+      albumSnapshots.map((snapshot) => [snapshot.name, snapshot]),
+    );
+    const items = [
+      ...[...albumLastPlayed.values()].flatMap((entry) => {
+        const snapshot = entry.albumId
+          ? albumSnapshotsById.get(entry.albumId)
+          : albumSnapshotsByLegacyName.get(entry.albumName);
+        return snapshot ? [{ snapshot, lastPlayedAt: entry.lastPlayedAt }] : [];
+      }),
+      ...songSnapshots.map((snapshot) => ({
+        snapshot,
+        lastPlayedAt: songLastPlayed.get(snapshot.resourceId) ?? new Date(0),
+      })),
+      ...playlistSnapshots.map((snapshot) => ({
+        snapshot,
+        lastPlayedAt: playlistLastPlayed.get(snapshot.resourceId) ?? new Date(0),
+      })),
+      ...stationSnapshots.map((snapshot) => ({
+        snapshot,
+        lastPlayedAt: stationLastPlayed.get(snapshot.resourceId) ?? new Date(0),
+      })),
+    ]
+      .sort((left, right) => right.lastPlayedAt.getTime() - left.lastPlayedAt.getTime())
+      .slice(0, 20);
+
+    if (items.length === 0) return null;
+
+    const refs = items.map(({ snapshot }) => {
+      const record = this.snapshotRecord(snapshot);
+      const bucket = this.getCatalogBucket(resources, record.resourceType);
+      if (bucket) {
+        bucket[record.resourceId] = this.mapCatalogResource(record);
+      }
+      return this.itemRef(record);
+    });
+
+    const sectionId = 'user-recently-played';
+    resources.personalRecommendation[sectionId] = {
+      id: sectionId,
+      type: 'personal-recommendation',
+      href: this.sectionHref(sectionId, pageName),
+      attributes: {
+        display: { kind: 'MusicCoverShelf', decorations: [] },
+        hasSeeAll: false,
+        isGroupRecommendation: false,
+        kind: 'recently-played',
+        nextUpdateDate: '',
+        resourceTypes: [...new Set(refs.map((ref) => ref.type))],
+        title: { stringForDisplay: 'Recently Played' },
+        titleWithoutName: { stringForDisplay: 'Recently Played' },
+        version: 1,
+        presentationMode:
+          RecommendationPresentationMode.RECOMMENDATION_PRESENTATION_MODE_FIXED,
+      },
+      relationships: {
+        contents: {
+          href: this.sectionRelationshipHref(sectionId, pageName, 'contents'),
+          data: refs,
+        },
+        primaryContent: {
+          href: this.sectionRelationshipHref(
+            sectionId,
+            pageName,
+            'primary-content',
+          ),
+          data: [],
+        },
+      },
+    };
+
+    return this.sectionRef({ externalId: sectionId }, pageName);
+  }
+
+  private snapshotRecord(
+    snapshot: RecommendationScoreSnapshot &
+      Partial<NonNullable<RecommendationItemRecord['resource']>>,
+  ): RecommendationItemRecord {
+    return {
+      resourceType: snapshot.resourceType,
+      resourceId: snapshot.resourceId,
+      sortOrder: 0,
+      isPrimary: false,
+      resource: snapshot as NonNullable<RecommendationItemRecord['resource']>,
+    };
+  }
+
+  private async buildScoreContext(
+    userId: string,
+    response: GetHomeRecommendationsResponse,
+    profile: TasteProfile,
+  ) {
+    const refs = this.responseContentRefs(response);
+    const snapshotKeys = refs.map((ref) => ({
+      resourceType: ref.type,
+      resourceId: ref.id,
+    }));
+    const snapshots = snapshotKeys.length
+      ? await this.prisma.recommendationResourceSnapshot.findMany({
+          where: {
+            OR: snapshotKeys,
+          },
+          select: {
+            resourceId: true,
+            resourceType: true,
+            artistName: true,
+            genreNames: true,
+            releaseDate: true,
+          },
+        })
+      : [];
+    const snapshotByKey = new Map(
+      snapshots.map((snapshot) => [
+        this.resourceKey(snapshot.resourceType, snapshot.resourceId),
+        snapshot,
+      ]),
+    );
+
+    const userSignals = await this.prisma.userListeningStats.findMany({
+      where: { userId },
+      select: {
+        songId: true,
+        playCount: true,
+        skipCount: true,
+        lastPlayedAt: true,
+      },
+    });
+    const songSignals = new Map<string, UserSongSignal>(
+      userSignals.map((signal) => [
+        signal.songId,
+        {
+          playCount: signal.playCount,
+          skipCount: signal.skipCount,
+          lastPlayedAt: signal.lastPlayedAt,
+        },
+      ]),
+    );
+
+    const globalAlbums = await this.listeningService.getTopAlbumsGlobal(30, 100);
+    const albumNameToId = await this.albumNameToId(
+      globalAlbums
+        .filter((album) => !album.albumId)
+        .map((album) => album.albumName),
+    );
+    const popularityByKey = new Map<string, number>();
+    const maxPlays = Number(globalAlbums[0]?.totalPlays ?? 0n) || 1;
+    for (const album of globalAlbums) {
+      const albumId = album.albumId || albumNameToId.get(album.albumName);
+      if (!albumId) continue;
+      popularityByKey.set(
+        `albums:${albumId}`,
+        Number(album.totalPlays) / maxPlays,
+      );
+    }
+
+    const recentAlbumIds = await this.recentAlbumIds(userId);
+
+    const artistWeights = new Map(profile.artists.map((a) => [a.name, a.weight]));
+    const genreWeights = new Map(profile.genres.map((g) => [g.name, g.weight]));
+
+    return {
+      profile,
+      artistWeights,
+      genreWeights,
+      snapshotByKey,
+      songSignals,
+      popularityByKey,
+      recentAlbumIds,
+    };
+  }
+
+  private scoreRecommendationRef(
+    ref: RecommendationRef,
+    context: Awaited<ReturnType<RecommendationsService['buildScoreContext']>>,
+  ): number {
+    const key = `${ref.type}:${ref.id}`;
+    const snapshot = context.snapshotByKey.get(key);
+    const artistScore = snapshot?.artistName
+      ? context.artistWeights.get(snapshot.artistName) ?? 0
+      : 0;
+    const genreScore = snapshot?.genreNames?.length
+      ? Math.min(
+          1,
+          snapshot.genreNames.reduce(
+            (total, genre) =>
+              total + (context.genreWeights.get(genre) ?? 0),
+            0,
+          ),
+        )
+      : 0;
+    const popularityScore = context.popularityByKey.get(key) ?? 0;
+    const recentScore = context.recentAlbumIds.has(ref.id) ? 1 : 0;
+    const freshnessScore = this.releaseFreshnessScore(snapshot?.releaseDate);
+    const skipPenalty =
+      ref.type === 'songs'
+        ? this.skipPenalty(context.songSignals.get(ref.id))
+        : 1;
+
+    return (
+      popularityScore * 0.35 +
+      artistScore * 0.22 +
+      genreScore * 0.18 +
+      recentScore * 0.15 +
+      freshnessScore * 0.1
+    ) * skipPenalty;
+  }
+
+  private responseContentRefs(
+    response: GetHomeRecommendationsResponse,
+  ): RecommendationRef[] {
+    const sections = response.resources?.personalRecommendation ?? {};
+    const seen = new Set<string>();
+    return Object.values(sections).flatMap((section) => {
+      const refs = section.relationships?.contents?.data ?? [];
+      return refs.filter((ref) => {
+        const key = `${ref.type}:${ref.id}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    });
+  }
+
+  private async albumNameToId(albumNames: string[]): Promise<Map<string, string>> {
+    if (albumNames.length === 0) return new Map();
+    const albums = await this.prisma.recommendationResourceSnapshot.findMany({
+      where: {
+        resourceType: 'albums',
+        name: { in: albumNames },
+      },
+      select: { name: true, resourceId: true },
+    });
+    return new Map(albums.map((album) => [album.name, album.resourceId]));
+  }
+
+  private async recentAlbumIds(userId: string): Promise<Set<string>> {
+    const recent = await this.listeningService.getRecentlyPlayed(userId, 30);
+    const directAlbumIds = recent
+      .map((item) => item.albumId)
+      .filter(Boolean);
+    const albumNames = [...new Set(
+      recent
+        .filter((item) => !item.albumId)
+        .map((item) => item.albumName)
+        .filter(Boolean),
+    )];
+    const nameToId = await this.albumNameToId(albumNames);
+    return new Set([...directAlbumIds, ...nameToId.values()]);
+  }
+
+  private releaseFreshnessScore(releaseDate: string | undefined): number {
+    if (!releaseDate) return 0;
+    const releasedAt = new Date(releaseDate).getTime();
+    if (!Number.isFinite(releasedAt)) return 0;
+    const ageDays = Math.max(0, (Date.now() - releasedAt) / 86_400_000);
+    return Math.max(0, 1 - ageDays / 120);
+  }
+
+  private skipPenalty(signal: UserSongSignal | undefined): number {
+    if (!signal || signal.playCount <= 0) return 1;
+    return Math.max(0.35, 1 - signal.skipCount / signal.playCount);
   }
 
   private mapSectionResource(
@@ -405,7 +1548,7 @@ export class RecommendationsService {
       href: this.sectionHref(section.externalId, pageName),
       attributes: {
         display: {
-          kind: section.displayKind,
+          kind: this.resolveDisplayKind(section),
           decorations: section.displayDecorations,
         },
         hasSeeAll: section.hasSeeAll,
@@ -420,6 +1563,10 @@ export class RecommendationsService {
           ? { stringForDisplay: section.titleWithoutName }
           : undefined,
         version: section.version,
+        presentationMode:
+          section.presentationMode === PrismaPresentationMode.AUTO
+            ? RecommendationPresentationMode.RECOMMENDATION_PRESENTATION_MODE_AUTO
+            : RecommendationPresentationMode.RECOMMENDATION_PRESENTATION_MODE_FIXED,
       },
       relationships: {
         contents: {
@@ -442,8 +1589,15 @@ export class RecommendationsService {
     };
   }
 
-  private mapCatalogResource(item: RecommendationItemRecord): CatalogResource {
+  private mapCatalogResource(
+    item: Pick<
+      RecommendationItemRecord,
+      'resourceType' | 'resourceId' | 'resource'
+    >,
+  ): CatalogResource {
     const resource = item.resource;
+    const raw = this.jsonObject(resource?.raw);
+    const rawRelationships = this.jsonObject(raw?.relationships);
     const name = resource?.name || resource?.title || '';
     const href =
       resource?.href || this.catalogHref(item.resourceType, item.resourceId);
@@ -462,7 +1616,7 @@ export class RecommendationsService {
         ),
       ),
       relationships: this.wrapOptionalStruct(
-        this.jsonObject(resource?.relationships),
+        rawRelationships ?? this.jsonObject(resource?.relationships),
       ),
     };
   }
@@ -555,7 +1709,7 @@ export class RecommendationsService {
           genreNames: resource?.genreNames,
           isCompilation: resource?.isCompilation ?? false,
           isComplete: resource?.isComplete ?? false,
-          isMasteredForItunes: resource?.isMasteredForItunes ?? false,
+          isStudioMastered: resource?.isStudioMastered ?? false,
           isPrerelease: resource?.isPrerelease ?? false,
           isSingle: resource?.isSingle ?? false,
           plainEditorialNotes: this.editorialNotes(resource),
@@ -624,7 +1778,19 @@ export class RecommendationsService {
   private validateReplacement(
     request: ReplaceHomeRecommendationsRequest,
   ): void {
-    this.requireText(request.userId, 'user_id', 128);
+    const pageScope = this.pageScope(request.scope);
+    this.pageStatus(request.status);
+    if (pageScope === PrismaPageScope.USER) {
+      this.requireText(request.userId, 'user_id', 128);
+    }
+    if (
+      request.scope !==
+        RecommendationPageScope.RECOMMENDATION_PAGE_SCOPE_UNSPECIFIED ||
+      request.status !==
+        RecommendationPageStatus.RECOMMENDATION_PAGE_STATUS_UNSPECIFIED
+    ) {
+      this.requireText(request.actorUserId, 'actor_user_id', 128);
+    }
     this.requireText(request.name || 'listen-now', 'name', 64);
     this.requireText(request.locale || 'en-GB', 'locale', 16);
     this.requireText(request.timezone || '+07:00', 'timezone', 16);
@@ -669,7 +1835,7 @@ export class RecommendationsService {
 
     const sectionIds = new Set<string>();
     for (const section of request.sections) {
-      this.validateSection(section, resourceKeys);
+      this.validateSection(section);
 
       if (sectionIds.has(section.id)) {
         this.invalidArgument(`duplicate section id: ${section.id}`);
@@ -682,7 +1848,6 @@ export class RecommendationsService {
     this.requireText(resource.id, 'resource.id', 128);
     this.validateResourceType(resource.type);
     this.optionalString(resource.href, 'resource.href', 1_000);
-
     if (!resource.attributes) {
       this.invalidArgument(
         `resource ${this.resourceKey(resource.type, resource.id)} is missing attributes`,
@@ -690,10 +1855,18 @@ export class RecommendationsService {
     }
 
     const attributes = this.unwrapStruct(resource.attributes);
-    if (typeof attributes.name !== 'string') {
-      this.invalidArgument('resource.attributes.name must be a string');
+    if (resource.type === 'editorial-items') {
+      this.optionalString(
+        attributes.name,
+        'resource.attributes.name',
+        255,
+      );
+    } else {
+      if (typeof attributes.name !== 'string') {
+        this.invalidArgument('resource.attributes.name must be a string');
+      }
+      this.requireText(attributes.name, 'resource.attributes.name', 255);
     }
-    this.requireText(attributes.name, 'resource.attributes.name', 255);
     this.validateJsonSize(attributes, 'resource.attributes');
 
     this.optionalString(attributes.url, 'resource.attributes.url', 1_000);
@@ -707,7 +1880,7 @@ export class RecommendationsService {
       'resource.attributes.curatorName',
       255,
     );
-    this.optionalStringArray(
+    this.optionalStringOrStringArray(
       attributes.artistNames,
       'resource.attributes.artistNames',
       255,
@@ -751,7 +1924,7 @@ export class RecommendationsService {
     for (const field of [
       'isCompilation',
       'isComplete',
-      'isMasteredForItunes',
+      'isStudioMastered',
       'isPrerelease',
       'isSingle',
       'hasCollaboration',
@@ -837,7 +2010,6 @@ export class RecommendationsService {
 
   private validateSection(
     section: PersonalRecommendationResource,
-    resourceKeys: Set<string>,
   ): void {
     this.requireText(section.id, 'section.id', 128);
 
@@ -848,24 +2020,40 @@ export class RecommendationsService {
     }
 
     const attributes = section.attributes;
-    const display = attributes?.display;
-
-    if (!attributes || !display?.kind) {
-      this.invalidArgument(`section ${section.id} is missing display.kind`);
+    if (!attributes) {
+      this.invalidArgument(`section ${section.id} is missing attributes`);
     }
-
-    this.requireText(
-      display.kind,
-      `section ${section.id} display.kind`,
-      64,
+    const display = attributes.display;
+    const presentationMode = this.presentationMode(
+      attributes.presentationMode,
     );
+
+    if (presentationMode === PrismaPresentationMode.FIXED) {
+      if (!display?.kind) {
+        this.invalidArgument(`section ${section.id} is missing display.kind`);
+      }
+      this.requireText(
+        display.kind,
+        `section ${section.id} display.kind`,
+        64,
+      );
+      if (!SUPPORTED_DISPLAY_KINDS.has(display.kind)) {
+        this.invalidArgument(
+          `section ${section.id} uses unsupported display.kind ${display.kind}`,
+        );
+      }
+    } else if (display?.kind) {
+      this.invalidArgument(
+        `section ${section.id} must omit display.kind when presentation_mode is AUTO`,
+      );
+    }
     this.optionalString(
       attributes.kind,
       `section ${section.id} attributes.kind`,
       64,
     );
     this.optionalStringArray(
-      display.decorations,
+      display?.decorations,
       `section ${section.id} display.decorations`,
       64,
     );
@@ -933,12 +2121,6 @@ export class RecommendationsService {
         );
 
         const resourceKey = this.resourceKey(item.type, item.id);
-        if (!resourceKeys.has(resourceKey)) {
-          this.invalidArgument(
-            `section ${section.id} references missing resource ${resourceKey}`,
-          );
-        }
-
         const itemKey = `${resourceKey}:${isPrimary}`;
         if (itemKeys.has(itemKey)) {
           this.invalidArgument(
@@ -950,7 +2132,171 @@ export class RecommendationsService {
     }
   }
 
-  private resourceSnapshotData(resource: CatalogResource) {
+  private pageResourceRefs(
+    request: ReplaceHomeRecommendationsRequest,
+  ): Array<{ type: string; id: string }> {
+    const refs = [
+      ...request.resources.map((resource) => ({
+        type: resource.type,
+        id: resource.id,
+      })),
+      ...request.sections.flatMap((section) => [
+        ...(section.relationships?.contents?.data ?? []),
+        ...(section.relationships?.primaryContent?.data ?? []),
+      ]),
+    ];
+    const seen = new Set<string>();
+
+    return refs.filter((ref) => {
+      const key = this.resourceKey(ref.type, ref.id);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  private async hydrateCatalogResources(
+    request: ReplaceHomeRecommendationsRequest,
+  ): Promise<ReplaceHomeRecommendationsRequest> {
+    const suppliedKeys = new Set(
+      request.resources.map((resource) =>
+        this.resourceKey(resource.type, resource.id),
+      ),
+    );
+    const missing = this.pageResourceRefs(request).filter(
+      (ref) => !suppliedKeys.has(this.resourceKey(ref.type, ref.id)),
+    );
+    if (missing.length === 0) return request;
+    if (missing.length > MAX_RESOURCES_PER_PAGE) {
+      this.invalidArgument(
+        `page references must contain at most ${MAX_RESOURCES_PER_PAGE} unique resources`,
+      );
+    }
+
+    const systemGeneratedRefs = missing.filter((ref) =>
+      this.isSystemGeneratedRef(ref),
+    );
+    const catalogRefs = missing.filter(
+      (ref) =>
+        this.catalogService.supports(ref.type) &&
+        !this.isSystemGeneratedRef(ref),
+    );
+    const hydrated = await this.catalogService.resolve(catalogRefs);
+    const hydratedKeys = new Set(
+      hydrated.map((resource) =>
+        this.resourceKey(resource.type, resource.id),
+      ),
+    );
+    const unpublishedCatalogRefs = catalogRefs.filter(
+      (ref) => !hydratedKeys.has(this.resourceKey(ref.type, ref.id)),
+    );
+    if (unpublishedCatalogRefs.length) {
+      this.invalidArgument(
+        `catalog resources are not published: ${unpublishedCatalogRefs
+          .slice(0, 10)
+          .map((ref) => this.resourceKey(ref.type, ref.id))
+          .join(', ')}`,
+      );
+    }
+
+    const snapshotRefs = [
+      ...missing.filter((ref) => !this.catalogService.supports(ref.type)),
+      ...systemGeneratedRefs,
+    ];
+    if (snapshotRefs.length === 0) {
+      return {
+        ...request,
+        resources: [...request.resources, ...hydrated],
+      };
+    }
+
+    const existing = await this.executePersistence(() =>
+      this.prisma.recommendationResourceSnapshot.findMany({
+        where: {
+          OR: snapshotRefs.map((ref) => ({
+            resourceType: ref.type,
+            resourceId: ref.id,
+          })),
+        },
+        select: { resourceType: true, resourceId: true },
+      }),
+    );
+    const existingKeys = new Set(
+      existing.map((resource) =>
+        this.resourceKey(resource.resourceType, resource.resourceId),
+      ),
+    );
+    const unresolvedSnapshots = snapshotRefs.filter(
+      (ref) => !existingKeys.has(this.resourceKey(ref.type, ref.id)),
+    );
+    if (unresolvedSnapshots.length) {
+      this.invalidArgument(
+        `page references missing resources: ${unresolvedSnapshots
+          .slice(0, 10)
+          .map((ref) => this.resourceKey(ref.type, ref.id))
+          .join(', ')}`,
+      );
+    }
+
+    return {
+      ...request,
+      resources: [...request.resources, ...hydrated],
+    };
+  }
+
+  private async assertReferencedResourcesExist(
+    request: ReplaceHomeRecommendationsRequest,
+  ): Promise<void> {
+    const supplied = new Set(
+      request.resources.map((resource) =>
+        this.resourceKey(resource.type, resource.id),
+      ),
+    );
+    const missing = this.pageResourceRefs(request).filter(
+      (ref) => !supplied.has(this.resourceKey(ref.type, ref.id)),
+    );
+
+    if (missing.length === 0) return;
+    if (missing.length > MAX_RESOURCES_PER_PAGE) {
+      this.invalidArgument(
+        `page references must contain at most ${MAX_RESOURCES_PER_PAGE} unique resources`,
+      );
+    }
+
+    const existing = await this.executePersistence(() =>
+      this.prisma.recommendationResourceSnapshot.findMany({
+        where: {
+          OR: missing.map((ref) => ({
+            resourceType: ref.type,
+            resourceId: ref.id,
+          })),
+        },
+        select: { resourceType: true, resourceId: true },
+      }),
+    );
+    const existingKeys = new Set(
+      existing.map((resource) =>
+        this.resourceKey(resource.resourceType, resource.resourceId),
+      ),
+    );
+    const unresolved = missing.filter(
+      (ref) => !existingKeys.has(this.resourceKey(ref.type, ref.id)),
+    );
+
+    if (unresolved.length) {
+      this.invalidArgument(
+        `page references missing resources: ${unresolved
+          .slice(0, 10)
+          .map((ref) => this.resourceKey(ref.type, ref.id))
+          .join(', ')}`,
+      );
+    }
+  }
+
+  private resourceSnapshotData(
+    resource: CatalogResource,
+    preserveImportedRaw: boolean,
+  ) {
     const attributes = this.unwrapStruct(resource.attributes!);
     const relationships = this.unwrapOptionalStruct(resource.relationships);
     const artwork = this.objectValue(attributes.artwork);
@@ -959,17 +2305,20 @@ export class RecommendationsService {
     );
     const description = this.objectValue(attributes.description);
     const link = this.objectValue(attributes.link);
+    const resourceName =
+      this.stringValue(attributes.name) ||
+      this.stringValue(plainEditorialNotes?.name);
 
     return {
-      name: this.stringValue(attributes.name),
-      title: this.stringValue(attributes.name),
+      name: resourceName,
+      title: resourceName,
       subtitle:
         this.stringValue(attributes.artistName) ||
         this.stringValue(attributes.curatorName),
       href: resource.href,
       externalUrl: this.stringValue(attributes.url),
       artistName: this.stringValue(attributes.artistName),
-      artistNames: this.stringArrayValue(attributes.artistNames),
+      artistNames: this.stringOrStringArrayValue(attributes.artistNames),
       curatorName: this.stringValue(attributes.curatorName),
       artworkUrl: this.stringValue(artwork?.url),
       artworkBgColor: this.normalizeColor(this.stringValue(artwork?.bgColor)),
@@ -995,7 +2344,7 @@ export class RecommendationsService {
       upc: this.stringValue(attributes.upc),
       isCompilation: this.booleanValue(attributes.isCompilation),
       isComplete: this.booleanValue(attributes.isComplete),
-      isMasteredForItunes: this.booleanValue(attributes.isMasteredForItunes),
+      isStudioMastered: this.booleanValue(attributes.isStudioMastered),
       isPrerelease: this.booleanValue(attributes.isPrerelease),
       isSingle: this.booleanValue(attributes.isSingle),
       playlistType: this.stringValue(attributes.playlistType),
@@ -1019,9 +2368,268 @@ export class RecommendationsService {
       plainEditorialNotes: this.toNullableInputJson(
         attributes.plainEditorialNotes,
       ),
+      attributes: this.toNullableInputJson(attributes),
       relationships: this.toNullableInputJson(relationships),
-      raw: Prisma.DbNull,
+      raw: preserveImportedRaw
+        ? this.toInputJson({
+            id: resource.id,
+            type: resource.type,
+            href: resource.href,
+            attributes,
+            relationships: relationships ?? null,
+          })
+        : Prisma.DbNull,
     };
+  }
+
+  private static readonly SNAPSHOT_UPSERT_COLUMNS: ReadonlyArray<{
+    column: string;
+    kind: 'text' | 'int' | 'bool' | 'array' | 'json';
+  }> = [
+    { column: 'name', kind: 'text' },
+    { column: 'title', kind: 'text' },
+    { column: 'subtitle', kind: 'text' },
+    { column: 'href', kind: 'text' },
+    { column: 'externalUrl', kind: 'text' },
+    { column: 'artistName', kind: 'text' },
+    { column: 'artistNames', kind: 'array' },
+    { column: 'curatorName', kind: 'text' },
+    { column: 'artworkUrl', kind: 'text' },
+    { column: 'artworkBgColor', kind: 'text' },
+    { column: 'bgColor', kind: 'text' },
+    { column: 'textColor1', kind: 'text' },
+    { column: 'textColor2', kind: 'text' },
+    { column: 'textColor3', kind: 'text' },
+    { column: 'textColor4', kind: 'text' },
+    { column: 'artworkWidth', kind: 'int' },
+    { column: 'artworkHeight', kind: 'int' },
+    { column: 'shortDescription', kind: 'text' },
+    { column: 'standardDescription', kind: 'text' },
+    { column: 'editorialNotesName', kind: 'text' },
+    { column: 'editorialNotesShort', kind: 'text' },
+    { column: 'editorialNotes', kind: 'text' },
+    { column: 'audioTraits', kind: 'array' },
+    { column: 'genreNames', kind: 'array' },
+    { column: 'contentRating', kind: 'text' },
+    { column: 'copyright', kind: 'text' },
+    { column: 'recordLabel', kind: 'text' },
+    { column: 'releaseDate', kind: 'text' },
+    { column: 'trackCount', kind: 'int' },
+    { column: 'upc', kind: 'text' },
+    { column: 'isCompilation', kind: 'bool' },
+    { column: 'isComplete', kind: 'bool' },
+    { column: 'isStudioMastered', kind: 'bool' },
+    { column: 'isPrerelease', kind: 'bool' },
+    { column: 'isSingle', kind: 'bool' },
+    { column: 'playlistType', kind: 'text' },
+    { column: 'editorialPlaylistKind', kind: 'text' },
+    { column: 'hasCollaboration', kind: 'bool' },
+    { column: 'isChart', kind: 'bool' },
+    { column: 'lastModifiedDate', kind: 'text' },
+    { column: 'supportsSing', kind: 'bool' },
+    { column: 'stationKind', kind: 'text' },
+    { column: 'mediaKind', kind: 'text' },
+    { column: 'radioUrl', kind: 'text' },
+    { column: 'isLive', kind: 'bool' },
+    { column: 'requiresSubscription', kind: 'bool' },
+    { column: 'linkUrl', kind: 'text' },
+    { column: 'playParams', kind: 'json' },
+    { column: 'editorialArtwork', kind: 'json' },
+    { column: 'editorialVideo', kind: 'json' },
+    { column: 'plainEditorialCard', kind: 'json' },
+    { column: 'plainEditorialNotes', kind: 'json' },
+    { column: 'attributes', kind: 'json' },
+    { column: 'relationships', kind: 'json' },
+    { column: 'raw', kind: 'json' },
+  ];
+
+  private static readonly SNAPSHOT_UPSERT_BATCH_SIZE = 100;
+
+  /**
+   * Batched upsert of resource snapshots via a single multi-row
+   * `INSERT ... ON CONFLICT ("resourceType", "resourceId") DO UPDATE`
+   * statement per chunk, replacing per-row Prisma `upsert()` calls.
+   * All values are bound as parameters (or emitted as fixed SQL fragments
+   * built from a static column list) — no user value is string-concatenated.
+   */
+  private async upsertResourceSnapshots(
+    tx: Prisma.TransactionClient,
+    resources: CatalogResource[],
+    preserveImportedRaw: boolean,
+  ): Promise<void> {
+    if (resources.length === 0) return;
+
+    const columns = RecommendationsService.SNAPSHOT_UPSERT_COLUMNS;
+
+    const insertColumns = Prisma.join([
+      Prisma.raw('"id"'),
+      Prisma.raw('"resourceType"'),
+      Prisma.raw('"resourceId"'),
+      ...columns.map((definition) => Prisma.raw(`"${definition.column}"`)),
+      Prisma.raw('"updatedAt"'),
+    ]);
+
+    const updateAssignments = Prisma.join([
+      ...columns.map((definition) =>
+        Prisma.raw(`"${definition.column}" = EXCLUDED."${definition.column}"`),
+      ),
+      Prisma.raw('"updatedAt" = now()'),
+    ]);
+
+    const batchSize = RecommendationsService.SNAPSHOT_UPSERT_BATCH_SIZE;
+    for (let start = 0; start < resources.length; start += batchSize) {
+      const chunk = resources.slice(start, start + batchSize);
+      const rows = chunk.map((resource) => {
+        const data = this.resourceSnapshotData(
+          resource,
+          preserveImportedRaw,
+        ) as Record<string, unknown>;
+        const values = columns.map((definition) =>
+          this.snapshotValueFragment(definition.kind, data[definition.column]),
+        );
+        return Prisma.sql`(${Prisma.join([
+          Prisma.sql`${randomUUID()}`,
+          Prisma.sql`${resource.type}`,
+          Prisma.sql`${resource.id}`,
+          ...values,
+          Prisma.raw('now()'),
+        ])})`;
+      });
+
+      await tx.$executeRaw`
+        INSERT INTO "recommendation_resource_snapshots" (${insertColumns})
+        VALUES ${Prisma.join(rows)}
+        ON CONFLICT ("resourceType", "resourceId") DO UPDATE SET ${updateAssignments}
+      `;
+    }
+  }
+
+  private snapshotValueFragment(
+    kind: 'text' | 'int' | 'bool' | 'array' | 'json',
+    value: unknown,
+  ): Prisma.Sql {
+    switch (kind) {
+      case 'array': {
+        const items = Array.isArray(value) ? (value as string[]) : [];
+        return items.length
+          ? Prisma.sql`ARRAY[${Prisma.join(items)}]::text[]`
+          : Prisma.sql`ARRAY[]::text[]`;
+      }
+      case 'json':
+        return value === Prisma.DbNull ||
+          value === null ||
+          value === undefined
+          ? Prisma.sql`NULL`
+          : Prisma.sql`${JSON.stringify(value)}::jsonb`;
+      default:
+        return Prisma.sql`${value}`;
+    }
+  }
+
+  private resolveDisplayKind(section: RecommendationSectionRecord): string {
+    if (
+      section.presentationMode !== PrismaPresentationMode.AUTO &&
+      section.displayKind
+    ) {
+      return section.displayKind;
+    }
+
+    const contentItems = section.items.filter((item) => !item.isPrimary);
+    const items = contentItems.length ? contentItems : section.items;
+    const resourceTypes = new Set(
+      items.map((item) => item.resourceType),
+    );
+    const hasPrimaryVideo = section.items.some(
+      (item) =>
+        item.isPrimary &&
+        this.jsonValue(item.resource?.editorialVideo) !== undefined,
+    );
+
+    if (hasPrimaryVideo) {
+      return 'MusicSuperHeroShelf';
+    }
+    if (resourceTypes.size === 1 && resourceTypes.has('stations')) {
+      return 'MusicCircleCoverShelf';
+    }
+    if (
+      resourceTypes.size === 1 &&
+      resourceTypes.has('editorial-items')
+    ) {
+      return 'MusicSocialCardShelf';
+    }
+    if (items.length >= 8 && resourceTypes.size > 1) {
+      return 'MusicCoverGrid';
+    }
+
+    return DEFAULT_DISPLAY_KIND;
+  }
+
+  private pageScope(value: RecommendationPageScope): PrismaPageScope {
+    switch (value) {
+      case RecommendationPageScope.RECOMMENDATION_PAGE_SCOPE_GLOBAL:
+        return PrismaPageScope.GLOBAL;
+      case RecommendationPageScope.RECOMMENDATION_PAGE_SCOPE_USER:
+      case RecommendationPageScope.RECOMMENDATION_PAGE_SCOPE_UNSPECIFIED:
+        return PrismaPageScope.USER;
+      default:
+        this.invalidArgument('scope is invalid');
+    }
+  }
+
+  private pageStatus(value: RecommendationPageStatus): PrismaPageStatus {
+    switch (value) {
+      case RecommendationPageStatus.RECOMMENDATION_PAGE_STATUS_DRAFT:
+        return PrismaPageStatus.DRAFT;
+      case RecommendationPageStatus.RECOMMENDATION_PAGE_STATUS_ARCHIVED:
+        return PrismaPageStatus.ARCHIVED;
+      case RecommendationPageStatus.RECOMMENDATION_PAGE_STATUS_PUBLISHED:
+      case RecommendationPageStatus.RECOMMENDATION_PAGE_STATUS_UNSPECIFIED:
+        return PrismaPageStatus.PUBLISHED;
+      default:
+        this.invalidArgument('status is invalid');
+    }
+  }
+
+  private presentationMode(
+    value: RecommendationPresentationMode,
+  ): PrismaPresentationMode {
+    switch (value) {
+      case RecommendationPresentationMode.RECOMMENDATION_PRESENTATION_MODE_AUTO:
+        return PrismaPresentationMode.AUTO;
+      case RecommendationPresentationMode.RECOMMENDATION_PRESENTATION_MODE_FIXED:
+      case RecommendationPresentationMode.RECOMMENDATION_PRESENTATION_MODE_UNSPECIFIED:
+        return PrismaPresentationMode.FIXED;
+      default:
+        this.invalidArgument('presentation_mode is invalid');
+    }
+  }
+
+  private userScopeKey(userId: string): string {
+    return `USER:${userId}`;
+  }
+
+  private pageTimezone(
+    scope: PrismaPageScope,
+    requestedTimezone: string,
+  ): string {
+    return scope === PrismaPageScope.GLOBAL
+      ? GLOBAL_TIMEZONE
+      : requestedTimezone;
+  }
+
+  private coldStartScore(
+    userId: string,
+    sectionId: string,
+    resourceId: string,
+    refreshWindow: number,
+  ): number {
+    const value = `${userId}\u001f${sectionId}\u001f${resourceId}\u001f${refreshWindow}`;
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
   }
 
   private optionalString(
@@ -1091,6 +2699,19 @@ export class RecommendationsService {
         );
       }
     }
+  }
+
+  private optionalStringOrStringArray(
+    value: unknown,
+    field: string,
+    maxItemLength: number,
+  ): void {
+    if (typeof value === 'string') {
+      this.optionalString(value, field, maxItemLength);
+      return;
+    }
+
+    this.optionalStringArray(value, field, maxItemLength);
   }
 
   private validateArtwork(artwork: Record<string, unknown>): void {
@@ -1225,6 +2846,10 @@ export class RecommendationsService {
       return undefined;
     }
 
+    const storedAttributes = this.objectValue(this.jsonValue(resource?.attributes));
+    const storedArtwork = this.objectValue(storedAttributes?.artwork);
+    const variants = this.jsonValue(storedArtwork?.variants);
+
     return this.compactObject({
       url: resource.artworkUrl || undefined,
       bgColor: this.stripHash(
@@ -1236,6 +2861,7 @@ export class RecommendationsService {
       textColor4: this.stripHash(resource.textColor4) || undefined,
       width: resource.artworkWidth,
       height: resource.artworkHeight,
+      variants,
     });
   }
 
@@ -1426,6 +3052,18 @@ export class RecommendationsService {
     return typeof value === 'string' ? value : '';
   }
 
+  private list<T>(value: T[] | undefined): T[] {
+    return Array.isArray(value) ? value : [];
+  }
+
+  private stringOrStringArrayValue(value: unknown): string[] {
+    if (typeof value === 'string') {
+      return value ? [value] : [];
+    }
+
+    return this.stringArrayValue(value);
+  }
+
   private stringArrayValue(value: unknown): string[] {
     return Array.isArray(value)
       ? value.filter((item): item is string => typeof item === 'string')
@@ -1442,6 +3080,13 @@ export class RecommendationsService {
 
   private resourceKey(resourceType: string, resourceId: string): string {
     return `${resourceType}:${resourceId}`;
+  }
+
+  private isSystemGeneratedRef(ref: { type: string; id: string }): boolean {
+    return (
+      (ref.type === 'playlists' && SYSTEM_DAILY_MIX_ID_PATTERN.test(ref.id)) ||
+      (ref.type === 'stations' && SYSTEM_STATION_ID_PATTERN.test(ref.id))
+    );
   }
 
   private async executePersistence<T>(operation: () => Promise<T>): Promise<T> {

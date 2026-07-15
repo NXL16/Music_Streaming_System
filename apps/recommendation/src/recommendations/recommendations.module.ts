@@ -1,16 +1,24 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import { resolveProtoPath, SONG } from '@musical/shared-proto';
+import {
+  GRPC_LOADER_OPTIONS,
+  resolveProtoPath,
+  SONG,
+} from '@musical/shared-proto';
 import { DatabaseModule } from '../database/database.module';
+import { ListeningModule } from '../listening/listening.module';
 import { RecommendationsController } from './recommendations.controller';
 import { RecommendationsService } from './recommendations.service';
 import { InternalGrpcGuard } from '../common/guards/internal-grpc.guard';
 import { RecommendationCatalogService } from './recommendation-catalog.service';
+import { GenerationService } from '../generation/generation.service';
+import { CatalogSynchronizationService } from './catalog-synchronization.service';
 
 @Module({
   imports: [
     DatabaseModule,
+    ListeningModule,
     ClientsModule.registerAsync([
       {
         name: 'SONG_SERVICE',
@@ -22,7 +30,7 @@ import { RecommendationCatalogService } from './recommendation-catalog.service';
             url: config.getOrThrow<string>('SONG_GRPC_URL'),
             package: SONG.PACKAGE,
             protoPath: resolveProtoPath(SONG.PROTO_FILE),
-            loader: { longs: Number },
+            loader: GRPC_LOADER_OPTIONS,
           },
         }),
       },
@@ -32,6 +40,8 @@ import { RecommendationCatalogService } from './recommendation-catalog.service';
   providers: [
     RecommendationsService,
     RecommendationCatalogService,
+    CatalogSynchronizationService,
+    GenerationService,
     InternalGrpcGuard,
   ],
   exports: [RecommendationsService],

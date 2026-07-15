@@ -8,29 +8,70 @@ datasource db {
     provider = "postgresql"
 }
 
+enum RecommendationPageScope {
+    GLOBAL
+    USER
+}
+
+enum RecommendationPageStatus {
+    DRAFT
+    PUBLISHED
+    ARCHIVED
+}
+
+enum RecommendationPresentationMode {
+    AUTO
+    FIXED
+}
+
 model RecommendationPage {
-    id        String   @id @default(uuid())
-    name      String   @db.VarChar(64) // listen-now
-    userId    String   @db.VarChar(128)
-    locale    String   @default("en-GB") @db.VarChar(16)
-    timezone  String   @default("+07:00") @db.VarChar(16)
-    createdAt DateTime @default(now()) @db.Timestamptz
-    updatedAt DateTime @updatedAt @db.Timestamptz
+    id          String                   @id @default(uuid())
+    name        String                   @db.VarChar(64) // listen-now
+    scope       RecommendationPageScope  @default(USER)
+    scopeKey    String                   @db.VarChar(160) // GLOBAL or USER:<userId>
+    userId      String?                  @db.VarChar(128)
+    status      RecommendationPageStatus @default(DRAFT)
+    locale      String                   @default("en-GB") @db.VarChar(16)
+    timezone    String                   @default("+07:00") @db.VarChar(16)
+    publishedAt DateTime?                @db.Timestamptz
+    staleAfter  DateTime?                @db.Timestamptz
+    createdBy   String                   @default("") @db.VarChar(128)
+    updatedBy   String                   @default("") @db.VarChar(128)
+    createdAt   DateTime                 @default(now()) @db.Timestamptz
+    updatedAt   DateTime                 @updatedAt @db.Timestamptz
 
-    sections RecommendationSection[]
+    sections      RecommendationSection[]
+    resourceLinks RecommendationPageResource[]
 
-    @@unique([userId, name, locale, timezone])
+    @@unique([scopeKey, name, locale, timezone, status])
     @@index([userId, name])
+    @@index([status, name, locale])
     @@map("recommendation_pages")
+}
+
+model RecommendationPageResource {
+    pageId       String
+    resourceType String @db.VarChar(64)
+    resourceId   String @db.VarChar(128)
+    sortOrder    Int    @default(0)
+
+    page     RecommendationPage             @relation(fields: [pageId], references: [id], onDelete: Cascade)
+    resource RecommendationResourceSnapshot @relation(fields: [resourceType, resourceId], references: [resourceType, resourceId], onDelete: Cascade)
+
+    @@id([pageId, resourceType, resourceId])
+    @@index([pageId, sortOrder])
+    @@index([resourceType, resourceId])
+    @@map("recommendation_page_resources")
 }
 
 model RecommendationSection {
     id                    String    @id @default(uuid())
-    externalId            String    @db.VarChar(128) // Apple-like id: 7-2Tqlz47h9yro
+    externalId            String    @db.VarChar(128) // Stable public section identifier
     pageId                String
     title                 String    @default("") @db.VarChar(255)
     titleWithoutName      String    @default("") @db.VarChar(255)
-    displayKind           String    @db.VarChar(64) // MusicCoverShelf, MusicNotesHeroShelf
+    presentationMode      RecommendationPresentationMode @default(FIXED)
+    displayKind           String    @default("") @db.VarChar(64) // resolved automatically when mode=AUTO
     displayDecorations    String[]  @default([])
     sectionKind           String    @default("music-recommendations") @db.VarChar(64)
     resourceTypes         String[]  @default([])
@@ -113,7 +154,7 @@ model RecommendationResourceSnapshot {
     upc                  String  @default("") @db.VarChar(64)
     isCompilation        Boolean @default(false)
     isComplete           Boolean @default(false)
-    isMasteredForItunes  Boolean @default(false)
+    isStudioMastered     Boolean @default(false)
     isPrerelease         Boolean @default(false)
     isSingle             Boolean @default(false)
 
@@ -136,6 +177,7 @@ model RecommendationResourceSnapshot {
     editorialVideo      Json?
     plainEditorialCard  Json?
     plainEditorialNotes Json?
+    attributes          Json?
     relationships       Json?
     raw                 Json?
 
@@ -143,8 +185,73 @@ model RecommendationResourceSnapshot {
     updatedAt DateTime @updatedAt @db.Timestamptz
 
     sectionItems RecommendationSectionItem[]
+    pageLinks    RecommendationPageResource[]
 
     @@unique([resourceType, resourceId])
     @@index([resourceType])
     @@map("recommendation_resource_snapshots")
+}
+
+model ListeningEvent {
+    id          String   @id @default(uuid())
+    userId      String   @db.VarChar(128)
+    songId      String   @db.VarChar(128)
+    eventType   String   @db.VarChar(32)
+    durationSec Int      @default(0)
+    totalSec    Int      @default(0)
+    songTitle   String   @default("") @db.VarChar(255)
+    artistName  String   @default("") @db.VarChar(255)
+    albumName   String   @default("") @db.VarChar(255)
+    albumId     String   @default("") @db.VarChar(128)
+    playlistId  String   @default("") @db.VarChar(128)
+    playlistName String  @default("") @db.VarChar(255)
+    playlistArtworkUrl String @default("") @db.VarChar(1000)
+    playlistArtworkBgColor String @default("") @db.VarChar(16)
+    stationId   String   @default("") @db.VarChar(128)
+    stationName String   @default("") @db.VarChar(255)
+    stationArtworkUrl String @default("") @db.VarChar(1000)
+    stationArtworkBgColor String @default("") @db.VarChar(16)
+    createdAt   DateTime @default(now()) @db.Timestamptz
+
+    @@index([userId, createdAt])
+    @@index([songId, createdAt])
+    @@index([albumId, createdAt])
+    @@index([playlistId, createdAt])
+    @@index([stationId, createdAt])
+    @@index([createdAt])
+    @@map("listening_events")
+}
+
+model UserListeningStats {
+    id              String   @id @default(uuid())
+    userId          String   @db.VarChar(128)
+    songId          String   @db.VarChar(128)
+    playCount       Int      @default(0)
+    completionCount Int      @default(0)
+    skipCount       Int      @default(0)
+    totalListenSec  Int      @default(0)
+    lastPlayedAt    DateTime @default(now()) @db.Timestamptz
+    songTitle       String   @default("") @db.VarChar(255)
+    artistName      String   @default("") @db.VarChar(255)
+    albumName       String   @default("") @db.VarChar(255)
+    albumId         String   @default("") @db.VarChar(128)
+    playlistId      String   @default("") @db.VarChar(128)
+    playlistName    String   @default("") @db.VarChar(255)
+    playlistArtworkUrl String @default("") @db.VarChar(1000)
+    playlistArtworkBgColor String @default("") @db.VarChar(16)
+    stationId       String   @default("") @db.VarChar(128)
+    stationName     String   @default("") @db.VarChar(255)
+    stationArtworkUrl String @default("") @db.VarChar(1000)
+    stationArtworkBgColor String @default("") @db.VarChar(16)
+    createdAt       DateTime @default(now()) @db.Timestamptz
+    updatedAt       DateTime @updatedAt @db.Timestamptz
+
+    @@unique([userId, songId])
+    @@index([userId, lastPlayedAt])
+    @@index([userId, playCount])
+    @@index([songId, playCount])
+    @@index([albumId, lastPlayedAt])
+    @@index([playlistId, lastPlayedAt])
+    @@index([stationId, lastPlayedAt])
+    @@map("user_listening_stats")
 }
