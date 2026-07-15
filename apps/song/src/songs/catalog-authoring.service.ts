@@ -472,9 +472,15 @@ export class CatalogAuthoringService {
       this.failedPrecondition('SONG_NOT_READY');
     }
 
-    const artistIds = this.strings(payload.artistIds);
+    const artistName = this.string(payload.artistName);
+    const artistIds = await this.resolveArtistCreditIds(
+      tx,
+      draft.storefront,
+      artistName,
+      this.strings(payload.artistIds),
+    );
     const composerIds = this.strings(payload.composerIds);
-    await this.assertArtists(tx, [...artistIds, ...composerIds], draft.storefront);
+    await this.assertArtists(tx, composerIds, draft.storefront);
 
     await tx.song.update({
       where: { id: draft.resourceId },
@@ -483,7 +489,7 @@ export class CatalogAuthoringService {
         storefront: draft.storefront,
         catalogTitle: this.requiredString(payload.name, 'name'),
         albumName: this.string(payload.albumName),
-        artistName: this.string(payload.artistName),
+        artistName,
         artworkAssetId: this.requiredString(
           payload.artworkAssetId,
           'artwork_asset_id',
@@ -548,7 +554,7 @@ export class CatalogAuthoringService {
     payload: JsonObject,
   ): Promise<void> {
     const artistName = this.string(payload.artistName);
-    const artistIds = await this.resolveAlbumArtistIds(
+    const artistIds = await this.resolveArtistCreditIds(
       tx,
       draft.storefront,
       artistName,
@@ -725,10 +731,10 @@ export class CatalogAuthoringService {
   }
 
   /**
-   * Album metadata is the source of truth for its displayed contributors.
-   * Keep names intact and split only explicit credit separators, never spaces.
+   * Displayed credit text is the source of truth. Split only explicit credit
+   * separators; collaborators without an Artist record remain plain text.
    */
-  private albumArtistNames(value: string): string[] {
+  private creditArtistNames(value: string): string[] {
     const seen = new Set<string>();
     return value
       .split(/\s*(?:,|&|\b(?:and|feat\.?|ft\.?)\b)\s*/i)
@@ -741,7 +747,7 @@ export class CatalogAuthoringService {
       });
   }
 
-  private async resolveAlbumArtistIds(
+  private async resolveArtistCreditIds(
     tx: Prisma.TransactionClient,
     storefront: string,
     artistName: string,
@@ -749,7 +755,7 @@ export class CatalogAuthoringService {
   ): Promise<string[]> {
     await this.assertArtists(tx, suppliedArtistIds, storefront);
 
-    const names = this.albumArtistNames(artistName);
+    const names = this.creditArtistNames(artistName);
     if (!names.length) return this.unique(suppliedArtistIds);
 
     const candidates = await tx.artist.findMany({
@@ -766,18 +772,24 @@ export class CatalogAuthoringService {
       },
       select: { id: true, name: true },
     });
-    const artistIdByName = new Map(
-      candidates.map((artist) => [
-        this.normalizedCatalogText(artist.name),
+    const artistIdsByName = new Map<string, string[]>();
+    for (const artist of candidates) {
+      const normalizedName = this.normalizedCatalogText(artist.name);
+      artistIdsByName.set(normalizedName, [
+        ...(artistIdsByName.get(normalizedName) ?? []),
         artist.id,
-      ]),
-    );
+      ]);
+    }
 
-    const artistIds: string[] = [];
+    const artistIds = [...this.unique(suppliedArtistIds)];
     for (const name of names) {
       const normalizedName = this.normalizedCatalogText(name);
-      const artistId = artistIdByName.get(normalizedName);
-      if (artistId) artistIds.push(artistId);
+      const matchedIds = artistIdsByName.get(normalizedName) ?? [];
+      // Never guess between artists sharing the same name. The supplied ID is
+      // still accepted above; an ambiguous text-only collaborator stays text.
+      if (matchedIds.length === 1 && !artistIds.includes(matchedIds[0])) {
+        artistIds.push(matchedIds[0]);
+      }
     }
     return artistIds;
   }
