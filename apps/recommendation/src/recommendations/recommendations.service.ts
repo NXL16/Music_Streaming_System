@@ -46,7 +46,7 @@ const MAX_TEXT_LENGTH = 100_000;
 const GLOBAL_SCOPE_KEY = 'GLOBAL';
 const GLOBAL_TIMEZONE = '*';
 const DEFAULT_DISPLAY_KIND = 'MusicCoverShelf';
-const HOME_PREVIEW_ITEM_LIMIT = 16;
+const HOME_PREVIEW_ITEM_LIMIT = 12;
 const SYSTEM_DAILY_MIX_ID_PATTERN = /^daily-mix-[a-f0-9]{32}(?:-\d+)?$/;
 const SYSTEM_STATION_ID_PATTERN = /^station-for-you-[a-f0-9]{32}-\d+$/;
 const SUPPORTED_DISPLAY_KINDS = new Set([
@@ -231,8 +231,8 @@ export class RecommendationsService {
       response = this.homeResponseForPage(
         page.name,
         page.locale,
-        page.sections as RecommendationSectionRecord[],
-        page.resourceLinks as RecommendationPageResourceRecord[],
+        page.sections,
+        page.resourceLinks,
         requestedTimezone,
         request.platform || 'web',
       );
@@ -272,8 +272,8 @@ export class RecommendationsService {
           this.homeResponseForPage(
             userPage.name,
             userPage.locale,
-            userPage.sections as RecommendationSectionRecord[],
-            userPage.resourceLinks as RecommendationPageResourceRecord[],
+            userPage.sections,
+            userPage.resourceLinks,
             requestedTimezone,
             request.platform || 'web',
           ),
@@ -1054,8 +1054,12 @@ export class RecommendationsService {
     for (const sectionRef of response.data) {
       const section = personalRecommendation[sectionRef.id];
       const contents = section?.relationships?.contents;
-      const refs = contents?.data;
-      if (!section || !contents || !refs?.length) {
+      const primaryContent = section?.relationships?.primaryContent;
+      const refs = [
+        ...(contents?.data ?? []),
+        ...(primaryContent?.data ?? []),
+      ];
+      if (!section || refs.length === 0) {
         data.push(sectionRef);
         continue;
       }
@@ -1089,14 +1093,22 @@ export class RecommendationsService {
 
       personalRecommendation[sectionRef.id] = {
         ...section,
+        attributes: {
+          ...section.attributes!,
+          // Keep the overflow signal after trimming the Home payload. The
+          // client can show its existing arrow without receiving those items.
+          hasSeeAll:
+            Boolean(section.attributes!.hasSeeAll) ||
+            sectionResources.size > preview.length,
+        },
         relationships: {
           ...section.relationships,
-          primaryContent: section.relationships?.primaryContent ?? {
-            href: '',
+          primaryContent: {
+            ...(primaryContent ?? { href: '', data: [] }),
             data: [],
           },
           contents: {
-            ...contents,
+            ...(contents ?? { href: '', data: [] }),
             data: preview,
           },
         },
