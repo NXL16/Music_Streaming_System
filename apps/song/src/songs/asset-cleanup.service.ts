@@ -90,6 +90,13 @@ export class AssetCleanupService
     await this.blockingRedis.quit().catch(() => {
       this.blockingRedis.disconnect(false);
     });
+
+    // Release the R2/S3 client's sockets and keep-alive agents on shutdown.
+    try {
+      this.r2.destroy();
+    } catch {
+      // Best-effort: ignore teardown errors.
+    }
   }
 
   private async consumeLoop(): Promise<void> {

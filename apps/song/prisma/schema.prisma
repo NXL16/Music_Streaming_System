@@ -1,63 +1,357 @@
 generator client {
-    provider     = "prisma-client"
-    output       = "../src/generated/prisma"
-    moduleFormat = "cjs"
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
 }
 
 datasource db {
-    provider = "postgresql"
+  provider = "postgresql"
+}
+
+enum CatalogDraftStatus {
+  DRAFT
+  PUBLISHED
+}
+
+model CatalogDraft {
+  id           String             @id @default(uuid())
+  resourceType String             @db.VarChar(32)
+  resourceId   String             @db.VarChar(128)
+  storefront   String             @default("vn") @db.VarChar(8)
+  status       CatalogDraftStatus @default(DRAFT)
+  payload      Json
+  version      Int                @default(1)
+  createdBy    String             @db.VarChar(128)
+  updatedBy    String             @db.VarChar(128)
+  publishedAt  DateTime?          @db.Timestamptz
+  createdAt    DateTime           @default(now()) @db.Timestamptz
+  updatedAt    DateTime           @updatedAt @db.Timestamptz
+
+  @@unique([resourceType, resourceId, storefront])
+  @@index([status, resourceType, storefront, updatedAt])
+  @@map("catalog_drafts")
+}
+
+model CatalogAssetUsageOutbox {
+  id           String    @id @default(uuid())
+  resourceType String    @db.VarChar(32)
+  resourceId   String    @db.VarChar(128)
+  storefront   String    @db.VarChar(8)
+  usages       Json
+  attempts     Int       @default(0)
+  availableAt  DateTime  @default(now()) @db.Timestamptz
+  lockedAt     DateTime? @db.Timestamptz
+  lastError    String    @default("") @db.VarChar(2000)
+  createdAt    DateTime  @default(now()) @db.Timestamptz
+  updatedAt    DateTime  @updatedAt @db.Timestamptz
+
+  @@unique([resourceType, resourceId, storefront])
+  @@index([availableAt, lockedAt])
+  @@map("catalog_asset_usage_outbox")
 }
 
 model Song {
-    id                String   @id @default(uuid())
-    status            Int      @default(1)
-    sourceObjectPath  String   @default("") @db.VarChar(500)
-    checksum          String   @unique @default("") @db.VarChar(64)
-    fileSizeBytes     BigInt   @default(0)
-    encryptedFilePath String   @default("") @db.VarChar(500)
-    durationSec       Int      @default(0)
-    bitrateKbps       Int      @default(0)
-    codec             String   @default("") @db.VarChar(32)
-    format            String   @default("fmp4") @db.VarChar(32)
-    createdAt         DateTime @default(now()) @db.Timestamptz
-    updatedAt         DateTime @updatedAt @db.Timestamptz
-    owners            SongOwner[]
+  id                        String              @id @default(uuid())
+  status                    Int                 @default(1)
+  sourceObjectPath          String              @default("") @db.VarChar(500)
+  checksum                  String?             @unique @db.VarChar(64)
+  fileSizeBytes             BigInt              @default(0)
+  encryptedFilePath         String              @default("") @db.VarChar(500)
+  durationSec               Int                 @default(0)
+  bitrateKbps               Int                 @default(0)
+  codec                     String              @default("") @db.VarChar(32)
+  format                    String              @default("fmp4") @db.VarChar(32)
+  isCatalog                 Boolean             @default(false)
+  storefront                String              @default("vn") @db.VarChar(8)
+  catalogTitle              String              @default("") @db.VarChar(255)
+  albumName                 String              @default("") @db.VarChar(255)
+  artistName                String              @default("") @db.VarChar(500)
+  artworkAssetId            String              @default("") @db.VarChar(128)
+  editorialArtworkAssetId   String              @default("") @db.VarChar(128)
+  artwork                   Json?
+  editorialArtwork          Json?
+  extendedAssetUrls         Json?
+  offers                    Json?
+  audioLocale               String              @default("") @db.VarChar(32)
+  audioTraits               String[]            @default([])
+  composerName              String              @default("") @db.VarChar(1000)
+  discNumber                Int                 @default(1)
+  durationInMillis          Int                 @default(0)
+  genreNames                String[]            @default([])
+  hasLyrics                 Boolean             @default(false)
+  hasTimeSyncedLyrics       Boolean             @default(false)
+  isHighResolutionMaster    Boolean             @default(false)
+  isStudioMastered          Boolean             @default(false)
+  isVocalAttenuationAllowed Boolean             @default(false)
+  isrc                      String?             @db.VarChar(32)
+  previewUrl                String              @default("") @db.VarChar(1000)
+  releaseDate               DateTime?           @db.Date
+  trackNumber               Int                 @default(0)
+  catalogUrl                String              @default("") @db.VarChar(1000)
+  contentRating             String              @default("") @db.VarChar(32)
+  createdAt                 DateTime            @default(now()) @db.Timestamptz
+  updatedAt                 DateTime            @updatedAt @db.Timestamptz
+  owners                    SongOwner[]
+  albumTracks               AlbumTrack[]
+  playlistTracks            PlaylistTrack[]
+  artistCredits             SongArtistCredit[]
+  favorites                 Favorite[]
+  userPlaylistTracks        UserPlaylistTrack[]
 
-    @@index([status, createdAt])
-    @@map("songs")
+  @@index([status, createdAt])
+  @@index([isCatalog, storefront])
+  @@index([storefront, isCatalog, releaseDate(sort: Desc), id(sort: Desc)])
+  @@index([catalogTitle])
+  @@index([isrc])
+  @@index([artworkAssetId])
+  @@index([editorialArtworkAssetId])
+  @@map("songs")
+}
+
+model Artist {
+  id                    String              @id @db.VarChar(128)
+  storefront            String              @default("vn") @db.VarChar(8)
+  name                  String              @db.VarChar(255)
+  url                   String              @default("") @db.VarChar(1000)
+  artworkAssetId        String              @default("") @db.VarChar(128)
+  artwork               Json?
+  editorialVideoAssetId String              @default("") @db.VarChar(128)
+  editorialVideo        Json?
+  genreNames            String[]            @default([])
+  createdAt             DateTime            @default(now()) @db.Timestamptz
+  updatedAt             DateTime            @updatedAt @db.Timestamptz
+  songCredits           SongArtistCredit[]
+  albumCredits          AlbumArtistCredit[]
+
+  @@index([storefront, name])
+  @@index([artworkAssetId])
+  @@index([editorialVideoAssetId])
+  @@map("artists")
+}
+
+model Album {
+  id                      String    @id @db.VarChar(128)
+  storefront              String    @default("vn") @db.VarChar(8)
+  name                    String    @db.VarChar(255)
+  artistName              String    @default("") @db.VarChar(500)
+  artworkAssetId          String    @default("") @db.VarChar(128)
+  editorialArtworkAssetId String    @default("") @db.VarChar(128)
+  editorialVideoAssetId   String    @default("") @db.VarChar(128)
+  artwork                 Json?
+  editorialArtwork        Json?
+  editorialNotes          Json?
+  editorialVideo          Json?
+  offers                  Json?
+  audioTraits             String[]  @default([])
+  contentRating           String    @default("") @db.VarChar(32)
+  copyright               String    @default("") @db.VarChar(1000)
+  genreNames              String[]  @default([])
+  isCompilation           Boolean   @default(false)
+  isComplete              Boolean   @default(true)
+  isStudioMastered        Boolean   @default(false)
+  isPrerelease            Boolean   @default(false)
+  isSingle                Boolean   @default(false)
+  recordLabel             String    @default("") @db.VarChar(255)
+  releaseDate             DateTime? @db.Date
+  trackCount              Int       @default(0)
+  upc                     String    @default("") @db.VarChar(64)
+  url                     String    @default("") @db.VarChar(1000)
+  createdAt               DateTime  @default(now()) @db.Timestamptz
+  updatedAt               DateTime  @updatedAt @db.Timestamptz
+
+  tracks        AlbumTrack[]
+  artistCredits AlbumArtistCredit[]
+
+  @@index([storefront, name])
+  @@index([releaseDate])
+  @@index([artworkAssetId])
+  @@index([editorialArtworkAssetId])
+  @@index([editorialVideoAssetId])
+  @@map("albums")
+}
+
+model AlbumTrack {
+  albumId    String
+  songId     String
+  position   Int
+  discNumber Int      @default(1)
+  popularity Float?
+  createdAt  DateTime @default(now()) @db.Timestamptz
+
+  album Album @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  song  Song  @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@id([albumId, songId])
+  @@unique([albumId, position])
+  @@index([songId])
+  @@map("album_tracks")
+}
+
+model AlbumArtistCredit {
+  albumId   String
+  artistId  String
+  position  Int      @default(0)
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  album  Album  @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  artist Artist @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  @@id([albumId, artistId])
+  @@unique([albumId, position])
+  @@index([artistId])
+  @@map("album_artist_credits")
+}
+
+model SongArtistCredit {
+  songId    String
+  artistId  String
+  role      String   @default("artist") @db.VarChar(32)
+  position  Int      @default(0)
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  song   Song   @relation(fields: [songId], references: [id], onDelete: Cascade)
+  artist Artist @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  @@id([songId, artistId, role])
+  @@unique([songId, role, position])
+  @@index([artistId])
+  @@index([artistId, songId])
+  @@map("song_artist_credits")
+}
+
+model Playlist {
+  id                      String    @id @db.VarChar(128)
+  storefront              String    @default("vn") @db.VarChar(8)
+  name                    String    @db.VarChar(255)
+  curatorName             String    @default("") @db.VarChar(255)
+  descriptionShort        String    @default("") @db.VarChar(1000)
+  descriptionStandard     String    @default("") @db.Text
+  artworkAssetId          String    @default("") @db.VarChar(128)
+  editorialArtworkAssetId String    @default("") @db.VarChar(128)
+  editorialVideoAssetId   String    @default("") @db.VarChar(128)
+  artwork                 Json?
+  editorialArtwork        Json?
+  editorialNotes          Json?
+  editorialVideo          Json?
+  plainEditorialCard      Json?
+  plainEditorialNotes     Json?
+  artistNames             String[]  @default([])
+  audioTraits             String[]  @default([])
+  editorialPlaylistKind   String    @default("") @db.VarChar(64)
+  hasCollaboration        Boolean   @default(false)
+  isChart                 Boolean   @default(false)
+  playlistType            String    @default("editorial") @db.VarChar(32)
+  supportsSing            Boolean   @default(false)
+  versionHash             String    @default("") @db.VarChar(128)
+  lastModifiedAt          DateTime? @db.Timestamptz
+  url                     String    @default("") @db.VarChar(1000)
+  ownerId                 String    @default("") @db.VarChar(128)
+  isPublic                Boolean   @default(true)
+  createdAt               DateTime  @default(now()) @db.Timestamptz
+  updatedAt               DateTime  @updatedAt @db.Timestamptz
+
+  tracks PlaylistTrack[]
+
+  @@index([storefront, name])
+  @@index([ownerId])
+  @@index([artworkAssetId])
+  @@index([editorialArtworkAssetId])
+  @@index([editorialVideoAssetId])
+  @@map("playlists")
+}
+
+model PlaylistTrack {
+  playlistId String
+  songId     String
+  position   Int
+  addedAt    DateTime @default(now()) @db.Timestamptz
+
+  playlist Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  song     Song     @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@id([playlistId, songId])
+  @@unique([playlistId, position])
+  @@index([songId])
+  @@map("playlist_tracks")
 }
 
 model SongOwner {
-    id        String   @id @default(uuid())
-    songId    String   @db.VarChar(128)
-    userId    String   @db.VarChar(128)
-    isPublic  Boolean  @default(true)
-    title     String   @default("") @db.VarChar(255)
-    artist    String   @default("") @db.VarChar(255)
-    album     String   @default("") @db.VarChar(255)
-    coverUrl  String   @default("") @db.VarChar(500)
-    tags      String[] @default([])
-    createdAt DateTime @default(now()) @db.Timestamptz
-    updatedAt DateTime @updatedAt @db.Timestamptz
+  id        String   @id @default(uuid())
+  songId    String   @db.VarChar(128)
+  userId    String   @db.VarChar(128)
+  isPublic  Boolean  @default(true)
+  title     String   @default("") @db.VarChar(255)
+  artist    String   @default("") @db.VarChar(255)
+  album     String   @default("") @db.VarChar(255)
+  coverUrl  String   @default("") @db.VarChar(500)
+  tags      String[] @default([])
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
 
-    song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+  song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
 
-    @@unique([songId, userId])
-    @@index([userId])
-    @@index([userId, isPublic])
-    @@map("song_owners")
+  @@unique([songId, userId])
+  @@index([userId])
+  @@index([userId, isPublic])
+  @@map("song_owners")
 }
 
 model AssetCleanupOutbox {
-    id                String   @id @default(uuid())
-    songId            String   @unique @db.VarChar(128)
-    sourceObjectPath  String   @default("") @db.VarChar(500)
-    encryptedFilePath String   @default("") @db.VarChar(500)
-    attempts          Int      @default(0)
-    lastError         String   @default("") @db.VarChar(1000)
-    createdAt         DateTime @default(now()) @db.Timestamptz
-    updatedAt         DateTime @updatedAt @db.Timestamptz
+  id                String   @id @default(uuid())
+  songId            String   @unique @db.VarChar(128)
+  sourceObjectPath  String   @default("") @db.VarChar(500)
+  encryptedFilePath String   @default("") @db.VarChar(500)
+  attempts          Int      @default(0)
+  lastError         String   @default("") @db.VarChar(1000)
+  createdAt         DateTime @default(now()) @db.Timestamptz
+  updatedAt         DateTime @updatedAt @db.Timestamptz
 
-    @@index([createdAt])
-    @@map("asset_cleanup_outbox")
+  @@index([createdAt])
+  @@map("asset_cleanup_outbox")
+}
+
+model Favorite {
+  id        String   @id @default(uuid())
+  userId    String   @db.VarChar(128)
+  songId    String   @db.VarChar(128)
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, songId])
+  @@index([userId, createdAt])
+  @@index([songId])
+  @@map("favorites")
+}
+
+model UserPlaylist {
+  id          String   @id @default(uuid())
+  userId      String   @db.VarChar(128)
+  name        String   @db.VarChar(255)
+  description String   @default("") @db.VarChar(1000)
+  coverUrl    String   @default("") @db.VarChar(500)
+  isPublic    Boolean  @default(false)
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  tracks UserPlaylistTrack[]
+
+  @@index([userId, createdAt])
+  @@index([isPublic, updatedAt])
+  @@map("user_playlists")
+}
+
+model UserPlaylistTrack {
+  playlistId String
+  songId     String
+  position   Int
+  addedAt    DateTime @default(now()) @db.Timestamptz
+
+  playlist UserPlaylist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  song     Song         @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@id([playlistId, songId])
+  @@unique([playlistId, position])
+  @@index([songId])
+  @@map("user_playlist_tracks")
 }

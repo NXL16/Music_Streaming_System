@@ -318,7 +318,7 @@ export class SongsService {
         status: request.status,
       };
 
-      if (Number(request.status) === SongStatus.SONG_STATUS_READY) {
+      if (request.status === SongStatus.SONG_STATUS_READY) {
         updateData.encryptedFilePath = request.encryptedFilePath;
         updateData.durationSec = request.durationSec;
         updateData.bitrateKbps = request.bitrateKbps;
@@ -347,15 +347,29 @@ export class SongsService {
       this.throwInvalidArgument('SONG_ID_REQUIRED');
     }
 
+    const requesterUserId = request.requesterUserId?.trim() || '';
+    // getSong only needs a single owner row: the requester's own ownership
+    // profile when authenticated, otherwise any public profile. Scope the
+    // included `owners` relation so we don't load every owner of the song.
+    const ownersWhere: Prisma.SongOwnerWhereInput = requesterUserId
+      ? { userId: requesterUserId }
+      : { isPublic: true };
+
     const song = await this.prisma.song.findUnique({
       where: { id: request.songId },
-      select: songDetailSelect,
+      select: {
+        ...songDetailSelect,
+        owners: {
+          ...songDetailSelect.owners,
+          where: ownersWhere,
+          take: 1,
+        },
+      },
     });
     if (!song) {
       this.throwNotFound('SONG_NOT_FOUND');
     }
 
-    const requesterUserId = request.requesterUserId?.trim() || '';
     const ownerProfile = requesterUserId
       ? song.owners.find((owner) => owner.userId === requesterUserId)
       : song.owners.find((owner) => owner.isPublic);
@@ -412,8 +426,11 @@ export class SongsService {
     const search = request.search?.trim();
     const artist = request.artist?.trim();
 
-    const filters: Prisma.SongWhereInput[] = [{ status: SongStatus.SONG_STATUS_READY }];
     const requesterUserId = request.requesterUserId?.trim() || '';
+    const isMyLibraryRequest = !request.onlyPublic && Boolean(requesterUserId);
+    const filters: Prisma.SongWhereInput[] = isMyLibraryRequest
+      ? []
+      : [{ status: SongStatus.SONG_STATUS_READY }];
     const ownerFilter: Prisma.SongOwnerWhereInput = request.onlyPublic
       ? { isPublic: true }
       : requesterUserId
@@ -436,7 +453,10 @@ export class SongsService {
     }
     filters.push({
       owners: {
-        some: ownerSearchFilters.length === 1 ? ownerSearchFilters[0] : { AND: ownerSearchFilters },
+        some:
+          ownerSearchFilters.length === 1
+            ? ownerSearchFilters[0]
+            : { AND: ownerSearchFilters },
       },
     });
 
@@ -472,14 +492,51 @@ export class SongsService {
     };
   }
 
-  addFavorite(request: FavoriteRequest): Promise<FavoriteResponse> {
+  async addFavorite(request: FavoriteRequest): Promise<FavoriteResponse> {
+    if (!request.userId) this.throwInvalidArgument('USER_ID_REQUIRED');
+    if (!request.songId) this.throwInvalidArgument('SONG_ID_REQUIRED');
+
+    const song = await this.prisma.song.findUnique({
+      where: { id: request.songId },
+      select: { id: true },
+    });
+    if (!song) this.throwNotFound('SONG_NOT_FOUND');
+
+    try {
+      await this.prisma.favorite.create({
+        data: {
+          userId: request.userId,
+          songId: request.songId,
+        },
+      });
+    } catch (error: unknown) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        // Already favorited — treat as success
+        return { success: true };
+      }
+      throw new RpcException({ code: status.INTERNAL, message: 'DB_ERROR' });
+    }
+
     this.logger.log(`User ${request.userId} liked song ${request.songId}`);
-    return Promise.resolve({ success: true });
+    return { success: true };
   }
 
-  removeFavorite(request: FavoriteRequest): Promise<FavoriteResponse> {
+  async removeFavorite(request: FavoriteRequest): Promise<FavoriteResponse> {
+    if (!request.userId) this.throwInvalidArgument('USER_ID_REQUIRED');
+    if (!request.songId) this.throwInvalidArgument('SONG_ID_REQUIRED');
+
+    await this.prisma.favorite.deleteMany({
+      where: {
+        userId: request.userId,
+        songId: request.songId,
+      },
+    });
+
     this.logger.log(`User ${request.userId} unliked song ${request.songId}`);
-    return Promise.resolve({ success: true });
+    return { success: true };
   }
 
   async removeSongOwnership(
@@ -517,16 +574,19 @@ export class SongsService {
           where: { id: request.songId },
           select: {
             id: true,
+            isCatalog: true,
             sourceObjectPath: true,
             encryptedFilePath: true,
           },
         });
 
-        await tx.song.deleteMany({
-          where: { id: request.songId },
-        });
+        if (!song?.isCatalog) {
+          await tx.song.deleteMany({
+            where: { id: request.songId },
+          });
+        }
 
-        if (song) {
+        if (song && !song.isCatalog) {
           cleanupPayload = {
             song_id: song.id,
             source_object_path: song.sourceObjectPath || '',
@@ -546,8 +606,7 @@ export class SongsService {
           `Queued asset cleanup for song ${cleanupPayload.song_id} source=${cleanupPayload.source_object_path || '<empty>'} encrypted=${cleanupPayload.encrypted_file_path || '<empty>'}`,
         );
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : String(error);
+        const message = error instanceof Error ? error.message : String(error);
         await this.outboxRepo().upsert({
           where: { songId: cleanupPayload.song_id },
           update: {
@@ -568,21 +627,254 @@ export class SongsService {
       }
     }
 
-    this.logger.log(`User ${request.userId} unlinked ownership for song ${request.songId}`);
+    this.logger.log(
+      `User ${request.userId} unlinked ownership for song ${request.songId}`,
+    );
     return { success: true };
   }
 
-  getPlaylist(request: GetPlaylistRequest): Promise<GetPlaylistResponse> {
-    return Promise.resolve({
-      playlist: {
-        id: request.playlistId,
-        name: 'My Playlist',
-        ownerId: request.requesterUserId,
-        songs: [],
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+  async getPlaylist(request: GetPlaylistRequest): Promise<GetPlaylistResponse> {
+    if (!request.playlistId) this.throwInvalidArgument('PLAYLIST_ID_REQUIRED');
+
+    const playlist = await this.prisma.userPlaylist.findUnique({
+      where: { id: request.playlistId },
+      include: {
+        tracks: {
+          include: {
+            song: {
+              select: songSummarySelect,
+            },
+          },
+          orderBy: { position: 'asc' },
+        },
       },
     });
+
+    if (!playlist) this.throwNotFound('PLAYLIST_NOT_FOUND');
+
+    const requesterUserId = request.requesterUserId?.trim() || '';
+    if (!playlist.isPublic && playlist.userId !== requesterUserId) {
+      this.throwPermissionDenied('PLAYLIST_ACCESS_DENIED');
+    }
+
+    return {
+      playlist: {
+        id: playlist.id,
+        name: playlist.name,
+        ownerId: playlist.userId,
+        songs: playlist.tracks.map(({ song }) =>
+          this.mapEntityToSummary(song, requesterUserId, true),
+        ),
+        createdAt: playlist.createdAt.getTime(),
+        updatedAt: playlist.updatedAt.getTime(),
+      },
+    };
+  }
+
+  async createUserPlaylist(
+    userId: string,
+    name: string,
+    description: string,
+    isPublic: boolean,
+  ) {
+    if (!userId) this.throwInvalidArgument('USER_ID_REQUIRED');
+    if (!name.trim()) this.throwInvalidArgument('PLAYLIST_NAME_REQUIRED');
+
+    const playlist = await this.prisma.userPlaylist.create({
+      data: {
+        userId,
+        name: name.trim(),
+        description: description?.trim() || '',
+        isPublic,
+      },
+    });
+
+    return {
+      id: playlist.id,
+      name: playlist.name,
+      description: playlist.description,
+      isPublic: playlist.isPublic,
+      createdAt: playlist.createdAt.getTime(),
+      updatedAt: playlist.updatedAt.getTime(),
+    };
+  }
+
+  async updateUserPlaylist(
+    userId: string,
+    playlistId: string,
+    data: { name?: string; description?: string; isPublic?: boolean },
+  ) {
+    if (!playlistId) this.throwInvalidArgument('PLAYLIST_ID_REQUIRED');
+
+    const existing = await this.prisma.userPlaylist.findUnique({
+      where: { id: playlistId },
+      select: { userId: true },
+    });
+    if (!existing) this.throwNotFound('PLAYLIST_NOT_FOUND');
+    if (existing.userId !== userId) this.throwPermissionDenied('PLAYLIST_ACCESS_DENIED');
+
+    const updateData: Record<string, unknown> = {};
+    if (data.name !== undefined) updateData.name = data.name.trim();
+    if (data.description !== undefined) updateData.description = data.description.trim();
+    if (data.isPublic !== undefined) updateData.isPublic = data.isPublic;
+
+    const playlist = await this.prisma.userPlaylist.update({
+      where: { id: playlistId },
+      data: updateData,
+    });
+
+    return {
+      id: playlist.id,
+      name: playlist.name,
+      description: playlist.description,
+      isPublic: playlist.isPublic,
+      createdAt: playlist.createdAt.getTime(),
+      updatedAt: playlist.updatedAt.getTime(),
+    };
+  }
+
+  async deleteUserPlaylist(userId: string, playlistId: string) {
+    if (!playlistId) this.throwInvalidArgument('PLAYLIST_ID_REQUIRED');
+
+    const existing = await this.prisma.userPlaylist.findUnique({
+      where: { id: playlistId },
+      select: { userId: true },
+    });
+    if (!existing) this.throwNotFound('PLAYLIST_NOT_FOUND');
+    if (existing.userId !== userId) this.throwPermissionDenied('PLAYLIST_ACCESS_DENIED');
+
+    await this.prisma.userPlaylist.delete({ where: { id: playlistId } });
+    return { success: true };
+  }
+
+  async listUserPlaylists(
+    userId: string,
+    requesterUserId: string,
+    limit: number,
+    cursor?: string,
+  ) {
+    const isSelf = userId === requesterUserId;
+    const take = Math.min(Math.max(limit || 10, 1), MAX_LIST_LIMIT);
+    const filters: Prisma.UserPlaylistWhereInput[] = [{ userId }];
+
+    if (!isSelf) {
+      filters.push({ isPublic: true });
+    }
+
+    if (cursor) {
+      const [ts, id] = cursor.split(':');
+      const timestamp = Number(ts);
+      if (!id || Number.isNaN(timestamp)) {
+        this.throwInvalidArgument('CURSOR_INVALID');
+      }
+      filters.push({
+        OR: [
+          { createdAt: { lt: new Date(timestamp) } },
+          { createdAt: new Date(timestamp), id: { lt: id } },
+        ],
+      });
+    }
+
+    const playlists = await this.prisma.userPlaylist.findMany({
+      where: { AND: filters },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: take + 1,
+      include: {
+        _count: { select: { tracks: true } },
+      },
+    });
+
+    const hasMore = playlists.length > take;
+    const result = hasMore ? playlists.slice(0, take) : playlists;
+
+    return {
+      playlists: result.map((pl) => ({
+        id: pl.id,
+        name: pl.name,
+        description: pl.description,
+        isPublic: pl.isPublic,
+        trackCount: pl._count.tracks,
+        createdAt: pl.createdAt.getTime(),
+        updatedAt: pl.updatedAt.getTime(),
+      })),
+      nextCursor: hasMore
+        ? `${result[result.length - 1].createdAt.getTime()}:${result[result.length - 1].id}`
+        : '',
+      hasMore,
+    };
+  }
+
+  async addTrackToPlaylist(
+    userId: string,
+    playlistId: string,
+    songId: string,
+  ) {
+    if (!playlistId) this.throwInvalidArgument('PLAYLIST_ID_REQUIRED');
+    if (!songId) this.throwInvalidArgument('SONG_ID_REQUIRED');
+
+    const playlist = await this.prisma.userPlaylist.findUnique({
+      where: { id: playlistId },
+      select: { userId: true },
+    });
+    if (!playlist) this.throwNotFound('PLAYLIST_NOT_FOUND');
+    if (playlist.userId !== userId) this.throwPermissionDenied('PLAYLIST_ACCESS_DENIED');
+
+    const song = await this.prisma.song.findUnique({
+      where: { id: songId },
+      select: { id: true },
+    });
+    if (!song) this.throwNotFound('SONG_NOT_FOUND');
+
+    const maxPosition = await this.prisma.userPlaylistTrack.aggregate({
+      where: { playlistId },
+      _max: { position: true },
+    });
+    const nextPosition = (maxPosition._max.position ?? -1) + 1;
+
+    try {
+      await this.prisma.userPlaylistTrack.create({
+        data: {
+          playlistId,
+          songId,
+          position: nextPosition,
+        },
+      });
+    } catch (error: unknown) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new RpcException({
+          code: status.ALREADY_EXISTS,
+          message: 'TRACK_ALREADY_IN_PLAYLIST',
+        });
+      }
+      throw new RpcException({ code: status.INTERNAL, message: 'DB_ERROR' });
+    }
+
+    return { success: true };
+  }
+
+  async removeTrackFromPlaylist(
+    userId: string,
+    playlistId: string,
+    songId: string,
+  ) {
+    if (!playlistId) this.throwInvalidArgument('PLAYLIST_ID_REQUIRED');
+    if (!songId) this.throwInvalidArgument('SONG_ID_REQUIRED');
+
+    const playlist = await this.prisma.userPlaylist.findUnique({
+      where: { id: playlistId },
+      select: { userId: true },
+    });
+    if (!playlist) this.throwNotFound('PLAYLIST_NOT_FOUND');
+    if (playlist.userId !== userId) this.throwPermissionDenied('PLAYLIST_ACCESS_DENIED');
+
+    await this.prisma.userPlaylistTrack.deleteMany({
+      where: { playlistId, songId },
+    });
+
+    return { success: true };
   }
 
   async applyWorkerCompletion(event: WorkerSongCompletionEvent): Promise<void> {
@@ -594,11 +886,14 @@ export class SongsService {
         ? SongStatus.SONG_STATUS_READY
         : SongStatus.SONG_STATUS_FAILED,
       encryptedFilePath:
-        event.encrypted_file_path || this.buildProcessedObjectPath(event.song_id),
-      durationSec: succeeded ? Math.max(0, Math.round(event.duration_sec ?? 0)) : 0,
-      bitrateKbps: succeeded ? event.bitrate_kbps ?? 128 : 0,
-      codec: succeeded ? event.codec ?? 'aac' : '',
-      format: succeeded ? event.format ?? 'fmp4' : '',
+        event.encrypted_file_path ||
+        this.buildProcessedObjectPath(event.song_id),
+      durationSec: succeeded
+        ? Math.max(0, Math.round(event.duration_sec ?? 0))
+        : 0,
+      bitrateKbps: succeeded ? (event.bitrate_kbps ?? 128) : 0,
+      codec: succeeded ? (event.codec ?? 'aac') : '',
+      format: succeeded ? (event.format ?? 'fmp4') : '',
       errorMessage: event.error_message ?? '',
     });
   }
@@ -611,7 +906,9 @@ export class SongsService {
     const ownerProfile =
       (!onlyPublic && requesterUserId
         ? entity.owners.find((owner) => owner.userId === requesterUserId)
-        : undefined) ?? entity.owners.find((owner) => owner.isPublic) ?? entity.owners[0];
+        : undefined) ??
+      entity.owners.find((owner) => owner.isPublic) ??
+      entity.owners[0];
 
     return {
       id: entity.id,
@@ -663,7 +960,7 @@ export class SongsService {
     if (!cursor) return null;
     const [ts, id] = cursor.split(':');
     const timestamp = Number(ts);
-    if (!id || Number.isNaN( timestamp)) {
+    if (!id || Number.isNaN(timestamp)) {
       this.throwInvalidArgument('CURSOR_INVALID');
     }
     return { createdAt: new Date(timestamp), id };
