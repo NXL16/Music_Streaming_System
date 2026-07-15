@@ -1,0 +1,50 @@
+# Generated Protobuf files
+**/*.pb.go
+**/*.pb.ts
+**/*.pb.cc
+**/*.pb.h
+
+# Go dependencies
+go.sum
+
+# IDE workspace files
+*.code-workspace
+*.tsbuildinfo
+
+# Generated files
+**/src/generated/
+node_modules/
+pnpm-lock.yaml
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+.next/
+.turbo/
+.wrangler/
+target/
+Cargo.lock
+
+# Environment
+.env
+.env.local
+.env.*.local
+.dev.vars
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
