@@ -25,6 +25,32 @@ export function catalogArtworkSrcSet(
   return getArtworkSrcSet(artwork, widths);
 }
 
+function mapTrackArtists(
+  response: CatalogResponse,
+  song: CatalogResponse["resources"]["songs"][string],
+) {
+  const artistResources = response.resources.artists;
+  const artists = new Map<
+    string,
+    { id: string; name: string; url?: string }
+  >();
+
+  for (const artistReference of song.relationships.artists?.data ?? []) {
+    const artist = artistResources[artistReference.id];
+    if (!artist) continue;
+
+    artists.set(artist.id, {
+      id: artist.id,
+      name: artist.attributes.name,
+      ...(artist.attributes.url
+        ? { url: artistRoute(artist.attributes.url, artist.id) }
+        : {}),
+    });
+  }
+
+  return [...artists.values()];
+}
+
 export function mapCatalogTracks(response: CatalogResponse): PlayerSong[] {
   const directTracks = response.data.filter(
     (reference) => reference.type === "songs",
@@ -49,19 +75,7 @@ export function mapCatalogTracks(response: CatalogResponse): PlayerSong[] {
     const song = response.resources.songs[reference.id];
     if (!song) return [];
 
-    const artists =
-      song.relationships.artists?.data.flatMap((artistReference) => {
-        const artist = response.resources.artists[artistReference.id];
-        if (!artist) return [];
-
-        return [
-          {
-            id: artist.id,
-            name: artist.attributes.name,
-            url: artistRoute(artist.attributes.url, artist.id),
-          },
-        ];
-      }) ?? [];
+    const artists = mapTrackArtists(response, song);
     const albumReference = song.relationships.albums?.data[0];
     const album = albumReference
       ? response.resources.albums[albumReference.id]

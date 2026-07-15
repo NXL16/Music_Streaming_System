@@ -29,7 +29,7 @@ export default function Loading({
         alt=""
         aria-hidden="true"
         height={loaderSize}
-        src="/Loading.svg"
+        src="/Loading.svg?v=20260715"
         style={{ filter: "invert(1)" }}
         unoptimized
         width={loaderSize}

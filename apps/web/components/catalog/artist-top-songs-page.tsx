@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { type CSSProperties, useEffect, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import AmpContextMenuButton from "../custom-elements/AmpContextMenuButton";
 import ResponsiveArtwork from "../media/common/responsive-artwork";
 import { formatDuration } from "@/lib/format/duration";
@@ -14,6 +20,85 @@ import Loading from "@/app/loading";
 type ArtistTopSongsPageProps = {
   artistId: string;
 };
+
+const SONG_ROW_HEIGHT = 54;
+const SONG_ROW_OVERSCAN = 8;
+
+function SongTableSpacer({ height }: { height: number }) {
+  if (height <= 0) return null;
+
+  return (
+    <div aria-hidden="true" className="table-row">
+      {Array.from({ length: 5 }, (_, index) => (
+        <div key={index} className="table-cell p-0">
+          {index === 0 && <div style={{ height }} />}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function useVisibleSongRange(
+  songCount: number,
+  tableRef: React.RefObject<HTMLDivElement | null>,
+) {
+  const [range, setRange] = useState({ start: 0, end: SONG_ROW_OVERSCAN * 2 });
+
+  useLayoutEffect(() => {
+    const scrollContainer = document.querySelector<HTMLElement>(
+      "[data-app-scroll-container]",
+    );
+    const table = tableRef.current;
+    if (!scrollContainer || !table) return;
+
+    let frame: number | undefined;
+    const updateRange = () => {
+      frame = undefined;
+      const containerRect = scrollContainer.getBoundingClientRect();
+      const tableTop =
+        scrollContainer.scrollTop +
+        table.getBoundingClientRect().top -
+        containerRect.top;
+      const viewportStart = Math.max(0, scrollContainer.scrollTop - tableTop);
+      const start = Math.max(
+        0,
+        Math.floor(viewportStart / SONG_ROW_HEIGHT) - SONG_ROW_OVERSCAN,
+      );
+      const end = Math.min(
+        songCount,
+        Math.ceil(
+          (viewportStart + scrollContainer.clientHeight) / SONG_ROW_HEIGHT,
+        ) + SONG_ROW_OVERSCAN,
+      );
+
+      setRange((current) =>
+        current.start === start && current.end === end ? current : { start, end },
+      );
+    };
+    const scheduleRangeUpdate = () => {
+      if (frame === undefined) frame = requestAnimationFrame(updateRange);
+    };
+
+    updateRange();
+    scrollContainer.addEventListener("scroll", scheduleRangeUpdate, {
+      passive: true,
+    });
+    const resizeObserver = new ResizeObserver(scheduleRangeUpdate);
+    resizeObserver.observe(scrollContainer);
+    resizeObserver.observe(table);
+
+    return () => {
+      scrollContainer.removeEventListener("scroll", scheduleRangeUpdate);
+      resizeObserver.disconnect();
+      if (frame !== undefined) cancelAnimationFrame(frame);
+    };
+  }, [songCount, tableRef]);
+
+  return {
+    start: Math.min(range.start, songCount),
+    end: Math.min(Math.max(range.end, range.start), songCount),
+  };
+}
 
 function ArtistLinks({
   artists,
@@ -60,6 +145,9 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
   const setQueue = usePlayerStore((state) => state.setQueue);
   const artistName = artist?.attributes.name ?? "";
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const songTableRef = useRef<HTMLDivElement | null>(null);
+  const visibleSongRange = useVisibleSongRange(songs.length, songTableRef);
+  const visibleSongs = songs.slice(visibleSongRange.start, visibleSongRange.end);
 
   useEffect(() => {
     const sentinel = loadMoreRef.current;
@@ -89,7 +177,10 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
           </div>
         </div>
 
-        <div className="[--linkColor:var(--systemSecondary)] border-collapse border-spacing-0 table [font:var(--callout)] table-fixed w-[calc(100%-var(--bodyGutter)*2)] ms-(--bodyGutter) me-(--bodyGutter) last:mb-5">
+        <div
+          ref={songTableRef}
+          className="[--linkColor:var(--systemSecondary)] border-collapse border-spacing-0 table [font:var(--callout)] table-fixed w-[calc(100%-var(--bodyGutter)*2)] ms-(--bodyGutter) me-(--bodyGutter) last:mb-5"
+        >
           <div className="text-(--systemSecondary) table-row [font:var(--callout-emphasized)] [clip:rect(1px,1px,1px,1px)] [border:0px] [clip-path:inset(0px_0px_99.9%_99.9%)] h-px overflow-hidden p-0 static w-px">
             <div className="table-cell align-middle inset-s-1.75 overflow-visible w-0 relative z-(--z-default) rounded-none [font:var(--callout-emphasized)] text-[0px]! h-0 leading-0! p-0">
               <div className="text-[0px] h-0 leading-0 p-0 overflow-hidden text-ellipsis whitespace-nowrap"></div>
@@ -116,7 +207,10 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
             </div>
           </div>
 
-          {songs.map((song, index) => {
+          <SongTableSpacer height={visibleSongRange.start * SONG_ROW_HEIGHT} />
+
+          {visibleSongs.map((song, visibleIndex) => {
+            const index = visibleSongRange.start + visibleIndex;
             const artworkColor =
               song.artworkBgColor ?? "var(--genericJoeColor)";
             return (
@@ -325,6 +419,10 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
               </div>
             );
           })}
+
+          <SongTableSpacer
+            height={(songs.length - visibleSongRange.end) * SONG_ROW_HEIGHT}
+          />
         </div>
 
         {loadingMore && <Loading fullScreen={false} size={46} />}

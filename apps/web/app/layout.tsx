@@ -61,11 +61,11 @@ export default function RootLayout({
     <html
       lang="vi"
       className={`h-full antialiased ${sfPro.variable} ${sfProIcons.variable}`}
-      >
+    >
       <head>
         <link
           rel="preload"
-          href="/Loading.svg"
+          href="/Loading.svg?v=20260715"
           as="image"
           type="image/svg+xml"
         />
@@ -76,10 +76,17 @@ export default function RootLayout({
               href={process.env.NEXT_PUBLIC_CDN_URL}
               crossOrigin="anonymous"
             />
+            <link rel="dns-prefetch" href={process.env.NEXT_PUBLIC_CDN_URL} />
+          </>
+        )}
+        {process.env.NEXT_PUBLIC_ASSET_URL && (
+          <>
             <link
-              rel="dns-prefetch"
-              href={process.env.NEXT_PUBLIC_CDN_URL}
+              rel="preconnect"
+              href={process.env.NEXT_PUBLIC_ASSET_URL}
+              crossOrigin="anonymous"
             />
+            <link rel="dns-prefetch" href={process.env.NEXT_PUBLIC_ASSET_URL} />
           </>
         )}
       </head>

@@ -16,6 +16,7 @@ import {
 } from "@/lib/recommendations/recommendation.mapper";
 import { getRecommendationSection } from "@/lib/recommendations/recommendation.api";
 import MediaShelfSkeleton from "@/components/loading/loading";
+import Loading from "@/app/loading";
 
 const MAX_HOME_SHELF_ITEMS = 12;
 const RECENTLY_PLAYED_SHELF_ID = "user-recently-played";
@@ -38,6 +39,7 @@ export default function HomePage() {
   const [loadedShelves, setLoadedShelves] = useState<Record<string, HomeShelf>>(
     {},
   );
+  const [loadingShelfId, setLoadingShelfId] = useState<string | null>(null);
   const [shelfLoadError, setShelfLoadError] = useState<string | null>(null);
 
   const shelves = useMemo(
@@ -72,6 +74,8 @@ export default function HomePage() {
 
       try {
         setShelfLoadError(null);
+        setSelectedShelfId(shelfId);
+        setLoadingShelfId(shelfId);
         const response = await getRecommendationSection(shelfId);
         const fullShelf = mapHomeRecommendations(response).find(
           (shelf) => shelf.id === shelfId,
@@ -79,9 +83,13 @@ export default function HomePage() {
         if (!fullShelf) throw new Error("Recommendation section is empty");
 
         setLoadedShelves((current) => ({ ...current, [shelfId]: fullShelf }));
-        setSelectedShelfId(shelfId);
       } catch {
+        setSelectedShelfId(null);
         setShelfLoadError("Không thể tải đầy đủ nội dung của kệ này.");
+      } finally {
+        setLoadingShelfId((current) =>
+          current === shelfId ? null : current,
+        );
       }
     },
     [loadedShelves, shelvesWithRecentlyPlayed],
@@ -172,10 +180,15 @@ export default function HomePage() {
 
   return (
     <>
-      {selectedShelfWithOverlay ? (
+      {loadingShelfId ? (
+        <ShelfDetailLoading />
+      ) : selectedShelfWithOverlay ? (
         <ShelfDetailView
           shelf={selectedShelfWithOverlay}
-          onBack={() => setSelectedShelfId(null)}
+          onBack={() => {
+            setSelectedShelfId(null);
+            setLoadingShelfId(null);
+          }}
         />
       ) : (
         <>
@@ -322,6 +335,16 @@ type ShelfDetailViewProps = {
   shelf: ReturnType<typeof mapHomeRecommendations>[number];
   onBack: () => void;
 };
+
+function ShelfDetailLoading() {
+  return (
+    <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-8">
+      <div className="flex min-h-[calc(100vh-16rem)] items-center justify-center">
+        <Loading fullScreen={false} size={56} />
+      </div>
+    </div>
+  );
+}
 
 function ShelfDetailView({ shelf, onBack }: ShelfDetailViewProps) {
   return (
