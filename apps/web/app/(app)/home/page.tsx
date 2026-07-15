@@ -10,10 +10,14 @@ import {
 import MediaShelf from "@/components/media/media-shelf";
 import MediaCardRenderer from "@/components/media/media-card-renderer";
 import { useHomeRecommendations } from "@/lib/recommendations/use-home-recommendations";
-import { mapHomeRecommendations } from "@/lib/recommendations/recommendation.mapper";
+import {
+  mapHomeRecommendations,
+  type HomeShelf,
+} from "@/lib/recommendations/recommendation.mapper";
+import { getRecommendationSection } from "@/lib/recommendations/recommendation.api";
 import MediaShelfSkeleton from "@/components/loading/loading";
 
-const MAX_HOME_SHELF_ITEMS = 16;
+const MAX_HOME_SHELF_ITEMS = 12;
 const RECENTLY_PLAYED_SHELF_ID = "user-recently-played";
 const DAILY_MIX_SHELF_ID = "user-daily-mix";
 const STATIONS_FOR_YOU_SHELF_ID = "user-stations-for-you";
@@ -31,10 +35,10 @@ export default function HomePage() {
   const { data, loading, error, recentlyPlayedItems } =
     useHomeRecommendations();
   const [selectedShelfId, setSelectedShelfId] = useState<string | null>(null);
-
-  const handleSelectShelf = useCallback((shelfId: string) => {
-    setSelectedShelfId(shelfId);
-  }, []);
+  const [loadedShelves, setLoadedShelves] = useState<Record<string, HomeShelf>>(
+    {},
+  );
+  const [shelfLoadError, setShelfLoadError] = useState<string | null>(null);
 
   const shelves = useMemo(
     () =>
@@ -52,20 +56,56 @@ export default function HomePage() {
       ),
     [recentlyPlayedItems, shelves],
   );
+  const handleSelectShelf = useCallback(
+    async (shelfId: string) => {
+      const localShelf = shelvesWithRecentlyPlayed.find(
+        (shelf) => shelf.id === shelfId,
+      );
+      if (!localShelf) return;
+
+      // This shelf is produced from local listening events, not a persisted
+      // recommendation section, so it is already available in memory.
+      if (shelfId === RECENTLY_PLAYED_SHELF_ID || loadedShelves[shelfId]) {
+        setSelectedShelfId(shelfId);
+        return;
+      }
+
+      try {
+        setShelfLoadError(null);
+        const response = await getRecommendationSection(shelfId);
+        const fullShelf = mapHomeRecommendations(response).find(
+          (shelf) => shelf.id === shelfId,
+        );
+        if (!fullShelf) throw new Error("Recommendation section is empty");
+
+        setLoadedShelves((current) => ({ ...current, [shelfId]: fullShelf }));
+        setSelectedShelfId(shelfId);
+      } catch {
+        setShelfLoadError("Không thể tải đầy đủ nội dung của kệ này.");
+      }
+    },
+    [loadedShelves, shelvesWithRecentlyPlayed],
+  );
 
   const homeShelves = useMemo(
     () =>
       shelvesWithRecentlyPlayed.map((shelf) => ({
         ...shelf,
         items: previewShelfItems(shelf, recentlyPlayedItems),
+        hasMore:
+          shelf.hasMore ||
+          (shelf.id === RECENTLY_PLAYED_SHELF_ID &&
+            mergeShelfItems(recentlyPlayedItems, shelf.items).length >
+              MAX_HOME_SHELF_ITEMS),
       })),
     [recentlyPlayedItems, shelvesWithRecentlyPlayed],
   );
   const selectedShelf = useMemo(
     () =>
+      (selectedShelfId ? loadedShelves[selectedShelfId] : undefined) ??
       shelvesWithRecentlyPlayed.find((shelf) => shelf.id === selectedShelfId) ??
       null,
-    [selectedShelfId, shelvesWithRecentlyPlayed],
+    [loadedShelves, selectedShelfId, shelvesWithRecentlyPlayed],
   );
   const selectedShelfWithOverlay = useMemo(
     () =>
@@ -157,16 +197,15 @@ export default function HomePage() {
       )}
 
       {error && <p className="mx-(--bodyGutter) text-red-500">{error}</p>}
+      {shelfLoadError && (
+        <p className="mx-(--bodyGutter) text-red-500">{shelfLoadError}</p>
+      )}
 
       {!loading &&
         !error &&
         (selectedShelf
           ? null
           : homeShelves.map((shelf, index) => {
-              const fullShelf = shelvesWithRecentlyPlayed.find(
-                (item) => item.id === shelf.id,
-              );
-
               return (
                 <MediaShelf
                   key={shelf.id}
@@ -175,11 +214,7 @@ export default function HomePage() {
                   items={shelf.items}
                   prioritizeFirstCard={index === 0}
                   shelfId={shelf.id}
-                  onSelect={
-                    fullShelf && fullShelf.items.length > MAX_HOME_SHELF_ITEMS
-                      ? handleSelectShelf
-                      : undefined
-                  }
+                  onSelect={shelf.hasMore ? handleSelectShelf : undefined}
                 />
               );
             }))}
@@ -205,6 +240,7 @@ function ensureRecentlyPlayedShelf(
     title: "Recently Played",
     displayKind: "MusicCoverShelf",
     sourceDisplayKind: "MusicCoverShelf",
+    hasMore: false,
     items: recentlyPlayedItems,
   } satisfies ReturnType<typeof mapHomeRecommendations>[number];
 

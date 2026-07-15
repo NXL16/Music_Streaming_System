@@ -60,3 +60,18 @@ export async function getHomeRecommendations() {
 
   return pendingHomeRecommendations;
 }
+
+export async function getRecommendationSection(sectionId: string) {
+  const response = await http.get<RecommendationResponse>(
+    `/me/recommendations/${encodeURIComponent(sectionId)}`,
+    {
+      params: {
+        name: "listen-now",
+        l: RECOMMENDATION_LOCALE,
+        timezone: getBrowserTimezone(),
+      },
+    },
+  );
+
+  return response.data;
+}
