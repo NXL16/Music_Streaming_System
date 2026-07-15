@@ -19,7 +19,7 @@ export default function ExpansionButton() {
       <svg
         xmlns="http://www.w3.org/2000/svg"
         viewBox="87.48 32.45 93.07 93.16"
-        className="w-full h-full"
+        className="size-full"
       >
         <path fill="currentColor" d={ICON_PATH} />
       </svg>

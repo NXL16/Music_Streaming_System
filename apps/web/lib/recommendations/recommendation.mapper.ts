@@ -11,19 +11,46 @@ import type {
   RecommendationResponse,
 } from "./recommendation.types";
 
+import type { MediaShelfDisplayKind } from "@/components/media/media-shelf";
+import { artistRoute } from "@/lib/catalog/artist-route";
+import { albumRoute } from "@/lib/catalog/album-route";
+import { songRoute } from "@/lib/catalog/song-route";
+import { formatArtistNames } from "@/lib/media/artist-names";
+import {
+  getArtworkRenditionUrl,
+  getArtworkSrcSet,
+} from "@/lib/media/artwork";
+
 export type HomeShelf = {
   id: string;
   title: string;
-  displayKind: "MusicNotesHeroShelf" | "MusicCoverShelf";
+  displayKind: MediaShelfDisplayKind;
   sourceDisplayKind: string;
   items: MediaCardProps[];
 };
 
-function artworkUrl(template: string, width: number, height = width) {
-  return template
-    .replaceAll("{w}", String(width))
-    .replaceAll("{h}", String(height))
-    .replaceAll("{f}", "webp");
+function artworkUrl(
+  artwork: Artwork,
+  width: number,
+  useHeroRenditions = false,
+) {
+  return getArtworkRenditionUrl(
+    artwork,
+    width,
+    useHeroRenditions ? "hero" : "default",
+  );
+}
+
+function artworkSrcSet(
+  artwork: Artwork,
+  fallbackSizes: Array<[width: number, height?: number]>,
+  useHeroRenditions = false,
+) {
+  return getArtworkSrcSet(
+    artwork,
+    fallbackSizes.map(([width]) => width),
+    useHeroRenditions ? "hero" : "default",
+  );
 }
 
 function resolveResource(
@@ -52,6 +79,7 @@ function resolveResource(
 }
 
 const PORTRAIT_VIDEO_KEYS = [
+  "primary",
   "motionTallVideo3x4",
   "motionDetailTall",
 ] as const;
@@ -72,7 +100,7 @@ function selectHeroVideo(
 
 function getDisplayKind(
   sourceKind: string,
-): HomeShelf["displayKind"] | undefined {
+): MediaShelfDisplayKind | undefined {
   if (
     sourceKind === "MusicNotesHeroShelf" ||
     sourceKind === "MusicSuperHeroShelf"
@@ -85,6 +113,18 @@ function getDisplayKind(
     sourceKind === "MusicConcertsEmptyShelf"
   ) {
     return "MusicCoverShelf";
+  }
+
+  if (sourceKind === "MusicCircleCoverShelf") {
+    return "MusicCircleCoverShelf";
+  }
+
+  if (sourceKind === "MusicCoverGrid") {
+    return "MusicCoverGrid";
+  }
+
+  if (sourceKind === "MusicSocialCardShelf") {
+    return "MusicSocialCardShelf";
   }
 
   return undefined;
@@ -140,38 +180,44 @@ function selectArtwork(
     videoPreview: videoAsset?.previewFrame,
   };
 
+  let artwork: Artwork | undefined;
+
   if (isHero) {
-    return (
+    artwork =
       videoAsset?.previewFrame ??
       editorialArtwork?.superHeroTall ??
       editorialArtwork?.staticDetailTall ??
       closestArtwork(artworkCandidates, 3 / 4, 0.08) ??
-      closestArtwork(artworkCandidates, 3 / 4)
-    );
+      closestArtwork(artworkCandidates, 3 / 4);
+  } else {
+    artwork =
+      editorialArtwork?.staticDetailSquare ??
+      closestArtwork(
+        {
+          standardArtwork: attributes.artwork,
+          videoPreview: videoAsset?.previewFrame,
+        },
+        1,
+        0.08,
+      ) ??
+      closestArtwork(editorialArtwork, 1, 0.08) ??
+      closestArtwork(artworkCandidates, 1);
   }
 
-  return (
-    editorialArtwork?.staticDetailSquare ??
-    closestArtwork(
-      {
-        standardArtwork: attributes.artwork,
-        videoPreview: videoAsset?.previewFrame,
-      },
-      1,
-      0.08,
-    ) ??
-    closestArtwork(editorialArtwork, 1, 0.08) ??
-    closestArtwork(artworkCandidates, 1)
-  );
+  if (!artwork && attributes.artwork?.url) {
+    artwork = attributes.artwork;
+  }
+
+  return artwork;
 }
 
 function getSubtitle(attributes: CatalogResourceAttributes) {
-  if (attributes.artistName) return attributes.artistName;
+  if (attributes.artistName) return formatArtistNames(attributes.artistName);
   if (attributes.curatorName) return attributes.curatorName;
 
   return Array.isArray(attributes.artistNames)
     ? attributes.artistNames.join(", ")
-    : (attributes.artistNames ?? "");
+    : formatArtistNames(attributes.artistNames ?? "");
 }
 
 function getArtists(
@@ -185,15 +231,14 @@ function getArtists(
   return artistRefs.flatMap((artistRef) => {
     const artist = artistResources[artistRef.id];
     const name = artist?.attributes?.name;
-    const url = artist?.attributes?.url;
-
-    if (!artist || !name || !url) return [];
+    const artistUrl = artist?.attributes?.url;
+    if (!artist || !name || !artistUrl) return [];
 
     return [
       {
         id: artist.id,
         name,
-        url,
+        url: artistRoute(artistUrl, artist.id),
       },
     ];
   });
@@ -202,10 +247,31 @@ function getArtists(
 function getCardType(
   resourceType: string,
   isHero: boolean,
+  displayKind: MediaShelfDisplayKind,
 ): MediaCardProps["cardType"] {
   if (isHero) return "hero";
+  if (displayKind === "MusicCircleCoverShelf") return "circle";
+  if (displayKind === "MusicSocialCardShelf") return "social";
   if (resourceType === "stations") return "station";
   return "collection";
+}
+
+function getResourceSlug(resource: CatalogResource) {
+  if (resource.type === "albums") {
+    const albumUrl = resource.attributes?.url;
+    return albumUrl ? albumRoute(albumUrl, resource.id) : undefined;
+  }
+  if (resource.type === "playlists") {
+    return `/playlist/${encodeURIComponent(resource.id)}`;
+  }
+  if (resource.type === "songs") {
+    return songRoute(resource.id);
+  }
+  if (resource.type === "artists") {
+    const artistUrl = resource.attributes?.url;
+    return artistUrl ? artistRoute(artistUrl, resource.id) : undefined;
+  }
+  return resource.attributes?.url;
 }
 
 export function mapHomeRecommendations(
@@ -226,6 +292,10 @@ export function mapHomeRecommendations(
     const isHero =
       sourceDisplayKind === "MusicNotesHeroShelf" ||
       sourceDisplayKind === "MusicSuperHeroShelf";
+    const sectionTitle =
+      section.attributes?.title?.stringForDisplay ??
+      section.attributes?.titleWithoutName?.stringForDisplay ??
+      "For You";
     const refs = getSectionRefs(
       section.relationships?.contents?.data,
       section.relationships?.primaryContent?.data,
@@ -248,31 +318,30 @@ export function mapHomeRecommendations(
           id: `${resource.type}-${resource.id}`,
           resourceId: resource.id,
           resourceType: resource.type,
-          cardType: getCardType(resource.type, isHero),
+          cardType: getCardType(resource.type, isHero, displayKind),
           title: resource.attributes.name ?? notes?.name ?? "Untitled",
           subtitle,
-          slug: resource.attributes.url,
+          slug: getResourceSlug(resource),
           artists: getArtists(response, resource),
           imageUrl: isHero
-            ? artworkUrl(artwork.url, 600, 800)
-            : artworkUrl(artwork.url, 632),
+            ? artworkUrl(artwork, 600, true)
+            : artworkUrl(artwork, 632),
           imageSrcSet: isHero
-            ? [
+            ? artworkSrcSet(artwork, [
                 [450, 600],
                 [600, 800],
-                [900, 1200],
-              ]
-                .map(
-                  ([width, height]) =>
-                    `${artworkUrl(artwork.url, width, height)} ${width}w`,
-                )
-                .join(",")
-            : [296, 316, 592, 632]
-                .map((size) => `${artworkUrl(artwork.url, size)} ${size}w`)
-                .join(","),
+              [900, 1200],
+              [1200, 1600],
+              ], true)
+            : artworkSrcSet(artwork, [
+                [296],
+                [316],
+                [592],
+                [632],
+              ]),
           artworkColors: { bg: color, main: color },
           ...(videoAsset?.video ? { videoSrc: videoAsset.video } : {}),
-          typeTag: notes?.tag ?? notes?.name,
+          typeTag: notes?.tag ?? (isHero ? sectionTitle : notes?.name),
           description:
             notes?.short ??
             notes?.standard ??
@@ -289,10 +358,7 @@ export function mapHomeRecommendations(
     return [
       {
         id: section.id,
-        title:
-          section.attributes?.title?.stringForDisplay ??
-          section.attributes?.titleWithoutName?.stringForDisplay ??
-          "For You",
+        title: sectionTitle,
         displayKind,
         sourceDisplayKind,
         items,

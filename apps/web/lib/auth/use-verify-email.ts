@@ -46,16 +46,20 @@ export function useVerifyEmail() {
 
   useEffect(() => {
     if (!token) {
-      setStatus("error");
-      setMessage("Token xác thực email không hợp lệ.");
-      setRedirecting(false);
+      queueMicrotask(() => {
+        setStatus("error");
+        setMessage("Token xác thực email không hợp lệ.");
+        setRedirecting(false);
+      });
       return;
     }
 
     if (verifiedEmailTokens.has(token)) {
-      setStatus("success");
-      setMessage("Email đã được xác thực.");
-      setRedirecting(false);
+      queueMicrotask(() => {
+        setStatus("success");
+        setMessage("Email đã được xác thực.");
+        setRedirecting(false);
+      });
       return;
     }
 

@@ -15,13 +15,13 @@ export default function StationCardMetadata({
           </div>
         </div>
 
-        {description ? (
+        {description && (
           <div className="[--overflowBleedSize:0] text-(--systemSecondary) [font:var(--callout)] mt-px [text-decoration:var(--linkHoverTextDecoration)]">
             <div className="line-clamp-(--mc-lineClamp,2) wrap-break-word overflow-hidden [--mc-overflowBleedSize:var(--overflowBleedSize,4px)] [--mc-badgeSpacing:calc(var(--mc-badgeSize)+var(--mc-overflowBleedSize))] [clip-path:inset(var(--mc-overflowBleedSize))] -mb-(--mc-overflowBleedSize) -mt-(--mc-overflowBleedSize) -me-(--mc-overflowBleedSize) -ms-(--mc-overflowBleedSize) pb-(--mc-overflowBleedSize) pe-(--mc-overflowBleedSize) pt-(--mc-overflowBleedSize) ps-(--mc-overflowBleedSize) scroll-p-(--mc-overflowBleedSize)">
               <span>{description}</span>
             </div>
           </div>
-        ) : null}
+        )}
       </div>
     </div>
   );

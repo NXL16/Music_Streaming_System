@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, useReducedMotion, AnimatePresence } from "motion/react";
 import { Music2 } from "lucide-react";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { useRouter } from "next/navigation";
+import { getHomeRecommendations } from "@/lib/recommendations/recommendation.api";
+import type { RecommendationResponse } from "@/lib/recommendations/recommendation.types";
 
 const EXIT_DURATION_MS = 500;
+const MIN_SPLASH_MS = 3000;
 const smoothEase = [0.16, 1, 0.3, 1] as const;
 const gentleEase = [0.25, 0.46, 0.45, 0.94] as const;
 
@@ -20,18 +23,11 @@ const D = {
   progress: 1.05,
 } as const;
 
-const LOAD_STEPS = [
-  { target: 32, label: "Syncing library", dots: [true, false, false] },
-  { target: 58, label: "Loading playlists", dots: [true, true, false] },
-  { target: 78, label: "Fetching history", dots: [true, true, true] },
-  { target: 100, label: "Almost there", dots: [true, true, true] },
-] as const;
-
-const DEFAULT_STEP = {
-  target: 100,
-  label: "Processing",
-  dots: [true, true, true],
-};
+const CEILING = {
+  init: 12, // vừa mount, đang chờ Auth Store xác thực
+  fetchingHome: 88, // authenticated: đang tải data trang home
+  ready: 100, // guest, hoặc data home đã tải xong toàn bộ
+} as const;
 
 const WAVE_BARS = [
   { height: 18, duration: 1.0, delay: 0.0 },
@@ -56,16 +52,8 @@ const WAVE_BARS = [
   { height: 26, duration: 1.0, delay: 0.25 },
 ] as const;
 
-const HINTS = [
-  "Tip: long press a song to add to queue",
-  "Your most played: Blinding Lights",
-  "Tip: swipe left to remove from playlist",
-  "47 new releases since your last visit",
-] as const;
-
 const CIRCLE_RADIUS = 72;
 const CIRCLE_CIRCUMFERENCE = 2 * Math.PI * CIRCLE_RADIUS;
-const STROKE_OFFSET_TARGET = CIRCLE_CIRCUMFERENCE * (1 - 0.85);
 
 interface FadeSlideProps {
   delay: number;
@@ -137,6 +125,14 @@ function OrbitalDot({
   );
 }
 
+function countResources(bucket: Record<string, unknown> | undefined): number {
+  return bucket ? Object.keys(bucket).length : 0;
+}
+
+function formatSyncTime(date: Date) {
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 export default function SplashScreen() {
   const router = useRouter();
   const reduceMotion = useReducedMotion();
@@ -145,113 +141,161 @@ export default function SplashScreen() {
 
   const [leaving, setLeaving] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [stepIdx, setStepIdx] = useState(0);
   const [hintIdx, setHintIdx] = useState(0);
+  const [minSplashElapsed, setMinSplashElapsed] = useState(false);
+
+  const [homeData, setHomeData] = useState<RecommendationResponse | null>(null);
+  const [homeReady, setHomeReady] = useState(false);
+  const [syncedAt, setSyncedAt] = useState<Date | null>(null);
 
   const progressRef = useRef(0);
-  const stepIdxRef = useRef(0);
-  const loopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const leaveScheduledRef = useRef(false);
 
   const displayName = user?.displayName?.split(" ")[0] ?? null;
-  const currentStep = LOAD_STEPS[stepIdx] ?? DEFAULT_STEP;
 
-  // Luồng logic quản lý Tiến trình & Chuyển trang
   useEffect(() => {
-    const startTimeoutId = setTimeout(() => {
-      const loop = () => {
-        // 1. Giữ chân tại 90% nếu hệ thống chưa xác thực xong Auth Store
-        if (status === "checking" && progressRef.current >= 90) {
-          loopTimeoutRef.current = setTimeout(loop, 100);
-          return;
-        }
+    if (status !== "authenticated") return;
 
-        let nextStepProgress = 1;
-        let delay = reduceMotion
-          ? 0
-          : Math.floor(Math.random() * (16 - 6 + 1)) + 6;
+    let cancelled = false;
 
-        // 2. Điểm gờ khựng thông minh tại mốc 90%
-        if (progressRef.current === 89) {
-          delay = reduceMotion
-            ? 0
-            : Math.floor(Math.random() * (2500 - 1500 + 1)) + 1500;
-          nextStepProgress = 0;
-          progressRef.current = 90;
-        }
-        // 3. Pha bứt tốc mượt mà từ 90% -> 100%
-        else if (progressRef.current > 90) {
-          nextStepProgress = Math.floor(Math.random() * (3 - 2 + 1)) + 2;
-          delay = reduceMotion ? 0 : 12;
-        }
-
-        // 4. Tiến hành tính toán cấu trúc phần trăm và đồng bộ trạng thái
-        if (progressRef.current <= 100) {
-          const targetProgress = Math.min(
-            100,
-            progressRef.current + nextStepProgress,
-          );
-
-          if (
-            targetProgress !== progressRef.current ||
-            nextStepProgress === 0
-          ) {
-            progressRef.current = targetProgress;
-            setProgress(progressRef.current);
-
-            //CHUYỂN TRANG SỚM
-            if (targetProgress >= 99 && status !== "checking") {
-              setLeaving(true);
-
-              setTimeout(
-                () => {
-                  router.replace(
-                    status === "authenticated" ? "/home" : "/login",
-                  );
-                },
-                reduceMotion ? 80 : EXIT_DURATION_MS,
-              );
-            }
-          }
-
-          // Kiểm tra để cập nhật nhãn hiển thị (Step Label)
-          let matchedIdx = LOAD_STEPS.length - 1;
-          for (let i = 0; i < LOAD_STEPS.length; i++) {
-            if (progressRef.current <= LOAD_STEPS[i].target) {
-              matchedIdx = i;
-              break;
-            }
-          }
-
-          if (matchedIdx !== stepIdxRef.current) {
-            stepIdxRef.current = matchedIdx;
-            setStepIdx(matchedIdx);
-          }
-        }
-
-        // 5. Điều kiện dừng tuyệt đối
-        if (progressRef.current >= 100) return;
-
-        loopTimeoutRef.current = setTimeout(loop, delay);
-      };
-
-      loop();
-    }, 760);
+    getHomeRecommendations()
+      .then((data) => {
+        if (cancelled) return;
+        setHomeData(data);
+        setSyncedAt(new Date());
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSyncedAt(new Date());
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setHomeReady(true);
+      });
 
     return () => {
-      clearTimeout(startTimeoutId);
-      if (loopTimeoutRef.current) {
-        clearTimeout(loopTimeoutRef.current);
-      }
+      cancelled = true;
     };
-  }, [reduceMotion, status, router]);
+  }, [status]);
 
   useEffect(() => {
-    const t = setInterval(
-      () => setHintIdx((i) => (i + 1) % HINTS.length),
-      2000,
-    );
-    return () => clearInterval(t);
+    const t = setTimeout(() => setMinSplashElapsed(true), MIN_SPLASH_MS);
+    return () => clearTimeout(t);
   }, []);
+
+  useEffect(() => {
+    if (status === "checking") return;
+    router.prefetch(status === "authenticated" ? "/home" : "/login");
+  }, [status, router]);
+
+  const ceiling = useMemo(() => {
+    if (status === "checking") return CEILING.init;
+    if (status === "guest") return CEILING.ready;
+    return homeReady ? CEILING.ready : CEILING.fetchingHome;
+  }, [status, homeReady]);
+
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const current = progressRef.current;
+      if (current >= ceiling) return;
+
+      const remaining = ceiling - current;
+      const step = reduceMotion ? remaining : Math.max(0.5, remaining * 0.09);
+      const next = Math.min(ceiling, current + step);
+      progressRef.current = next;
+      setProgress(next);
+
+      if (next < ceiling) raf = requestAnimationFrame(tick);
+    };
+
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [ceiling, reduceMotion]);
+
+  useEffect(() => {
+    if (
+      progress < 100 ||
+      status === "checking" ||
+      !minSplashElapsed ||
+      leaveScheduledRef.current
+    ) {
+      return;
+    }
+    leaveScheduledRef.current = true;
+    setLeaving(true);
+  }, [progress, status, minSplashElapsed]);
+
+  useEffect(() => {
+    if (!leaving) return;
+
+    const navTimer = setTimeout(
+      () => {
+        router.replace(
+          useAuthStore.getState().status === "authenticated"
+            ? "/home"
+            : "/login",
+        );
+      },
+      reduceMotion ? 80 : EXIT_DURATION_MS,
+    );
+
+    return () => clearTimeout(navTimer);
+  }, [leaving, router, reduceMotion]);
+
+  const stepLabel = useMemo(() => {
+    if (status === "checking") return "Checking your session";
+    if (status === "guest") return "Redirecting to sign in";
+    if (!homeReady) return "Loading your music";
+    return "Ready";
+  }, [status, homeReady]);
+
+  const stageDots = useMemo(
+    () => [
+      { label: "Session", active: status !== "checking" },
+      { label: "Library", active: homeReady || status === "guest" },
+      { label: "Ready", active: progress >= 99 },
+    ],
+    [status, homeReady, progress],
+  );
+
+  const stats = useMemo(() => {
+    if (!homeData?.resources) return null;
+
+    const songs = countResources(homeData.resources.songs);
+    const playlists = countResources(homeData.resources.playlists);
+    const albums = countResources(homeData.resources.albums);
+
+    const parts: string[] = [];
+    if (songs > 0) parts.push(`${songs} songs`);
+    if (playlists > 0) parts.push(`${playlists} playlists`);
+    else if (albums > 0) parts.push(`${albums} albums`);
+    if (syncedAt) parts.push(`Last sync: ${formatSyncTime(syncedAt)}`);
+
+    return parts.length ? parts : null;
+  }, [homeData, syncedAt]);
+
+  const hints = useMemo(() => {
+    const sections = homeData?.resources?.personalRecommendation;
+    if (sections) {
+      const titles = Object.values(sections)
+        .map((section) => section.attributes?.title?.stringForDisplay)
+        .filter((title): title is string => Boolean(title));
+      const unique = [...new Set(titles)].slice(0, 5);
+      if (unique.length) return unique;
+    }
+
+    if (status === "guest") return ["Preparing your sign in"];
+    return ["Personalizing your home", "Loading your recommendations"];
+  }, [homeData, status]);
+
+  const currentHint = hints[hintIdx % hints.length];
+
+  useEffect(() => {
+    if (hints.length <= 1) return;
+    const t = setInterval(() => setHintIdx((i) => i + 1), 2000);
+    return () => clearInterval(t);
+  }, [hints.length]);
 
   return (
     <main
@@ -358,7 +402,7 @@ export default function SplashScreen() {
                   />
                 </svg>
 
-                {/* Animated Fill Arc */}
+                {/* Progress Arc — phản ánh đúng tiến trình tải thật */}
                 {!reduceMotion && (
                   <svg
                     width={160}
@@ -376,12 +420,11 @@ export default function SplashScreen() {
                       strokeLinecap="round"
                       strokeDasharray={CIRCLE_CIRCUMFERENCE}
                       initial={{ strokeDashoffset: CIRCLE_CIRCUMFERENCE }}
-                      animate={{ strokeDashoffset: STROKE_OFFSET_TARGET }}
-                      transition={{
-                        duration: 2.4,
-                        ease: smoothEase,
-                        delay: D.ring + 0.15,
+                      animate={{
+                        strokeDashoffset:
+                          CIRCLE_CIRCUMFERENCE * (1 - progress / 100),
                       }}
+                      transition={{ duration: 0.3, ease: "linear" }}
                       style={{
                         transformOrigin: "80px 80px",
                         transform: "rotate(-90deg)",
@@ -472,14 +515,21 @@ export default function SplashScreen() {
                 </p>
               </FadeSlide>
 
-              {/* Statistical Metadata Line */}
+              {/* Statistical Metadata Line — data thật từ trang home */}
               <FadeSlide
                 delay={D.stats}
                 style={{ marginBottom: "clamp(24px, 3.5vh, 36px)" }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  {["2,847 songs", "14 playlists", "Last sync: just now"].map(
-                    (text, i) => (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    minHeight: 18,
+                  }}
+                >
+                  {stats ? (
+                    stats.map((text, i) => (
                       <span
                         key={text}
                         style={{
@@ -509,7 +559,18 @@ export default function SplashScreen() {
                           {text}
                         </span>
                       </span>
-                    ),
+                    ))
+                  ) : (
+                    <span
+                      style={{
+                        fontSize: 14,
+                        color: "rgba(255,255,255,0.14)",
+                      }}
+                    >
+                      {status === "guest"
+                        ? "Preparing your experience"
+                        : "Syncing your library"}
+                    </span>
                   )}
                 </div>
               </FadeSlide>
@@ -558,7 +619,7 @@ export default function SplashScreen() {
 
             {/* ── Progress Indicators Block ── */}
             <FadeSlide delay={D.progress} style={{ width: "100%" }}>
-              {/* Rotating Dynamic Tip */}
+              {/* Rotating Dynamic Tip — tên section đề xuất thật */}
               <div
                 style={{
                   textAlign: "center",
@@ -569,7 +630,7 @@ export default function SplashScreen() {
               >
                 <AnimatePresence mode="wait">
                   <motion.span
-                    key={hintIdx}
+                    key={currentHint}
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -6 }}
@@ -580,7 +641,7 @@ export default function SplashScreen() {
                       display: "block",
                     }}
                   >
-                    {HINTS[hintIdx]}
+                    {currentHint}
                   </motion.span>
                 </AnimatePresence>
               </div>
@@ -602,7 +663,7 @@ export default function SplashScreen() {
                     textAlign: "left",
                   }}
                 >
-                  {currentStep.label}
+                  {stepLabel}
                 </span>
                 <span
                   style={{
@@ -611,7 +672,7 @@ export default function SplashScreen() {
                     fontVariantNumeric: "tabular-nums",
                   }}
                 >
-                  {progress}%
+                  {Math.round(progress)}%
                 </span>
               </div>
 
@@ -669,55 +730,50 @@ export default function SplashScreen() {
                   marginTop: 18,
                 }}
               >
-                {(["Library", "Playlists", "History"] as const).map(
-                  (label, i) => {
-                    const active = currentStep.dots[i] ?? false;
-                    return (
-                      <div
-                        key={label}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 6,
-                        }}
-                      >
-                        <motion.span
-                          animate={
-                            active && !reduceMotion
-                              ? {
-                                  scale: [0.85, 1, 0.85],
-                                  opacity: [0.3, 0.85, 0.3],
-                                }
-                              : { opacity: active ? 0.3 : 0.08 }
-                          }
-                          transition={{
-                            duration: 1.8,
-                            repeat: Infinity,
-                            ease: "easeInOut",
-                          }}
-                          style={{
-                            width: 5,
-                            height: 5,
-                            borderRadius: "50%",
-                            background: "rgba(255,255,255,0.35)",
-                            display: "inline-block",
-                            flexShrink: 0,
-                          }}
-                        />
-                        <span
-                          style={{
-                            fontSize: 13,
-                            color: active
-                              ? "rgba(255,255,255,0.2)"
-                              : "rgba(255,255,255,0.08)",
-                          }}
-                        >
-                          {label}
-                        </span>
-                      </div>
-                    );
-                  },
-                )}
+                {stageDots.map(({ label, active }) => (
+                  <div
+                    key={label}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <motion.span
+                      animate={
+                        active && !reduceMotion
+                          ? {
+                              scale: [0.85, 1, 0.85],
+                              opacity: [0.3, 0.85, 0.3],
+                            }
+                          : { opacity: active ? 0.3 : 0.08 }
+                      }
+                      transition={{
+                        duration: 1.8,
+                        repeat: Infinity,
+                        ease: "easeInOut",
+                      }}
+                      style={{
+                        width: 5,
+                        height: 5,
+                        borderRadius: "50%",
+                        background: "rgba(255,255,255,0.35)",
+                        display: "inline-block",
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span
+                      style={{
+                        fontSize: 13,
+                        color: active
+                          ? "rgba(255,255,255,0.2)"
+                          : "rgba(255,255,255,0.08)",
+                      }}
+                    >
+                      {label}
+                    </span>
+                  </div>
+                ))}
               </div>
             </FadeSlide>
           </motion.div>

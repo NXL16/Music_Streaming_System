@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getApiErrorMessage } from "@/lib/api/api-error";
 import { deleteMySong, listMySongs } from "@/lib/songs/song.api";
 import { subscribeSongLibraryChanged } from "@/lib/songs/song-library-events";
@@ -21,6 +21,7 @@ export function useSongLibrary(refreshKey = 0) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [deletingSongId, setDeletingSongId] = useState("");
   const [error, setError] = useState("");
+  const hasProcessingRef = useRef(false);
 
   const loadSongs = useCallback(async (options?: { silent?: boolean }) => {
     setError("");
@@ -31,10 +32,12 @@ export function useSongLibrary(refreshKey = 0) {
 
     try {
       const result = await listMySongs({ limit: 20 });
+      const nextSongs = result.songs ?? [];
 
-      setSongs(result.songs ?? []);
+      setSongs(nextSongs);
       setNextCursor(result.nextCursor ?? "");
       setHasMore(Boolean(result.hasMore));
+      hasProcessingRef.current = hasActiveProcessingSongs(nextSongs);
     } catch (error) {
       if (!options?.silent) {
         setError(getApiErrorMessage(error, "Cannot load your song library."));
@@ -87,7 +90,7 @@ export function useSongLibrary(refreshKey = 0) {
   }, []);
 
   useEffect(() => {
-    void loadSongs();
+    queueMicrotask(() => void loadSongs());
   }, [loadSongs, refreshKey]);
 
   useEffect(() => {
@@ -97,16 +100,16 @@ export function useSongLibrary(refreshKey = 0) {
   }, [loadSongs]);
 
   useEffect(() => {
-    if (!hasActiveProcessingSongs(songs)) {
-      return;
-    }
-
     const intervalId = window.setInterval(() => {
+      if (!hasProcessingRef.current) {
+        return;
+      }
+
       void loadSongs({ silent: true });
     }, POLLING_INTERVAL_MS);
 
     return () => window.clearInterval(intervalId);
-  }, [loadSongs, songs]);
+  }, [loadSongs]);
 
   return {
     songs,

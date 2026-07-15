@@ -17,12 +17,21 @@ const stepLabel = {
   error: "Upload failed",
 } as const;
 
-export function SongUploadPanel({ onUploaded, compact = false }: SongUploadPanelProps) {
+export function SongUploadPanel({
+  onUploaded,
+  compact = false,
+}: SongUploadPanelProps) {
   const upload = useSongUpload({ onUploaded });
 
   return (
-    <section className={compact ? "" : "rounded-3xl bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.06)] ring-1 ring-[#e5e5ea] md:p-8"}>
-      {!compact ? (
+    <section
+      className={
+        compact
+          ? ""
+          : "rounded-3xl bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.06)] ring-1 ring-[#e5e5ea] md:p-8"
+      }
+    >
+      {!compact && (
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#fa233b]">
             Upload
@@ -35,11 +44,16 @@ export function SongUploadPanel({ onUploaded, compact = false }: SongUploadPanel
             library.
           </p>
         </div>
-      ) : null}
+      )}
 
-      <form onSubmit={upload.handleSubmit} className={compact ? "space-y-4" : "mt-6 space-y-4"}>
+      <form
+        onSubmit={upload.handleSubmit}
+        className={compact ? "space-y-4" : "mt-6 space-y-4"}
+      >
         <div>
-          <label className="block text-sm font-semibold text-[#1d1d1f]">Audio file</label>
+          <label className="block text-sm font-semibold text-[#1d1d1f]">
+            Audio file
+          </label>
           <input
             type="file"
             accept="audio/*"
@@ -54,10 +68,14 @@ export function SongUploadPanel({ onUploaded, compact = false }: SongUploadPanel
 
         <div className="grid gap-4 md:grid-cols-2">
           <div>
-            <label className="block text-sm font-semibold text-[#1d1d1f]">Title</label>
+            <label className="block text-sm font-semibold text-[#1d1d1f]">
+              Title
+            </label>
             <input
               value={upload.form.title}
-              onChange={(event) => upload.updateField("title", event.target.value)}
+              onChange={(event) =>
+                upload.updateField("title", event.target.value)
+              }
               disabled={upload.loading}
               className="mt-2 w-full rounded-2xl bg-[#f5f5f7] px-4 py-3 outline-none ring-1 ring-[#d2d2d7] focus:ring-[#fa233b] disabled:cursor-not-allowed disabled:opacity-60"
               required
@@ -65,7 +83,9 @@ export function SongUploadPanel({ onUploaded, compact = false }: SongUploadPanel
           </div>
 
           <div>
-            <label className="block text-sm font-semibold text-[#1d1d1f]">Artist</label>
+            <label className="block text-sm font-semibold text-[#1d1d1f]">
+              Artist
+            </label>
             <input
               value={upload.form.artist}
               onChange={(event) =>
@@ -80,10 +100,14 @@ export function SongUploadPanel({ onUploaded, compact = false }: SongUploadPanel
 
         <div className="grid gap-4 md:grid-cols-2">
           <div>
-            <label className="block text-sm font-semibold text-[#1d1d1f]">Album</label>
+            <label className="block text-sm font-semibold text-[#1d1d1f]">
+              Album
+            </label>
             <input
               value={upload.form.album}
-              onChange={(event) => upload.updateField("album", event.target.value)}
+              onChange={(event) =>
+                upload.updateField("album", event.target.value)
+              }
               disabled={upload.loading}
               className="mt-2 w-full rounded-2xl bg-[#f5f5f7] px-4 py-3 outline-none ring-1 ring-[#d2d2d7] focus:ring-[#fa233b] disabled:cursor-not-allowed disabled:opacity-60"
             />
@@ -103,18 +127,18 @@ export function SongUploadPanel({ onUploaded, compact = false }: SongUploadPanel
           </label>
         </div>
 
-        {upload.error ? (
+        {upload.error && (
           <div className="rounded-2xl bg-[#fff1f3] px-4 py-3 text-sm font-medium text-[#d91d32]">
             {upload.error}
           </div>
-        ) : null}
+        )}
 
-        {upload.step !== "idle" ? (
+        {upload.step !== "idle" && (
           <div className="rounded-2xl bg-[#f5f5f7] px-4 py-3 text-sm font-semibold text-[#6e6e73] ring-1 ring-[#e5e5ea]">
             {stepLabel[upload.step]}
             {upload.status ? ` - ${upload.status}` : ""}
           </div>
-        ) : null}
+        )}
 
         <div className="flex flex-wrap justify-end gap-3">
           <button

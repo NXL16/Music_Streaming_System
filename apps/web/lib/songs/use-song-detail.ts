@@ -31,7 +31,7 @@ export function useSongDetail(songId: string | null) {
   }, [songId]);
 
   useEffect(() => {
-    void loadSong();
+    queueMicrotask(() => void loadSong());
   }, [loadSong]);
 
   return {

@@ -21,7 +21,7 @@ export default function Logo() {
         width="20"
         height="24"
         viewBox="0 0 20 24"
-        className="w-full h-full"
+        className="size-full"
       >
         <path
           fill="currentColor"

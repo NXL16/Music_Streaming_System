@@ -2,19 +2,24 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState, MouseEvent } from "react";
+import { useRef, useState, useCallback, MouseEvent } from "react";
 
 export default function NotFound() {
   const [coords, setCoords] = useState({ x: 0, y: 0 });
   const [isHovered, setIsHovered] = useState(false);
+  const rafRef = useRef(0);
 
-  const handleMouseMove = (e: MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    setCoords({
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
+  const handleMouseMove = useCallback((e: MouseEvent<HTMLDivElement>) => {
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+    const target = e.currentTarget;
+
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      const rect = target.getBoundingClientRect();
+      setCoords({ x: clientX - rect.left, y: clientY - rect.top });
     });
-  };
+  }, []);
 
   return (
     <main
@@ -44,7 +49,7 @@ export default function NotFound() {
             width={670}
             height={670}
             loading="eager"
-            className="w-full h-full object-contain"
+            className="size-full object-contain"
           />
         </div>
 

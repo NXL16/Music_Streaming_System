@@ -23,11 +23,11 @@ function VerifyEmailContent() {
       }
       narrow
     >
-      {redirecting ? (
+      {redirecting && (
         <p className="mt-5 rounded-2xl bg-[#f5f5f7] px-4 py-3 text-sm font-semibold text-[#6e6e73]">
           Redirecting you back to profile...
         </p>
-      ) : null}
+      )}
     </AuthPageShell>
   );
 }

@@ -45,6 +45,16 @@ export async function getMySong(songId: string) {
   return response.data;
 }
 
+export async function getSongStreamUrl(songId: string) {
+  const response = await http.get<{
+    streamUrl: string;
+    key: string;
+    iv: string;
+  }>(`/stream/${encodeURIComponent(songId)}`);
+
+  return response.data;
+}
+
 export async function requestSongUpload(payload: RequestUploadPayload) {
   const response = await http.post<RequestUploadResponse>(
     "/songs/request-upload",
@@ -54,13 +64,18 @@ export async function requestSongUpload(payload: RequestUploadPayload) {
   return response.data;
 }
 
-export async function uploadSongFile(uploadUrl: string, file: File) {
+export async function uploadSongFile(
+  uploadUrl: string,
+  file: File,
+  signal?: AbortSignal,
+) {
   const response = await fetch(uploadUrl, {
     method: "PUT",
     headers: {
       "Content-Type": "application/octet-stream",
     },
     body: file,
+    signal,
   });
 
   if (!response.ok) {

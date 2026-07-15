@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef } from "react";
+import { memo, useLayoutEffect, useRef } from "react";
 
 const APPLE_CSS = `:host{--playback-control-icon-width:var(--skip-icon-width, 32px);--playback-control-icon-height:var(--skip-icon-height, 28px);width:var(--playback-control-button-width, 32px);height:var(--playback-control-button-height, 32px);display:flex;flex:0 0 auto;align-items:stretch;justify-content:stretch;position:relative}:host button{width:100%;height:100%;position:relative;transition:color 0.2s ease-out}:host amp-icon{width:var(--playback-control-icon-width, 32px);height:var(--playback-control-icon-height, 28px);display:block;position:absolute;top:50%;left:50%;transform:translate(-50%, -50%)}button{margin:0;padding:0;display:inline-block;border:0;background-color:transparent;outline:none;cursor:pointer;appearance:none;font-family:inherit;font-size:inherit;line-height:inherit;width:100%;height:100%;color:var(--skip-control-color, var(--white80, rgba(255, 255, 255, 0.8)));background-position:center;background-size:contain}button::-moz-focus-inner{border:0}button:hover:not([disabled]),button:focus-visible:not([disabled]){color:var(--skip-control-color-hover, var(--skip-control-color, #fff))}button:disabled{opacity:0.4;cursor:default}:host([data-theme*=video]) button amp-icon{color:#e5e5e5}button:focus-visible{--sk-focus-offset:2px;outline:4px solid var(--sk-focus-color, var(--keyColor-focus-color, var(--keyColor, #0071e3)));outline-offset:var(--sk-focus-offset, 1px)}.button--previous{transform:rotate(180deg)}.button_label{position:absolute;clip:rect(1px, 1px, 1px, 1px);clip-path:inset(0 0 99.9% 99.9%);overflow:hidden;height:1px;width:1px;padding:0;border:0}`;
 
@@ -13,12 +13,14 @@ interface AmpSkipButtonProps {
   disabled?: boolean;
 }
 
-export default function AmpSkipButton({
+const AmpSkipButton = memo(function AmpSkipButton({
   direction,
   onClick,
   disabled = false,
 }: AmpSkipButtonProps) {
   const containerRef = useRef<HTMLElement>(null);
+  const onClickRef = useRef(onClick);
+  onClickRef.current = onClick;
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -55,15 +57,15 @@ export default function AmpSkipButton({
       shadow.appendChild(inlineStyle);
     }
 
-    const currentClick = () => {
-      if (onClick) onClick();
+    const handleClick = () => {
+      onClickRef.current?.();
     };
-    button.addEventListener("click", currentClick);
+    button.addEventListener("click", handleClick);
 
     return () => {
-      button?.removeEventListener("click", currentClick);
+      button?.removeEventListener("click", handleClick);
     };
-  }, [direction, onClick]);
+  }, [direction]);
 
   useLayoutEffect(() => {
     const shadow = containerRef.current?.shadowRoot;
@@ -93,4 +95,6 @@ export default function AmpSkipButton({
       hydrated=""
     />
   );
-}
+});
+
+export default AmpSkipButton;

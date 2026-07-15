@@ -18,6 +18,13 @@ export function useProfile() {
       return;
     }
 
+    // Nếu store đã có dữ liệu người dùng (đã hydrate từ phiên đăng nhập),
+    // bỏ qua việc gọi lại getProfile trên mỗi lần mount. Việc chuyển từ
+    // trạng thái đăng xuất -> đăng nhập vẫn chạy đúng vì lúc đó user = null.
+    if (user) {
+      return;
+    }
+
     let cancelled = false;
 
     async function loadProfile() {
@@ -51,7 +58,7 @@ export function useProfile() {
     return () => {
       cancelled = true;
     };
-  }, [setUser, status]);
+  }, [setUser, status, user]);
 
   return {
     user,

@@ -4,15 +4,11 @@ const ICON_PATH =
 const AmpCustomTag = "amp-contextual-menu-button" as React.ElementType;
 
 export default function AmpContextMenuButton({ isHover = false }) {
-  const handleMenuOpen = () => {
-    console.log("Mở menu ngon lành!");
-  };
-
   return (
     <AmpCustomTag hydrated="">
       <button
         type="button"
-        onClick={handleMenuOpen}
+        onClick={() => {}}
         className="m-0 p-0 block border-0 outline-none cursor-pointer appearance-none font-inherit text-inherit leading-inherit rounded-(--ctxmenu-trigger-border-radius,50%) bg-(--ctxmenu-trigger-background-color,transparent) transition-opacity duration-100 ease-in opacity-(--ctxmenu-trigger-opacity,1) backdrop-blur-(--ctxmenu-trigger-backdrop-blur,0)"
       >
         <span
@@ -22,7 +18,7 @@ export default function AmpContextMenuButton({ isHover = false }) {
             width="28"
             height="28"
             viewBox="0 0 28 28"
-            className="h-full w-full rounded-[inherit]"
+            className="size-full rounded-[inherit]"
             xmlns="http://www.w3.org/2000/svg"
           >
             {isHover && (

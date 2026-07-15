@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { getApiErrorMessage } from "@/lib/api/api-error";
 import { requestSongUpload, uploadSongFile } from "@/lib/songs/song.api";
 import { notifySongLibraryChanged } from "@/lib/songs/song-library-events";
@@ -39,6 +39,7 @@ export function useSongUpload(options?: { onUploaded?: () => void }) {
   const [error, setError] = useState("");
   const [songId, setSongId] = useState("");
   const [status, setStatus] = useState("");
+  const abortRef = useRef<AbortController | null>(null);
 
   const loading =
     step === "hashing" || step === "requesting" || step === "uploading";
@@ -69,12 +70,21 @@ export function useSongUpload(options?: { onUploaded?: () => void }) {
   }
 
   function reset() {
+    abortRef.current?.abort();
+    abortRef.current = null;
     setFile(null);
     setForm(initialForm);
     setStep("idle");
     setError("");
     setSongId("");
     setStatus("");
+  }
+
+  function cancel() {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setStep("idle");
+    setError("");
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -89,9 +99,15 @@ export function useSongUpload(options?: { onUploaded?: () => void }) {
     setSongId("");
     setStatus("");
 
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
       setStep("hashing");
       const checksum = await calculateFileSha256(file);
+
+      if (controller.signal.aborted) return;
 
       setStep("requesting");
       const uploadRequest = await requestSongUpload({
@@ -102,6 +118,8 @@ export function useSongUpload(options?: { onUploaded?: () => void }) {
         checksum,
         size: file.size,
       });
+
+      if (controller.signal.aborted) return;
 
       setSongId(uploadRequest.songId);
       notifySongLibraryChanged();
@@ -116,7 +134,11 @@ export function useSongUpload(options?: { onUploaded?: () => void }) {
 
       if (uploadRequest.uploadUrl) {
         setStep("uploading");
-        await uploadSongFile(uploadRequest.uploadUrl, file);
+        await uploadSongFile(
+          uploadRequest.uploadUrl,
+          file,
+          controller.signal,
+        );
       }
 
       setStep("waiting");
@@ -124,12 +146,14 @@ export function useSongUpload(options?: { onUploaded?: () => void }) {
       notifySongLibraryChanged();
       options?.onUploaded?.();
     } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
       setStep("error");
       setError(getApiErrorMessage(error, "Cannot upload this song."));
     }
   }
 
   return {
+    cancel,
     error,
     file,
     form,

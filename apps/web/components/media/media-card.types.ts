@@ -1,4 +1,9 @@
-export type MediaCardType = "hero" | "collection" | "station";
+export type MediaCardType =
+  | "hero"
+  | "collection"
+  | "station"
+  | "circle"
+  | "social";
 
 export interface MediaCardArtist {
   id: string;

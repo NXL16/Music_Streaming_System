@@ -3,6 +3,9 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useAuthStore } from "@/lib/auth/auth-store";
+import { useWalletBalance } from "@/lib/wallet/use-wallet-balance";
+import { Coins, Plus } from "lucide-react";
 
 type SidebarItem = {
   key: string;
@@ -54,22 +57,6 @@ const primaryNavigationItems: SidebarItem[] = [
       </svg>
     ),
   },
-  {
-    key: "radio",
-    label: "Radio",
-    href: "/settings",
-    icon: (
-      <svg
-        width="24"
-        height="24"
-        viewBox="0 0 24 24"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
-      >
-        <path d="M19.359 18.57C21.033 16.818 22 14.461 22 11.89s-.967-4.93-2.641-6.68c-.276-.292-.653-.26-.868-.023-.222.246-.176.591.085.868 1.466 1.535 2.272 3.593 2.272 5.835 0 2.241-.806 4.3-2.272 5.835-.261.268-.307.621-.085.86.215.245.592.276.868-.016zm-13.85.014c.222-.238.176-.59-.085-.86-1.474-1.535-2.272-3.593-2.272-5.834 0-2.242.798-4.3 2.272-5.835.261-.277.307-.622.085-.868-.215-.238-.592-.269-.868.023C2.967 6.96 2 9.318 2 11.89s.967 4.929 2.641 6.68c.276.29.653.26.868.014zm1.957-1.873c.223-.253.162-.583-.1-.867-.951-1.068-1.473-2.45-1.473-3.954 0-1.505.522-2.887 1.474-3.954.26-.284.322-.614.1-.876-.23-.26-.622-.26-.891.039-1.175 1.274-1.827 2.963-1.827 4.79 0 1.82.652 3.517 1.827 4.784.269.3.66.307.89.038zm9.958-.038c1.175-1.267 1.827-2.964 1.827-4.783 0-1.828-.652-3.517-1.827-4.791-.269-.3-.66-.3-.89-.039-.23.262-.162.592.092.876.96 1.067 1.481 2.449 1.481 3.954 0 1.504-.522 2.886-1.481 3.954-.254.284-.323.614-.092.867.23.269.621.261.89-.038zm-8.061-1.966c.23-.26.13-.568-.092-.883-.415-.522-.63-1.197-.63-1.934 0-.737.215-1.413.63-1.943.222-.307.322-.614.092-.875s-.653-.261-.906.054a4.385 4.385 0 0 0-.968 2.764 4.38 4.38 0 0 0 .968 2.756c.253.322.675.322.906.061zm6.18-.061a4.38 4.38 0 0 0 .968-2.756 4.385 4.385 0 0 0-.968-2.764c-.253-.315-.675-.315-.906-.054-.23.261-.138.568.092.875.415.53.63 1.206.63 1.943 0 .737-.215 1.412-.63 1.934-.23.315-.322.622-.092.883s.653.261.906-.061zm-3.547-.967c.96 0 1.789-.814 1.789-1.797s-.83-1.789-1.789-1.789c-.96 0-1.781.806-1.781 1.789 0 .983.821 1.797 1.781 1.797z" />
-      </svg>
-    ),
-  },
 ];
 
 const libraryItems: SidebarItem[] = [
@@ -92,7 +79,7 @@ const libraryItems: SidebarItem[] = [
   {
     key: "artists",
     label: "Artists",
-    href: "/library2",
+    href: "/#",
     icon: (
       <svg
         width="24"
@@ -108,7 +95,7 @@ const libraryItems: SidebarItem[] = [
   {
     key: "albums",
     label: "Albums",
-    href: "/library",
+    href: "/#",
     icon: (
       <svg
         width="24"
@@ -124,7 +111,7 @@ const libraryItems: SidebarItem[] = [
   {
     key: "songs",
     label: "Songs",
-    href: "/library",
+    href: "/#",
     icon: (
       <svg
         width="24"
@@ -138,26 +125,9 @@ const libraryItems: SidebarItem[] = [
     ),
   },
   {
-    key: "music-videos",
-    label: "Music Videos",
-    href: "/library",
-    icon: (
-      <svg
-        width="24"
-        height="24"
-        xmlns="http://www.w3.org/2000/svg"
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-      >
-        <path d="M4.052 17.291h15.896c1.275 0 2.052-.788 2.052-2.061V6.052C22 4.779 21.223 4 19.948 4H4.052C2.777 4 2 4.779 2 6.052v9.178c0 1.273.777 2.061 2.052 2.061Zm.022-1.296c-.489 0-.787-.288-.787-.786V6.073c0-.49.298-.786.787-.786h15.852c.489 0 .787.296.787.786v9.136c0 .498-.298.786-.787.786H4.074Zm3.906 3.999h8.04a.64.64 0 0 0 .645-.644.646.646 0 0 0-.645-.652H7.98a.646.646 0 0 0-.645.652.64.64 0 0 0 .645.644Z"></path>
-        <path d="M14.405 9.188c.388-.098.505-.178.505-.646V6.971c0-.3-.107-.438-.536-.329l-2.337.578c-.398.099-.484.177-.484.647v3.604c0 .357-.031.425-.431.536l-.736.194c-.725.19-1.339.617-1.339 1.408 0 .677.515 1.172 1.318 1.172 1.143 0 1.92-.822 1.92-1.983v-2.747c0-.296.068-.375.238-.405l1.882-.458Z"></path>
-      </svg>
-    ),
-  },
-  {
     key: "made-for-you",
     label: "Made for You",
-    href: "/library",
+    href: "/#",
     icon: (
       <svg
         width="24"
@@ -176,7 +146,7 @@ const playlistItems: SidebarItem[] = [
   {
     key: "all-playlists",
     label: "All Playlists",
-    href: "/library",
+    href: "/#",
     icon: (
       <svg
         width="24"
@@ -196,7 +166,7 @@ const playlistItems: SidebarItem[] = [
   {
     key: "favourite-songs",
     label: "Favourite Songs",
-    href: "/library",
+    href: "/#",
     icon: (
       <svg
         xmlns="http://www.w3.org/2000/svg"
@@ -212,25 +182,9 @@ const playlistItems: SidebarItem[] = [
     ),
   },
   {
-    key: "playlist-11",
-    label: "11",
-    href: "/library",
-    icon: (
-      <svg
-        width="24"
-        height="24"
-        viewBox="0 0 24 24"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
-      >
-        <path d="M13.079 19.712c1.076 0 2.688-.79 2.688-2.922v-6.702c0-.388.073-.468.417-.542l3.347-.732a.48.48 0 0 0 .403-.483V5.577c0-.388-.315-.637-.688-.564l-3.765.82c-.469.103-.725.359-.725.77l.015 8.144c.036.359-.132.593-.455.659l-1.164.242c-1.465.307-2.153 1.054-2.153 2.16 0 1.12.864 1.904 2.08 1.904zM12.046 8.675a.503.503 0 0 0 .498-.498.497.497 0 0 0-.498-.49H5.498a.492.492 0 0 0-.498.49.5.5 0 0 0 .498.498h6.548zm0 2.607a.5.5 0 0 0 .498-.505.49.49 0 0 0-.498-.483H5.498a.486.486 0 0 0-.498.483c0 .278.212.505.498.505h6.548zm0 2.608a.494.494 0 1 0 0-.989H5.498a.492.492 0 0 0-.498.49.49.49 0 0 0 .498.499h6.548z"></path>
-      </svg>
-    ),
-  },
-  {
     key: "get-up",
     label: "Get Up!",
-    href: "/library",
+    href: "/#",
     icon: (
       <svg
         width="24"
@@ -246,7 +200,7 @@ const playlistItems: SidebarItem[] = [
   {
     key: "todays-hits",
     label: "Today's Hits",
-    href: "/library",
+    href: "/#",
     icon: (
       <svg
         width="24"
@@ -309,19 +263,6 @@ function ArrowIcon() {
   );
 }
 
-function AccountIcon() {
-  return (
-    <svg
-      viewBox="0 0 28 28"
-      xmlns="http://www.w3.org/2000/svg"
-      className="h-6 w-6 fill-(--keyColor)"
-      aria-hidden="true"
-    >
-      <path d="M14.007 28C6.299 28 0 21.703 0 14S6.299 0 14.007 0C21.7 0 28 6.297 28 14s-6.299 14-13.993 14zm0-9.392c4.253 0 7.49 1.514 8.805 3.216 1.815-2.08 2.899-4.81 2.899-7.824 0-6.54-5.12-11.784-11.704-11.784C7.41 2.216 2.289 7.46 2.289 14c0 3.014 1.084 5.743 2.9 7.824 1.313-1.702 4.55-3.216 8.818-3.216zm-.014-2.297c-2.6-.027-4.646-2.19-4.646-5.095-.014-2.73 2.059-4.986 4.646-4.986 2.601 0 4.647 2.256 4.647 4.986 0 2.906-2.032 5.122-4.647 5.095z" />
-    </svg>
-  );
-}
-
 function isActiveRoute(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
@@ -337,11 +278,11 @@ function SidebarSection({
 }) {
   return (
     <div>
-      {title ? (
+      {title && (
         <div className="flex items-end justify-between text-white/64 h-9 mt-0 mx-0 mb-1 py-1 px-2 text-[12px] font-semibold leading-[1.24]">
           <span>{title}</span>
         </div>
-      ) : null}
+      )}
 
       <ul className="m-0 list-none p-0 [font:var(--title-navigation)]">
         {items.map((item) => {
@@ -364,7 +305,7 @@ function SidebarSection({
               >
                 <div
                   className={[
-                    "flex h-full w-full items-center gap-1.5 rounded-[inherit] min-[484px]:gap-0.5",
+                    "flex size-full items-center gap-1.5 rounded-[inherit] min-[484px]:gap-0.5",
                     isSelected
                       ? "text-(--keyColor)"
                       : "text-(--navigation-item-text-color,var(--systemPrimary))",
@@ -395,6 +336,11 @@ function SidebarSection({
 
 export default function AppSidebar() {
   const pathname = usePathname();
+  const user = useAuthStore((state) => state.user);
+  const { balance } = useWalletBalance();
+  const avatarLetter = (user?.displayName || user?.username || "U")
+    .charAt(0)
+    .toUpperCase();
 
   return (
     <div className="max-[648px]:hidden [grid-area:structure-header] h-full w-65 relative z-(--z-web-chrome) min-[484px]:z-[calc(var(--z-web-chrome)-11)] min-[484px]:w-[33.8842975207vw] min-[767.32px]:w-65">
@@ -462,13 +408,36 @@ export default function AppSidebar() {
               <div className="mx-3 mb-5">
                 <div className="self-center">
                   <div className="top-1.25 w-full">
-                    <button
-                      type="button"
-                      aria-label="My Account"
-                      className="grid w-full grid-cols-[auto_1fr] items-center justify-items-start gap-2 ps-2 text-(--systemPrimary) [font:var(--title-navigation)] font-semibold"
-                    >
-                      <AccountIcon />
-                    </button>
+                    <div className="p-1.5 rounded-full bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 flex items-center justify-between gap-2 shadow-sm">
+                      <Link
+                        href="/profile"
+                        className="flex items-center gap-2.5 min-w-0 flex-1 hover:opacity-80 transition"
+                        aria-label="My Profile"
+                      >
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-sm font-black text-white shadow-sm border border-neutral-800">
+                          {avatarLetter}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-bold text-(--systemPrimary)">
+                            {user?.displayName || user?.username || "Account"}
+                          </p>
+                          <p className="truncate text-[10px] font-semibold text-amber-500 flex items-center gap-1 mt-0.5">
+                            <Coins className="h-3.5 w-3.5 shrink-0" />
+                            <span>
+                              {(balance?.coinBalance ?? 0).toLocaleString()}{" "}
+                              Coin
+                            </span>
+                          </p>
+                        </div>
+                      </Link>
+                      <Link
+                        href="/deposit"
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-(--keyColor) hover:bg-(--keyColor)/90 text-white shadow transition-all cursor-pointer"
+                        title="Nạp Coin"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Link>
+                    </div>
                   </div>
                 </div>
               </div>

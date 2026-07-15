@@ -4,6 +4,7 @@ import { formatDateTime } from "@/lib/format/date";
 import { usePlayerStore } from "@/lib/player/use-player-store";
 import { useSongDetail } from "@/lib/songs/use-song-detail";
 import type { SongStatus } from "@/lib/songs/song.types";
+import { formatDuration } from "@/lib/format/duration";
 
 type SongDetailDrawerProps = {
   songId: string | null;
@@ -26,16 +27,13 @@ const statusClass: Record<SongStatus, string> = {
   4: "bg-[#fff1f3] text-[#d91d32]",
 };
 
-function formatDuration(seconds: number) {
-  if (!seconds) return "--:--";
-
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-
-  return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
-}
-
-function DetailField({ label, value }: { label: string; value: React.ReactNode }) {
+function DetailField({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
   return (
     <div className="rounded-2xl bg-white/72 px-4 py-3 ring-1 ring-[#e5e5ea]">
       <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#86868b]">
@@ -56,7 +54,7 @@ export function SongDetailDrawer({ songId, onClose }: SongDetailDrawerProps) {
 
   const ready = song?.status === 3;
 
-  function handlePlay() {
+  async function handlePlay() {
     if (!song || !ready) return;
 
     setPlayerSong({
@@ -65,6 +63,8 @@ export function SongDetailDrawer({ songId, onClose }: SongDetailDrawerProps) {
       artist: song.artist || "Unknown Artist",
       album: song.album || "Single",
       durationSec: song.durationSec || 0,
+      artworkUrl: "",
+      playbackUrl: `mse:${song.id}`,
     });
     onClose();
   }
@@ -78,7 +78,7 @@ export function SongDetailDrawer({ songId, onClose }: SongDetailDrawerProps) {
         onClick={onClose}
       />
 
-      <aside className="h-full w-full max-w-xl overflow-y-auto bg-[#f5f5f7] shadow-[-24px_0_80px_rgba(0,0,0,0.18)] ring-1 ring-[#e5e5ea]">
+      <aside className="size-full max-w-xl overflow-y-auto bg-[#f5f5f7] shadow-[-24px_0_80px_rgba(0,0,0,0.18)] ring-1 ring-[#e5e5ea]">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#d2d2d7] bg-[#f5f5f7]/88 px-5 py-4 backdrop-blur-2xl">
           <p className="text-sm font-bold text-[#1d1d1f]">Details</p>
           <button
@@ -91,13 +91,13 @@ export function SongDetailDrawer({ songId, onClose }: SongDetailDrawerProps) {
         </div>
 
         <div className="p-5">
-          {loading ? (
-            <div className="rounded-[2rem] bg-white px-5 py-10 text-center text-[#6e6e73] shadow-[0_1px_2px_rgba(0,0,0,0.06)] ring-1 ring-[#e5e5ea]">
+          {loading && (
+            <div className="rounded-4xl bg-white px-5 py-10 text-center text-[#6e6e73] shadow-[0_1px_2px_rgba(0,0,0,0.06)] ring-1 ring-[#e5e5ea]">
               Loading song details...
             </div>
-          ) : null}
+          )}
 
-          {error ? (
+          {error && (
             <div className="rounded-2xl bg-[#fff1f3] px-4 py-3 text-sm font-medium text-[#d91d32]">
               {error}
               <button
@@ -108,20 +108,20 @@ export function SongDetailDrawer({ songId, onClose }: SongDetailDrawerProps) {
                 Retry
               </button>
             </div>
-          ) : null}
+          )}
 
-          {song ? (
+          {song && (
             <>
-              <section className="overflow-hidden rounded-[2rem] bg-white shadow-[0_18px_50px_rgba(0,0,0,0.06)] ring-1 ring-[#e5e5ea]">
+              <section className="overflow-hidden rounded-4xl bg-white shadow-[0_18px_50px_rgba(0,0,0,0.06)] ring-1 ring-[#e5e5ea]">
                 <div className="bg-linear-to-b from-white to-[#f5f5f7] px-6 py-8 text-center">
-                  <div className="mx-auto flex aspect-square w-52 max-w-full items-center justify-center rounded-[2rem] bg-linear-to-br from-[#ff375f] via-[#ff9f0a] to-[#af52de] text-7xl font-bold text-white shadow-[0_28px_70px_rgba(250,35,59,0.24)]">
+                  <div className="mx-auto flex aspect-square w-52 max-w-full items-center justify-center rounded-4xl bg-linear-to-br from-[#ff375f] via-[#ff9f0a] to-[#af52de] text-7xl font-bold text-white shadow-[0_28px_70px_rgba(250,35,59,0.24)]">
                     {(song.title || "S").charAt(0).toUpperCase()}
                   </div>
 
                   <p className="mt-7 text-sm font-semibold text-[#6e6e73]">
                     {song.artist || "Unknown Artist"}
                   </p>
-                  <h3 className="mt-1 break-words text-4xl font-bold tracking-[-0.055em] text-[#1d1d1f]">
+                  <h3 className="mt-1 wrap-break-word text-4xl font-bold tracking-[-0.055em] text-[#1d1d1f]">
                     {song.title || "Untitled Song"}
                   </h3>
                   <p className="mt-2 text-sm font-medium text-[#6e6e73]">
@@ -142,7 +142,7 @@ export function SongDetailDrawer({ songId, onClose }: SongDetailDrawerProps) {
                   <button
                     type="button"
                     disabled={!ready}
-                    onClick={handlePlay}
+                    onClick={() => void handlePlay()}
                     className="mt-7 rounded-full bg-[#fa233b] px-8 py-3 text-sm font-bold text-white transition hover:bg-[#d91d32] disabled:cursor-not-allowed disabled:bg-[#d2d2d7]"
                   >
                     {ready ? "Play" : "Not ready yet"}
@@ -150,15 +150,27 @@ export function SongDetailDrawer({ songId, onClose }: SongDetailDrawerProps) {
                 </div>
               </section>
 
-              <section className="mt-5 rounded-[2rem] bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.06)] ring-1 ring-[#e5e5ea]">
+              <section className="mt-5 rounded-4xl bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.06)] ring-1 ring-[#e5e5ea]">
                 <p className="text-sm font-bold text-[#1d1d1f]">Audio info</p>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <DetailField label="Duration" value={formatDuration(song.durationSec)} />
-                  <DetailField label="Bitrate" value={song.bitrateKbps ? `${song.bitrateKbps} kbps` : "--"} />
+                  <DetailField
+                    label="Duration"
+                    value={formatDuration(song.durationSec, "--:--")}
+                  />
+                  <DetailField
+                    label="Bitrate"
+                    value={song.bitrateKbps ? `${song.bitrateKbps} kbps` : "--"}
+                  />
                   <DetailField label="Codec" value={song.codec || "--"} />
                   <DetailField label="Format" value={song.format || "--"} />
-                  <DetailField label="Created" value={formatDateTime(song.createdAt)} />
-                  <DetailField label="Updated" value={formatDateTime(song.updatedAt)} />
+                  <DetailField
+                    label="Created"
+                    value={formatDateTime(song.createdAt)}
+                  />
+                  <DetailField
+                    label="Updated"
+                    value={formatDateTime(song.updatedAt)}
+                  />
                 </div>
               </section>
 
@@ -167,14 +179,14 @@ export function SongDetailDrawer({ songId, onClose }: SongDetailDrawerProps) {
                   Technical asset path
                 </summary>
                 <p className="mt-3 break-all font-medium">
-                  {song.encryptedFilePath || "Encrypted file is not available yet."}
+                  {song.encryptedFilePath ||
+                    "Encrypted file is not available yet."}
                 </p>
               </details>
             </>
-          ) : null}
+          )}
         </div>
       </aside>
     </div>
   );
 }
-

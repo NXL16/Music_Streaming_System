@@ -2,6 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   transpilePackages: ["@musical/shared-types"],
+  experimental: {
+    optimizePackageImports: ["lucide-react", "motion"],
+  },
   images: {
     remotePatterns: [
       {

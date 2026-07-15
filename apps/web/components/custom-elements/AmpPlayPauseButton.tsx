@@ -17,13 +17,13 @@ const AmpPlaybackControlsPlayTag = "amp-playback-controls-play" as React.Element
 const AmpIconTag = "amp-icon" as React.ElementType;
 const SlotFbTag = "slot-fb" as React.ElementType;
 
-export default function AmpPlayPauseButton({
+const AmpPlayPauseButton = React.memo(function AmpPlayPauseButton({
   mode,
   onClick,
   disabled = false,
 }: AmpPlayPauseButtonProps) {
   const buttonClassName = `
-    w-full h-full relative m-0 p-0 inline-block border-0 bg-transparent outline-none cursor-pointer appearance-none font-inherit text-inherit leading-inherit bg-center bg-contain
+    size-full relative m-0 p-0 inline-block border-0 bg-transparent outline-none cursor-pointer appearance-none font-inherit text-inherit leading-inherit bg-center bg-contain
     text-(--playback-control-color,var(--white80,rgba(255,255,255,0.8)))
     transition-colors duration-200 ease-out
     hover:not-disabled:text-(--playback-control-color-hover,#fff)
@@ -56,7 +56,7 @@ export default function AmpPlayPauseButton({
               name="play"
               hydrated=""
             >
-              <svg viewBox="0 0 32 28" className="w-full h-full block text-current pointer-events-none" xmlns="http://www.w3.org/2000/svg">
+              <svg viewBox="0 0 32 28" className="size-full block text-current pointer-events-none" xmlns="http://www.w3.org/2000/svg">
                 <path d={PLAY_PATH} fillRule="nonzero" fill="currentColor" />
               </svg>
             </AmpIconTag>
@@ -82,7 +82,7 @@ export default function AmpPlayPauseButton({
               name="pause"
               hydrated=""
             >
-              <svg viewBox="0 0 32 28" className="w-full h-full block text-current pointer-events-none" xmlns="http://www.w3.org/2000/svg">
+              <svg viewBox="0 0 32 28" className="size-full block text-current pointer-events-none" xmlns="http://www.w3.org/2000/svg">
                 <path d={PAUSE_PATH} fillRule="nonzero" fill="currentColor" />
               </svg>
             </AmpIconTag>
@@ -94,4 +94,6 @@ export default function AmpPlayPauseButton({
       )}
     </AmpPlaybackControlsPlayTag>
   );
-}
+});
+
+export default AmpPlayPauseButton;

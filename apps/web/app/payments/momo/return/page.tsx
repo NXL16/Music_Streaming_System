@@ -21,7 +21,6 @@ function PaymentReturnContent() {
         {/* TRẠNG THÁI ĐANG XỬ LÝ */}
         {status === "processing" && (
           <div className="space-y-4">
-            <div className="w-12 h-12 border-4 border-t-pink-500 border-neutral-700 rounded-full animate-spin mx-auto"></div>
             <h2 className="text-xl font-semibold">
               Đang xác thực giao dịch...
             </h2>
@@ -92,6 +91,13 @@ function PaymentReturnContent() {
               </div>
             </div>
 
+            <div className="text-left text-xs bg-pink-950/20 border border-pink-800/20 text-pink-400 p-4 rounded-xl space-y-1">
+              <p className="font-bold">💡 Môi trường thử nghiệm (Sandbox):</p>
+              <p>
+                Nếu ví nhạc của bạn ở thanh bên (sidebar) đã được cộng số dư thành công, điều này có nghĩa là cổng thanh toán đã gửi Webhook thành công. Bạn có thể bỏ qua thông báo lỗi chuyển hướng này của ví điện tử.
+              </p>
+            </div>
+
             <div className="flex gap-3">
               <Link
                 href="/home"
@@ -100,7 +106,7 @@ function PaymentReturnContent() {
                 Trang chủ
               </Link>
               <button
-                onClick={() => router.push("/home")} // Định tuyến về trang nạp tiền của bạn
+                onClick={() => router.push("/deposit")} // Định tuyến về trang nạp tiền của bạn
                 className="flex-1 bg-pink-600 hover:bg-pink-700 text-white font-medium py-3 rounded-xl transition-all text-sm"
               >
                 Thử nạp lại
@@ -118,7 +124,6 @@ export default function MomoReturnPage() {
     <Suspense
       fallback={
         <div className="flex items-center justify-center min-h-screen bg-neutral-950 text-neutral-100">
-          <div className="w-8 h-8 border-2 border-pink-500 border-t-transparent rounded-full animate-spin"></div>
         </div>
       }
     >

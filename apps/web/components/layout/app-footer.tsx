@@ -13,7 +13,7 @@ const legalLinks = [
 export function AppFooter() {
   return (
     <div className="contents">
-      <footer className="bg-(--footerBg) block shrink-0 font-sans text-[10px] font-normal tracking-normal leading-[1.3] min-h-36.75 py-(--footerVerticalPadding,15px) px-(--bodyGutter) z-(--z-default) min-[480px]:-ms-(--web-navigation-width) min-[480px]:ps-[calc(var(--web-navigation-width)+var(--bodyGutter))] min-[740px]:font-sans min-[740px]:text-[11px] min-[740px]:font-normal min-[740px]:tracking-normal min-[740px]:leading-[1.2727272727] min-[740px]:min-h-22 min-[740px]:pb-[calc(76px+var(--footerVerticalPadding,14px))] min-[740px]:pt-(--footerVerticalPadding,14px)">
+      <footer className="bg-(--footerBg) block shrink-0 font-sans text-[10px] font-normal tracking-normal leading-[1.3] min-h-36.75 py-(--footerVerticalPadding,15px) px-(--bodyGutter) z-(--z-default) min-[480px]:-ms-(--web-navigation-width) min-[480px]:ps-[calc(var(--web-navigation-width)+var(--bodyGutter))] min-[740px]:font-sans min-[740px]:text-[11px] min-[740px]:font-normal min-[740px]:tracking-normal min-[740px]:leading-[1.2727272727] min-[740px]:min-h-22 min-[740px]:pb-[calc(76px+var(--footerVerticalPadding,14px))] min-[740px]:pt-(--footerVerticalPadding,14px) min-[1680px]:content-start min-[1680px]:items-baseline min-[1680px]:[display:var(--footerDisplay,flex)] min-[1680px]:justify-between">
         <div className="[--linkColor:var(--systemSecondary)] font-sans order-1 min-[740px]:order-2">
           <div className="flex mb-6.25">
             <button className="link text-[hsla(0,0%,100%,.92)] inline-flex leading-none mt-1.5 align-middle whitespace-nowrap">

@@ -34,11 +34,11 @@ export default function TwoFactorLoginPage() {
             required
           />
 
-          {error ? (
+          {error && (
             <div className="mt-5 rounded-2xl bg-[#fff1f3] px-4 py-3 text-sm font-medium text-[#d91d32]">
               {error}
             </div>
-          ) : null}
+          )}
 
           <button
             disabled={loading}

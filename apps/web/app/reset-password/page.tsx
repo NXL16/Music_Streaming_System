@@ -25,13 +25,15 @@ function ResetPasswordContent() {
         description="Choose a strong password with uppercase, lowercase, number, and special character."
       >
         <form onSubmit={handleSubmit}>
-          <h2 className="text-2xl font-bold tracking-[-0.04em]">Reset password</h2>
+          <h2 className="text-2xl font-bold tracking-[-0.04em]">
+            Reset password
+          </h2>
 
-          {!token ? (
+          {!token && (
             <div className="mt-5 rounded-2xl bg-[#fff1f3] px-4 py-3 text-sm font-medium text-[#d91d32]">
               Reset token is missing or invalid.
             </div>
-          ) : null}
+          )}
 
           <label className="mt-6 block text-sm font-semibold text-[#1d1d1f]">
             New password
@@ -59,17 +61,17 @@ function ResetPasswordContent() {
             minLength={8}
           />
 
-          {error ? (
+          {error && (
             <div className="mt-5 rounded-2xl bg-[#fff1f3] px-4 py-3 text-sm font-medium text-[#d91d32]">
               {error}
             </div>
-          ) : null}
+          )}
 
-          {successMessage ? (
+          {successMessage && (
             <div className="mt-5 rounded-2xl bg-[#ecfdf3] px-4 py-3 text-sm font-medium text-[#067647]">
               {successMessage}
             </div>
-          ) : null}
+          )}
 
           <button
             disabled={loading || !token}

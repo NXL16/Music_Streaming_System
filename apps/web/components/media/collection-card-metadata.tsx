@@ -1,6 +1,7 @@
 import Link from "next/link";
-import React from "react";
+import { Fragment } from "react";
 import type { MediaCardProps } from "./media-card.types";
+import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
 
 type CollectionCardMetadataProps = Pick<
   MediaCardProps,
@@ -10,20 +11,10 @@ type CollectionCardMetadataProps = Pick<
 export default function CollectionCardMetadata(
   props: CollectionCardMetadataProps,
 ) {
-  const artists = React.useMemo(() => {
-    if (props.artists?.length) return props.artists;
-    if (!props.subtitle) return [];
-
-    return props.subtitle
-      .split(/\s*(?:,|&)\s*/)
-      .map((artist) => artist.trim())
-      .filter(Boolean)
-      .map((name) => ({
-        id: name,
-        name,
-        url: undefined,
-      }));
-  }, [props.artists, props.subtitle]);
+  const artists = useFormattedArtists({
+    artists: props.artists,
+    fallbackText: props.subtitle,
+  });
 
   return (
     <div className="mt-1">
@@ -46,7 +37,7 @@ export default function CollectionCardMetadata(
           <div className="line-clamp-(--mc-lineClamp,1) wrap-break-word overflow-hidden [--mc-overflowBleedSize:var(--overflowBleedSize,4px)] [--mc-badgeSpacing:calc(var(--mc-badgeSize)+var(--mc-overflowBleedSize))] [clip-path:inset(var(--mc-overflowBleedSize))] -mb-(--mc-overflowBleedSize) -mt-(--mc-overflowBleedSize) -me-(--mc-overflowBleedSize) -ms-(--mc-overflowBleedSize) pb-(--mc-overflowBleedSize) pe-(--mc-overflowBleedSize) pt-(--mc-overflowBleedSize) ps-(--mc-overflowBleedSize) scroll-p-(--mc-overflowBleedSize)">
             <span>
               {artists.map((artist, index) => (
-                <React.Fragment key={`${artist.id}-${index}`}>
+                <Fragment key={`${artist.id}-${index}`}>
                   {artist.url ? (
                     <Link
                       href={artist.url}
@@ -55,11 +46,11 @@ export default function CollectionCardMetadata(
                       <span>{artist.name}</span>
                     </Link>
                   ) : (
-                    <span className="hover:underline">{artist.name}</span>
+                    <span>{artist.name}</span>
                   )}
 
                   {index < artists.length - 1 && ", "}
-                </React.Fragment>
+                </Fragment>
               ))}
             </span>
           </div>

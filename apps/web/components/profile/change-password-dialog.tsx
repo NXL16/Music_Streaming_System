@@ -89,11 +89,11 @@ export function ChangePasswordDialog({
             />
           </div>
 
-          {error ? (
+          {error && (
             <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
               {error}
             </div>
-          ) : null}
+          )}
 
           <div className="flex flex-wrap justify-end gap-3">
             <button
@@ -118,4 +118,3 @@ export function ChangePasswordDialog({
     </div>
   );
 }
-

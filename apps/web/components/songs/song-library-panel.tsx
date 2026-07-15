@@ -1,9 +1,10 @@
 ﻿"use client";
 
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { SongDetailDrawer } from "@/components/songs/song-detail-drawer";
 import { useSongLibrary } from "@/lib/songs/use-song-library";
 import type { SongStatus, SongSummary } from "@/lib/songs/song.types";
+import { formatDuration } from "@/lib/format/duration";
 
 const statusLabel: Record<SongStatus, string> = {
   0: "Unknown",
@@ -20,15 +21,6 @@ const statusClass: Record<SongStatus, string> = {
   3: "bg-[#ecfdf3] text-[#067647]",
   4: "bg-[#fff1f3] text-[#d91d32]",
 };
-
-function formatDuration(seconds: number) {
-  if (!seconds) return "--:--";
-
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-
-  return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
-}
 
 function SongArtwork({ title, index }: { title: string; index: number }) {
   const gradients = [
@@ -48,7 +40,7 @@ function SongArtwork({ title, index }: { title: string; index: number }) {
   );
 }
 
-function SongRow({
+const SongRow = memo(function SongRow({
   song,
   index,
   deleting,
@@ -99,7 +91,7 @@ function SongRow({
 
       <div className="flex items-center justify-end gap-3">
         <span className="hidden text-sm font-medium text-[#86868b] sm:inline">
-          {formatDuration(song.durationSec)}
+          {formatDuration(song.durationSec, "--:--")}
         </span>
         <button
           type="button"
@@ -115,12 +107,12 @@ function SongRow({
       </div>
     </div>
   );
-}
+});
 
 function EmptyLibrary({ onUploadClick }: { onUploadClick?: () => void }) {
   return (
     <div className="px-6 py-14 text-center">
-      <div className="mx-auto flex h-28 w-28 items-center justify-center rounded-[2rem] bg-linear-to-br from-[#ff375f] via-[#ff9f0a] to-[#af52de] text-4xl font-bold text-white shadow-[0_24px_60px_rgba(250,35,59,0.2)]">
+      <div className="mx-auto flex h-28 w-28 items-center justify-center rounded-4xl bg-linear-to-br from-[#ff375f] via-[#ff9f0a] to-[#af52de] text-4xl font-bold text-white shadow-[0_24px_60px_rgba(250,35,59,0.2)]">
         MS
       </div>
       <h3 className="mt-7 text-3xl font-bold tracking-[-0.045em] text-[#1d1d1f]">
@@ -130,7 +122,7 @@ function EmptyLibrary({ onUploadClick }: { onUploadClick?: () => void }) {
         Upload your first track and it will appear here immediately, even while
         the worker is still processing it.
       </p>
-      {onUploadClick ? (
+      {onUploadClick && (
         <button
           type="button"
           onClick={onUploadClick}
@@ -138,7 +130,7 @@ function EmptyLibrary({ onUploadClick }: { onUploadClick?: () => void }) {
         >
           Upload your first song
         </button>
-      ) : null}
+      )}
     </div>
   );
 }
@@ -162,7 +154,7 @@ export function SongLibraryPanel({
     removeSong,
   } = useSongLibrary(refreshKey);
   const [selectedSongId, setSelectedSongId] = useState<string | null>(null);
-  const safeSongs = songs ?? [];
+  const safeSongs = useMemo(() => songs ?? [], [songs]);
   const readyCount = useMemo(
     () => safeSongs.filter((song) => song.status === 3).length,
     [safeSongs],
@@ -170,10 +162,10 @@ export function SongLibraryPanel({
 
   return (
     <>
-      <section className="overflow-hidden rounded-[2rem] bg-white/92 shadow-[0_18px_50px_rgba(0,0,0,0.06)] ring-1 ring-[#e5e5ea] backdrop-blur-xl">
+      <section className="overflow-hidden rounded-4xl bg-white/92 shadow-[0_18px_50px_rgba(0,0,0,0.06)] ring-1 ring-[#e5e5ea] backdrop-blur-xl">
         <div className="flex flex-col gap-4 border-b border-[#e5e5ea] px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-3xl font-bold tracking-[-0.05em] text-[#1d1d1f]">
+            <h2 className="text-3xl font-bold tracking-tighter text-[#1d1d1f]">
               Songs
             </h2>
             <p className="mt-1 text-sm text-[#6e6e73]">
@@ -191,13 +183,13 @@ export function SongLibraryPanel({
           </button>
         </div>
 
-        {error ? (
+        {error && (
           <div className="m-5 rounded-2xl bg-[#fff1f3] px-4 py-3 text-sm font-medium text-[#d91d32]">
             {error}
           </div>
-        ) : null}
+        )}
 
-        {safeSongs.length > 0 ? (
+        {safeSongs.length > 0 && (
           <div className="hidden grid-cols-[48px_1fr_180px_120px_96px] gap-4 border-b border-[#e5e5ea] px-3 py-2 text-xs font-bold uppercase tracking-[0.08em] text-[#86868b] md:grid">
             <span />
             <span>Title</span>
@@ -205,18 +197,18 @@ export function SongLibraryPanel({
             <span>Status</span>
             <span className="text-right">Time</span>
           </div>
-        ) : null}
+        )}
 
         <div className="p-2">
-          {loading && safeSongs.length === 0 ? (
+          {loading && safeSongs.length === 0 && (
             <div className="px-5 py-10 text-center text-[#6e6e73]">
               Loading your library...
             </div>
-          ) : null}
+          )}
 
-          {!loading && safeSongs.length === 0 ? (
+          {!loading && safeSongs.length === 0 && (
             <EmptyLibrary onUploadClick={onUploadClick} />
-          ) : null}
+          )}
 
           {safeSongs.map((song, index) => (
             <SongRow
@@ -230,7 +222,7 @@ export function SongLibraryPanel({
           ))}
         </div>
 
-        {hasMore ? (
+        {hasMore && (
           <div className="border-t border-[#e5e5ea] p-5">
             <button
               type="button"
@@ -241,7 +233,7 @@ export function SongLibraryPanel({
               {loadingMore ? "Loading more..." : "Load more"}
             </button>
           </div>
-        ) : null}
+        )}
       </section>
 
       <SongDetailDrawer
@@ -251,5 +243,3 @@ export function SongLibraryPanel({
     </>
   );
 }
-
-

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import QRCode from "qrcode";
 import type { UserProfile } from "@/lib/auth/auth.types";
 import { useTwoFactorSettings } from "@/lib/auth/use-two-factor-settings";
 import Image from "next/image";
@@ -75,6 +74,7 @@ function TwoFactorQrCode({ value }: { value: string }) {
     let cancelled = false;
 
     async function renderQrCode() {
+      const QRCode = await import("qrcode");
       const url = await QRCode.toDataURL(value, {
         errorCorrectionLevel: "M",
         margin: 2,
@@ -146,17 +146,17 @@ function TwoFactorDialog({
           </button>
         </div>
 
-        {twoFactor.message ? (
+        {twoFactor.message && (
           <div className="mt-5 rounded-2xl bg-green-50 px-4 py-3 text-sm text-green-700">
             {twoFactor.message}
           </div>
-        ) : null}
+        )}
 
-        {twoFactor.error ? (
+        {twoFactor.error && (
           <div className="mt-5 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
             {twoFactor.error}
           </div>
-        ) : null}
+        )}
 
         <div className="mt-6 space-y-5">
           {!enabled && twoFactor.recoveryCodes.length === 0 ? (
@@ -236,7 +236,7 @@ function TwoFactorDialog({
             </div>
           ) : (
             <div className="grid gap-5 lg:grid-cols-2">
-              {enabled ? (
+              {enabled && (
                 <>
                   <form
                     onSubmit={twoFactor.disable}
@@ -339,7 +339,7 @@ function TwoFactorDialog({
                     </button>
                   </form>
                 </>
-              ) : null}
+              )}
             </div>
           )}
 
@@ -372,13 +372,13 @@ export function TwoFactorPanel({ user }: TwoFactorPanelProps) {
         </button>
       </div>
 
-      {dialogOpen ? (
+      {dialogOpen && (
         <TwoFactorDialog
           enabled={enabled}
           onClose={() => setDialogOpen(false)}
           twoFactor={twoFactor}
         />
-      ) : null}
+      )}
     </>
   );
 }

@@ -5,6 +5,7 @@ import MediaCardShell from "./common/media-card-shell";
 import CardArtwork from "./common/card-artwork";
 import CardPlayButton from "./common/card-play-button";
 import CardContextMenu from "./common/card-context-menu";
+import { playCatalogResource } from "@/lib/catalog/play-catalog-resource";
 
 type CollectionCardProps = MediaCardProps & {
   cardType: "collection";
@@ -14,27 +15,31 @@ export default function CollectionCard(props: CollectionCardProps) {
   return (
     <MediaCardShell artworkColor={props.artworkColors.main}>
       <>
-        <div className="rounded-(--global-border-radius-medium,7px) shadow-[0_1px_1px_rgba(0,0,0,0.01),0_2px_2px_rgba(0,0,0,0.01),0_4px_4px_rgba(0,0,0,0.02),0_8px_8px_rgba(0,0,0,0.03),0_14px_14px_rgba(0,0,0,0.03)] relative z-(--z-default) after:content-[''] after:absolute after:inset-0 after:rounded-[inherit] after:bg-[#333333]/30 after:opacity-(--scrimOpacity,0) after:transition-opacity after:duration-100 after:ease-in after:z-1">
+        <div className="media-card-artwork rounded-(--global-border-radius-medium,7px) shadow-[0_1px_1px_rgba(0,0,0,0.01),0_2px_2px_rgba(0,0,0,0.01),0_4px_4px_rgba(0,0,0,0.02),0_8px_8px_rgba(0,0,0,0.03),0_14px_14px_rgba(0,0,0,0.03)] relative z-(--z-default) after:content-[''] after:absolute after:inset-0 after:rounded-[inherit] after:bg-[#333333]/30 after:opacity-(--scrimOpacity,0) after:transition-opacity after:duration-100 after:ease-in after:z-1">
           <CardArtwork
             variant="cover"
             title={props.title}
             altText={props.altText}
-            imageUrl={props.imageUrl}
             imageSrcSet={props.imageSrcSet}
             artworkColors={props.artworkColors}
           />
 
-          <div className="rounded-[inherit] h-full opacity-(--scrimOpacity,0) absolute top-0 transition-(--global-transition) w-full z-[calc(var(--z-default)+1)]">
-            {props.slug ? (
+          <div className="media-card-interaction rounded-[inherit] size-full opacity-(--scrimOpacity,0) absolute top-0 transition-(--global-transition) z-[calc(var(--z-default)+1)]">
+            {props.slug && (
               <Link
-                className="text-transparent block h-full absolute w-full z-(--z-default) wrap-break-word"
+                className="text-transparent block size-full absolute inset-0 z-(--z-default) wrap-break-word"
                 href={props.slug}
               >
                 {props.title}
               </Link>
-            ) : null}
+            )}
 
-            <CardPlayButton variant="cover" />
+            <CardPlayButton
+              variant="cover"
+              onPlay={() => {
+                void playCatalogResource(props.resourceType, props.resourceId);
+              }}
+            />
             <CardContextMenu />
           </div>
         </div>

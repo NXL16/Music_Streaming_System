@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  --apple-music-font: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --apple-music-font: var(--font-sf-pro), var(--font-sf-pro-icons), -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --default-font-family: var(--apple-music-font);
   --font-sans: var(--apple-music-font);
 }
@@ -53,9 +53,12 @@
     --systemStandardMediumMaterialSover: rgba(40, 40, 40, .6);
     --systemQuaternary: hsla(0, 0%, 100%, .1);
     --keyColor: #e24154;
+    --pageBG: #1f1f1f;
+    --footerBg: #323232;
 
     --containerInnerStroke: #fff;
     --metadata-color-override: #fff;
+    --artworkShadowInset: inset 0 0 0 1px var(--containerInnerStroke);
 
     --mobileNavigationBG: rgba(31, 31, 34, 0.8);
     --navSidebarBG: rgba(38, 38, 41, 0.82);
@@ -74,19 +77,45 @@
     --web-navigation-width: 260px;
     --z-web-chrome: 9901;
     --z-default: 1;
+    --z-gpu: 1001;
 
     --global-transition-property: opacity;
     --global-transition-duration: .1s;
     --global-transition-timing-function: ease-in;
     --global-transition: var(--global-transition-property, opacity) var(--global-transition-duration, .1s) var(--global-transition-timing-function, ease-in);
 
+    --body: 400 13px/ 1.2307692308 var(--apple-music-font);
+    --body-tall: 400 13px/ 1.3846153846 var(--apple-music-font);
     --header-emphasized: 700 34px/ 1.1764905882 var(--apple-music-font);
     --title-2-emphasized: 700 17px/ 1.2941176471 var(--apple-music-font);
+    --title-3-semibold: 600 15px/ 1.3333833333 var(--apple-music-font);
+    --title-3-tall: 400 15px/ 1.4666666667 var(--apple-music-font);
     --callout: 400 12px/ 1.25 var(--apple-music-font);
+    --callout-emphasized: 600 12px/ 1.25 var(--apple-music-font);
     --callout-medium: 500 12px/ 1.25 var(--apple-music-font);
     --body-emphasized: 600 13px/ 1.2307692308 var(--apple-music-font);
     --subhead-emphasized: 600 11px/ 1.2727272727 var(--apple-music-font);
     --subhead: 400 11px/ 1.2727272727 var(--apple-music-font);
+    --large-title-short: 400 26px/ 1.1538461538 var(--apple-music-font);
+    --large-title-semibold: 600 26px/ 1.2307692308 var(--apple-music-font);
+    --large-title-emphasized-short: 700 26px/ 1.1538461538 var(--apple-music-font);
+
+    --radiosityShadowColor: rgba(0, 0, 0, .3);
+
+    --button-pill-background-color: #fff;
+    --button-pill-color: #000;
+    --button-circle-background-color: hsla(0, 0%, 100%, .04);
+    --button-circle-border-color: hsla(0, 0%, 100%, .08);
+    --add-to-library-bg-color: hsla(0, 0%, 100%, .04);
+    --add-to-library-border-color: hsla(0, 0%, 100%, .08);
+    --addToLibraryFillOverride: hsla(0, 0%, 100%, .92);
+
+    --genericJoeColor: #323232;
+    --tracklistHoverColor: hsla(0, 0%, 100%, .06);
+    --dropdownLightGrayIcon: #999;
+    --selectionColor: #a50012;
+    --systemQuinary: hsla(0, 0%, 100%, .05);
+    --keyline-border-style: .5px solid var(--labelDivider);
   }
 }
 
@@ -100,11 +129,11 @@
 
   @keyframes marquee {
     0% {
-      transform: translateX(0);
+      transform: translate3d(0, 0, 0);
     }
 
     100% {
-      transform: translateX(calc(var(--marquee-scroll-width) * -1px));
+      transform: translate3d(calc(var(--marquee-scroll-width) * -1px), 0, 0);
     }
   }
 }
@@ -230,6 +259,37 @@
   svg {
     pointer-events: none;
   }
+
+  .link,
+  a {
+    color: var(--linkColor, inherit);
+    cursor: pointer;
+    letter-spacing: inherit;
+    text-decoration: none
+  }
+
+  .link:hover,
+  a:hover {
+    -webkit-text-decoration: var(--linkHoverTextDecoration, underline);
+    text-decoration: var(--linkHoverTextDecoration, underline)
+  }
+
+  .link:focus,
+  .link:hover,
+  a:focus,
+  a:hover {
+    color: var(--linkHoverColor, var(--linkColor, inherit))
+  }
+
+  .link:disabled,
+  a:disabled {
+    opacity: .42
+  }
+
+  ul {
+    list-style-type: none;
+  }
+
 }
 
 @media (min-width: 1000px) {
@@ -264,6 +324,10 @@ amp-contextual-menu-button {
   --progress-track-color-elapsed: var(--systemPrimary);
   --progress-track-color-elapsed-active: var(--systemPrimary);
   --progress: 0%;
+  /* The thumb is hidden, so it must not reserve horizontal space in the
+     native range control. This keeps its value mapping aligned with the
+     full-width CSS progress fill. */
+  --progress-thumb-width: 0px;
   -webkit-appearance: none;
   -moz-appearance: none;
   appearance: none;
@@ -532,6 +596,7 @@ html[dir=rtl] .chrome-volume__slider.svelte-13xdpwq.svelte-13xdpwq {
   -webkit-overflow-scrolling: touch;
   margin-bottom: calc(var(--override-shelf-overflow-bleed-bottom, var(--overflowBleedBottom, 15px)) * -1);
   margin-top: calc(var(--override-shelf-overflow-bleed-top, var(--overflowBleedTop, 15px)) * -1);
+  overflow-anchor: none;
   overscroll-behavior-x: none;
   padding-bottom: var(--override-shelf-overflow-bleed-bottom, var(--overflowBleedBottom, 15px));
   padding-top: var(--override-shelf-overflow-bleed-top, var(--overflowBleedTop, 15px));
@@ -557,9 +622,6 @@ html[dir=rtl] .chrome-volume__slider.svelte-13xdpwq.svelte-13xdpwq {
 }
 
 @media (hover:hover) and (pointer:fine) {
-  .shelf-grid__list[data-scroll-active="true"][data-draggable="true"] {
-    cursor: grab;
-  }
 
   .shelf-grid__list[data-dragging="true"],
   .shelf-grid__list[data-dragging="true"] * {
@@ -649,6 +711,22 @@ html[dir=rtl] .chrome-volume__slider.svelte-13xdpwq.svelte-13xdpwq {
 .shelf-grid__list--align-items-end.svelte-ranejh {
   --override-shelf-overflow-bleed-bottom: 35px;
   padding-top: 0
+}
+
+[data-player-drawer] {
+  will-change: transform;
+}
+
+/* Preserve card shadows while scrolling; only pause effects that require
+   backdrop compositing or transition work on each frame. */
+[data-app-scroll-container][data-performance-scrolling="true"] .media-card-interaction {
+  transition: none !important;
+}
+
+[data-app-scroll-container][data-performance-scrolling="true"] .media-card-play-button svg,
+[data-app-scroll-container][data-performance-scrolling="true"] .media-card-context-menu button {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
 }
 
 @media (min-width: 1000px) {

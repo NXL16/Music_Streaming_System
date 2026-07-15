@@ -17,9 +17,13 @@ export default function ForgotPasswordPage() {
         description="Enter your account email. If it exists, we will send a secure password reset link."
       >
         <form onSubmit={handleSubmit}>
-          <h2 className="text-2xl font-bold tracking-[-0.04em]">Forgot password</h2>
+          <h2 className="text-2xl font-bold tracking-[-0.04em]">
+            Forgot password
+          </h2>
 
-          <label className="mt-6 block text-sm font-semibold text-[#1d1d1f]">Email</label>
+          <label className="mt-6 block text-sm font-semibold text-[#1d1d1f]">
+            Email
+          </label>
           <input
             type="email"
             className="mt-2 w-full rounded-2xl bg-[#f5f5f7] px-4 py-3 outline-none ring-1 ring-[#d2d2d7] focus:ring-[#fa233b]"
@@ -28,17 +32,17 @@ export default function ForgotPasswordPage() {
             required
           />
 
-          {error ? (
+          {error && (
             <div className="mt-5 rounded-2xl bg-[#fff1f3] px-4 py-3 text-sm font-medium text-[#d91d32]">
               {error}
             </div>
-          ) : null}
+          )}
 
-          {successMessage ? (
+          {successMessage && (
             <div className="mt-5 rounded-2xl bg-[#ecfdf3] px-4 py-3 text-sm font-medium text-[#067647]">
               {successMessage}
             </div>
-          ) : null}
+          )}
 
           <button
             disabled={loading}

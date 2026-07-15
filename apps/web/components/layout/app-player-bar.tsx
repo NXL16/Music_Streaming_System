@@ -1,23 +1,249 @@
 "use client";
 
+import Link from "next/link";
+import { createPortal } from "react-dom";
 import AmpShuffleButton from "../custom-elements/AmpShuffleButton";
 import AmpRepeatButton from "../custom-elements/AmpRepeatButton";
 import AmpSkipButton from "../custom-elements/AmpSkipButton";
 import AmpPlayPauseButton from "../custom-elements/AmpPlayPauseButton";
 import Logo from "../custom-elements/Logo";
-import { useState } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import AmpLyrics from "../custom-elements/AmpLyrics";
 import ExpansionButton from "../custom-elements/ExpansionButton";
 import AmpContextMenuButton from "../custom-elements/AmpContextMenuButton";
 import AmpPlaybackControlsProgress from "../custom-elements/AmpPlaybackControlsProgress";
+import { usePlayerStore, type PlayerSong } from "@/lib/player/use-player-store";
+import { useShallow } from "zustand/react/shallow";
+import { useMsePlayback } from "@/lib/player/use-mse-playback";
+import { usePersistentVolume } from "@/lib/player/use-persistent-volume";
+import { PlayerBarMarquee } from "./player-bar-marquee";
+import { sendListeningEvent } from "@/lib/recommendations/listening-events";
+import type { MediaCardProps } from "@/components/media/media-card.types";
+import ResponsiveArtwork from "@/components/media/common/responsive-artwork";
+import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
+
+const LISTENING_QUALIFY_SECONDS = 3;
+
+function recentlyPlayedCard(song: PlayerSong): MediaCardProps {
+  if (song.sourceStation) {
+    const station = song.sourceStation;
+    return {
+      id: `stations-${station.id}`,
+      resourceId: station.id,
+      resourceType: "stations",
+      cardType: "station",
+      title: station.name,
+      subtitle: "",
+      imageUrl: station.artworkUrl,
+      imageSrcSet: station.artworkSrcSet || station.artworkUrl,
+      artworkColors: {
+        bg: station.artworkBgColor || "#2c2c2e",
+        main: station.artworkBgColor || "#2c2c2e",
+      },
+      altText: station.name,
+    };
+  }
+
+  if (song.sourcePlaylist) {
+    const playlist = song.sourcePlaylist;
+    return {
+      id: `playlists-${playlist.id}`,
+      resourceId: playlist.id,
+      resourceType: "playlists",
+      cardType: "collection",
+      title: playlist.name,
+      subtitle: "Musical",
+      imageUrl: playlist.artworkUrl,
+      imageSrcSet: playlist.artworkSrcSet || playlist.artworkUrl,
+      artworkColors: {
+        bg: playlist.artworkBgColor || "#2c2c2e",
+        main: playlist.artworkBgColor || "#2c2c2e",
+      },
+      slug: `/playlist/${encodeURIComponent(playlist.id)}`,
+      altText: playlist.name,
+    };
+  }
+
+  const resourceType = song.albumId ? "albums" : "songs";
+  const resourceId = song.albumId ?? song.id;
+
+  return {
+    id: `${resourceType}-${resourceId}`,
+    resourceId,
+    resourceType,
+    cardType: "collection",
+    title: song.albumId ? song.album || song.title : song.title,
+    subtitle: song.artist,
+    imageUrl: song.artworkUrl,
+    imageSrcSet: song.artworkSrcSet || song.artworkUrl,
+    artworkColors: {
+      bg: "#2c2c2e",
+      main: "#2c2c2e",
+    },
+    slug: song.albumUrl,
+    altText: song.albumId ? song.album || song.title : song.title,
+    artists: song.artists?.flatMap((artist) =>
+      artist.id && artist.url
+        ? [{ id: artist.id, name: artist.name, url: artist.url }]
+        : [],
+    ),
+  };
+}
 
 export function AppPlayerBar() {
-  const isPlaying = false;
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const {
+    currentSong,
+    queue,
+    playing,
+    shuffleEnabled,
+    stationMode,
+    repeatMode,
+    togglePlayback,
+    toggleShuffle,
+    cycleRepeatMode,
+    pause,
+    next,
+    previous,
+  } = usePlayerStore(
+    useShallow((state) => ({
+      currentSong: state.currentSong,
+      queue: state.queue,
+      playing: state.playing,
+      shuffleEnabled: state.shuffleEnabled,
+      stationMode: state.stationMode,
+      repeatMode: state.repeatMode,
+      togglePlayback: state.togglePlayback,
+      toggleShuffle: state.toggleShuffle,
+      cycleRepeatMode: state.cycleRepeatMode,
+      pause: state.pause,
+      next: state.next,
+      previous: state.previous,
+    })),
+  );
+  const { isMseActive } = useMsePlayback(audioRef);
+  const isPlaying = Boolean(currentSong && playing);
+  const currentArtworkSrcSet =
+    currentSong?.thumbnailArtworkSrcSet ?? currentSong?.artworkSrcSet;
+  const playableSongCount = useMemo(
+    () => queue.filter((song) => song.playbackUrl).length,
+    [queue],
+  );
+  const currentArtists = useFormattedArtists({
+    artists: currentSong?.artists,
+    fallbackText: currentSong?.artist,
+  });
 
   const [isExpanded, setIsExpanded] = useState(false);
   const [isProgressExpanded, setIsProgressExpanded] = useState(false);
-  const [volume, setVolume] = useState(0.72);
-  const [prevVolume, setPrevVolume] = useState(volume);
+  const [isSecondaryMarqueeActive, setIsSecondaryMarqueeActive] =
+    useState(false);
+  const { volume, lastAudibleVolume, setVolume } = usePersistentVolume();
+  const trackedSongRef = useRef<string | null>(null);
+
+  const emitEvent = useCallback(
+    (
+      song: PlayerSong,
+      eventType: "PLAY_START" | "PLAY_COMPLETE" | "SKIP",
+      elapsed?: number,
+    ) => {
+      void sendListeningEvent({
+        songId: song.id,
+        eventType,
+        durationSec: elapsed ?? 0,
+        totalSec: song.durationSec ?? 0,
+        songTitle: song.title,
+        artistName: song.artist,
+        albumName: song.album,
+        albumId: song.albumId,
+        playlistId: song.sourcePlaylist?.id,
+        playlistName: song.sourcePlaylist?.name,
+        playlistArtworkUrl: song.sourcePlaylist?.artworkUrl,
+        playlistArtworkBgColor: song.sourcePlaylist?.artworkBgColor,
+        stationId: song.sourceStation?.id,
+        stationName: song.sourceStation?.name,
+        stationArtworkUrl: song.sourceStation?.artworkUrl,
+        stationArtworkBgColor: song.sourceStation?.artworkBgColor,
+        recentlyPlayedItem:
+          eventType === "PLAY_START" ? recentlyPlayedCard(song) : undefined,
+      });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    trackedSongRef.current = null;
+  }, [currentSong?.id]);
+
+  const markQualifiedPlay = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio || !currentSong || !playing) return;
+    if (trackedSongRef.current === currentSong.id) return;
+    if (audio.currentTime < LISTENING_QUALIFY_SECONDS) return;
+
+    trackedSongRef.current = currentSong.id;
+    emitEvent(currentSong, "PLAY_START", audio.currentTime);
+  }, [currentSong, emitEvent, playing]);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = volume;
+    }
+  }, [volume]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || isMseActive) return;
+
+    if (!currentSong?.playbackUrl || !playing) {
+      audio.pause();
+      return;
+    }
+
+    void audio.play().catch(() => {
+      pause();
+    });
+  }, [currentSong?.id, currentSong?.playbackUrl, pause, playing, isMseActive]);
+
+  const handleEnded = () => {
+    const audio = audioRef.current;
+    if (currentSong) {
+      markQualifiedPlay();
+      if (trackedSongRef.current === currentSong.id) {
+        emitEvent(currentSong, "PLAY_COMPLETE", audio?.currentTime);
+      }
+      trackedSongRef.current = null;
+    }
+    if (
+      audio &&
+      (repeatMode === 1 || (repeatMode === 2 && playableSongCount === 1))
+    ) {
+      audio.currentTime = 0;
+      void audio.play().catch(pause);
+      return;
+    }
+    next(true);
+  };
+
+  const handleNext = () => {
+    if (currentSong) {
+      if (trackedSongRef.current === currentSong.id) {
+        emitEvent(currentSong, "SKIP", audioRef.current?.currentTime);
+      }
+      trackedSongRef.current = null;
+    }
+    next();
+  };
+
+  const handlePrevious = () => {
+    if (currentSong) {
+      if (trackedSongRef.current === currentSong.id) {
+        emitEvent(currentSong, "SKIP", audioRef.current?.currentTime);
+      }
+      trackedSongRef.current = null;
+    }
+    previous();
+  };
 
   const toggleMute = () => {
     if (!isExpanded) {
@@ -26,10 +252,9 @@ export function AppPlayerBar() {
     }
 
     if (volume > 0) {
-      setPrevVolume(volume);
       setVolume(0);
     } else {
-      setVolume(prevVolume);
+      setVolume(lastAudibleVolume);
     }
   };
 
@@ -37,97 +262,163 @@ export function AppPlayerBar() {
   const [lyricsMounted, setLyricsMounted] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
   const [queueMounted, setQueueMounted] = useState(false);
+  const lyricsUnmountTimerRef = useRef<
+    ReturnType<typeof setTimeout> | undefined
+  >(undefined);
+  const queueUnmountTimerRef = useRef<
+    ReturnType<typeof setTimeout> | undefined
+  >(undefined);
+  const setDrawerOpen = usePlayerStore((state) => state.setDrawerOpen);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  useEffect(
+    () => () => {
+      if (lyricsUnmountTimerRef.current) {
+        clearTimeout(lyricsUnmountTimerRef.current);
+      }
+      if (queueUnmountTimerRef.current) {
+        clearTimeout(queueUnmountTimerRef.current);
+      }
+      setDrawerOpen(false);
+    },
+    [setDrawerOpen],
+  );
+
+  const unmountLyricsAfterTransition = () => {
+    if (lyricsUnmountTimerRef.current) {
+      clearTimeout(lyricsUnmountTimerRef.current);
+    }
+    lyricsUnmountTimerRef.current = setTimeout(() => {
+      setLyricsMounted(false);
+      lyricsUnmountTimerRef.current = undefined;
+    }, 300);
+  };
+
+  const unmountQueueAfterTransition = () => {
+    if (queueUnmountTimerRef.current) {
+      clearTimeout(queueUnmountTimerRef.current);
+    }
+    queueUnmountTimerRef.current = setTimeout(() => {
+      setQueueMounted(false);
+      queueUnmountTimerRef.current = undefined;
+    }, 300);
+  };
 
   const toggleLyrics = () => {
     if (!showLyrics) {
       setIsSidebarOpen(true);
+      setDrawerOpen(true);
       setLyricsMounted(true);
-      setQueueMounted(true);
+      if (lyricsUnmountTimerRef.current) {
+        clearTimeout(lyricsUnmountTimerRef.current);
+      }
 
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           setShowLyrics(true);
           setShowQueue(false);
+          if (queueMounted) unmountQueueAfterTransition();
         });
       });
     } else {
       setIsSidebarOpen(false);
+      setDrawerOpen(false);
       setShowLyrics(false);
-      setTimeout(() => {
-        setLyricsMounted(false);
-        setQueueMounted(false);
-      }, 300);
+      unmountLyricsAfterTransition();
     }
   };
 
   const toggleQueue = () => {
     if (!showQueue) {
       setIsSidebarOpen(true);
-      setLyricsMounted(true);
+      setDrawerOpen(true);
       setQueueMounted(true);
+      if (queueUnmountTimerRef.current) {
+        clearTimeout(queueUnmountTimerRef.current);
+      }
 
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           setShowQueue(true);
           setShowLyrics(false);
+          if (lyricsMounted) unmountLyricsAfterTransition();
         });
       });
     } else {
       setIsSidebarOpen(false);
+      setDrawerOpen(false);
       setShowQueue(false);
-      setTimeout(() => {
-        setLyricsMounted(false);
-        setQueueMounted(false);
-      }, 300);
+      unmountQueueAfterTransition();
     }
   };
 
   return (
     <div
-      className={`min-[484px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)] min-[484px]:[grid-area:structure-main-section] sticky self-end mb-5 px-5 top-auto bottom-auto h-13.5 w-[calc(100vw-var(--web-navigation-width))] z-[calc(var(--z-web-chrome)-1)] inset-e-0 ${isSidebarOpen ? "pe-80" : ""}`}
+      className="min-[484px]:[grid-area:structure-main-section] sticky self-end mb-5 px-5 top-auto bottom-auto h-13.5 w-[calc(100vw-var(--web-navigation-width))] z-[calc(var(--z-web-chrome)-1)] inset-e-0"
+      style={{
+        transform: isSidebarOpen
+          ? "translate3d(-10rem, 0, 0)"
+          : "translate3d(0, 0, 0)",
+        transition: "transform .3s cubic-bezier(.215,.61,.355,1)",
+        willChange: "transform",
+      }}
     >
+      <audio
+        ref={audioRef}
+        src={isMseActive ? undefined : currentSong?.playbackUrl || undefined}
+        preload="metadata"
+        onEnded={handleEnded}
+        onError={pause}
+        onTimeUpdate={markQualifiedPlay}
+      />
       <div className="block">
         <div className="mx-auto relative grid grid-cols-[auto_1fr_auto] place-items-center max-w-167 h-14 px-4 rounded-[1000px] before:content-[''] before:absolute before:inset-0 before:z-(--z-default) before:rounded-[1000px] before:backdrop-saturate-220 before:backdrop-blur-lg before:bg-(--glassMaterialBackground) before:shadow-[0_10px_40px_var(--glassMaterialShadowColor)] after:content-[''] after:block after:h-0 after:min-w-full after:min-h-full after:max-w-full after:max-h-full after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)] after:rounded-[1000px] after:shadow-[inset_.5px_.5px_var(--glassMaterialInnerStroke),inset_.5px_-.5px_var(--glassMaterialInnerStroke),inset_-.5px_.5px_var(--glassMaterialInnerStroke),inset_-.5px_-.5px_var(--glassMaterialInnerStroke)] after:opacity-10 dark:after:opacity-25">
           <div className="z-[calc(var(--z-default)+1)]">
             <div className="flex gap-2 [--playback-control-button-width:24px] [--playback-control-button-height:24px] [--playback-control-icon-width:30px] [--playback-controls-play-color:var(--systemPrimary)] [--shuffle-repeat-button-width:24px] [--shuffle-repeat-button-height:24px] [--skip-control-color:var(--systemPrimary)] [--skip-icon-width:28px]">
-              <AmpShuffleButton />
+              <AmpShuffleButton
+                shuffled={shuffleEnabled && !stationMode}
+                disabled={playableSongCount < 2 || stationMode}
+                onToggle={toggleShuffle}
+              />
 
               <div className="flex gap-2 [--playback-control-icon-width:34px] [--playback-control-icon-height:34px] [--playback-controls-play-color:var(--systemPrimary)]">
                 <AmpSkipButton
                   direction="previous"
-                  // onClick={handlePrev}
-                  // disabled={isFirstSong}
-                  disabled={true}
+                  onClick={handlePrevious}
+                  disabled={!currentSong}
                 />
 
                 <AmpPlayPauseButton
                   mode={!isPlaying ? "play" : "pause"}
-                  disabled={isPlaying ? false : true}
+                  onClick={togglePlayback}
+                  disabled={!currentSong?.playbackUrl}
                 />
 
                 <AmpSkipButton
                   direction="next"
-                  // onClick={handleNext}
-                  // disabled={isLastSong}
-                  disabled={true}
+                  onClick={handleNext}
+                  disabled={!currentSong}
                 />
               </div>
 
-              <AmpRepeatButton />
+              <AmpRepeatButton
+                mode={stationMode ? 0 : repeatMode}
+                disabled={!currentSong || stationMode}
+                onCycle={cycleRepeatMode}
+              />
             </div>
           </div>
 
           <div className="z-[calc(var(--z-default)+1)] [--lcd-marquee-offset:0px] [--marquee-line-padding:28px] px-4 justify-self-stretch self-center">
             <div slot="lcd">
               <div
-                className={`grid [grid-template-areas:'artwork_metadata_after-metadata''progress_progress_progress'] grid-rows-[34px_auto] h-14 place-content-center relative z-(--z-default) ${!isPlaying ? "text-(--systemTertiary) gap-0 grid-cols-1 pt-0 place-items-center" : "gap-x-2 grid-cols-[auto_minmax(0,1fr)_auto] pt-2"}`}
+                className={`grid [grid-template-areas:'artwork_metadata_after-metadata''progress_progress_progress'] grid-rows-[34px_auto] h-14 place-content-center relative z-(--z-default) ${!currentSong ? "text-(--systemTertiary) gap-0 grid-cols-1 pt-0 place-items-center" : "gap-x-2 grid-cols-[auto_minmax(0,1fr)_auto] pt-2"}`}
               >
-                {isPlaying ? (
+                {currentSong ? (
                   <>
                     <div
-                      className={`[--artworkShadowInset:inset_0_0_0_1px_var(--containerInnerStroke)] aspect-square rounded-md [grid-area:artwork] scale-100 transition-transform duration-150 ease-out hover:scale-110 ${isProgressExpanded ? "opacity-50" : ""}`}
+                      className={`aspect-square rounded-md [grid-area:artwork] scale-100 transition-transform duration-150 ease-out hover:scale-110 ${isProgressExpanded ? "opacity-50" : ""}`}
                     >
                       <div
                         className="bg-(--override-placeholder-bg-color,var(--placeholder-bg-color,var(--genericJoeColor))) rounded-[inherit] box-border contain-content h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0px) min-w-(--artwork-override-min-width,0px) overflow-hidden relative w-(--artwork-override-width,100%) z-(--z-default) after:content-[''] after:block after:absolute after:top-0 after:w-full after:h-0 after:min-h-full after:min-w-full after:max-h-full after:max-w-full after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:opacity-(--containerInnerStrokeAlpha,0.25) after:pointer-events-none after:z-[calc(var(--z-default)+1)]"
@@ -138,25 +429,18 @@ export function AppPlayerBar() {
                           } as React.CSSProperties
                         }
                       >
-                        <picture>
-                          <source
-                            sizes="40px"
-                            srcSet="https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/11/ae/f2/11aef294-f57c-bab9-c9fc-529162984e62/24UMGIM85348.rgb.jpg/40x40bb-60.jpg 40w, https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/11/ae/f2/11aef294-f57c-bab9-c9fc-529162984e62/24UMGIM85348.rgb.jpg/80x80bb-60.jpg 80w"
-                            type="image/jpeg"
-                          />
-                          <img
-                            className="block h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0px) min-w-(--artwork-override-min-width,0px) [object-fit:var(--artwork-override-object-fit,fill)] object-(--artwork-override-object-position,center) w-(--artwork-override-width,100%) rounded-[inherit] transition-(--global-transition,opacity_.1s_ease-in)"
-                            loading="lazy"
-                            src="/assets/artwork/1x1.gif"
-                            role="presentation"
-                            decoding="async"
-                            width={40}
-                            height={40}
-                            fetchPriority="auto"
-                            style={{ opacity: 1 }}
-                            alt=""
-                          />
-                        </picture>
+                        <ResponsiveArtwork
+                          alt=""
+                          className="block h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0px) min-w-(--artwork-override-min-width,0px) [object-fit:var(--artwork-override-object-fit,fill)] object-(--artwork-override-object-position,center) w-(--artwork-override-width,100%) rounded-[inherit] transition-(--global-transition,opacity_.1s_ease-in)"
+                          height={40}
+                          pictureClassName="block size-full"
+                          role="presentation"
+                          sizes="40px"
+                          src="/assets/artwork/1x1.gif"
+                          srcSet={currentArtworkSrcSet}
+                          style={{ opacity: 1 }}
+                          width={40}
+                        />
                       </div>
 
                       <button className="bg-[rgba(51,51,51,0.3)] rounded-[inherit] text-white grid inset-0 opacity-0 place-items-center absolute transition-opacity duration-150 ease-out z-(--z-default) hover:opacity-100">
@@ -174,17 +458,17 @@ export function AppPlayerBar() {
                               <div>
                                 <div className="items-center flex flex-row justify-[var(--lcd-justify-text,center)] overflow-clip relative [text-align:var(--lcd-justify-text,center)] [text-overflow:none] whitespace-nowrap w-full">
                                   <div className="w-auto min-w-0 relative pe-0">
-                                    <div className="h-3.75 w-full">
-                                      <div className="[--marquee-scroll-width:calc((var(--marquee-text-content-width)+var(--marquee-line-padding,8px))/1)] grid grid-cols-[auto_1fr] h-3.75">
-                                        <div>
-                                          <span className="flex items-center gap-[0.333em]">
-                                            <span className="no-underline text-inherit">
-                                              Die With A Smile
-                                            </span>
-                                          </span>
-                                        </div>
-                                      </div>
-                                    </div>
+                                    <PlayerBarMarquee
+                                      key={`title-${currentSong.id}`}
+                                      className="h-3.75 w-full"
+                                      isPlaybackActive={isPlaying}
+                                    >
+                                      <span className="flex items-center gap-[0.333em]">
+                                        <span className="no-underline text-inherit">
+                                          {currentSong.title}
+                                        </span>
+                                      </span>
+                                    </PlayerBarMarquee>
 
                                     <div className="absolute max-h-4 top-[-1.21px] ml-1 inset-s-[calc(100%+4px)]">
                                       <div className="-ms-1 relative z-[calc(var(--z-default)+1)] opacity-0 group-hover/metadata:opacity-100 transition-opacity duration-120">
@@ -212,71 +496,63 @@ export function AppPlayerBar() {
 
                           <div className="min-h-3.25 relative transition-colors duration-100 ease-in w-(--lcd-secondary-width,100%) text-(--lcd-secondary-text-color,var(--systemSecondary)) [font:var(--callout-medium)] mt-0.5">
                             <div className="h-5.25 absolute -top-1.25 w-full">
-                              <div className="flex flex-row items-center justify-end box-border overflow-clip relative text-center whitespace-nowrap w-full grow shrink pe-1">
+                              <div
+                                className={`flex flex-row items-center ${isSecondaryMarqueeActive ? "justify-end" : "[justify-content:var(--lcd-justify-text,center)]"} box-border overflow-clip relative [text-align:var(--lcd-justify-text,center)] whitespace-nowrap w-full grow shrink ${isSecondaryMarqueeActive ? "pe-1" : ""}`}
+                              >
                                 <div className="min-w-0 w-auto p-(--lcd-line-padding,0_10px)">
                                   <div className="w-full box-border h-5.25 pt-0.75 pb-0.5 [mask:var(--secondary-mask-hover,var(--stopped-marquee-mask,linear-gradient(270deg,transparent_var(--lcd-marquee-offset,35px),#000_calc(var(--lcd-marquee-offset,35px)+15px))))]">
-                                    <div
-                                      className="grid grid-cols-[auto_1fr] h-3.75 z-(--z-default) [--marquee-scroll-width:calc((var(--marquee-text-content-width)+var(--marquee-line-padding,8px))/1px)] animate-marquee"
-                                      style={
-                                        {
-                                          "--marquee-text-content-width":
-                                            "297.8587951660156px",
-                                        } as React.CSSProperties
+                                    <PlayerBarMarquee
+                                      key={`metadata-${currentSong.id}`}
+                                      className="h-3.75 w-full"
+                                      isPlaybackActive={isPlaying}
+                                      onOverflowChange={
+                                        setIsSecondaryMarqueeActive
                                       }
                                     >
-                                      <div className="pe-(--marquee-line-padding,8px)">
-                                        <span className="flex items-center gap-[.333em]">
-                                          <span className="text-inherit no-underline">
-                                            <button className="hover:text-(--keyColor) hover:underline">
-                                              Lady Gaga
-                                            </button>
-                                            {", "}
-                                          </span>
-
-                                          <span className="text-inherit no-underline">
-                                            <button className="hover:text-(--keyColor) hover:underline">
-                                              Bruno Mars
-                                            </button>
-                                          </span>
-
-                                          <span className="text-inherit no-underline">
-                                            —
-                                          </span>
-
-                                          <span className="text-inherit no-underline">
-                                            <button className="hover:text-(--keyColor) hover:underline">
-                                              Die With A Smile - Single
-                                            </button>
-                                          </span>
+                                      <span className="flex items-center gap-[.333em]">
+                                        <span className="text-inherit no-underline">
+                                          {currentArtists.map(
+                                            (artist, index) => (
+                                              <span
+                                                key={
+                                                  artist.id ??
+                                                  `${artist.name}-${index}`
+                                                }
+                                              >
+                                                {artist.url ? (
+                                                  <Link
+                                                    href={artist.url}
+                                                    className="hover:text-(--keyColor) hover:underline"
+                                                  >
+                                                    {artist.name}
+                                                  </Link>
+                                                ) : (
+                                                  <span>{artist.name}</span>
+                                                )}
+                                                {index <
+                                                  currentArtists.length - 1 &&
+                                                  ", "}
+                                              </span>
+                                            ),
+                                          )}
                                         </span>
-                                      </div>
-                                      <div className="pe-(--marquee-line-padding,8px)">
-                                        <span className="flex items-center gap-[.333em]">
-                                          <span className="text-inherit no-underline">
-                                            <button className="hover:text-(--keyColor) hover:underline">
-                                              Lady Gaga
-                                            </button>
-                                            {", "}
-                                          </span>
-
-                                          <span className="text-inherit no-underline">
-                                            <button className="hover:text-(--keyColor) hover:underline">
-                                              Bruno Mars
-                                            </button>
-                                          </span>
-
-                                          <span className="text-inherit no-underline">
-                                            —
-                                          </span>
-
-                                          <span className="text-inherit no-underline">
-                                            <button className="hover:text-(--keyColor) hover:underline">
-                                              Die With A Smile - Single
-                                            </button>
-                                          </span>
+                                        <span className="text-inherit no-underline">
+                                          —
                                         </span>
-                                      </div>
-                                    </div>
+                                        <span className="text-inherit no-underline">
+                                          {currentSong.albumUrl ? (
+                                            <Link
+                                              href={currentSong.albumUrl}
+                                              className="hover:text-(--keyColor) hover:underline"
+                                            >
+                                              {currentSong.album}
+                                            </Link>
+                                          ) : (
+                                            <span>{currentSong.album}</span>
+                                          )}
+                                        </span>
+                                      </span>
+                                    </PlayerBarMarquee>
                                   </div>
                                   <div className="absolute top-0 max-h-4 inset-e-(--menu-position-shift,26px)"></div>
                                 </div>
@@ -304,6 +580,7 @@ export function AppPlayerBar() {
                         className={`relative before:content-[''] before:pointer-events-none before:transition-opacity before:duration-260 ${isProgressExpanded ? "before:opacity-100 before:absolute before:h-14 before:-bottom-1.75 before:-inset-x-2 before:backdrop-blur-xs" : "before:opacity-0"}`}
                       >
                         <AmpPlaybackControlsProgress
+                          audioRef={audioRef}
                           isProgressExpanded={isProgressExpanded}
                         />
                       </div>
@@ -341,8 +618,10 @@ export function AppPlayerBar() {
                   </button>
                 </div>
 
-                {lyricsMounted && (
-                  <div
+                {lyricsMounted &&
+                  createPortal(
+                    <div
+                    data-player-drawer
                     className={`min-[1000px]:backdrop-saturate-220 min-[1000px]:backdrop-blur-lg min-[1000px]:bg-(--glassMaterialBackground) min-[1000px]:shadow-[0_10px_40px_var(--glassMaterialShadowColor)] min-[1000px]:h-screen min-[1000px]:overflow-y-hidden min-[1000px]:top-0 border-s-[0.5px] border-s-(--systemQuaternary) bottom-0 inset-e-0 overflow-x-hidden fixed scroll-pt-14.5 top-13.5 w-75 z-[calc(var(--z-web-chrome)+1)] [--side-panel-horizontal-padding:20px] transition-transform duration-300 ease-[cubic-bezier(.215,.61,.355,1)] ${showLyrics ? "translate-x-0" : "translate-x-full"}`}
                   >
                     <div className="h-[calc(100dvh-58px)] overflow-y-auto">
@@ -364,8 +643,9 @@ export function AppPlayerBar() {
                         <AmpLyrics />
                       </div>
                     </div>
-                  </div>
-                )}
+                    </div>,
+                    document.body,
+                  )}
 
                 <button
                   onClick={toggleQueue}
@@ -382,14 +662,16 @@ export function AppPlayerBar() {
                   </svg>
                 </button>
 
-                {queueMounted && (
-                  <div
-                    className={`min-[1000px]:[backdrop-filter:saturate(220%)_blur(16px)] min-[1000px]:bg-(--glassMaterialBackground) min-[1000px]:shadow-[0_10px_40px_var(--glassMaterialShadowColor)] min-[1000px]:h-screen min-[1000px]:overflow-y-hidden min-[1000px]:top-0 border-s-[0.5px] border-s-(--systemQuaternary) bottom-0 inset-e-0 overflow-x-hidden fixed scroll-pt-14.5 top-13.5 w-75 z-[calc(var(--z-web-chrome)+1)] [--side-panel-horizontal-padding:20px] transition-transform duration-300 ease-[cubic-bezier(.215,.61,.355,1)] ${showQueue ? "translate-x-0" : "translate-x-full"}`}
+                {queueMounted &&
+                  createPortal(
+                    <div
+                    data-player-drawer
+                    className={`[--side-panel-horizontal-padding:20px] min-[1000px]:[backdrop-filter:saturate(220%)_blur(16px)] min-[1000px]:bg-(--glassMaterialBackground) min-[1000px]:shadow-[0_10px_40px_var(--glassMaterialShadowColor)] min-[1000px]:h-screen min-[1000px]:overflow-y-hidden min-[1000px]:top-0 border-s-[0.5px] border-s-(--systemQuaternary) bottom-0 inset-e-0 overflow-x-hidden fixed scroll-pt-14.5 top-13.5 w-75 z-[calc(var(--z-web-chrome)+1)] transition-transform duration-300 ease-[cubic-bezier(.215,.61,.355,1)] ${showQueue ? "translate-x-0" : "translate-x-full"}`}
                   >
                     <div className="[backdrop-filter:none] bg-transparent flex flex-col pb-3 pe-5 pt-5.75 ps-5 sticky top-0 z-[calc(var(--z-default)+6)]">
                       <div className="flex justify-between text-(--systemPrimary)">
                         <h3 className="pe-2.5 [font:var(--title-2-emphasized)]">
-                          Up Next
+                          Up next
                         </h3>
                         <div className="flex items-center">
                           <div className="pe-2.5">{/* something */}</div>
@@ -397,16 +679,21 @@ export function AppPlayerBar() {
                       </div>
                     </div>
 
-                    <div className="z-[calc(var(--z-default)+4)] absolute inset-0 flex items-center justify-center h-full w-full m-auto text-center [font:var(--callout)]">
+                    <div className="z-[calc(var(--z-default)+4)] absolute inset-0 flex items-center justify-center size-full m-auto text-center [font:var(--callout)]">
                       <div
                         slot="empty"
-                        className="flex items-center justify-center h-full w-full text-center px-(--side-panel-horizontal-padding,0px)"
+                        className="flex items-center justify-center size-full text-center px-(--side-panel-horizontal-padding,0px)"
                       >
-                        No upcoming songs.
+                        {stationMode
+                          ? "1 song up next"
+                          : queue.length > 0
+                            ? `${queue.length} songs queued.`
+                            : "No upcoming songs"}
                       </div>
                     </div>
-                  </div>
-                )}
+                    </div>,
+                    document.body,
+                  )}
 
                 <div
                   onMouseLeave={() => setIsExpanded(false)}

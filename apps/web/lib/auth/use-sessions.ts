@@ -82,7 +82,7 @@ export function useSessions() {
       return;
     }
 
-    void loadSessions();
+    queueMicrotask(() => void loadSessions());
   }, [status]);
 
   return {

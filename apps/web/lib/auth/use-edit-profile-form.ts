@@ -30,11 +30,13 @@ export function useEditProfileForm(onSaved?: () => void) {
       return;
     }
 
-    setForm({
-      displayName: user.displayName,
-      avatar: user.avatar ?? "",
-      bio: user.bio ?? "",
-    });
+    queueMicrotask(() =>
+      setForm({
+        displayName: user.displayName,
+        avatar: user.avatar ?? "",
+        bio: user.bio ?? "",
+      }),
+    );
   }, [user]);
 
   function updateField<TField extends keyof EditProfileForm>(

@@ -63,18 +63,18 @@ export function SessionsPanel({ className = "mt-6" }: SessionsPanelProps) {
         </div>
       </div>
 
-      {error ? (
+      {error && (
         <div className="mt-5 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
-      ) : null}
+      )}
 
       <div className="mt-6 space-y-4">
-        {sessions.length === 0 && !loading ? (
+        {sessions.length === 0 && !loading && (
           <div className="rounded-3xl border border-[#e5e5ea] bg-[#f5f5f7] px-5 py-4 text-sm font-semibold text-[#6e6e73]">
             Chưa có phiên đăng nhập nào.
           </div>
-        ) : null}
+        )}
 
         {sessions.map((session) => (
           <div
@@ -88,11 +88,11 @@ export function SessionsPanel({ className = "mt-6" }: SessionsPanelProps) {
                     {shortDeviceId(session.deviceId)}
                   </p>
 
-                  {session.isCurrent ? (
+                  {session.isCurrent && (
                     <span className="rounded-full bg-[#1d1d1f] px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-white">
                       Current
                     </span>
-                  ) : null}
+                  )}
                 </div>
 
                 <p className="mt-2 wrap-break-word text-sm font-semibold text-[#6e6e73]">
@@ -132,6 +132,3 @@ export function SessionsPanel({ className = "mt-6" }: SessionsPanelProps) {
     </section>
   );
 }
-
-
-
