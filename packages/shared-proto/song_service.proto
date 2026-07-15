@@ -37,6 +37,9 @@ service SongService {
   rpc GetCatalogPlaylist(GetCatalogPlaylistRequest) returns (CatalogResponse);
   rpc GetCatalogPlaylistTracks(GetCatalogPlaylistRequest) returns (CatalogResponse);
   rpc GetCatalogResources(GetCatalogResourcesRequest) returns (CatalogResponse);
+  rpc GetCatalogArtistAlbums(GetCatalogArtistAlbumsRequest) returns (CatalogResponse);
+  rpc GetCatalogArtistSongs(GetCatalogArtistSongsRequest) returns (GetCatalogArtistSongsResponse);
+  rpc BrowseCatalog(BrowseCatalogRequest) returns (BrowseCatalogResponse);
 
   // Internal catalog authoring. Drafts never affect public catalog reads until
   // they are published atomically into the relational catalog tables.
@@ -300,6 +303,23 @@ message GetCatalogPlaylistRequest {
   string playlist_id = 2;
 }
 
+message GetCatalogArtistAlbumsRequest {
+  string storefront = 1;
+  string artist_id = 2;
+}
+
+message GetCatalogArtistSongsRequest {
+  string storefront = 1;
+  string artist_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+}
+
+message GetCatalogArtistSongsResponse {
+  CatalogResponse catalog = 1;
+  string next_cursor = 2;
+}
+
 message CatalogResourceIdentifier {
   string type = 1;
   string id = 2;
@@ -332,6 +352,8 @@ message SaveCatalogArtistDraftRequest {
   CatalogArtwork artwork = 6 [deprecated = true];
   repeated string genre_names = 7;
   string artwork_asset_id = 8;
+  string editorial_video_asset_id = 9;
+  google.protobuf.Struct editorial_video = 10;
 }
 
 message SaveCatalogSongDraftRequest {
@@ -538,6 +560,8 @@ message CatalogArtistAttributes {
   CatalogArtwork artwork = 3;
   repeated string genre_names = 4;
   string artwork_asset_id = 5;
+  string editorial_video_asset_id = 6;
+  google.protobuf.Struct editorial_video = 7;
 }
 
 message CatalogSongAttributes {
@@ -665,4 +689,19 @@ message CatalogResources {
 message CatalogResponse {
   repeated CatalogReference data = 1;
   CatalogResources resources = 2;
+}
+
+message BrowseCatalogResponse {
+  repeated CatalogReference data = 1;
+  CatalogResources resources = 2;
+  string next_cursor = 3;
+  bool has_more = 4;
+}
+
+message BrowseCatalogRequest {
+  string storefront = 1;
+  string resource_type = 2;
+  int32 limit = 3;
+  string sort = 4;
+  string cursor = 5;
 }

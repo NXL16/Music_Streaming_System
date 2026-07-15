@@ -13,6 +13,8 @@ service RecommendationService {
   rpc ReplaceHomeRecommendations(ReplaceHomeRecommendationsRequest) returns (GetHomeRecommendationsResponse);
   rpc PublishRecommendationPage(PublishRecommendationPageRequest) returns (GetHomeRecommendationsResponse);
   rpc GetRecommendationPageForAdmin(GetRecommendationPageForAdminRequest) returns (GetHomeRecommendationsResponse);
+  rpc RecordListeningEvent(RecordListeningEventRequest) returns (RecordListeningEventResponse);
+  rpc GenerateRecommendations(GenerateRecommendationsRequest) returns (GetHomeRecommendationsResponse);
 }
 
 enum RecommendationPageScope {
@@ -167,4 +169,45 @@ message GetHomeRecommendationsResponse {
   repeated RecommendationRef data      = 1;
   RecommendationResources    resources = 2;
   RecommendationMeta         meta      = 3;
+}
+
+enum ListeningEventType {
+  LISTENING_EVENT_TYPE_UNSPECIFIED    = 0;
+  LISTENING_EVENT_TYPE_PLAY_START    = 1;
+  LISTENING_EVENT_TYPE_PLAY_COMPLETE = 2;
+  LISTENING_EVENT_TYPE_SKIP          = 3;
+}
+
+message RecordListeningEventRequest {
+  string             user_id      = 1;
+  string             song_id      = 2;
+  ListeningEventType event_type   = 3;
+  int32              duration_sec = 4;
+  int32              total_sec    = 5;
+  string             song_title   = 6;
+  string             artist_name  = 7;
+  string             album_name   = 8;
+  string             album_id     = 9;
+  string             playlist_id  = 10;
+  string             playlist_name = 11;
+  string             playlist_artwork_url = 12;
+  string             playlist_artwork_bg_color = 13;
+  string             station_id = 14;
+  string             station_name = 15;
+  string             station_artwork_url = 16;
+  string             station_artwork_bg_color = 17;
+}
+
+message RecordListeningEventResponse {
+  bool success = 1;
+}
+
+message GenerateRecommendationsRequest {
+  string                  user_id       = 1;
+  RecommendationPageScope scope         = 2;
+  string                  actor_user_id = 3;
+  string                  name          = 4;
+  string                  locale        = 5;
+  string                  timezone      = 6;
+  string                  platform      = 7;
 }
