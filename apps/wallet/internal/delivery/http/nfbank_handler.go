@@ -70,7 +70,7 @@ func (h *NFBankHandler) HandleWebhook(c *gin.Context) {
 	expectedSignature := hex.EncodeToString(mac.Sum(nil))
 
 	// 4. So khớp chữ ký chống giả mạo dữ liệu dòng tiền
-	if payload.Signature != expectedSignature {
+	if !hmac.Equal([]byte(payload.Signature), []byte(expectedSignature)) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Chữ ký xác thực không khớp!"})
 		return
 	}

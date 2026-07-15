@@ -21,17 +21,19 @@ import (
 // WalletService hiện thực hóa gRPC Server interface được sinh ra từ file .proto
 type WalletService struct {
 	walletpb.UnimplementedWalletServiceServer
-	repo domain.WalletRepository
-	db   *sql.DB
-	cfg  *config.Config
+	repo       domain.WalletRepository
+	db         *sql.DB
+	cfg        *config.Config
+	httpClient *http.Client
 }
 
 // NewWalletService khởi tạo Service với đầy đủ kết nối Repo, DB và Config
 func NewWalletService(repo domain.WalletRepository, db *sql.DB, cfg *config.Config) *WalletService {
 	return &WalletService{
-		repo: repo,
-		db:   db,
-		cfg:  cfg,
+		repo:       repo,
+		db:         db,
+		cfg:        cfg,
+		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -312,8 +314,7 @@ func (s *WalletService) createMomoDepositOrder(ctx context.Context, req *walletp
 
 	jsonValue, _ := json.Marshal(momoBody)
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Post(s.cfg.MomoAPIURL, "application/json", bytes.NewBuffer(jsonValue))
+	resp, err := s.httpClient.Post(s.cfg.MomoAPIURL, "application/json", bytes.NewBuffer(jsonValue))
 	if err != nil {
 		return nil, fmt.Errorf("Network error connecting to MoMo API: %w", err)
 	}
@@ -494,8 +495,7 @@ func (s *WalletService) createNFBankDepositOrder(ctx context.Context, req *walle
 
 	jsonValue, _ := json.Marshal(nfBankBody)
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Post(fmt.Sprintf("%s/payments/create", s.cfg.NFBankAPIURL), "application/json", bytes.NewBuffer(jsonValue))
+	resp, err := s.httpClient.Post(fmt.Sprintf("%s/payments/create", s.cfg.NFBankAPIURL), "application/json", bytes.NewBuffer(jsonValue))
 	if err != nil {
 		return nil, fmt.Errorf("Network error connecting to NF Bank API: %w", err)
 	}

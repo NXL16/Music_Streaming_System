@@ -64,3 +64,4 @@ CREATE INDEX IF NOT EXISTS idx_bank_payment_orders_wallet_id ON bank_payment_ord
 CREATE INDEX IF NOT EXISTS idx_bank_payment_orders_order_code ON bank_payment_orders(order_code);
 CREATE INDEX IF NOT EXISTS idx_wallet_transactions_wallet_id ON wallet_transactions(wallet_id);
 CREATE INDEX IF NOT EXISTS idx_wallet_transactions_idempotency_key ON wallet_transactions(idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_wallet_transactions_wallet_created ON wallet_transactions(wallet_id, created_at DESC);
