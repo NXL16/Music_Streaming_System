@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   DeleteObjectsCommand,
@@ -15,7 +15,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
 @Injectable()
-export class StorageService {
+export class StorageService implements OnModuleDestroy {
   private readonly bucket: string;
   private readonly cdnUrl: string;
   private readonly client: S3Client;
@@ -162,5 +162,9 @@ export class StorageService {
       .map((part) => encodeURIComponent(part))
       .join('/');
     return `${this.cdnUrl}/${encodedKey}`;
+  }
+
+  onModuleDestroy(): void {
+    this.client?.destroy();
   }
 }

@@ -65,6 +65,7 @@ export class AssetProcessingWorkerService
   onModuleDestroy(): void {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
+    this.processor.abort();
   }
 
   private schedule(delayMs: number): void {
