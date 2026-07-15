@@ -267,15 +267,10 @@ export class AuthService {
       );
 
       if (require2fa) {
-        const authUser = await this.usersService.findById(user.id, false);
-        if (!authUser) {
-          throw new RpcException({
-            code: status.UNAUTHENTICATED,
-            message: 'Thông tin đăng nhập không chính xác',
-          });
-        }
-
-        return this.createTwoFactorChallenge(authUser, finalDeviceId);
+        return this.createTwoFactorChallenge(
+          this.usersService.toEntity(user),
+          finalDeviceId,
+        );
       }
     }
 
@@ -384,9 +379,9 @@ export class AuthService {
           providerSub,
           email,
         );
-        user = await this.usersService.findById(existing.id, false);
+        user = this.usersService.toEntity(existing);
 
-        if (user && !user.emailVerified) {
+        if (!user.emailVerified) {
           user = await this.usersService.markEmailVerified(user.id);
         }
       } else {
@@ -432,15 +427,7 @@ export class AuthService {
       );
 
       if (require2fa) {
-        const authUser = await this.usersService.findById(user.id, false);
-        if (!authUser) {
-          throw new RpcException({
-            code: status.UNAUTHENTICATED,
-            message: 'Thông tin đăng nhập không chính xác',
-          });
-        }
-
-        return this.createTwoFactorChallenge(authUser, finalDeviceId);
+        return this.createTwoFactorChallenge(user, finalDeviceId);
       }
     }
 
@@ -541,9 +528,16 @@ export class AuthService {
       ? await this.redis.mget(...sessionKeys)
       : [];
 
+    const staleDeviceIds = deviceIds.filter((_, i) => !sessionValues[i]);
+    if (staleDeviceIds.length > 0) {
+      await this.redis.srem(authDevicesKey(request.userId), ...staleDeviceIds);
+    }
+    const activeDeviceIds = deviceIds.filter((_, i) => sessionValues[i]);
+    const activeSessionValues = sessionValues.filter(Boolean);
+
     return {
-      sessions: deviceIds.map((deviceId, index) => {
-        const raw = sessionValues[index];
+      sessions: activeDeviceIds.map((deviceId, index) => {
+        const raw = activeSessionValues[index];
         let ipAddress: string | undefined;
         let userAgent: string | undefined;
         let lastSeenAt = 0;
@@ -1454,6 +1448,12 @@ export class AuthService {
   }
 
   private async saveAuthState(user: UserEntity): Promise<void> {
+    const rfExpiresIn = this.configService.getOrThrow<string>(
+      'JWT_REFRESH_EXPIRES_IN',
+    );
+    const ttlMs = ms(rfExpiresIn as import('ms').StringValue);
+    const ttlSeconds = Math.floor(ttlMs / 1000);
+
     await this.redis.set(
       authStateKey(user.id),
       JSON.stringify({
@@ -1463,6 +1463,8 @@ export class AuthService {
         emailVerified: user.emailVerified,
         twoFactorEnabled: user.twoFactorEnabled,
       } satisfies AuthState),
+      'EX',
+      ttlSeconds,
     );
   }
 

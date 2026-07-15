@@ -118,16 +118,19 @@ export class UsersService {
     id: string,
     includeMetadata = false,
   ): Promise<UserEntity | null> {
-    const user = await this.prisma.user.findUnique({ where: { id } });
+    // The metadata lookup keys off the input `id`, not any field from the
+    // Postgres row, so the PG and Mongo queries are independent and can run
+    // concurrently instead of sequentially.
+    const [user, metadata] = await Promise.all([
+      this.prisma.user.findUnique({ where: { id } }),
+      includeMetadata
+        ? this.metadataModel.findOne({ userId: id }).lean()
+        : Promise.resolve(null),
+    ]);
+
     if (!user) return null;
 
-    let metadata: MetadataLean | null = null;
-
-    if (includeMetadata) {
-      metadata = await this.metadataModel.findOne({ userId: id }).lean();
-    }
-
-    return this.mapToEntity(user, metadata);
+    return this.mapToEntity(user, metadata as MetadataLean | null);
   }
 
   // ================================
@@ -367,7 +370,11 @@ export class UsersService {
         orderBy: { createdAt: 'desc' },
         skip,
         take: input.limit,
-      }),
+        omit: {
+          password: true,
+          twoFactorSecret: true,
+        },
+      }) as unknown as ReturnType<typeof this.prisma.user.findMany>,
       this.prisma.user.count({ where }),
     ]);
 
@@ -554,6 +561,10 @@ export class UsersService {
       },
     });
 
+    return this.mapToEntity(user, null);
+  }
+
+  toEntity(user: PrismaUser): UserEntity {
     return this.mapToEntity(user, null);
   }
 
