@@ -21,6 +21,7 @@ import {
   RecommendationPageScope,
   RecommendationPageStatus,
   RecommendationPresentationMode,
+  ListeningEventType,
 } from '@musical/shared-proto';
 import { StrictJwtAuthGuard } from '../common/guards/strict-jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
@@ -97,6 +98,24 @@ function normalizePageStatus(value: unknown): RecommendationPageStatus {
   }
 }
 
+function normalizeEventType(value: unknown): ListeningEventType {
+  if (typeof value === 'number') return value;
+  if (typeof value !== 'string') {
+    return ListeningEventType.LISTENING_EVENT_TYPE_PLAY_START;
+  }
+
+  switch (value.toUpperCase()) {
+    case 'PLAY_START':
+      return ListeningEventType.LISTENING_EVENT_TYPE_PLAY_START;
+    case 'PLAY_COMPLETE':
+      return ListeningEventType.LISTENING_EVENT_TYPE_PLAY_COMPLETE;
+    case 'SKIP':
+      return ListeningEventType.LISTENING_EVENT_TYPE_SKIP;
+    default:
+      return ListeningEventType.LISTENING_EVENT_TYPE_PLAY_START;
+  }
+}
+
 @Controller('me/recommendations')
 @UseGuards(StrictJwtAuthGuard)
 export class RecommendationsController {
@@ -146,6 +165,51 @@ export class RecommendationsController {
     }
 
     return this.recommendationsService.getRecommendationSection(request);
+  }
+
+  @Post('listening-events')
+  recordListeningEvent(
+    @Req() req: Request,
+    @Body()
+    body: {
+      songId: string;
+      eventType: string;
+      durationSec?: number;
+      totalSec?: number;
+      songTitle?: string;
+      artistName?: string;
+      albumName?: string;
+      albumId?: string;
+      playlistId?: string;
+      playlistName?: string;
+      playlistArtworkUrl?: string;
+      playlistArtworkBgColor?: string;
+      stationId?: string;
+      stationName?: string;
+      stationArtworkUrl?: string;
+      stationArtworkBgColor?: string;
+    },
+  ) {
+    const user = req.user as JwtUser;
+    return this.recommendationsService.recordListeningEvent({
+      userId: user.userId,
+      songId: body.songId,
+      eventType: normalizeEventType(body.eventType),
+      durationSec: body.durationSec ?? 0,
+      totalSec: body.totalSec ?? 0,
+      songTitle: body.songTitle ?? '',
+      artistName: body.artistName ?? '',
+      albumName: body.albumName ?? '',
+      albumId: body.albumId ?? '',
+      playlistId: body.playlistId ?? '',
+      playlistName: body.playlistName ?? '',
+      playlistArtworkUrl: body.playlistArtworkUrl ?? '',
+      playlistArtworkBgColor: body.playlistArtworkBgColor ?? '',
+      stationId: body.stationId ?? '',
+      stationName: body.stationName ?? '',
+      stationArtworkUrl: body.stationArtworkUrl ?? '',
+      stationArtworkBgColor: body.stationArtworkBgColor ?? '',
+    });
   }
 }
 
@@ -219,6 +283,32 @@ export class RecommendationAdminController {
       ...body,
       scope: normalizePageScope(body.scope),
       actorUserId: actor.userId,
+    });
+  }
+
+  @Post('home/generate')
+  generateRecommendations(
+    @Req() req: Request,
+    @Body()
+    body: {
+      scope?: string;
+      userId?: string;
+      name?: string;
+      locale?: string;
+      timezone?: string;
+      platform?: string;
+    } = {},
+  ) {
+    const actor = req.user as JwtUser;
+    const b = body ?? {};
+    return this.recommendationsService.generateRecommendations({
+      userId: b.userId ?? '',
+      scope: normalizePageScope(b.scope || 'GLOBAL'),
+      actorUserId: actor.userId,
+      name: b.name || 'listen-now',
+      locale: b.locale || 'en-GB',
+      timezone: b.timezone || '+07:00',
+      platform: b.platform || 'web',
     });
   }
 }

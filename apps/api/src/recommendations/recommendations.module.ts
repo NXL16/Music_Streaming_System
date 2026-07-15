@@ -12,6 +12,8 @@ import {
 } from './recommendations.controller';
 import { RecommendationsService } from './recommendations.service';
 
+const RECOMMENDATION_GRPC_MAX_MESSAGE_LENGTH = 16 * 1024 * 1024;
+
 @Module({
   imports: [
     ConfigModule,
@@ -27,6 +29,8 @@ import { RecommendationsService } from './recommendations.service';
             package: RECOMMENDATION.PACKAGE,
             protoPath: resolveProtoPath(RECOMMENDATION.PROTO_FILE),
             loader: GRPC_LOADER_OPTIONS,
+            maxSendMessageLength: RECOMMENDATION_GRPC_MAX_MESSAGE_LENGTH,
+            maxReceiveMessageLength: RECOMMENDATION_GRPC_MAX_MESSAGE_LENGTH,
           },
         }),
       },

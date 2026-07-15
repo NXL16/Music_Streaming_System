@@ -15,7 +15,7 @@ import {
 } from '@musical/shared-proto';
 import { ConfigService } from '@nestjs/config';
 import { Metadata } from '@grpc/grpc-js';
-import { firstValueFrom } from 'rxjs';
+import { grpcFirstValueFrom } from '../common/utils/grpc-timeout';
 
 @Injectable()
 export class AssetsService implements OnModuleInit {
@@ -44,7 +44,7 @@ export class AssetsService implements OnModuleInit {
   requestUpload(
     request: RequestAssetUploadRequest,
   ): Promise<RequestAssetUploadResponse> {
-    return firstValueFrom(
+    return grpcFirstValueFrom(
       this.client.requestAssetUpload(request, this.metadata()),
     );
   }
@@ -52,26 +52,26 @@ export class AssetsService implements OnModuleInit {
   finalizeUpload(
     request: FinalizeAssetUploadRequest,
   ): Promise<AssetResponse> {
-    return firstValueFrom(
+    return grpcFirstValueFrom(
       this.client.finalizeAssetUpload(request, this.metadata()),
     );
   }
 
   getAsset(request: GetAssetRequest): Promise<AssetResponse> {
-    return firstValueFrom(this.client.getAsset(request, this.metadata()));
+    return grpcFirstValueFrom(this.client.getAsset(request, this.metadata()));
   }
 
   listAssets(request: ListAssetsRequest): Promise<ListAssetsResponse> {
-    return firstValueFrom(this.client.listAssets(request, this.metadata()));
+    return grpcFirstValueFrom(this.client.listAssets(request, this.metadata()));
   }
 
   listAssetUsages(request: GetAssetRequest): Promise<ListAssetUsagesResponse> {
-    return firstValueFrom(
+    return grpcFirstValueFrom(
       this.client.listAssetUsages(request, this.metadata()),
     );
   }
 
   deleteAsset(request: DeleteAssetRequest): Promise<DeleteAssetResponse> {
-    return firstValueFrom(this.client.deleteAsset(request, this.metadata()));
+    return grpcFirstValueFrom(this.client.deleteAsset(request, this.metadata()));
   }
 }

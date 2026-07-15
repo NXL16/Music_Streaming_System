@@ -4,9 +4,6 @@ const REQUIRED_KEYS = [
   'API_HOST',
   'API_PORT',
   'API_PREFIX',
-  'MASTER_SIGNING_KEY',
-  'STREAM_URL_TTL_SEC',
-  'CDN_URL',
   'IDENTITY_GRPC_URL',
   'INTERNAL_GRPC_TOKEN',
   'META_GRPC_URL',
@@ -23,6 +20,8 @@ const REQUIRED_KEYS = [
   'R2_BUCKET',
   'FINALIZER_INTERNAL_TOKEN',
   'AUTH_REFRESH_COOKIE_MAX_AGE_DAYS',
+  'MASTER_SECRET_KEY',
+  'STREAM_WORKER_URL',
 ] as const;
 
 const isPositiveInteger = (value: string): boolean => /^\d+$/.test(value);
@@ -44,7 +43,6 @@ export const validateEnv = (rawEnv: RawEnv): RawEnv => {
 
   const apiPort = rawEnv.API_PORT as string;
   const redisPort = rawEnv.REDIS_PORT as string;
-  const streamUrlTtlSec = rawEnv.STREAM_URL_TTL_SEC as string;
   const refreshCookieMaxAgeDays = rawEnv.AUTH_REFRESH_COOKIE_MAX_AGE_DAYS as string;
 
   if (!isPositiveInteger(apiPort)) {
@@ -55,12 +53,13 @@ export const validateEnv = (rawEnv: RawEnv): RawEnv => {
     throw new Error('REDIS_PORT must be a positive integer');
   }
 
-  if (!isPositiveInteger(streamUrlTtlSec)) {
-    throw new Error('STREAM_URL_TTL_SEC must be a positive integer');
-  }
-
   if (!isPositiveInteger(refreshCookieMaxAgeDays)) {
     throw new Error('AUTH_REFRESH_COOKIE_MAX_AGE_DAYS must be a positive integer');
+  }
+
+  const masterSecretKey = rawEnv.MASTER_SECRET_KEY as string;
+  if (masterSecretKey.length < 64 || masterSecretKey.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(masterSecretKey)) {
+    throw new Error('MASTER_SECRET_KEY must be a hex string of at least 32 bytes (64 hex chars)');
   }
 
   return rawEnv;

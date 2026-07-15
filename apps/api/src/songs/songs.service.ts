@@ -5,6 +5,7 @@ import {
   Logger,
   BadRequestException,
   ConflictException,
+  InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
 import type { ClientGrpc } from '@nestjs/microservices';
@@ -33,12 +34,20 @@ import {
   SongStatus,
   GetCatalogAlbumRequest,
   GetCatalogPlaylistRequest,
+  GetCatalogResourcesRequest,
+  GetCatalogArtistAlbumsRequest,
+  GetCatalogArtistSongsRequest,
   CatalogResponse,
   SaveCatalogArtistDraftRequest,
   SaveCatalogSongDraftRequest,
   SaveCatalogAlbumDraftRequest,
   SaveCatalogPlaylistDraftRequest,
   CatalogDraftInfo,
+  CatalogArtwork,
+  CatalogSongAttributes,
+  CatalogAlbumAttributes,
+  CatalogPlaylistAttributes,
+  CatalogArtistAttributes,
   GetCatalogDraftRequest,
   CatalogDraftDetail,
   ListCatalogDraftsRequest,
@@ -56,11 +65,16 @@ import {
   PlaylistTrackResponse,
   UserPlaylistInfo,
 } from '@musical/shared-proto';
-import { firstValueFrom } from 'rxjs';
+import { grpcFirstValueFrom } from '../common/utils/grpc-timeout';
 import { R2Service } from '../common/r2/r2.service';
 import { RequestUploadDto } from './dto/request-upload.dto';
 import { FinalizeUploadDto } from './dto/finalize-upload.dto';
 import { TRANSCODE_QUEUE } from '@musical/shared-types';
+import {
+  wrapStructInput,
+  wrapStructInputs,
+  unwrapStructOutput,
+} from '../common/utils/protobuf-struct';
 
 @Injectable()
 export class SongsService implements OnModuleInit {
@@ -82,51 +96,51 @@ export class SongsService implements OnModuleInit {
   }
 
   async getSong(data: GetSongRequest): Promise<GetSongResponse> {
-    return await firstValueFrom(this.songServiceClient.getSong(data));
+    return await grpcFirstValueFrom(this.songServiceClient.getSong(data));
   }
 
   async getSongByChecksum(
     data: GetSongByChecksumRequest,
   ): Promise<GetSongByChecksumResponse> {
-    return await firstValueFrom(this.songServiceClient.getSongByChecksum(data));
+    return await grpcFirstValueFrom(this.songServiceClient.getSongByChecksum(data));
   }
 
   async getSongIngestInfo(
     data: GetSongIngestInfoRequest,
   ): Promise<GetSongIngestInfoResponse> {
-    return await firstValueFrom(this.songServiceClient.getSongIngestInfo(data));
+    return await grpcFirstValueFrom(this.songServiceClient.getSongIngestInfo(data));
   }
 
   async listSongs(data: ListSongsRequest): Promise<ListSongsResponse> {
-    return await firstValueFrom(this.songServiceClient.listSongs(data));
+    return await grpcFirstValueFrom(this.songServiceClient.listSongs(data));
   }
 
   async createSongRecord(
     data: CreateSongRecordRequest,
   ): Promise<CreateSongRecordResponse> {
-    return await firstValueFrom(this.songServiceClient.createSongRecord(data));
+    return await grpcFirstValueFrom(this.songServiceClient.createSongRecord(data));
   }
 
   async updateSongProcessingResult(
     data: UpdateSongProcessingResultRequest,
   ): Promise<UpdateSongProcessingResultResponse> {
-    return await firstValueFrom(
+    return await grpcFirstValueFrom(
       this.songServiceClient.updateSongProcessingResult(data),
     );
   }
 
   async addFavorite(data: FavoriteRequest): Promise<FavoriteResponse> {
-    return await firstValueFrom(this.songServiceClient.addFavorite(data));
+    return await grpcFirstValueFrom(this.songServiceClient.addFavorite(data));
   }
 
   async removeFavorite(data: FavoriteRequest): Promise<FavoriteResponse> {
-    return await firstValueFrom(this.songServiceClient.removeFavorite(data));
+    return await grpcFirstValueFrom(this.songServiceClient.removeFavorite(data));
   }
 
   async removeSongOwnership(
     data: RemoveSongOwnershipRequest,
   ): Promise<RemoveSongOwnershipResponse> {
-    return await firstValueFrom(this.songServiceClient.removeSongOwnership(data));
+    return await grpcFirstValueFrom(this.songServiceClient.removeSongOwnership(data));
   }
 
   async unlinkSong(
@@ -137,43 +151,43 @@ export class SongsService implements OnModuleInit {
   }
 
   async getPlaylist(data: GetPlaylistRequest): Promise<GetPlaylistResponse> {
-    return await firstValueFrom(this.songServiceClient.getPlaylist(data));
+    return await grpcFirstValueFrom(this.songServiceClient.getPlaylist(data));
   }
 
   async createUserPlaylist(
     data: CreateUserPlaylistRequest,
   ): Promise<UserPlaylistInfo> {
-    return await firstValueFrom(this.songServiceClient.createUserPlaylist(data));
+    return await grpcFirstValueFrom(this.songServiceClient.createUserPlaylist(data));
   }
 
   async updateUserPlaylist(
     data: UpdateUserPlaylistRequest,
   ): Promise<UserPlaylistInfo> {
-    return await firstValueFrom(this.songServiceClient.updateUserPlaylist(data));
+    return await grpcFirstValueFrom(this.songServiceClient.updateUserPlaylist(data));
   }
 
   async deleteUserPlaylist(
     data: DeleteUserPlaylistRequest,
   ): Promise<DeleteUserPlaylistResponse> {
-    return await firstValueFrom(this.songServiceClient.deleteUserPlaylist(data));
+    return await grpcFirstValueFrom(this.songServiceClient.deleteUserPlaylist(data));
   }
 
   async listUserPlaylists(
     data: ListUserPlaylistsRequest,
   ): Promise<ListUserPlaylistsResponse> {
-    return await firstValueFrom(this.songServiceClient.listUserPlaylists(data));
+    return await grpcFirstValueFrom(this.songServiceClient.listUserPlaylists(data));
   }
 
   async addTrackToPlaylist(
     data: PlaylistTrackRequest,
   ): Promise<PlaylistTrackResponse> {
-    return await firstValueFrom(this.songServiceClient.addTrackToPlaylist(data));
+    return await grpcFirstValueFrom(this.songServiceClient.addTrackToPlaylist(data));
   }
 
   async removeTrackFromPlaylist(
     data: PlaylistTrackRequest,
   ): Promise<PlaylistTrackResponse> {
-    return await firstValueFrom(
+    return await grpcFirstValueFrom(
       this.songServiceClient.removeTrackFromPlaylist(data),
     );
   }
@@ -181,42 +195,83 @@ export class SongsService implements OnModuleInit {
   async getCatalogAlbum(
     data: GetCatalogAlbumRequest,
   ): Promise<CatalogResponse> {
-    return await firstValueFrom(this.songServiceClient.getCatalogAlbum(data));
+    const response = await grpcFirstValueFrom(this.songServiceClient.getCatalogAlbum(data));
+    return this.unwrapCatalogResponse(response);
   }
 
   async getCatalogPlaylist(
     data: GetCatalogPlaylistRequest,
   ): Promise<CatalogResponse> {
-    return await firstValueFrom(
+    const response = await grpcFirstValueFrom(
       this.songServiceClient.getCatalogPlaylist(data),
     );
+    return this.unwrapCatalogResponse(response);
   }
 
   async getCatalogPlaylistTracks(
     data: GetCatalogPlaylistRequest,
   ): Promise<CatalogResponse> {
-    return await firstValueFrom(
+    const response = await grpcFirstValueFrom(
       this.songServiceClient.getCatalogPlaylistTracks(data),
     );
+    return this.unwrapCatalogResponse(response);
+  }
+
+  async getCatalogResources(
+    data: GetCatalogResourcesRequest,
+  ): Promise<CatalogResponse> {
+    const response = await grpcFirstValueFrom(
+      this.songServiceClient.getCatalogResources(data),
+    );
+    return this.unwrapCatalogResponse(response);
+  }
+
+  async getCatalogArtistAlbums(
+    data: GetCatalogArtistAlbumsRequest,
+  ): Promise<CatalogResponse> {
+    const response = await grpcFirstValueFrom(
+      this.songServiceClient.getCatalogArtistAlbums(data),
+    );
+    return this.unwrapCatalogResponse(response);
+  }
+
+  async getCatalogArtistSongs(
+    data: GetCatalogArtistSongsRequest,
+  ): Promise<CatalogResponse & { nextCursor?: string }> {
+    const response = await grpcFirstValueFrom(
+      this.songServiceClient.getCatalogArtistSongs(data),
+    );
+    if (!response.catalog) {
+      throw new InternalServerErrorException(
+        'Song service returned an empty artist song page.',
+      );
+    }
+    return {
+      ...this.unwrapCatalogResponse(response.catalog),
+      nextCursor: response.nextCursor || undefined,
+    };
   }
 
   async saveCatalogArtistDraft(
     data: SaveCatalogArtistDraftRequest,
   ): Promise<CatalogDraftInfo> {
-    return firstValueFrom(
-      this.songServiceClient.saveCatalogArtistDraft(data),
+    return grpcFirstValueFrom(
+      this.songServiceClient.saveCatalogArtistDraft({
+        ...data,
+        editorialVideo: wrapStructInput(data.editorialVideo),
+      }),
     );
   }
 
   async saveCatalogSongDraft(
     data: SaveCatalogSongDraftRequest,
   ): Promise<CatalogDraftInfo> {
-    return firstValueFrom(
+    return grpcFirstValueFrom(
       this.songServiceClient.saveCatalogSongDraft({
         ...data,
-        editorialArtwork: this.wrapStructInput(data.editorialArtwork),
-        extendedAssetUrls: this.wrapStructInput(data.extendedAssetUrls),
-        offers: this.wrapStructInputs(data.offers),
+        editorialArtwork: wrapStructInput(data.editorialArtwork),
+        extendedAssetUrls: wrapStructInput(data.extendedAssetUrls),
+        offers: wrapStructInputs(data.offers),
       }),
     );
   }
@@ -224,13 +279,13 @@ export class SongsService implements OnModuleInit {
   async saveCatalogAlbumDraft(
     data: SaveCatalogAlbumDraftRequest,
   ): Promise<CatalogDraftInfo> {
-    return firstValueFrom(
+    return grpcFirstValueFrom(
       this.songServiceClient.saveCatalogAlbumDraft({
         ...data,
-        editorialArtwork: this.wrapStructInput(data.editorialArtwork),
-        editorialNotes: this.wrapStructInput(data.editorialNotes),
-        editorialVideo: this.wrapStructInput(data.editorialVideo),
-        offers: this.wrapStructInputs(data.offers),
+        editorialArtwork: wrapStructInput(data.editorialArtwork),
+        editorialNotes: wrapStructInput(data.editorialNotes),
+        editorialVideo: wrapStructInput(data.editorialVideo),
+        offers: wrapStructInputs(data.offers),
       }),
     );
   }
@@ -238,14 +293,14 @@ export class SongsService implements OnModuleInit {
   async saveCatalogPlaylistDraft(
     data: SaveCatalogPlaylistDraftRequest,
   ): Promise<CatalogDraftInfo> {
-    return firstValueFrom(
+    return grpcFirstValueFrom(
       this.songServiceClient.saveCatalogPlaylistDraft({
         ...data,
-        editorialArtwork: this.wrapStructInput(data.editorialArtwork),
-        editorialNotes: this.wrapStructInput(data.editorialNotes),
-        editorialVideo: this.wrapStructInput(data.editorialVideo),
-        plainEditorialCard: this.wrapStructInput(data.plainEditorialCard),
-        plainEditorialNotes: this.wrapStructInput(data.plainEditorialNotes),
+        editorialArtwork: wrapStructInput(data.editorialArtwork),
+        editorialNotes: wrapStructInput(data.editorialNotes),
+        editorialVideo: wrapStructInput(data.editorialVideo),
+        plainEditorialCard: wrapStructInput(data.plainEditorialCard),
+        plainEditorialNotes: wrapStructInput(data.plainEditorialNotes),
       }),
     );
   }
@@ -253,33 +308,34 @@ export class SongsService implements OnModuleInit {
   async getCatalogDraft(
     data: GetCatalogDraftRequest,
   ): Promise<CatalogDraftDetail> {
-    const response = await firstValueFrom(
+    const response = await grpcFirstValueFrom(
       this.songServiceClient.getCatalogDraft(data),
     );
     return {
       ...response,
-      payload: this.unwrapStructOutput(response.payload),
+      payload: unwrapStructOutput(response.payload),
     };
   }
 
   async listCatalogDrafts(
     data: ListCatalogDraftsRequest,
   ): Promise<ListCatalogDraftsResponse> {
-    return firstValueFrom(this.songServiceClient.listCatalogDrafts(data));
+    return grpcFirstValueFrom(this.songServiceClient.listCatalogDrafts(data));
   }
 
   async publishCatalogDraft(
     data: PublishCatalogDraftRequest,
   ): Promise<CatalogResponse> {
-    return firstValueFrom(
+    const response = await grpcFirstValueFrom(
       this.songServiceClient.publishCatalogDraft(data),
     );
+    return this.unwrapCatalogResponse(response);
   }
 
   async deleteCatalogDraft(
     data: DeleteCatalogDraftRequest,
   ): Promise<DeleteCatalogDraftResponse> {
-    return firstValueFrom(
+    return grpcFirstValueFrom(
       this.songServiceClient.deleteCatalogDraft(data),
     );
   }
@@ -373,95 +429,6 @@ export class SongsService implements OnModuleInit {
 
       return await this.buildExistingUploadResponse(latest.song.id, false);
     }
-  }
-
-  private wrapStructInput(
-    value: Record<string, unknown> | undefined,
-  ): Record<string, unknown> | undefined {
-    if (!value) return undefined;
-    if (
-      typeof value.fields === 'object' &&
-      value.fields !== null &&
-      !Array.isArray(value.fields)
-    ) {
-      return value;
-    }
-    return {
-      fields: Object.fromEntries(
-        Object.entries(value).map(([key, item]) => [
-          key,
-          this.wrapStructValue(item),
-        ]),
-      ),
-    };
-  }
-
-  private wrapStructInputs(
-    values: Array<Record<string, unknown>> | undefined,
-  ): Array<Record<string, unknown>> {
-    return (values ?? []).map((value) => this.wrapStructInput(value) ?? {});
-  }
-
-  private wrapStructValue(value: unknown): Record<string, unknown> {
-    if (value === null || value === undefined) return { nullValue: 0 };
-    if (Array.isArray(value)) {
-      return {
-        listValue: {
-          values: value.map((item) => this.wrapStructValue(item)),
-        },
-      };
-    }
-    if (typeof value === 'object') {
-      return {
-        structValue: this.wrapStructInput(
-          value as Record<string, unknown>,
-        ),
-      };
-    }
-    if (typeof value === 'string') return { stringValue: value };
-    if (typeof value === 'number') return { numberValue: value };
-    if (typeof value === 'boolean') return { boolValue: value };
-    return { nullValue: 0 };
-  }
-
-  private unwrapStructOutput(
-    value: Record<string, unknown> | undefined,
-  ): Record<string, unknown> | undefined {
-    if (!value) return undefined;
-    const fields = value.fields;
-    if (
-      typeof fields !== 'object' ||
-      fields === null ||
-      Array.isArray(fields)
-    ) {
-      return value;
-    }
-    return Object.fromEntries(
-      Object.entries(fields).map(([key, item]) => [
-        key,
-        this.unwrapStructValue(item),
-      ]),
-    );
-  }
-
-  private unwrapStructValue(value: unknown): unknown {
-    if (typeof value !== 'object' || value === null) return null;
-    const item = value as Record<string, unknown>;
-    if ('stringValue' in item) return item.stringValue;
-    if ('numberValue' in item) return item.numberValue;
-    if ('boolValue' in item) return item.boolValue;
-    if ('structValue' in item) {
-      return this.unwrapStructOutput(
-        item.structValue as Record<string, unknown>,
-      );
-    }
-    if ('listValue' in item) {
-      const list = item.listValue as { values?: unknown[] };
-      return (list.values ?? []).map((entry) =>
-        this.unwrapStructValue(entry),
-      );
-    }
-    return null;
   }
 
   private async buildExistingUploadResponse(
@@ -761,5 +728,81 @@ export class SongsService implements OnModuleInit {
       return 120;
     }
     return Math.floor(parsed);
+  }
+
+  private unwrapCatalogResponse(response: CatalogResponse): CatalogResponse {
+    if (!response.resources) return response;
+    const { songs, albums, playlists, artists } = response.resources;
+
+    if (songs) {
+      for (const song of Object.values(songs)) {
+        if (song.attributes) this.unwrapSongAttributes(song.attributes);
+      }
+    }
+
+    if (albums) {
+      for (const album of Object.values(albums)) {
+        if (album.attributes) this.unwrapAlbumAttributes(album.attributes);
+      }
+    }
+
+    if (playlists) {
+      for (const playlist of Object.values(playlists)) {
+        if (playlist.attributes)
+          this.unwrapPlaylistAttributes(playlist.attributes);
+      }
+    }
+
+    if (artists) {
+      for (const artist of Object.values(artists)) {
+        if (artist.attributes)
+          this.unwrapArtistAttributes(artist.attributes);
+      }
+    }
+
+    return response;
+  }
+
+  private unwrapArtwork(artwork: CatalogArtwork | undefined): void {
+    if (artwork) {
+      artwork.variants = unwrapStructOutput(artwork.variants);
+    }
+  }
+
+  private unwrapSongAttributes(attrs: CatalogSongAttributes): void {
+    this.unwrapArtwork(attrs.artwork);
+    attrs.editorialArtwork = unwrapStructOutput(attrs.editorialArtwork);
+    attrs.extendedAssetUrls = unwrapStructOutput(attrs.extendedAssetUrls);
+    attrs.offers = attrs.offers.map(
+      (offer) => unwrapStructOutput(offer) ?? {},
+    );
+  }
+
+  private unwrapAlbumAttributes(attrs: CatalogAlbumAttributes): void {
+    this.unwrapArtwork(attrs.artwork);
+    attrs.editorialArtwork = unwrapStructOutput(attrs.editorialArtwork);
+    attrs.editorialNotes = unwrapStructOutput(attrs.editorialNotes);
+    attrs.editorialVideo = unwrapStructOutput(attrs.editorialVideo);
+    attrs.offers = attrs.offers.map(
+      (offer) => unwrapStructOutput(offer) ?? {},
+    );
+  }
+
+  private unwrapPlaylistAttributes(attrs: CatalogPlaylistAttributes): void {
+    this.unwrapArtwork(attrs.artwork);
+    attrs.editorialArtwork = unwrapStructOutput(attrs.editorialArtwork);
+    attrs.editorialNotes = unwrapStructOutput(attrs.editorialNotes);
+    attrs.editorialVideo = unwrapStructOutput(attrs.editorialVideo);
+    attrs.plainEditorialCard = unwrapStructOutput(
+      attrs.plainEditorialCard,
+    );
+    attrs.plainEditorialNotes = unwrapStructOutput(
+      attrs.plainEditorialNotes,
+    );
+  }
+
+  private unwrapArtistAttributes(attrs: CatalogArtistAttributes): void {
+    this.unwrapArtwork(attrs.artwork);
+    attrs.editorialVideo = unwrapStructOutput(attrs.editorialVideo);
   }
 }

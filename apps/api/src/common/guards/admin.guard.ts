@@ -7,19 +7,15 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import Redis from 'ioredis';
-import {
-  AuthState,
-  JwtUser,
-  UserRole,
-  authStateKey,
-} from '@musical/shared-types';
+import { AuthState, UserRole, authStateKey } from '@musical/shared-types';
+import type { AuthenticatedRequest } from './strict-jwt-auth.guard';
 
 @Injectable()
 export class AdminGuard implements CanActivate {
   constructor(@Inject('REDIS_INSTANCE') private readonly redis: Redis) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest<{ user?: JwtUser }>();
+    const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const user = request.user;
 
     const allowedAdminRoles = new Set<UserRole>([
@@ -35,15 +31,17 @@ export class AdminGuard implements CanActivate {
       });
     }
 
-    const rawState = await this.redis.get(authStateKey(user.userId));
-    if (!rawState) {
-      throw new UnauthorizedException({
-        code: 'AUTH_STATE_MISSING',
-        message: 'Không thể xác thực trạng thái tài khoản',
-      });
+    let state = request.authState;
+    if (!state) {
+      const rawState = await this.redis.get(authStateKey(user.userId));
+      if (!rawState) {
+        throw new UnauthorizedException({
+          code: 'AUTH_STATE_MISSING',
+          message: 'Không thể xác thực trạng thái tài khoản',
+        });
+      }
+      state = JSON.parse(rawState) as AuthState;
     }
-
-    const state = JSON.parse(rawState) as AuthState;
 
     if (!state.emailVerified) {
       throw new ForbiddenException({

@@ -1,67 +1,60 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHmac } from 'crypto';
+import { hkdf } from 'crypto';
+import { promisify } from 'util';
+
+const KEY_INFO = 'music-stream:v1:key';
+const IV_INFO = 'music-stream:v1:iv';
+const KEY_LEN = 32;
+const IV_LEN = 16;
+
+// Async HKDF (callback-based) wrapped in a Promise so key derivation runs off
+// the event loop instead of blocking it like hkdfSync did.
+const hkdfAsync = promisify(hkdf);
 
 @Injectable()
 export class StreamService {
-  private readonly prewarmCooldownMs = 2_000;
-  private readonly lastPrewarmAt = new Map<string, number>();
-  private readonly inFlightPrewarm = new Set<string>();
+  private readonly masterSecret: Buffer;
+  private readonly streamWorkerUrl: string;
+  private readonly keyCache = new Map<string, { key: string; iv: string }>();
+  private static readonly MAX_CACHE_SIZE = 10_000;
 
-  constructor(private readonly config: ConfigService) {}
-
-  getStreamUrl(songId: string): { url: string } {
-    const url = this.createSignedUrl(songId);
-    this.prewarmFirstChunk(url);
-    return { url };
+  constructor(private readonly config: ConfigService) {
+    this.masterSecret = Buffer.from(
+      this.config.getOrThrow<string>('MASTER_SECRET_KEY'),
+      'hex',
+    );
+    this.streamWorkerUrl = this.config
+      .getOrThrow<string>('STREAM_WORKER_URL')
+      .replace(/\/+$/, '');
   }
 
-  private createSignedUrl(songId: string): string {
-    const cdnUrl = this.config.getOrThrow<string>('CDN_URL');
-    const signingKey = this.config.getOrThrow<string>('MASTER_SIGNING_KEY');
-    const ttlSec = Number(this.config.getOrThrow<string>('STREAM_URL_TTL_SEC'));
-    const exp = Math.floor(Date.now() / 1000) + ttlSec;
+  async getStreamUrl(songId: string): Promise<{
+    streamUrl: string;
+    key: string;
+    iv: string;
+  }> {
+    const streamUrl = `${this.streamWorkerUrl}/${encodeURIComponent(songId)}`;
+    const cached = this.keyCache.get(songId);
+    if (cached) return { streamUrl, ...cached };
 
-    const payload = `${songId}~exp=${exp}`;
-    const hmac = createHmac('sha256', signingKey).update(payload).digest('hex');
+    const salt = Buffer.from(songId, 'utf-8');
+    const [key, iv] = await Promise.all([
+      hkdfAsync('sha256', this.masterSecret, salt, KEY_INFO, KEY_LEN),
+      hkdfAsync('sha256', this.masterSecret, salt, IV_INFO, IV_LEN),
+    ]);
 
-    return `${cdnUrl}/audio/${songId}?__token__=exp=${exp}~hmac=${hmac}`;
-  }
+    const derived = {
+      key: Buffer.from(key).toString('hex'),
+      iv: Buffer.from(iv).toString('hex'),
+    };
 
-  private prewarmFirstChunk(url: string): void {
-    const enabled =
-      (this.config.get<string>('STREAM_PREWARM_ENABLED') ?? 'true').toLowerCase() !== 'false';
-    if (!enabled) return;
-    if (!this.shouldPrewarm(url)) return;
-
-    const timeoutMs = Number(this.config.get<string>('STREAM_PREWARM_TIMEOUT_MS') ?? '1000');
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), Number.isFinite(timeoutMs) ? timeoutMs : 1500);
-
-    void fetch(url, {
-      method: 'GET',
-      headers: { Range: 'bytes=0-98303' },
-      signal: controller.signal,
-    })
-      .catch(() => undefined)
-      .finally(() => {
-        clearTimeout(timer);
-        this.inFlightPrewarm.delete(url);
-      });
-  }
-
-  private shouldPrewarm(url: string): boolean {
-    const now = Date.now();
-    const lastAt = this.lastPrewarmAt.get(url) ?? 0;
-    if (now - lastAt < this.prewarmCooldownMs) return false;
-    if (this.inFlightPrewarm.has(url)) return false;
-    this.lastPrewarmAt.set(url, now);
-    this.inFlightPrewarm.add(url);
-
-    if (this.lastPrewarmAt.size > 5000) {
-      const oldestKey = this.lastPrewarmAt.keys().next().value;
-      if (oldestKey) this.lastPrewarmAt.delete(oldestKey);
+    if (this.keyCache.size >= StreamService.MAX_CACHE_SIZE) {
+      const firstKey = this.keyCache.keys().next().value!;
+      this.keyCache.delete(firstKey);
     }
-    return true;
+    this.keyCache.set(songId, derived);
+
+    return { streamUrl, ...derived };
   }
 }

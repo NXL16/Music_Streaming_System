@@ -1,6 +1,6 @@
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import type { ClientGrpc } from '@nestjs/microservices';
-import { firstValueFrom } from 'rxjs';
+import { grpcFirstValueFrom } from '../common/utils/grpc-timeout';
 import type {
   GetStreamDataRequest,
   MetadataServiceClient,
@@ -49,7 +49,7 @@ export class MetadataService implements OnModuleInit {
   }
 
   async getStreamData(data: GetStreamDataRequest): Promise<StreamDataResponse> {
-    return await firstValueFrom(this.metadataClient.getStreamData(data));
+    return await grpcFirstValueFrom(this.metadataClient.getStreamData(data));
   }
 
   async getCompactStreamData(songId: string): Promise<CompactMetadataResponse> {
@@ -85,16 +85,28 @@ export class MetadataService implements OnModuleInit {
       waveform: data.waveform || [],
     };
 
+    if (this.streamDataCache.size >= META_CACHE_MAX_ITEMS) {
+      this.purgeExpiredEntries(now);
+    }
+
+    if (this.streamDataCache.size >= META_CACHE_MAX_ITEMS) {
+      const oldestKey = this.streamDataCache.keys().next().value;
+      if (oldestKey) this.streamDataCache.delete(oldestKey);
+    }
+
     this.streamDataCache.set(songId, {
       expiresAt: now + META_CACHE_TTL_MS,
       data: compact,
     });
 
-    if (this.streamDataCache.size > META_CACHE_MAX_ITEMS) {
-      const oldestKey = this.streamDataCache.keys().next().value;
-      if (oldestKey) this.streamDataCache.delete(oldestKey);
-    }
-
     return compact;
+  }
+
+  private purgeExpiredEntries(now: number) {
+    for (const [key, entry] of this.streamDataCache) {
+      if (entry.expiresAt <= now) {
+        this.streamDataCache.delete(key);
+      }
+    }
   }
 }

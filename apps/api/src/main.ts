@@ -7,6 +7,7 @@ import { ValidationExceptionFilter } from './common/filters/validation-exception
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { GrpcExceptionFilter } from './common/filters/grpc-exception.filter';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
 import { NestExpressApplication } from '@nestjs/platform-express';
 
 async function bootstrap() {
@@ -19,6 +20,7 @@ async function bootstrap() {
   const prefix = configService.getOrThrow<string>('API_PREFIX');
 
   app.useBodyParser('json', { limit: '20mb' });
+  app.use(helmet());
   app.use(cookieParser());
 
   if (corsOrigin.trim() === '*') {

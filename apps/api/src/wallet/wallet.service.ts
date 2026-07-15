@@ -1,6 +1,6 @@
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import type { ClientGrpc } from '@nestjs/microservices';
-import { firstValueFrom } from 'rxjs';
+import { grpcFirstValueFrom } from '../common/utils/grpc-timeout';
 import type {
   DepositOrderRequest,
   DepositOrderResponse,
@@ -20,7 +20,7 @@ export class WalletService implements OnModuleInit {
   }
 
   async getBalance(userId: string): Promise<GetBalanceResponse> {
-    const balance = await firstValueFrom(
+    const balance = await grpcFirstValueFrom(
       this.walletClient.getBalance({ userId }),
     );
 
@@ -33,6 +33,6 @@ export class WalletService implements OnModuleInit {
   async createDepositOrder(
     payload: DepositOrderRequest,
   ): Promise<DepositOrderResponse> {
-    return firstValueFrom(this.walletClient.createDepositOrder(payload));
+    return grpcFirstValueFrom(this.walletClient.createDepositOrder(payload));
   }
 }

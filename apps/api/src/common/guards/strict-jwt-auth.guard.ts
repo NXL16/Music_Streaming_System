@@ -16,6 +16,11 @@ import {
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { Inject } from '@nestjs/common';
 
+export type AuthenticatedRequest = {
+  user?: JwtUser;
+  authState?: AuthState;
+};
+
 @Injectable()
 export class StrictJwtAuthGuard extends JwtAuthGuard implements CanActivate {
   constructor(@Inject('REDIS_INSTANCE') private readonly redis: Redis) {
@@ -26,7 +31,7 @@ export class StrictJwtAuthGuard extends JwtAuthGuard implements CanActivate {
     const ok = await super.canActivate(context);
     if (!ok) return false;
 
-    const request = context.switchToHttp().getRequest<{ user?: JwtUser }>();
+    const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const user = request.user;
 
     if (!user?.jti) {
@@ -59,6 +64,7 @@ export class StrictJwtAuthGuard extends JwtAuthGuard implements CanActivate {
     if (!rawState) return true;
 
     const state = JSON.parse(rawState) as AuthState;
+    request.authState = state;
 
     if (!state.isActive) {
       throw new ForbiddenException({

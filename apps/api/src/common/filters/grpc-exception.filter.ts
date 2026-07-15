@@ -31,22 +31,27 @@ export class GrpcExceptionFilter implements ExceptionFilter {
       code?: number | string;
       message?: string;
       details?: string;
+      metadata?: unknown;
     };
 
-    if (typeof error?.code !== 'number' && typeof error?.code !== 'string') {
+    const grpcCode =
+      typeof error?.code === 'number'
+        ? error.code
+        : typeof error?.code === 'string' && /^\d+$/.test(error.code)
+          ? Number(error.code)
+          : null;
+
+    if (grpcCode === null || !(grpcCode in GRPC_CODE_TO_HTTP_STATUS)) {
       throw exception;
     }
 
-    const grpcCode = typeof error.code === 'number' ? error.code : 13;
-    const status = GRPC_CODE_TO_HTTP_STATUS[grpcCode] ?? HttpStatus.BAD_GATEWAY;
+    const status = GRPC_CODE_TO_HTTP_STATUS[grpcCode];
     const message =
       error.details || error.message || 'Lỗi giao tiếp với gRPC service.';
-    const code =
-      typeof error.code === 'string' ? error.code : `GRPC_${grpcCode}`;
 
     response.status(status).json({
       success: false,
-      code,
+      code: `GRPC_${grpcCode}`,
       message,
       timestamp: new Date().toISOString(),
     });

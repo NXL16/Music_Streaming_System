@@ -55,6 +55,59 @@ export class CatalogController {
     });
   }
 
+  @Get('artists/:artistId')
+  getArtist(
+    @Param('storefront') storefront: string,
+    @Param('artistId') artistId: string,
+  ) {
+    return this.songsService.getCatalogResources({
+      storefront,
+      resources: [{ type: 'artists', id: artistId }],
+    });
+  }
+
+  @Post('resources')
+  getResources(
+    @Param('storefront') storefront: string,
+    @Body() body: { resources?: Array<{ type?: string; id?: string }> },
+  ) {
+    return this.songsService.getCatalogResources({
+      storefront,
+      resources: (body.resources ?? [])
+        .filter(
+          (resource): resource is { type: string; id: string } =>
+            typeof resource.type === 'string' &&
+            typeof resource.id === 'string',
+        )
+        .map((resource) => ({ type: resource.type, id: resource.id })),
+    });
+  }
+
+  @Get('artists/:artistId/albums')
+  getArtistAlbums(
+    @Param('storefront') storefront: string,
+    @Param('artistId') artistId: string,
+  ) {
+    return this.songsService.getCatalogArtistAlbums({ storefront, artistId });
+  }
+
+  @Get('artists/:artistId/songs')
+  getArtistSongs(
+    @Param('storefront') storefront: string,
+    @Param('artistId') artistId: string,
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    const parsedLimit = Number(limit);
+
+    return this.songsService.getCatalogArtistSongs({
+      storefront,
+      artistId,
+      limit: Number.isInteger(parsedLimit) ? parsedLimit : 0,
+      cursor: cursor?.trim() ?? '',
+    });
+  }
+
 }
 
 @Controller('admin/catalog')
