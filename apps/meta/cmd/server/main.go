@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"Music_Streaming_System/apps/meta/internal/config"
@@ -18,27 +21,22 @@ import (
 )
 
 func main() {
-	// 1. Load config
 	cfg := config.LoadConfig()
 
-	// 2. Kết nối MongoDB
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	connectCtx, connectCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer connectCancel()
 
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(cfg.MongoURI))
+	client, err := mongo.Connect(connectCtx, options.Client().ApplyURI(cfg.MongoURI))
 	if err != nil {
 		log.Fatalf("Failed to connect to MongoDB: %v", err)
 	}
-	defer client.Disconnect(ctx)
 
 	db := client.Database(cfg.MongoDBName)
 	log.Printf("Connected to MongoDB: %s", cfg.MongoDBName)
 
-	// 3. Khởi tạo Repository và Service
 	repo := repository.NewMetadataRepository(db)
 	metaServer := service.NewMetadataServer(repo)
 
-	// 4. Khởi tạo gRPC Server
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", cfg.GRPCPort))
 	if err != nil {
 		log.Fatalf("Failed to listen: %v", err)
@@ -47,8 +45,26 @@ func main() {
 	grpcServer := grpc.NewServer()
 	pb.RegisterMetadataServiceServer(grpcServer, metaServer)
 
-	log.Printf("Metadata Service is running on port: %s", cfg.GRPCPort)
-	if err := grpcServer.Serve(lis); err != nil {
-		log.Fatalf("Failed to serve: %v", err)
+	stopChan := make(chan os.Signal, 1)
+	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		log.Printf("Metadata Service is running on port: %s", cfg.GRPCPort)
+		if err := grpcServer.Serve(lis); err != nil {
+			log.Printf("gRPC Server stopped: %v", err)
+		}
+	}()
+
+	<-stopChan
+	log.Println("Shutting down Metadata Service...")
+
+	grpcServer.GracefulStop()
+
+	disconnectCtx, disconnectCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer disconnectCancel()
+	if err := client.Disconnect(disconnectCtx); err != nil {
+		log.Printf("Error disconnecting MongoDB: %v", err)
 	}
+
+	log.Println("Metadata Service stopped")
 }
