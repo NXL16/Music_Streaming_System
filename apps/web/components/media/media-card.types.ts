@@ -23,6 +23,10 @@ export interface MediaCardProps {
   artworkColors: {
     bg: string;
     main: string;
+    textPrimary?: string;
+    textSecondary?: string;
+    textScrimColor?: string;
+    textScrimOpacity?: number;
   };
   typeTag?: string;
   description?: string;

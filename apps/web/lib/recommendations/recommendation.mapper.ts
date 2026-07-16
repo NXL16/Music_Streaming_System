@@ -54,6 +54,53 @@ function artworkSrcSet(
   );
 }
 
+function formatColor(color: string | undefined) {
+  const normalized = color?.replace(/^#/, "").trim();
+  return normalized && /^[0-9a-f]{6}$/i.test(normalized)
+    ? `#${normalized}`
+    : undefined;
+}
+
+function contrastTextColor(backgroundColor: string) {
+  const normalized = backgroundColor.replace(/^#/, "");
+  if (!/^[0-9a-f]{6}$/i.test(normalized)) return "#ffffff";
+
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+  const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
+
+  return luminance > 0.52 ? "#000000" : "#ffffff";
+}
+
+type HeroTextPalette = {
+  textColor1?: string;
+  textColor2?: string;
+  scrimColor?: string;
+  scrimOpacity?: number;
+};
+
+function getHeroTextPalette(artwork: Artwork): HeroTextPalette | undefined {
+  if (!artwork.variants || typeof artwork.variants !== "object") {
+    return undefined;
+  }
+
+  const hero = (artwork.variants as { hero?: unknown }).hero;
+  if (!hero || typeof hero !== "object") return undefined;
+
+  const palette = (hero as { palette?: unknown }).palette;
+  if (!palette || typeof palette !== "object") return undefined;
+
+  const value = palette as HeroTextPalette;
+  return {
+    textColor1: value.textColor1,
+    textColor2: value.textColor2,
+    scrimColor: value.scrimColor,
+    scrimOpacity:
+      typeof value.scrimOpacity === "number" ? value.scrimOpacity : undefined,
+  };
+}
+
 function resolveResource(
   response: RecommendationResponse,
   ref: RecommendationRef,
@@ -311,6 +358,14 @@ export function mapHomeRecommendations(
       if (!artwork?.url) return [];
 
       const color = `#${artwork.bgColor?.replace(/^#/, "") || "2c2c2e"}`;
+      const heroPalette = isHero ? getHeroTextPalette(artwork) : undefined;
+      const primaryTextColor =
+        formatColor(heroPalette?.textColor1 ?? artwork.textColor1) ??
+        contrastTextColor(color);
+      const secondaryTextColor =
+        formatColor(heroPalette?.textColor2 ?? artwork.textColor2) ??
+        primaryTextColor;
+      const scrimColor = formatColor(heroPalette?.scrimColor);
       const subtitle = getSubtitle(resource.attributes);
       const notes = resource.attributes.plainEditorialNotes;
 
@@ -340,7 +395,18 @@ export function mapHomeRecommendations(
                 [592],
                 [632],
               ]),
-          artworkColors: { bg: color, main: color },
+          artworkColors: {
+            bg: color,
+            main: color,
+            textPrimary: primaryTextColor,
+            textSecondary: secondaryTextColor,
+            ...(scrimColor && heroPalette?.scrimOpacity !== undefined
+              ? {
+                  textScrimColor: scrimColor,
+                  textScrimOpacity: heroPalette.scrimOpacity,
+                }
+              : {}),
+          },
           ...(videoAsset?.video ? { videoSrc: videoAsset.video } : {}),
           typeTag: notes?.tag ?? (isHero ? sectionTitle : notes?.name),
           description:

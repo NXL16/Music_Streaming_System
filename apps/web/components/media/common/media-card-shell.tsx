@@ -4,12 +4,16 @@ type MediaCardShellProps = {
   children: ReactNode;
   isHero?: boolean;
   artworkColor: string;
+  metadataTextPrimary?: string;
+  metadataTextSecondary?: string;
 };
 
 export default function MediaCardShell({
   children,
   isHero = false,
   artworkColor,
+  metadataTextPrimary,
+  metadataTextSecondary,
 }: MediaCardShellProps) {
   return (
     <li
@@ -21,7 +25,8 @@ export default function MediaCardShell({
           isHero
             ? ({
                 "--artwork-background-color": artworkColor,
-                "--metadata-color-override": "#ffffff",
+                "--metadata-primary-color": metadataTextPrimary ?? "#ffffff",
+                "--metadata-secondary-color": metadataTextSecondary ?? metadataTextPrimary ?? "#ffffff",
                 "--legibility-gradient-color": "0, 0, 0",
               } as CSSProperties)
             : undefined
