@@ -28,9 +28,28 @@ const HERO_ASPECT_RATIO = 3 / 4;
 // The extension overlaps the original artwork and fades in gradually. This
 // avoids a visible horizontal seam on bright artwork.
 const HERO_BOTTOM_STRIP_HEIGHT = 72;
-const HERO_BLEND_OVERLAP_HEIGHT = 56;
+const HERO_BLEND_OVERLAP_HEIGHT = 46;
 const HERO_EXTENSION_BLUR_SIGMA = 34;
+const HERO_TEXT_REGION_START = 0.62;
+const HERO_TEXT_CONTRAST_PERCENTILE = 0.15;
+const MINIMUM_TEXT_CONTRAST = 4.5;
 const PROCESS_TIMEOUT_MS = 30 * 60 * 1000;
+
+interface ArtworkPalette {
+  bgColor: string;
+  textColor1: string;
+  textColor2: string;
+  textColor3: string;
+  textColor4: string;
+  hasP3: boolean;
+}
+
+interface HeroTextPalette {
+  textColor1: string;
+  textColor2: string;
+  scrimColor?: string;
+  scrimOpacity?: number;
+}
 
 interface ProbeResult {
   streams?: Array<{
@@ -132,6 +151,7 @@ export class AssetProcessorService implements OnModuleDestroy {
             heroHeight,
             extendHeight,
           );
+    const heroPalette = await this.heroTextPalette(heroSource);
     const heroMaximumWidth = Math.min(
       width,
       HERO_ARTWORK_WIDTHS.at(-1) ?? width,
@@ -176,6 +196,7 @@ export class AssetProcessorService implements OnModuleDestroy {
         hero: {
           width,
           height: heroHeight,
+          palette: heroPalette,
           renditions: heroRenditions,
         },
       }),
@@ -239,14 +260,7 @@ export class AssetProcessorService implements OnModuleDestroy {
     return alpha;
   }
 
-  private async artworkPalette(source: Buffer): Promise<{
-    bgColor: string;
-    textColor1: string;
-    textColor2: string;
-    textColor3: string;
-    textColor4: string;
-    hasP3: boolean;
-  }> {
+  private async artworkPalette(source: Buffer): Promise<ArtworkPalette> {
     const dominant = (await sharp(source).stats()).dominant;
     const background = {
       r: dominant.r,
@@ -274,6 +288,88 @@ export class AssetProcessorService implements OnModuleDestroy {
       textColor4: textColor(0.46),
       hasP3: false,
     };
+  }
+
+  /**
+   * Hero metadata always sits at the bottom, so a whole-image dominant color
+   * is not reliable enough. Analyse the final hero artwork's lower area and
+   * choose the text colour with the strongest lower-percentile WCAG contrast.
+   * A directional scrim is emitted only for mixed backgrounds where neither
+   * black nor white can keep the target contrast across that area.
+   */
+  private async heroTextPalette(source: Buffer): Promise<HeroTextPalette> {
+    const metadata = await sharp(source).metadata();
+    const width = metadata.width ?? 0;
+    const height = metadata.height ?? 0;
+    if (width <= 0 || height <= 0) {
+      return { textColor1: 'ffffff', textColor2: 'ffffff' };
+    }
+
+    const top = Math.min(height - 1, Math.floor(height * HERO_TEXT_REGION_START));
+    const { data, info } = await sharp(source)
+      .extract({ left: 0, top, width, height: height - top })
+      .removeAlpha()
+      .resize({ width: 96, height: 96, fit: 'fill' })
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const luminances: number[] = [];
+    for (let offset = 0; offset < data.length; offset += info.channels) {
+      const red = data[offset] ?? 0;
+      const green = data[offset + 1] ?? 0;
+      const blue = data[offset + 2] ?? 0;
+      luminances.push(this.relativeLuminance(red, green, blue));
+    }
+    luminances.sort((left, right) => left - right);
+
+    const darkest = this.percentile(luminances, HERO_TEXT_CONTRAST_PERCENTILE);
+    const brightest = this.percentile(
+      luminances,
+      1 - HERO_TEXT_CONTRAST_PERCENTILE,
+    );
+    const blackContrast = (darkest + 0.05) / 0.05;
+    const whiteContrast = 1.05 / (brightest + 0.05);
+    const useBlackText = blackContrast >= whiteContrast;
+    const contrast = useBlackText ? blackContrast : whiteContrast;
+
+    if (contrast >= MINIMUM_TEXT_CONTRAST) {
+      const color = useBlackText ? '000000' : 'ffffff';
+      return { textColor1: color, textColor2: color };
+    }
+
+    const targetLuminance = useBlackText ? 0.175 : 1 / 4.5 - 0.05;
+    const baseLuminance = useBlackText ? darkest : brightest;
+    const requiredOpacity = useBlackText
+      ? (targetLuminance - baseLuminance) / Math.max(0.001, 1 - baseLuminance)
+      : 1 - targetLuminance / Math.max(0.001, baseLuminance);
+    const color = useBlackText ? '000000' : 'ffffff';
+
+    return {
+      textColor1: color,
+      textColor2: color,
+      scrimColor: useBlackText ? 'ffffff' : '000000',
+      scrimOpacity: Math.max(0.18, Math.min(0.72, requiredOpacity + 0.06)),
+    };
+  }
+
+  private relativeLuminance(red: number, green: number, blue: number) {
+    const linear = (channel: number) => {
+      const value = channel / 255;
+      return value <= 0.04045
+        ? value / 12.92
+        : ((value + 0.055) / 1.055) ** 2.4;
+    };
+
+    return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue);
+  }
+
+  private percentile(values: number[], percentile: number) {
+    if (!values.length) return 0;
+    const index = Math.min(
+      values.length - 1,
+      Math.max(0, Math.floor((values.length - 1) * percentile)),
+    );
+    return values[index] ?? 0;
   }
 
   private hexColor(color: { r: number; g: number; b: number }): string {
