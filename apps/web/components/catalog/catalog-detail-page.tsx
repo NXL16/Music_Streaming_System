@@ -17,6 +17,7 @@ import Link from "next/link";
 import { formatDuration, formatSummaryDuration } from "@/lib/format/duration";
 import { artistRoute } from "@/lib/catalog/artist-route";
 import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
+import CatalogPageLoading from "../loading/catalog-page-loading";
 
 type CatalogDetailPageProps = {
   resourceType: CatalogDetailType;
@@ -221,11 +222,7 @@ export function CatalogDetailPage({
 
   return (
     <>
-      {loading && (
-        <div className="mx-(--bodyGutter) pt-8 text-(--systemSecondary)">
-          Đang tải...
-        </div>
-      )}
+      {loading && !data && <CatalogPageLoading />}
 
       {error && (
         <div className="mx-(--bodyGutter) pt-8 text-red-500">

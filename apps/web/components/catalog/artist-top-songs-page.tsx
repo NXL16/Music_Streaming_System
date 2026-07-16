@@ -16,6 +16,7 @@ import { useCatalogArtistSongs } from "@/lib/catalog/use-catalog-artist-songs";
 import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
 import { usePlayerStore } from "@/lib/player/use-player-store";
 import Loading from "@/app/loading";
+import CatalogPageLoading from "../loading/catalog-page-loading";
 
 type ArtistTopSongsPageProps = {
   artistId: string;
@@ -135,11 +136,11 @@ export function ArtistTopSongsPage({ artistId }: ArtistTopSongsPageProps) {
 }
 
 function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
-  const { artist } = useCatalogArtist(artistId, {
+  const { artist, loading: artistLoading } = useCatalogArtist(artistId, {
     includeAlbums: false,
     includeSongs: false,
   });
-  const { songs, loadingMore, hasMore, loadMore } =
+  const { songs, loading: songsLoading, loadingMore, hasMore, loadMore } =
     useCatalogArtistSongs(artistId);
   const [selectedSongId, setSelectedSongId] = useState<string | null>(null);
   const setQueue = usePlayerStore((state) => state.setQueue);
@@ -165,6 +166,10 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [hasMore, loadMore, loadingMore]);
+
+  if (artistLoading || songsLoading) {
+    return <CatalogPageLoading />;
+  }
 
   return (
     <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-8 [--songs-list-row-border-radius:12px] relative z-(--z-default)">

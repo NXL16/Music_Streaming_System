@@ -10,6 +10,7 @@ import Link from "next/link";
 import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
 import { getArtworkRenditionUrl, getArtworkSrcSet } from "@/lib/media/artwork";
 import { formatDuration, formatSummaryDuration } from "@/lib/format/duration";
+import CatalogPageLoading from "../loading/catalog-page-loading";
 
 type DailyMixPageProps = {
   playlistId: string;
@@ -70,11 +71,7 @@ export default function DailyMixPage({ playlistId }: DailyMixPageProps) {
   }, [playlistId]);
 
   if (!mix && !error) {
-    return (
-      <p className="mx-(--bodyGutter) pt-8 text-(--systemSecondary)">
-        Đang tải...
-      </p>
-    );
+    return <CatalogPageLoading />;
   }
 
   if (!mix || error) {

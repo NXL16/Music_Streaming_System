@@ -15,6 +15,7 @@ import { getAllCatalogArtistSongs } from "@/lib/catalog/artist-song-pages";
 import Link from "next/link";
 import CardContextMenu from "../media/common/card-context-menu";
 import CardPlayButton from "../media/common/card-play-button";
+import CatalogPageLoading from "../loading/catalog-page-loading";
 
 type ArtistDetailPageProps = {
   artistId: string;
@@ -39,10 +40,14 @@ function formatLatestReleaseDate(dateValue?: string) {
 
 export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
   const router = useRouter();
-  const { artist, albums, songs } = useCatalogArtist(artistId);
+  const { artist, albums, songs, loading } = useCatalogArtist(artistId);
   const setQueue = usePlayerStore((state) => state.setQueue);
   const startStation = usePlayerStore((state) => state.startStation);
   const [startingStation, setStartingStation] = useState(false);
+
+  if (loading) {
+    return <CatalogPageLoading />;
+  }
 
   const artistName = artist?.attributes?.name;
 

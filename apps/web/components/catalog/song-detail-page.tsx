@@ -6,6 +6,7 @@ import { useCatalogSong } from "@/lib/catalog/use-catalog-song";
 import { formatDuration } from "@/lib/format/duration";
 import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
 import ResponsiveArtwork from "../media/common/responsive-artwork";
+import CatalogPageLoading from "../loading/catalog-page-loading";
 
 type SongDetailPageProps = {
   songId: string;
@@ -43,7 +44,7 @@ export function SongDetailPage({ songId }: SongDetailPageProps) {
   const setQueue = usePlayerStore((state) => state.setQueue);
 
   if (loading) {
-    return <p className="mx-(--bodyGutter) pt-8 text-(--systemSecondary)">Đang tải...</p>;
+    return <CatalogPageLoading />;
   }
 
   if (error) {
