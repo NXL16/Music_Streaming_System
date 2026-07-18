@@ -961,43 +961,7 @@ export class RecommendationsService {
   ): Promise<GetHomeRecommendationsResponse> {
     if (!response.resources) return response;
 
-    const profile = await this.listeningService.getUserTasteProfile(userId);
     const resources = this.cloneResources(response.resources);
-    const scoreContext = await this.buildScoreContext(userId, response, profile);
-    const personalRecommendation = { ...resources.personalRecommendation };
-
-    for (const [sectionId, section] of Object.entries(personalRecommendation)) {
-      const contents = section.relationships?.contents;
-      const refs = contents?.data;
-      if (!contents || !refs || refs.length < 2) continue;
-
-      const rankedRefs = [...refs].sort(
-        (left, right) =>
-          this.scoreRecommendationRef(right, scoreContext) -
-          this.scoreRecommendationRef(left, scoreContext),
-      );
-
-      personalRecommendation[sectionId] = {
-        ...section,
-        relationships: {
-          ...section.relationships,
-          primaryContent: section.relationships?.primaryContent ?? {
-            href: this.sectionRelationshipHref(
-              sectionId,
-              pageName,
-              'primary-content',
-            ),
-            data: [],
-          },
-          contents: {
-            ...contents,
-            data: rankedRefs,
-          },
-        },
-      };
-    }
-
-    resources.personalRecommendation = personalRecommendation;
     const recentRef = await this.addRuntimeRecentlyPlayedSection(
       userId,
       pageName,
@@ -1045,7 +1009,6 @@ export class RecommendationsService {
   ): GetHomeRecommendationsResponse {
     if (!response.resources) return response;
 
-    const usedPreviewResources = new Set<string>();
     const personalRecommendation = {
       ...response.resources.personalRecommendation,
     };
@@ -1078,28 +1041,20 @@ export class RecommendationsService {
         sectionResources.add(key);
 
         if (preview.length < HOME_PREVIEW_ITEM_LIMIT) {
-          if (usedPreviewResources.has(key)) {
-            continue;
-          }
           preview.push(ref);
         }
       }
 
       if (preview.length === 0) continue;
 
-      for (const ref of preview) {
-        usedPreviewResources.add(this.resourceKey(ref.type, ref.id));
-      }
-
       personalRecommendation[sectionRef.id] = {
         ...section,
         attributes: {
           ...section.attributes!,
-          // Keep the overflow signal after trimming the Home payload. The
-          // client can show its existing arrow without receiving those items.
-          hasSeeAll:
-            Boolean(section.attributes!.hasSeeAll) ||
-            sectionResources.size > preview.length,
+          // A Home shelf is selectable only when it has entries outside the
+          // preview. Do not retain a stale author-provided flag: it made the
+          // arrow appear for shelves that already fit on Home.
+          hasSeeAll: sectionResources.size > preview.length,
         },
         relationships: {
           ...section.relationships,

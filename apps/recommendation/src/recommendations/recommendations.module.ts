@@ -14,6 +14,7 @@ import { InternalGrpcGuard } from '../common/guards/internal-grpc.guard';
 import { RecommendationCatalogService } from './recommendation-catalog.service';
 import { GenerationService } from '../generation/generation.service';
 import { CatalogSynchronizationService } from './catalog-synchronization.service';
+import { RecommendationEngineService } from '../generation/recommendation-engine.service';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { CatalogSynchronizationService } from './catalog-synchronization.service
     RecommendationCatalogService,
     CatalogSynchronizationService,
     GenerationService,
+    RecommendationEngineService,
     InternalGrpcGuard,
   ],
   exports: [RecommendationsService],

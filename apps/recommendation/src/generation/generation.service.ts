@@ -13,6 +13,11 @@ import { ListeningService, TasteProfile } from '../listening/listening.service';
 import { RecommendationsService } from '../recommendations/recommendations.service';
 import { RecommendationCatalogService } from '../recommendations/recommendation-catalog.service';
 import { CatalogSynchronizationService } from '../recommendations/catalog-synchronization.service';
+import {
+  GeneratedShelf,
+  PERSONALIZATION_MODEL_VERSION,
+  RecommendationEngineService,
+} from './recommendation-engine.service';
 
 const STALE_DURATION_MS = 6 * 60 * 60 * 1000;
 const RELEASE_RADAR_DAYS = 30;
@@ -110,6 +115,7 @@ export class GenerationService {
     private readonly recommendationsService: RecommendationsService,
     private readonly catalogService: RecommendationCatalogService,
     private readonly catalogSynchronizationService: CatalogSynchronizationService,
+    private readonly recommendationEngine: RecommendationEngineService,
   ) {}
 
   async generate(
@@ -199,9 +205,18 @@ export class GenerationService {
       },
       select: {
         staleAfter: true,
+        sections: {
+          where: { externalId: 'user-top-picks' },
+          select: { version: true },
+        },
       },
     });
-    const isStale = !existingPage?.staleAfter || existingPage.staleAfter <= new Date();
+    const isStale =
+      !existingPage?.staleAfter ||
+      existingPage.staleAfter <= new Date() ||
+      !existingPage.sections.some(
+        (section) => section.version >= PERSONALIZATION_MODEL_VERSION,
+      );
 
     if (!isStale) {
       const needsArtworkFix =
@@ -385,28 +400,19 @@ export class GenerationService {
     const recentlyPlayed = await this.buildRecentlyPlayedSection(userId);
     if (recentlyPlayed) sections.push(recentlyPlayed);
 
+    // System playlists and stations are collection cards on Home. Their track
+    // selection still uses the listener profile, while album shelves come from
+    // the v2 ranking engine below.
     const dailyMix = await this.buildDailyMixPlaylist(userId, profile);
     if (dailyMix) sections.push(dailyMix);
+    const stations = await this.buildStationsForYouSection(userId, profile);
+    if (stations) sections.push(stations);
 
-    const stationsForYou = await this.buildStationsForYouSection(
-      userId,
-      profile,
+    const personalizedShelves =
+      await this.recommendationEngine.generateUserShelves(userId);
+    sections.push(
+      ...personalizedShelves.map((shelf) => this.buildEngineSection(shelf)),
     );
-    if (stationsForYou) sections.push(stationsForYou);
-
-    const releaseRadar = await this.buildReleaseRadarSection(profile);
-    if (releaseRadar) sections.push(releaseRadar);
-
-    const madeForYou = await this.buildMadeForYouSection(profile);
-    if (madeForYou) sections.push(madeForYou);
-
-    const becauseSections = await this.buildBecauseYouListenedSections(profile);
-    for (const section of becauseSections) {
-      sections.push(section);
-    }
-
-    const discover = await this.buildDiscoverSection(profile);
-    if (discover) sections.push(discover);
 
     if (sections.length === 0) {
       return this.recommendationsService.getHomeRecommendations({
@@ -1764,7 +1770,7 @@ export class GenerationService {
 
     return this.buildSection(
       'global-featured-albums',
-      'Top Picks for You',
+      'Featured Now',
       'MusicNotesHeroShelf',
       ['albums'],
       items,
@@ -2397,6 +2403,26 @@ export class GenerationService {
           })),
         },
         primaryContent: { href: '', data: [] },
+      },
+    };
+  }
+
+  private buildEngineSection(
+    shelf: GeneratedShelf,
+  ): PersonalRecommendationResource {
+    const section = this.buildSection(
+      shelf.id,
+      shelf.title,
+      'MusicCoverShelf',
+      ['albums'],
+      shelf.items,
+    );
+    return {
+      ...section,
+      attributes: {
+        ...section.attributes!,
+        kind: 'ranked-personalisation',
+        version: shelf.modelVersion,
       },
     };
   }

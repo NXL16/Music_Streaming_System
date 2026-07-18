@@ -44,6 +44,14 @@ export async function sendListeningEvent(payload: ListeningEventPayload) {
     await http.post("/me/recommendations/listening-events", payload);
     if (payload.eventType === "PLAY_START") {
       invalidateHomeRecommendationsCache();
+      if (typeof window !== "undefined") {
+        // The optimistic item above updates an already-mounted Home. This
+        // event makes the source of truth refresh too, including when Home
+        // mounted after the qualified three-second play was recorded.
+        window.dispatchEvent(
+          new Event(HOME_RECOMMENDATIONS_REFRESH_EVENT),
+        );
+      }
     }
   } catch {}
 }

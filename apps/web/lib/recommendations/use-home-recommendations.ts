@@ -6,7 +6,10 @@ import {
   getHomeRecommendations,
 } from "./recommendation.api";
 import type { RecommendationResponse } from "./recommendation.types";
-import { RECENTLY_PLAYED_ITEM_EVENT } from "./listening-events";
+import {
+  HOME_RECOMMENDATIONS_REFRESH_EVENT,
+  RECENTLY_PLAYED_ITEM_EVENT,
+} from "./listening-events";
 import type { MediaCardProps } from "@/components/media/media-card.types";
 
 const MAX_RECENTLY_PLAYED_OVERLAY_ITEMS = 24;
@@ -46,6 +49,20 @@ export function useHomeRecommendations() {
 
     return () => {
       controller.abort();
+    };
+  }, [refresh]);
+
+  useEffect(() => {
+    const handleRecommendationRefresh = () => refresh(false);
+    window.addEventListener(
+      HOME_RECOMMENDATIONS_REFRESH_EVENT,
+      handleRecommendationRefresh,
+    );
+    return () => {
+      window.removeEventListener(
+        HOME_RECOMMENDATIONS_REFRESH_EVENT,
+        handleRecommendationRefresh,
+      );
     };
   }, [refresh]);
 

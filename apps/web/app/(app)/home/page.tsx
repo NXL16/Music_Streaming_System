@@ -97,15 +97,22 @@ export default function HomePage() {
 
   const homeShelves = useMemo(
     () =>
-      shelvesWithRecentlyPlayed.map((shelf) => ({
-        ...shelf,
-        items: previewShelfItems(shelf, recentlyPlayedItems),
-        hasMore:
-          shelf.hasMore ||
-          (shelf.id === RECENTLY_PLAYED_SHELF_ID &&
-            mergeShelfItems(recentlyPlayedItems, shelf.items).length >
-              MAX_HOME_SHELF_ITEMS),
-      })),
+      shelvesWithRecentlyPlayed.map((shelf) => {
+        const previewItems = previewShelfItems(shelf, recentlyPlayedItems);
+        return {
+          ...shelf,
+          items: previewItems,
+          hasMore:
+            // The API may have overflow before Home removes duplicates shared
+            // with earlier shelves. Only expose the detail chevron when this
+            // shelf itself fills its 12-card Home preview.
+            (shelf.hasMore &&
+              previewItems.length >= MAX_HOME_SHELF_ITEMS) ||
+            (shelf.id === RECENTLY_PLAYED_SHELF_ID &&
+              mergeShelfItems(recentlyPlayedItems, shelf.items).length >
+                MAX_HOME_SHELF_ITEMS),
+        };
+      }),
     [recentlyPlayedItems, shelvesWithRecentlyPlayed],
   );
   const selectedShelf = useMemo(
@@ -227,6 +234,11 @@ export default function HomePage() {
                   items={shelf.items}
                   prioritizeFirstCard={index === 0}
                   shelfId={shelf.id}
+                  scrollToStartKey={
+                    shelf.id === RECENTLY_PLAYED_SHELF_ID
+                      ? shelf.items[0]?.id
+                      : undefined
+                  }
                   onSelect={shelf.hasMore ? handleSelectShelf : undefined}
                 />
               );

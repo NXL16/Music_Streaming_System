@@ -24,6 +24,8 @@ export type MediaShelfProps = {
   items: MediaCardProps[];
   shelfId?: string;
   prioritizeFirstCard?: boolean;
+  /** Reset the horizontal viewport when a newly-prepended item becomes first. */
+  scrollToStartKey?: string;
   onSelect?: (shelfId: string) => void;
   /** @deprecated Use shelfId + onSelect instead */
   onTitleClick?: () => void;
@@ -245,9 +247,7 @@ function getShelfVisibilityObserver() {
       });
     },
     {
-      root: document.querySelector<HTMLElement>(
-        "[data-app-scroll-container]",
-      ),
+      root: document.querySelector<HTMLElement>("[data-app-scroll-container]"),
       rootMargin: SHELF_MEASUREMENT_ROOT_MARGIN,
     },
   );
@@ -256,9 +256,11 @@ function getShelfVisibilityObserver() {
 }
 
 function canPrewarmArtwork() {
-  const connection = (navigator as Navigator & {
-    connection?: { effectiveType?: string; saveData?: boolean };
-  }).connection;
+  const connection = (
+    navigator as Navigator & {
+      connection?: { effectiveType?: string; saveData?: boolean };
+    }
+  ).connection;
 
   return !(
     connection?.saveData ||
@@ -336,9 +338,7 @@ function getShelfArtworkPrewarmObserver() {
       });
     },
     {
-      root: document.querySelector<HTMLElement>(
-        "[data-app-scroll-container]",
-      ),
+      root: document.querySelector<HTMLElement>("[data-app-scroll-container]"),
       rootMargin: SHELF_ARTWORK_PREWARM_ROOT_MARGIN,
     },
   );
@@ -352,13 +352,17 @@ function MediaShelf({
   items,
   shelfId,
   prioritizeFirstCard = false,
+  scrollToStartKey,
   onSelect,
   onTitleClick,
 }: MediaShelfProps) {
   const isHeroShelf = displayKind === "MusicNotesHeroShelf";
   const shelfContainerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
-  const [isContentMounted, setIsContentMounted] = useState(false);
+  // Do not gate the first render on IntersectionObserver. With the nested app
+  // scroll container it can report a visible shelf as non-intersecting, which
+  // leaves the title and an intrinsic-height placeholder but no cards.
+  const [isContentMounted, setIsContentMounted] = useState(true);
   const [placeholderHeight, setPlaceholderHeight] = useState(
     mediaShelfIntrinsicHeights[displayKind],
   );
@@ -389,11 +393,29 @@ function MediaShelf({
   }, []);
 
   useEffect(() => {
+    if (!scrollToStartKey) return;
+    const shelf = listRef.current;
+    if (!shelf) return;
+
+    // Recently Played prepends qualified plays. Preserve no previous scroll
+    // offset here, otherwise the new first card remains hidden to the left.
+    const frame = requestAnimationFrame(() => {
+      shelf.scrollLeft = 0;
+      queueShelfDraggabilityUpdate(shelf);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [scrollToStartKey]);
+
+  useEffect(() => {
     const shelf = listRef.current;
     if (!shelf) return;
 
     const handleVisibilityChange = (isNearViewport: boolean) => {
-      setIsContentMounted(isNearViewport);
+      // Once rendered, keep cards mounted. This is a Home surface, where
+      // correctness is more important than aggressively virtualising shelves.
+      if (isNearViewport) {
+        setIsContentMounted(true);
+      }
     };
     shelfVisibilityListeners.set(shelf, handleVisibilityChange);
 
@@ -452,7 +474,9 @@ function MediaShelf({
     let frame: number | undefined;
     const updatePlaceholderHeight = () => {
       frame = undefined;
-      const nextHeight = Math.ceil(shelfContainer.getBoundingClientRect().height);
+      const nextHeight = Math.ceil(
+        shelfContainer.getBoundingClientRect().height,
+      );
       if (nextHeight > 0) {
         setPlaceholderHeight((currentHeight) =>
           currentHeight === nextHeight ? currentHeight : nextHeight,

@@ -7,6 +7,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 let pendingHomeRecommendations: Promise<RecommendationResponse> | null = null;
 let cachedResponse: RecommendationResponse | null = null;
 let cacheExpiresAt = 0;
+let cacheGeneration = 0;
 
 function getBrowserTimezone() {
   try {
@@ -31,8 +32,12 @@ export function getCachedHomeRecommendations(): RecommendationResponse | null {
 }
 
 export function invalidateHomeRecommendationsCache() {
+  cacheGeneration += 1;
   cachedResponse = null;
   cacheExpiresAt = 0;
+  // Do not reuse a request started before a playback event. It can resolve
+  // after invalidation and otherwise make Recently Played appear unchanged.
+  pendingHomeRecommendations = null;
 }
 
 export async function getHomeRecommendations() {
@@ -40,7 +45,8 @@ export async function getHomeRecommendations() {
     return cachedResponse;
   }
 
-  pendingHomeRecommendations ??= http
+  const requestGeneration = cacheGeneration;
+  const request = http
     .get<RecommendationResponse>("/me/recommendations", {
       params: {
         name: "listen-now",
@@ -50,15 +56,20 @@ export async function getHomeRecommendations() {
       },
     })
     .then((response) => {
-      cachedResponse = response.data;
-      cacheExpiresAt = Date.now() + CACHE_TTL_MS;
+      if (requestGeneration === cacheGeneration) {
+        cachedResponse = response.data;
+        cacheExpiresAt = Date.now() + CACHE_TTL_MS;
+      }
       return response.data;
     })
     .finally(() => {
-      pendingHomeRecommendations = null;
+      if (pendingHomeRecommendations === request) {
+        pendingHomeRecommendations = null;
+      }
     });
+  pendingHomeRecommendations = request;
 
-  return pendingHomeRecommendations;
+  return request;
 }
 
 export async function getRecommendationSection(sectionId: string) {
