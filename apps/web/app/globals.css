@@ -781,3 +781,9 @@ html[dir=rtl] .chrome-volume__slider.svelte-13xdpwq.svelte-13xdpwq {
     transform: rotate(1turn);
   }
 }
+
+/* Keep keyboard focus visually neutral across the product. */
+:where(*:focus, *:focus-visible) {
+  outline: none !important;
+  box-shadow: none !important;
+}

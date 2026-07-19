@@ -27,8 +27,6 @@ const AmpPlayPauseButton = React.memo(function AmpPlayPauseButton({
     text-(--playback-control-color,var(--white80,rgba(255,255,255,0.8)))
     transition-colors duration-200 ease-out
     hover:not-disabled:text-(--playback-control-color-hover,#fff)
-    focus-visible:not-disabled:text-(--playback-control-color-hover,#fff)
-    focus-visible:outline-[4px] focus-visible:outline-solid focus-visible:outline-(--sk-focus-color,#0071e3) focus-visible:outline-offset-2
     disabled:opacity-40 disabled:cursor-default
   `.trim();
 
