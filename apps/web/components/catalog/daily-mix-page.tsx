@@ -11,6 +11,7 @@ import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
 import { getArtworkRenditionUrl, getArtworkSrcSet } from "@/lib/media/artwork";
 import { formatDuration, formatSummaryDuration } from "@/lib/format/duration";
 import CatalogPageLoading from "../loading/catalog-page-loading";
+import { AddToLibraryButton } from "../songs/add-to-library-button";
 
 type DailyMixPageProps = {
   playlistId: string;
@@ -215,31 +216,13 @@ export default function DailyMixPage({ playlistId }: DailyMixPageProps) {
 
                 <div className="order-3">
                   <div className="[--add-to-library-button-width:36px] [--add-to-library-icon-width:12px]">
-                    <div className="items-stretch flex shrink-0 h-7">
-                      <button
-                        className="items-center text-(--keyColor) cursor-pointer inline-flex justify-center transition-(--global-transition) h-(--add-to-library-button-width,25px) leading-0 w-(--add-to-library-button-width,25px) me-(--addToLibraryMarginEnd,4px) bg-(--add-to-library-bg-color) [border:.75px_solid_var(--add-to-library-border-color)] rounded-full"
-                        aria-label="Add to library"
-                        title="Add to library"
-                      >
-                        <svg
-                          width="10"
-                          height="10"
-                          viewBox="0 0 10 10"
-                          xmlns="http://www.w3.org/2000/svg"
-                          fillRule="evenodd"
-                          clipRule="evenodd"
-                          strokeLinejoin="round"
-                          strokeMiterlimit="2"
-                          className="pointer-events-none h-(--add-to-library-icon-width,12px) w-(--add-to-library-icon-width,12px) fill-(--addToLibraryFillOverride,var(--keyColor))"
-                          aria-hidden="true"
-                        >
-                          <path
-                            d="M.784 5.784h3.432v3.432c0 .43.354.784.784.784.43 0 .784-.354.784-.784V5.784h3.432a.784.784 0 1 0 0-1.568H5.784V.784A.788.788 0 0 0 5 0a.788.788 0 0 0-.784.784v3.432H.784a.784.784 0 1 0 0 1.568z"
-                            fillRule="nonzero"
-                          ></path>
-                        </svg>
-                      </button>
-                    </div>
+                    <AddToLibraryButton
+                      resourceType="playlists"
+                      resourceId={mix.id}
+                      title={mix.title}
+                      subtitle={mix.curatorName}
+                      artworkUrl={artworkImageUrl || ""}
+                    />
                   </div>
                 </div>
               </div>

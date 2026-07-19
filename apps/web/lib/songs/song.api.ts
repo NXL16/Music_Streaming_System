@@ -39,6 +39,34 @@ export async function listMySongs(params?: {
   return response.data;
 }
 
+export async function listFavoriteSongs(params?: {
+  cursor?: string;
+  limit?: number;
+}) {
+  const response = await http.get<ListSongsResponse>("/songs/favorites", {
+    params: {
+      cursor: params?.cursor,
+      limit: params?.limit ?? 50,
+    },
+  });
+
+  return response.data;
+}
+
+export async function addFavoriteSong(songId: string) {
+  const response = await http.post<{ success: boolean }>(
+    `/songs/${encodeURIComponent(songId)}/favorite`,
+  );
+  return response.data;
+}
+
+export async function removeFavoriteSong(songId: string) {
+  const response = await http.delete<{ success: boolean }>(
+    `/songs/${encodeURIComponent(songId)}/favorite`,
+  );
+  return response.data;
+}
+
 export async function getMySong(songId: string) {
   const response = await http.get<GetSongResponse>(`/songs/private/${songId}`);
 

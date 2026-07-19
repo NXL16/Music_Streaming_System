@@ -1,11 +1,12 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuthStore } from "@/lib/auth/auth-store";
+import { http } from "@/lib/api/http";
 import { useWalletBalance } from "@/lib/wallet/use-wallet-balance";
-import { Coins, Plus } from "lucide-react";
+import { Coins, Plus, ShieldCheck } from "lucide-react";
 
 type SidebarItem = {
   key: string;
@@ -14,11 +15,16 @@ type SidebarItem = {
   icon: ReactNode;
 };
 
+type UserPlaylist = {
+  id: string;
+  name: string;
+};
+
 const primaryNavigationItems: SidebarItem[] = [
   {
     key: "search",
     label: "Search",
-    href: "/dashboard",
+    href: "/#",
     icon: (
       <svg height="24" viewBox="0 0 24 24" width="24" aria-hidden="true">
         <path
@@ -47,7 +53,7 @@ const primaryNavigationItems: SidebarItem[] = [
   {
     key: "new",
     label: "New",
-    href: "/library",
+    href: "/#",
     icon: (
       <svg height="24" viewBox="0 0 24 24" width="24" aria-hidden="true">
         <path
@@ -146,7 +152,7 @@ const playlistItems: SidebarItem[] = [
   {
     key: "all-playlists",
     label: "All Playlists",
-    href: "/#",
+    href: "/library/all-playlists/",
     icon: (
       <svg
         width="24"
@@ -166,7 +172,7 @@ const playlistItems: SidebarItem[] = [
   {
     key: "favourite-songs",
     label: "Favourite Songs",
-    href: "/#",
+    href: "/library#favourite-songs",
     icon: (
       <svg
         xmlns="http://www.w3.org/2000/svg"
@@ -181,37 +187,22 @@ const playlistItems: SidebarItem[] = [
       </svg>
     ),
   },
+];
+
+function PlaylistIcon() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M13.079 19.712c1.076 0 2.688-.79 2.688-2.922v-6.702c0-.388.073-.468.417-.542l3.347-.732a.48.48 0 0 0 .403-.483V5.577c0-.388-.315-.637-.688-.564l-3.765.82c-.469.103-.725.359-.725.77l.015 8.144c.036.359-.132.593-.455.659l-1.164.242c-1.465.307-2.153 1.054-2.153 2.16 0 1.12.864 1.904 2.08 1.904zM12.046 8.675a.503.503 0 0 0 .498-.498.497.497 0 0 0-.498-.49H5.498a.492.492 0 0 0-.498.49.5.5 0 0 0 .498.498h6.548zm0 2.607a.5.5 0 0 0 .498-.505.49.49 0 0 0-.498-.483H5.498a.486.486 0 0 0-.498.483c0 .278.212.505.498.505h6.548zm0 2.608a.494.494 0 1 0 0-.989H5.498a.492.492 0 0 0-.498.49.49.49 0 0 0 .498.499h6.548z" />
+    </svg>
+  );
+}
+
+const identityAdminItems: SidebarItem[] = [
   {
-    key: "get-up",
-    label: "Get Up!",
-    href: "/#",
-    icon: (
-      <svg
-        width="24"
-        height="24"
-        viewBox="0 0 24 24"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
-      >
-        <path d="M13.079 19.712c1.076 0 2.688-.79 2.688-2.922v-6.702c0-.388.073-.468.417-.542l3.347-.732a.48.48 0 0 0 .403-.483V5.577c0-.388-.315-.637-.688-.564l-3.765.82c-.469.103-.725.359-.725.77l.015 8.144c.036.359-.132.593-.455.659l-1.164.242c-1.465.307-2.153 1.054-2.153 2.16 0 1.12.864 1.904 2.08 1.904zM12.046 8.675a.503.503 0 0 0 .498-.498.497.497 0 0 0-.498-.49H5.498a.492.492 0 0 0-.498.49.5.5 0 0 0 .498.498h6.548zm0 2.607a.5.5 0 0 0 .498-.505.49.49 0 0 0-.498-.483H5.498a.486.486 0 0 0-.498.483c0 .278.212.505.498.505h6.548zm0 2.608a.494.494 0 1 0 0-.989H5.498a.492.492 0 0 0-.498.49.49.49 0 0 0 .498.499h6.548z"></path>
-      </svg>
-    ),
-  },
-  {
-    key: "todays-hits",
-    label: "Today's Hits",
-    href: "/#",
-    icon: (
-      <svg
-        width="24"
-        height="24"
-        viewBox="0 0 24 24"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
-      >
-        <path d="M13.079 19.712c1.076 0 2.688-.79 2.688-2.922v-6.702c0-.388.073-.468.417-.542l3.347-.732a.48.48 0 0 0 .403-.483V5.577c0-.388-.315-.637-.688-.564l-3.765.82c-.469.103-.725.359-.725.77l.015 8.144c.036.359-.132.593-.455.659l-1.164.242c-1.465.307-2.153 1.054-2.153 2.16 0 1.12.864 1.904 2.08 1.904zM12.046 8.675a.503.503 0 0 0 .498-.498.497.497 0 0 0-.498-.49H5.498a.492.492 0 0 0-.498.49.5.5 0 0 0 .498.498h6.548zm0 2.607a.5.5 0 0 0 .498-.505.49.49 0 0 0-.498-.483H5.498a.486.486 0 0 0-.498.483c0 .278.212.505.498.505h6.548zm0 2.608a.494.494 0 1 0 0-.989H5.498a.492.492 0 0 0-.498.49.49.49 0 0 0 .498.499h6.548z"></path>
-      </svg>
-    ),
+    key: "admin",
+    label: "Admin",
+    href: "/admin",
+    icon: <ShieldCheck className="h-5 w-5" aria-hidden="true" />,
   },
 ];
 
@@ -337,10 +328,55 @@ function SidebarSection({
 export default function AppSidebar() {
   const pathname = usePathname();
   const user = useAuthStore((state) => state.user);
+  const [userPlaylists, setUserPlaylists] = useState<UserPlaylist[]>([]);
+  const canManageIdentity = [
+    "SUPER_ADMIN",
+    "ADMIN_USER_OPS",
+    "ADMIN_SECURITY_OPS",
+  ].includes(user?.role ?? "");
   const { balance } = useWalletBalance();
   const avatarLetter = (user?.displayName || user?.username || "U")
     .charAt(0)
     .toUpperCase();
+
+  useEffect(() => {
+    if (!user?.userId) {
+      return;
+    }
+
+    let active = true;
+    const loadPlaylists = async () => {
+      try {
+        const response = await http.get(
+          `/playlists/user/${encodeURIComponent(user.userId)}`,
+          { params: { limit: 50 } },
+        );
+        if (!active) return;
+        setUserPlaylists(
+          response.data.playlists ?? response.data.data?.playlists ?? [],
+        );
+      } catch {
+        if (active) setUserPlaylists([]);
+      }
+    };
+
+    void loadPlaylists();
+    window.addEventListener("library:playlists-changed", loadPlaylists);
+    return () => {
+      active = false;
+      window.removeEventListener("library:playlists-changed", loadPlaylists);
+    };
+  }, [user?.userId]);
+
+  const visiblePlaylistItems: SidebarItem[] = [
+    ...playlistItems.slice(0, 2),
+    ...(user?.userId ? userPlaylists : []).map((playlist) => ({
+      key: `user-playlist-${playlist.id}`,
+      label: playlist.name,
+      href: `/playlist/${playlist.id}`,
+      icon: <PlaylistIcon />,
+    })),
+  ];
 
   return (
     <div className="max-[648px]:hidden [grid-area:structure-header] h-full w-65 relative z-(--z-web-chrome) min-[484px]:z-[calc(var(--z-web-chrome)-11)] min-[484px]:w-[33.8842975207vw] min-[767.32px]:w-65">
@@ -376,9 +412,16 @@ export default function AppSidebar() {
               />
               <SidebarSection
                 title="Playlists"
-                items={playlistItems}
+                items={visiblePlaylistItems}
                 pathname={pathname}
               />
+              {canManageIdentity && (
+                <SidebarSection
+                  title="Administration"
+                  items={identityAdminItems}
+                  pathname={pathname}
+                />
+              )}
             </div>
           </div>
 

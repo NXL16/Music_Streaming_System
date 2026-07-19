@@ -18,19 +18,13 @@ import { getRecommendationSection } from "@/lib/recommendations/recommendation.a
 import MediaShelfSkeleton from "@/components/loading/loading";
 import Loading from "@/app/loading";
 
-const MAX_HOME_SHELF_ITEMS = 12;
+const MAX_HOME_SHELF_ITEMS = 14;
 const RECENTLY_PLAYED_SHELF_ID = "user-recently-played";
 const DAILY_MIX_SHELF_ID = "user-daily-mix";
 const STATIONS_FOR_YOU_SHELF_ID = "user-stations-for-you";
 const FEATURED_ARTISTS_SHELF_ID = "global-top-artists";
 const DAILY_MIX_SHELF_GAP = 2;
 const HOME_SCROLL_IDLE_MS = 120;
-
-function homePreviewDisplayKind(
-  displayKind: ReturnType<typeof mapHomeRecommendations>[number]["displayKind"],
-) {
-  return displayKind === "MusicCoverGrid" ? "MusicCoverShelf" : displayKind;
-}
 
 export default function HomePage() {
   const { data, loading, error, recentlyPlayedItems } =
@@ -87,9 +81,7 @@ export default function HomePage() {
         setSelectedShelfId(null);
         setShelfLoadError("Không thể tải đầy đủ nội dung của kệ này.");
       } finally {
-        setLoadingShelfId((current) =>
-          current === shelfId ? null : current,
-        );
+        setLoadingShelfId((current) => (current === shelfId ? null : current));
       }
     },
     [loadedShelves, shelvesWithRecentlyPlayed],
@@ -106,8 +98,7 @@ export default function HomePage() {
             // The API may have overflow before Home removes duplicates shared
             // with earlier shelves. Only expose the detail chevron when this
             // shelf itself fills its 12-card Home preview.
-            (shelf.hasMore &&
-              previewItems.length >= MAX_HOME_SHELF_ITEMS) ||
+            (shelf.hasMore && previewItems.length >= MAX_HOME_SHELF_ITEMS) ||
             (shelf.id === RECENTLY_PLAYED_SHELF_ID &&
               mergeShelfItems(recentlyPlayedItems, shelf.items).length >
                 MAX_HOME_SHELF_ITEMS),
@@ -148,28 +139,18 @@ export default function HomePage() {
 
     let isScrolling = false;
     let idleTimer: ReturnType<typeof setTimeout> | undefined;
-    let scrollStateFrame: number | undefined;
 
     const finishScrolling = () => {
       idleTimer = undefined;
       isScrolling = false;
-      if (scrollStateFrame !== undefined) {
-        cancelAnimationFrame(scrollStateFrame);
-        scrollStateFrame = undefined;
-      }
       delete scrollContainer.dataset.performanceScrolling;
     };
 
     const handleScroll = () => {
       if (!isScrolling) {
         isScrolling = true;
-        // Commit scrolling before the optional visual-work suppression runs.
-        scrollStateFrame = requestAnimationFrame(() => {
-          scrollStateFrame = undefined;
-          if (isScrolling) {
-            scrollContainer.dataset.performanceScrolling = "true";
-          }
-        });
+        // Disable costly visual affordances in the same frame as scrolling.
+        scrollContainer.dataset.performanceScrolling = "true";
       }
 
       if (idleTimer) clearTimeout(idleTimer);
@@ -180,7 +161,6 @@ export default function HomePage() {
     return () => {
       scrollContainer.removeEventListener("scroll", handleScroll);
       if (idleTimer) clearTimeout(idleTimer);
-      if (scrollStateFrame !== undefined) cancelAnimationFrame(scrollStateFrame);
       delete scrollContainer.dataset.performanceScrolling;
     };
   }, []);
@@ -230,7 +210,7 @@ export default function HomePage() {
                 <MediaShelf
                   key={shelf.id}
                   title={shelf.title}
-                  displayKind={homePreviewDisplayKind(shelf.displayKind)}
+                  displayKind={shelf.displayKind}
                   items={shelf.items}
                   prioritizeFirstCard={index === 0}
                   shelfId={shelf.id}
@@ -297,8 +277,7 @@ function positionDailyMixShelf(
 
   const shelvesWithoutSystemMixes = shelves.filter(
     (shelf) =>
-      shelf.id !== DAILY_MIX_SHELF_ID &&
-      shelf.id !== STATIONS_FOR_YOU_SHELF_ID,
+      shelf.id !== DAILY_MIX_SHELF_ID && shelf.id !== STATIONS_FOR_YOU_SHELF_ID,
   );
   const recentIndexWithoutSystemMixes = shelvesWithoutSystemMixes.findIndex(
     (shelf) => shelf.id === RECENTLY_PLAYED_SHELF_ID,
@@ -307,7 +286,10 @@ function positionDailyMixShelf(
     recentIndexWithoutSystemMixes + DAILY_MIX_SHELF_GAP + 1,
     shelvesWithoutSystemMixes.length,
   );
-  const systemMixShelves = [dailyMix, ...(stationsForYou ? [stationsForYou] : [])];
+  const systemMixShelves = [
+    dailyMix,
+    ...(stationsForYou ? [stationsForYou] : []),
+  ];
 
   return [
     ...shelvesWithoutSystemMixes.slice(0, targetIndex),

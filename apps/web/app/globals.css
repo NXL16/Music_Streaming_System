@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  --apple-music-font: var(--font-sf-pro), var(--font-sf-pro-icons), -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --apple-music-font: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --default-font-family: var(--apple-music-font);
   --font-sans: var(--apple-music-font);
 }
@@ -16,6 +16,10 @@
   --systemPrimary: rgb(29, 29, 31);
   --systemSecondary: rgba(60, 60, 67, 0.6);
   --keyColor: #f12c43;
+  --keyColorText: #ffffff;
+  --statusPositive: #248a3d;
+  --statusPositiveBackground: rgba(36, 138, 61, 0.12);
+  --statusNegativeBackground: rgba(241, 44, 67, 0.12);
 
   --mobileNavigationBG: rgba(255, 255, 255, 0.8);
   --navSidebarBG: rgba(242, 242, 247, 0.82);
@@ -53,6 +57,10 @@
     --systemStandardMediumMaterialSover: rgba(40, 40, 40, .6);
     --systemQuaternary: hsla(0, 0%, 100%, .1);
     --keyColor: #e24154;
+    --keyColorText: #ffffff;
+    --statusPositive: #30d158;
+    --statusPositiveBackground: rgba(48, 209, 88, 0.16);
+    --statusNegativeBackground: rgba(226, 65, 84, 0.16);
     --pageBG: #1f1f1f;
     --footerBg: #323232;
 
@@ -289,7 +297,6 @@
   ul {
     list-style-type: none;
   }
-
 }
 
 @media (min-width: 1000px) {
@@ -605,6 +612,25 @@ html[dir=rtl] .chrome-volume__slider.svelte-13xdpwq.svelte-13xdpwq {
   scrollbar-width: none;
 }
 
+.shelf-grid__list[data-dragging="true"] {
+  /* The scroll container is already compositor-scrolled by the browser.
+     Avoid forcing a giant texture layer for every visible card while dragging. */
+  scroll-snap-type: none;
+  will-change: scroll-position;
+}
+
+/* Hover affordances use blur/opacity transitions. They are not useful while
+   dragging, and skipping them prevents a repaint of every moving card. */
+.shelf-grid__list[data-dragging="true"] .media-card-interaction {
+  transition: none !important;
+}
+
+.shelf-grid__list[data-dragging="true"] .media-card-play-button svg,
+.shelf-grid__list[data-dragging="true"] .media-card-context-menu button {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
 .shelf-grid__list[data-scroll-active="false"] {
   overflow: clip;
   scroll-snap-type: none;
@@ -747,5 +773,11 @@ html[dir=rtl] .chrome-volume__slider.svelte-13xdpwq.svelte-13xdpwq {
     padding-inline-start: var(--shelf-inline-offset);
     scroll-padding-inline-start: var(--shelf-inline-offset);
     width: 100dvw;
+  }
+}
+
+@keyframes addToSpinner {
+  100% {
+    transform: rotate(1turn);
   }
 }

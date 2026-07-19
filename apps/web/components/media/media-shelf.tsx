@@ -15,7 +15,6 @@ export type MediaShelfDisplayKind =
   | "MusicNotesHeroShelf"
   | "MusicCoverShelf"
   | "MusicCircleCoverShelf"
-  | "MusicCoverGrid"
   | "MusicSocialCardShelf";
 
 export type MediaShelfProps = {
@@ -95,27 +94,6 @@ const mediaShelfPresets = {
     "--standard-lockup-shadow-offset": "15px",
   },
 
-  MusicCoverGrid: {
-    "--grid-max-content-xsmall": "144px",
-    "--grid-column-gap-xsmall": "10px",
-    "--grid-row-gap-xsmall": "24px",
-    "--grid-small": "4",
-    "--grid-column-gap-small": "20px",
-    "--grid-row-gap-small": "24px",
-    "--grid-medium": "5",
-    "--grid-column-gap-medium": "20px",
-    "--grid-row-gap-medium": "24px",
-    "--grid-large": "6",
-    "--grid-column-gap-large": "20px",
-    "--grid-row-gap-large": "24px",
-    "--grid-xlarge": "6",
-    "--grid-column-gap-xlarge": "20px",
-    "--grid-row-gap-xlarge": "24px",
-    "--grid-type": "G",
-    "--grid-rows": "2",
-    "--standard-lockup-shadow-offset": "15px",
-  },
-
   MusicSocialCardShelf: {
     "--grid-max-content-xsmall": "280px",
     "--grid-column-gap-xsmall": "10px",
@@ -138,14 +116,6 @@ const mediaShelfPresets = {
   },
 };
 
-const mediaShelfIntrinsicHeights = {
-  MusicNotesHeroShelf: 640,
-  MusicCoverShelf: 380,
-  MusicCircleCoverShelf: 320,
-  MusicCoverGrid: 720,
-  MusicSocialCardShelf: 200,
-} satisfies Record<MediaShelfDisplayKind, number>;
-
 const mediaShelfVisibility = {
   MusicNotesHeroShelf: {
     contentVisibility: "auto",
@@ -159,10 +129,6 @@ const mediaShelfVisibility = {
     contentVisibility: "auto",
     containIntrinsicSize: "auto 320px",
   },
-  MusicCoverGrid: {
-    contentVisibility: "auto",
-    containIntrinsicSize: "auto 720px",
-  },
   MusicSocialCardShelf: {
     contentVisibility: "auto",
     containIntrinsicSize: "auto 200px",
@@ -170,22 +136,16 @@ const mediaShelfVisibility = {
 } satisfies Record<MediaShelfDisplayKind, CSSProperties>;
 
 const MOUSE_DRAG_THRESHOLD = 6;
-const SHELF_MEASUREMENT_ROOT_MARGIN = "900px 0px";
+const SHELF_RENDER_AHEAD_ROOT_MARGIN = "1400px 0px";
 const SHELF_ARTWORK_PREWARM_ROOT_MARGIN = "0px 0px 1600px";
 const SHELF_ARTWORK_PREWARM_ITEM_LIMIT = 6;
 const ARTWORK_PREWARM_BATCH_SIZE = 2;
-let shelfResizeObserver: ResizeObserver | undefined;
-let shelfVisibilityObserver: IntersectionObserver | undefined;
 let shelfArtworkPrewarmObserver: IntersectionObserver | undefined;
 let shelfResizeFrame: number | undefined;
 let artworkPrewarmIdleCallback: number | undefined;
 const pendingShelfDraggabilityUpdates = new Set<HTMLUListElement>();
 const pendingArtworkPreloads = new Set<string>();
 const prewarmedArtworkUrls = new Set<string>();
-const shelfVisibilityListeners = new Map<
-  HTMLUListElement,
-  (isNearViewport: boolean) => void
->();
 const shelfArtworkPrewarmListeners = new Map<HTMLUListElement, () => void>();
 
 function updateShelfDraggable(shelf: HTMLUListElement) {
@@ -211,48 +171,6 @@ function queueShelfDraggabilityUpdate(shelf: HTMLUListElement) {
     });
     pendingShelfDraggabilityUpdates.clear();
   });
-}
-
-function getShelfResizeObserver() {
-  if (shelfResizeObserver) return shelfResizeObserver;
-
-  shelfResizeObserver = new ResizeObserver((entries) => {
-    entries.forEach((entry) => {
-      queueShelfDraggabilityUpdate(entry.target as HTMLUListElement);
-    });
-  });
-
-  return shelfResizeObserver;
-}
-
-function getShelfVisibilityObserver() {
-  if (shelfVisibilityObserver) return shelfVisibilityObserver;
-
-  shelfVisibilityObserver = new IntersectionObserver(
-    (entries) => {
-      const resizeObserver = getShelfResizeObserver();
-
-      entries.forEach((entry) => {
-        const shelf = entry.target as HTMLUListElement;
-        const isNearViewport = entry.isIntersecting;
-        shelfVisibilityListeners.get(shelf)?.(isNearViewport);
-        shelf.dataset.resizeActive = isNearViewport ? "true" : "false";
-
-        if (isNearViewport) {
-          resizeObserver.observe(shelf);
-          queueShelfDraggabilityUpdate(shelf);
-        } else {
-          resizeObserver.unobserve(shelf);
-        }
-      });
-    },
-    {
-      root: document.querySelector<HTMLElement>("[data-app-scroll-container]"),
-      rootMargin: SHELF_MEASUREMENT_ROOT_MARGIN,
-    },
-  );
-
-  return shelfVisibilityObserver;
 }
 
 function canPrewarmArtwork() {
@@ -359,13 +277,7 @@ function MediaShelf({
   const isHeroShelf = displayKind === "MusicNotesHeroShelf";
   const shelfContainerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
-  // Do not gate the first render on IntersectionObserver. With the nested app
-  // scroll container it can report a visible shelf as non-intersecting, which
-  // leaves the title and an intrinsic-height placeholder but no cards.
-  const [isContentMounted, setIsContentMounted] = useState(true);
-  const [placeholderHeight, setPlaceholderHeight] = useState(
-    mediaShelfIntrinsicHeights[displayKind],
-  );
+  const [isNearViewport, setIsNearViewport] = useState(false);
 
   const handleTitleClick = () => {
     if (onSelect && shelfId) {
@@ -378,13 +290,39 @@ function MediaShelf({
   const isClickable = Boolean(onSelect || onTitleClick);
 
   useEffect(() => {
+    const shelfContainer = shelfContainerRef.current;
+    if (!shelfContainer) return;
+
+    if (!("IntersectionObserver" in window)) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setIsNearViewport((current) =>
+          current === entry.isIntersecting ? current : entry.isIntersecting,
+        );
+      },
+      {
+        root: document.querySelector<HTMLElement>(
+          "[data-app-scroll-container]",
+        ),
+        rootMargin: SHELF_RENDER_AHEAD_ROOT_MARGIN,
+      },
+    );
+
+    observer.observe(shelfContainer);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
     const shelf = listRef.current;
     if (!shelf) return;
 
     // Native scrolling preserves scrollLeft. Keeping shelves active avoids
     // observer-driven writes while the page is scrolling vertically.
     shelf.dataset.scrollActive = "true";
-    shelf.dataset.resizeActive = "false";
+    shelf.dataset.resizeActive = "true";
 
     return () => {
       delete shelf.dataset.scrollActive;
@@ -410,43 +348,16 @@ function MediaShelf({
     const shelf = listRef.current;
     if (!shelf) return;
 
-    const handleVisibilityChange = (isNearViewport: boolean) => {
-      // Once rendered, keep cards mounted. This is a Home surface, where
-      // correctness is more important than aggressively virtualising shelves.
-      if (isNearViewport) {
-        setIsContentMounted(true);
-      }
-    };
-    shelfVisibilityListeners.set(shelf, handleVisibilityChange);
-
-    const visibilityObserver =
-      "IntersectionObserver" in window
-        ? getShelfVisibilityObserver()
+    queueShelfDraggabilityUpdate(shelf);
+    const resizeObserver =
+      "ResizeObserver" in window
+        ? new ResizeObserver(() => queueShelfDraggabilityUpdate(shelf))
         : undefined;
-    let fallbackContentMountFrame: number | undefined;
-
-    if (visibilityObserver) {
-      visibilityObserver.observe(shelf);
-    } else {
-      shelf.dataset.resizeActive = "true";
-      fallbackContentMountFrame = requestAnimationFrame(() => {
-        fallbackContentMountFrame = undefined;
-        setIsContentMounted(true);
-      });
-      queueShelfDraggabilityUpdate(shelf);
-      if ("ResizeObserver" in window) {
-        getShelfResizeObserver().observe(shelf);
-      }
-    }
+    resizeObserver?.observe(shelf);
 
     return () => {
-      shelfVisibilityListeners.delete(shelf);
-      visibilityObserver?.unobserve(shelf);
-      shelfResizeObserver?.unobserve(shelf);
+      resizeObserver?.disconnect();
       pendingShelfDraggabilityUpdates.delete(shelf);
-      if (fallbackContentMountFrame !== undefined) {
-        cancelAnimationFrame(fallbackContentMountFrame);
-      }
       delete shelf.dataset.draggable;
     };
   }, []);
@@ -466,43 +377,6 @@ function MediaShelf({
   }, [items]);
 
   useLayoutEffect(() => {
-    if (!isContentMounted) return;
-
-    const shelfContainer = shelfContainerRef.current;
-    if (!shelfContainer) return;
-
-    let frame: number | undefined;
-    const updatePlaceholderHeight = () => {
-      frame = undefined;
-      const nextHeight = Math.ceil(
-        shelfContainer.getBoundingClientRect().height,
-      );
-      if (nextHeight > 0) {
-        setPlaceholderHeight((currentHeight) =>
-          currentHeight === nextHeight ? currentHeight : nextHeight,
-        );
-      }
-    };
-    const scheduleHeightUpdate = () => {
-      if (frame === undefined) {
-        frame = requestAnimationFrame(updatePlaceholderHeight);
-      }
-    };
-
-    updatePlaceholderHeight();
-    const resizeObserver =
-      "ResizeObserver" in window
-        ? new ResizeObserver(scheduleHeightUpdate)
-        : undefined;
-    resizeObserver?.observe(shelfContainer);
-
-    return () => {
-      resizeObserver?.disconnect();
-      if (frame !== undefined) cancelAnimationFrame(frame);
-    };
-  }, [isContentMounted, items]);
-
-  useLayoutEffect(() => {
     const shelf = listRef.current;
     if (!shelf) return;
 
@@ -510,7 +384,7 @@ function MediaShelf({
 
     const frame = requestAnimationFrame(() => updateShelfDraggable(shelf));
     return () => cancelAnimationFrame(frame);
-  }, [isContentMounted, items]);
+  }, [items]);
 
   useEffect(() => {
     const shelf = listRef.current;
@@ -519,27 +393,15 @@ function MediaShelf({
     let pointerId: number | undefined;
     let startX = 0;
     let startScrollLeft = 0;
-    let targetScrollLeft = 0;
-    let scrollFrame: number | undefined;
     let didDrag = false;
     let suppressClick = false;
     let suppressClickTimer: ReturnType<typeof setTimeout> | undefined;
-
-    const flushScroll = () => {
-      scrollFrame = undefined;
-      shelf.scrollLeft = targetScrollLeft;
-    };
 
     const finishDrag = (event: PointerEvent) => {
       if (pointerId !== event.pointerId) return;
 
       const activePointerId = pointerId;
       pointerId = undefined;
-
-      if (scrollFrame !== undefined) {
-        cancelAnimationFrame(scrollFrame);
-        flushScroll();
-      }
 
       if (didDrag) {
         suppressClick = true;
@@ -572,14 +434,16 @@ function MediaShelf({
       pointerId = event.pointerId;
       startX = event.clientX;
       startScrollLeft = shelf.scrollLeft;
-      targetScrollLeft = startScrollLeft;
       didDrag = false;
     };
 
     const handlePointerMove = (event: PointerEvent) => {
       if (pointerId !== event.pointerId) return;
 
-      const distance = event.clientX - startX;
+      // Browser pointer events are already coalesced to the display cadence.
+      // Writing here avoids a second requestAnimationFrame of visible latency.
+      const latestEvent = event.getCoalescedEvents?.().at(-1) ?? event;
+      const distance = latestEvent.clientX - startX;
       if (!didDrag && Math.abs(distance) < MOUSE_DRAG_THRESHOLD) return;
 
       if (!didDrag) {
@@ -590,11 +454,7 @@ function MediaShelf({
       }
 
       event.preventDefault();
-      targetScrollLeft = startScrollLeft - distance;
-
-      if (scrollFrame === undefined) {
-        scrollFrame = requestAnimationFrame(flushScroll);
-      }
+      shelf.scrollLeft = startScrollLeft - distance;
     };
 
     const handleClick = (event: MouseEvent) => {
@@ -625,7 +485,6 @@ function MediaShelf({
       shelf.removeEventListener("dragstart", handleNativeDrag);
 
       if (suppressClickTimer) clearTimeout(suppressClickTimer);
-      if (scrollFrame !== undefined) cancelAnimationFrame(scrollFrame);
       delete shelf.dataset.dragging;
       shelf.style.removeProperty("scroll-behavior");
     };
@@ -637,7 +496,7 @@ function MediaShelf({
       className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-3"
       style={{
         ...mediaShelfVisibility[displayKind],
-        ...(isContentMounted ? {} : { height: `${placeholderHeight}px` }),
+        contentVisibility: isNearViewport ? "visible" : "auto",
       }}
     >
       <div>
@@ -674,18 +533,17 @@ function MediaShelf({
               <ul
                 ref={listRef}
                 className={`shelf-grid__list svelte-ranejh ${isHeroShelf ? "shelf-grid__list--align-items-end" : ""}`}
-                style={isContentMounted ? undefined : { minHeight: 1 }}
+                style={undefined}
               >
-                {isContentMounted &&
-                  items.map((card, index) => (
-                    <MediaCardRenderer
-                      key={card.id}
-                      {...card}
-                      priority={
-                        (prioritizeFirstCard || isHeroShelf) && index === 0
-                      }
-                    />
-                  ))}
+                {items.map((card, index) => (
+                  <MediaCardRenderer
+                    key={card.id}
+                    {...card}
+                    priority={
+                      (prioritizeFirstCard || isHeroShelf) && index === 0
+                    }
+                  />
+                ))}
               </ul>
             </div>
           </section>

@@ -34,12 +34,14 @@ export default function CollectionCard(props: CollectionCardProps) {
               </Link>
             )}
 
-            <CardPlayButton
-              variant="cover"
-              onPlay={() => {
-                void playCatalogResource(props.resourceType, props.resourceId);
-              }}
-            />
+            {props.resourceType !== "user-playlist" && (
+              <CardPlayButton
+                variant="cover"
+                onPlay={() => {
+                  void playCatalogResource(props.resourceType, props.resourceId);
+                }}
+              />
+            )}
             <CardContextMenu />
           </div>
         </div>

@@ -20,6 +20,9 @@ import type {
   DisableTwoFactorPayload,
   RegenerateTwoFactorRecoveryCodesPayload,
   TwoFactorRecoveryCodesResponse,
+  ListAdminUsersQuery,
+  ListAdminUsersResponse,
+  UserRole,
 } from "./auth.types";
 
 export async function signup(payload: SignupPayload) {
@@ -181,6 +184,57 @@ export async function verifyEmail(payload: VerifyEmailPayload) {
   const response = await http.post<ApiResponse<UserProfile>>(
     "/auth/email/verify",
     payload,
+  );
+
+  return response.data;
+}
+
+export async function listAdminUsers(query: ListAdminUsersQuery = {}) {
+  const response = await http.get<ApiResponse<ListAdminUsersResponse>>(
+    "/auth/admin/users",
+    { params: query },
+  );
+
+  return response.data;
+}
+
+export async function getAdminUser(userId: string) {
+  const response = await http.get<ApiResponse<UserProfile>>(
+    `/auth/admin/users/${encodeURIComponent(userId)}`,
+  );
+
+  return response.data;
+}
+
+export async function setAdminUserStatus(userId: string, isActive: boolean) {
+  const response = await http.patch<ApiResponse<UserProfile>>(
+    `/auth/admin/users/${encodeURIComponent(userId)}/status`,
+    { isActive },
+  );
+
+  return response.data;
+}
+
+export async function setAdminUserRole(userId: string, role: UserRole) {
+  const response = await http.patch<ApiResponse<UserProfile>>(
+    `/auth/admin/users/${encodeURIComponent(userId)}/role`,
+    { role },
+  );
+
+  return response.data;
+}
+
+export async function revokeAdminUserSessions(userId: string) {
+  const response = await http.post<ApiResponse<Record<string, never>>>(
+    `/auth/admin/users/${encodeURIComponent(userId)}/revoke-sessions`,
+  );
+
+  return response.data;
+}
+
+export async function resetAdminUserTwoFactor(userId: string) {
+  const response = await http.post<ApiResponse<UserProfile>>(
+    `/auth/admin/users/${encodeURIComponent(userId)}/reset-2fa`,
   );
 
   return response.data;

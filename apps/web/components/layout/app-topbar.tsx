@@ -5,12 +5,6 @@ import { usePathname } from "next/navigation";
 import { logout } from "@/lib/auth/auth.api";
 import { useAuthStore } from "@/lib/auth/auth-store";
 
-const mobileNavigationItems = [
-  { href: "/home", label: "Home" },
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/library", label: "Library" },
-] as const;
-
 function getPageTitle(pathname: string) {
   if (pathname.startsWith("/home")) return "Trang chủ";
   if (pathname.startsWith("/library")) return "Library";
@@ -34,6 +28,17 @@ export function AppTopbar() {
   const pathname = usePathname();
   const user = useAuthStore((state) => state.user);
   const clearSession = useAuthStore((state) => state.clearSession);
+  const canViewAnalytics = [
+    "ARTIST",
+    "SUPER_ADMIN",
+    "ADMIN_USER_OPS",
+    "ADMIN_SECURITY_OPS",
+  ].includes(user?.role ?? "");
+  const mobileNavigationItems = [
+    { href: "/home", label: "Home" },
+    ...(canViewAnalytics ? [{ href: "/dashboard", label: "Dashboard" }] : []),
+    { href: "/library", label: "Library" },
+  ];
 
   async function handleLogout() {
     try {

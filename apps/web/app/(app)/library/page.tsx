@@ -1,73 +1,154 @@
 "use client";
 
-import { useState } from "react";
-import { AppButtonLink } from "@/components/layout/app-button-link";
-import { PageHero } from "@/components/layout/page-hero";
-import { SongLibraryPanel } from "@/components/songs/song-library-panel";
-import { SongUploadPanel } from "@/components/songs/song-upload-panel";
+import { FormEvent, useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import {
+  MusicPageHeading,
+  MusicPageLayout,
+  MusicPageSection,
+} from "@/components/layout/music-page-layout";
+import { FavoriteSongButton } from "@/components/songs/favorite-song-button";
+import { http } from "@/lib/api/http";
+import { useAuthStore } from "@/lib/auth/auth-store";
+import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
+
+type Playlist = {
+  id: string;
+  name: string;
+  description?: string;
+  isPublic?: boolean;
+  trackCount?: number;
+};
 
 export default function LibraryPage() {
-  const [libraryRefreshKey, setLibraryRefreshKey] = useState(0);
-  const [uploadOpen, setUploadOpen] = useState(false);
-
-  function handleUploaded() {
-    setLibraryRefreshKey((current) => current + 1);
-    setUploadOpen(false);
+  const user = useAuthStore((state) => state.user);
+  const userId = user?.userId;
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const favorites = useFavoriteStore((state) => state.songs);
+  const hydrateFavorites = useFavoriteStore((state) => state.hydrate);
+  const [name, setName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    if (!userId) return;
+    try {
+      setError("");
+      const [playlistResponse] = await Promise.all([
+        http.get(`/playlists/user/${encodeURIComponent(userId)}`, {
+          params: { limit: 50 },
+        }),
+        hydrateFavorites(),
+      ]);
+      setPlaylists(
+        playlistResponse.data.playlists ??
+          playlistResponse.data.data?.playlists ??
+          [],
+      );
+    } catch {
+      setError("Could not load your library.");
+    }
+  }, [hydrateFavorites, userId]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+  async function createPlaylist(event: FormEvent) {
+    event.preventDefault();
+    if (!name.trim()) return;
+    setCreating(true);
+    try {
+      await http.post("/playlists", { name: name.trim(), isPublic: false });
+      setName("");
+      window.dispatchEvent(new Event("library:playlists-changed"));
+      await load();
+    } catch {
+      setError("Could not create playlist.");
+    } finally {
+      setCreating(false);
+    }
   }
-
   return (
-    <>
-      <PageHero
-        eyebrow="Library"
-        title="Songs"
-        description="Browse your uploaded music, follow processing status, and keep your personal library organized."
-        actions={
-          <>
-            <button
-              type="button"
-              onClick={() => setUploadOpen(true)}
-              className="rounded-full bg-[#fa233b] px-5 py-2.5 text-sm font-bold text-white transition hover:bg-[#d91d32]"
+    <MusicPageLayout>
+      <MusicPageHeading title="Library" />
+      <MusicPageSection id="favourite-songs" title="Favourite songs">
+        <div className="border-t border-(--labelDivider)">
+          {favorites.map((song) => (
+            <div
+              key={song.id}
+              className="flex items-center gap-3 border-b border-(--labelDivider) py-4"
             >
-              Upload
-            </button>
-            <AppButtonLink href="/profile">Profile</AppButtonLink>
-          </>
-        }
-      />
-
-      <div className="mt-6">
-        <SongLibraryPanel
-          refreshKey={libraryRefreshKey}
-          onUploadClick={() => setUploadOpen(true)}
-        />
-      </div>
-
-      {uploadOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/28 px-4 py-8 backdrop-blur-sm">
-          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white p-4 shadow-[0_28px_90px_rgba(0,0,0,0.22)] ring-1 ring-[#e5e5ea] md:p-6">
-            <div className="mb-4 flex items-center justify-between gap-4">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#fa233b]">
-                  Upload
-                </p>
-                <h2 className="mt-1 text-2xl font-bold tracking-[-0.04em] text-[#1d1d1f]">
-                  Add a song
-                </h2>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setUploadOpen(false)}
-                className="rounded-full bg-[#f2f2f7] px-4 py-2 text-sm font-bold text-[#1d1d1f] transition hover:bg-[#e5e5ea]"
+              <Link
+                href={`/song/${song.id}`}
+                className="min-w-0 flex-1 text-(--systemPrimary)"
               >
-                Close
-              </button>
+                <strong className="block truncate [font:var(--body-tall-emphasized)]">
+                  {song.title}
+                </strong>
+                <span className="mt-1 block truncate text-(--systemSecondary) [font:var(--callout)]">
+                  {song.artist}
+                  {song.album ? ` · ${song.album}` : ""}
+                </span>
+              </Link>
+              <span className="shrink-0 text-(--systemSecondary) [font:var(--callout)]">
+                {song.durationSec
+                  ? `${Math.floor(song.durationSec / 60)}:${String(song.durationSec % 60).padStart(2, "0")}`
+                  : ""}
+              </span>
+              <FavoriteSongButton compact songId={song.id} />
             </div>
-
-            <SongUploadPanel onUploaded={handleUploaded} compact />
-          </div>
+          ))}
+          {!favorites.length && !error && (
+            <p className="py-6 text-(--systemSecondary) [font:var(--callout)]">
+              Songs you favourite will appear here.
+            </p>
+          )}
         </div>
-      )}
-    </>
+      </MusicPageSection>
+      <MusicPageSection id="playlists" title="Playlists">
+        <form
+          onSubmit={createPlaylist}
+          className="mb-5 flex max-w-md gap-2 border-b border-(--labelDivider) pb-3"
+        >
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="New playlist"
+            className="min-w-0 flex-1 bg-transparent text-(--systemPrimary) [font:var(--body-tall)] outline-none"
+          />
+          <button
+            disabled={creating}
+            className="rounded-full bg-(--keyColor) px-4 py-2 text-(--keyColorText) [font:var(--callout-emphasized)] disabled:opacity-50"
+          >
+            Create
+          </button>
+        </form>
+        {error && (
+          <p className="mb-3 text-(--keyColor) [font:var(--callout)]">
+            {error}
+          </p>
+        )}
+        <div className="grid gap-x-5 md:grid-cols-2">
+          {playlists.map((playlist) => (
+            <Link
+              key={playlist.id}
+              href={`/playlist/${playlist.id}?library=1`}
+              className="border-t border-(--labelDivider) py-5 text-(--systemPrimary)"
+            >
+              <strong className="[font:var(--body-tall-emphasized)]">
+                {playlist.name}
+              </strong>
+              <span className="mt-1 block text-(--systemSecondary) [font:var(--callout)]">
+                {playlist.description || `${playlist.trackCount ?? 0} songs`}
+              </span>
+            </Link>
+          ))}
+        </div>
+        {!playlists.length && !error && (
+          <p className="border-t border-(--labelDivider) py-6 text-(--systemSecondary) [font:var(--callout)]">
+            Create a playlist to organize music you love.
+          </p>
+        )}
+      </MusicPageSection>
+    </MusicPageLayout>
   );
 }

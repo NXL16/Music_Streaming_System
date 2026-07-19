@@ -1,132 +1,129 @@
 "use client";
 
-import { ActionCard } from "@/components/layout/action-card";
-import { AppButtonLink } from "@/components/layout/app-button-link";
-import { PageHero } from "@/components/layout/page-hero";
-import { ProfileField } from "@/components/profile/profile-field";
+import Link from "next/link";
+import type { ReactNode } from "react";
+import { Coins } from "lucide-react";
+import {
+  MusicPageHeading,
+  MusicPageLayout,
+  MusicPageSection,
+} from "@/components/layout/music-page-layout";
 import { useProfile } from "@/lib/auth/use-profile";
 import { formatDateTime } from "@/lib/format/date";
 import { useWalletBalance } from "@/lib/wallet/use-wallet-balance";
-import { Coins } from "lucide-react";
-import Link from "next/link";
 
-const profileActions = [
-  {
-    href: "/settings/account",
-    label: "Account",
-    title: "Edit account details",
-    description: "Manage display name, bio, avatar, and email verification.",
-  },
-  {
-    href: "/settings/security",
-    label: "Security",
-    title: "Protect your account",
-    description: "Change password, manage 2FA, and review active sessions.",
-  },
-] as const;
+function DetailRow({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="group items-center text-(--systemPrimary) grid grid-cols-[minmax(130px,.7fr)_1fr] gap-4 pb-[7.5px] pt-[7.5px] relative w-full after:[border-top:var(--keyline-border-style)] after:content-[''] after:inset-e-0 after:inset-s-0 after:absolute after:top-0">
+      <span className="text-(--systemSecondary) [font:var(--callout)]">
+        {label}
+      </span>
+      <span className="truncate [font:var(--body-tall)]">{value || "—"}</span>
+    </div>
+  );
+}
 
 export default function ProfilePage() {
   const { user, loading, error } = useProfile();
   const { balance } = useWalletBalance();
-  const avatarLetter = (user?.displayName || user?.username || "U")
-    .charAt(0)
-    .toUpperCase();
+  const name = user?.displayName || user?.username || "Profile";
 
   return (
-    <>
-      <PageHero
-        eyebrow="Profile"
-        title={user?.displayName || "Your profile"}
-        description={user?.email || "View your account overview."}
-        leading={
-          <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-4xl bg-[#1d1d1f] text-4xl font-black text-white shadow-[0_18px_40px_rgba(35,23,15,0.22)]">
-            {avatarLetter}
+    <MusicPageLayout>
+      <MusicPageHeading
+        title={name}
+        trailing={
+          <div className="flex gap-2">
+            <Link
+              href="/dashboard"
+              className="rounded-full border border-(--labelDivider) px-4 py-2 text-(--systemPrimary) [font:var(--callout-emphasized)]"
+            >
+              Dashboard
+            </Link>
+            <Link
+              href="/settings/account"
+              className="rounded-full bg-(--keyColor) px-4 py-2 text-(--keyColorText) [font:var(--callout-emphasized)]"
+            >
+              Edit profile
+            </Link>
           </div>
         }
-        actions={
-          <>
-            <AppButtonLink href="/dashboard">Dashboard</AppButtonLink>
-            <AppButtonLink href="/settings/account" variant="primary">
-              Account settings
-            </AppButtonLink>
-          </>
-        }
-      >
+      />
+      <MusicPageSection title="Account">
         {loading && (
-          <div className="mt-6 rounded-2xl bg-[#f5f5f7] px-4 py-3 text-sm font-semibold text-[#fa233b]">
-            Syncing latest profile...
-          </div>
+          <p className="pb-4 text-(--systemSecondary) [font:var(--callout)]">
+            Syncing profile…
+          </p>
         )}
-
         {error && (
-          <div className="mt-6 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
+          <p className="pb-4 text-(--keyColor) [font:var(--callout)]">
             {error}
-          </div>
+          </p>
         )}
-      </PageHero>
-
-      <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_360px]">
-        <section className="rounded-4xl border border-[#e5e5ea] dark:border-white/10 bg-white dark:bg-white/5 p-6 shadow-[0_24px_80px_rgba(95,55,25,0.1)] dark:shadow-none md:p-8">
-          <p className="text-sm font-bold uppercase tracking-[0.35em] text-[#fa233b]">
-            Overview
-          </p>
-          <h2 className="mt-2 text-3xl font-black">Account snapshot</h2>
-
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
-            <ProfileField label="Username" value={user?.username} />
-            <ProfileField label="Email" value={user?.email} />
-            <ProfileField
-              label="Email status"
-              value={user?.emailVerified ? "Verified" : "Not verified"}
-            />
-            <ProfileField
-              label="Account status"
-              value={user?.isActive ? "Active" : "Disabled"}
-            />
-            <ProfileField
-              label="Created at"
-              value={formatDateTime(user?.createdAt)}
-            />
-            <ProfileField
-              label="Last login"
-              value={formatDateTime(user?.lastLoginAt)}
-            />
-            <ProfileField
-              label="Wallet Balance"
-              value={
-                <div className="flex items-center justify-between w-full">
-                  <span className="text-amber-500 font-bold flex items-center gap-1">
-                    <Coins className="h-4 w-4 shrink-0" />
-                    {(balance?.coinBalance ?? 0).toLocaleString()} Coin
-                  </span>
-                  <Link
-                    href="/deposit"
-                    className="text-xs font-bold text-[#fa233b] hover:underline"
-                  >
-                    Nạp thêm
-                  </Link>
-                </div>
-              }
-            />
-          </div>
-        </section>
-
-        <aside className="rounded-4xl border border-[#e5e5ea] dark:border-white/10 bg-white dark:bg-white/5 p-6 shadow-[0_24px_80px_rgba(95,55,25,0.1)] dark:shadow-none md:p-8">
-          <p className="text-sm font-bold uppercase tracking-[0.35em] text-[#fa233b]">
-            Bio
-          </p>
-          <h2 className="mt-2 text-3xl font-black">About</h2>
-          <p className="mt-5 leading-7 text-[#6e6e73] dark:text-neutral-400">
-            {user?.bio || "No bio yet."}
-          </p>
-        </aside>
-      </div>
-
-      <div className="mt-6 grid gap-6 md:grid-cols-2">
-        {profileActions.map((action) => (
-          <ActionCard key={action.href} {...action} />
-        ))}
-      </div>
-    </>
+        <div className="box-content -me-0.5 -ms-0.5 overflow-visible pe-0.5 ps-0.5 w-full">
+          <DetailRow label="Username" value={user?.username} />
+          <DetailRow label="Email" value={user?.email} />
+          <DetailRow
+            label="Email status"
+            value={user?.emailVerified ? "Verified" : "Not verified"}
+          />
+          <DetailRow
+            label="Account status"
+            value={user?.isActive ? "Active" : "Disabled"}
+          />
+          <DetailRow label="Created" value={formatDateTime(user?.createdAt)} />
+          <DetailRow
+            label="Last sign-in"
+            value={formatDateTime(user?.lastLoginAt)}
+          />
+          <DetailRow
+            label="Coin balance"
+            value={
+              <span className="inline-flex items-center gap-2 text-(--keyColor)">
+                <Coins className="h-4 w-4" />
+                {(balance?.coinBalance ?? 0).toLocaleString()} Coin{" "}
+                <Link
+                  href="/deposit"
+                  className="ms-2 text-(--systemPrimary) underline"
+                >
+                  Top up
+                </Link>
+              </span>
+            }
+          />
+        </div>
+      </MusicPageSection>
+      <MusicPageSection title="About">
+        <p className="max-w-2xl text-(--systemSecondary) [font:var(--body-tall)]">
+          {user?.bio || "No bio yet."}
+        </p>
+      </MusicPageSection>
+      <MusicPageSection title="Settings">
+        <div className="grid gap-5 md:grid-cols-2">
+          <Link
+            href="/settings/account"
+            className="border-t border-(--labelDivider) py-5 text-(--systemPrimary)"
+          >
+            <strong className="[font:var(--body-tall-emphasized)]">
+              Account
+            </strong>
+            <span className="mt-1 block text-(--systemSecondary) [font:var(--callout)]">
+              Display name, bio, avatar and email verification.
+            </span>
+          </Link>
+          <Link
+            href="/settings/security"
+            className="border-t border-(--labelDivider) py-5 text-(--systemPrimary)"
+          >
+            <strong className="[font:var(--body-tall-emphasized)]">
+              Security
+            </strong>
+            <span className="mt-1 block text-(--systemSecondary) [font:var(--callout)]">
+              Password, two-factor authentication and sessions.
+            </span>
+          </Link>
+        </div>
+      </MusicPageSection>
+    </MusicPageLayout>
   );
 }

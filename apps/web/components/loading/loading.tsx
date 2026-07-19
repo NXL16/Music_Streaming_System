@@ -4,7 +4,6 @@ type MediaShelfDisplayKind =
   | "MusicNotesHeroShelf"
   | "MusicCoverShelf"
   | "MusicCircleCoverShelf"
-  | "MusicCoverGrid"
   | "MusicSocialCardShelf";
 
 interface MediaShelfSkeletonProps {
@@ -73,26 +72,6 @@ const mediaShelfPresets = {
     "--grid-rows": "1",
     "--standard-lockup-shadow-offset": "15px",
   },
-  MusicCoverGrid: {
-    "--grid-max-content-xsmall": "144px",
-    "--grid-column-gap-xsmall": "10px",
-    "--grid-row-gap-xsmall": "24px",
-    "--grid-small": "4",
-    "--grid-column-gap-small": "20px",
-    "--grid-row-gap-small": "24px",
-    "--grid-medium": "5",
-    "--grid-column-gap-medium": "20px",
-    "--grid-row-gap-medium": "24px",
-    "--grid-large": "6",
-    "--grid-column-gap-large": "20px",
-    "--grid-row-gap-large": "24px",
-    "--grid-xlarge": "6",
-    "--grid-column-gap-xlarge": "20px",
-    "--grid-row-gap-xlarge": "24px",
-    "--grid-type": "G",
-    "--grid-rows": "2",
-    "--standard-lockup-shadow-offset": "15px",
-  },
   MusicSocialCardShelf: {
     "--grid-max-content-xsmall": "280px",
     "--grid-column-gap-xsmall": "10px",
@@ -128,10 +107,6 @@ const mediaShelfVisibility = {
     contentVisibility: "auto",
     containIntrinsicSize: "auto 320px",
   },
-  MusicCoverGrid: {
-    contentVisibility: "auto",
-    containIntrinsicSize: "auto 720px",
-  },
   MusicSocialCardShelf: {
     contentVisibility: "auto",
     containIntrinsicSize: "auto 200px",
@@ -144,9 +119,8 @@ export default memo(function MediaShelfSkeleton({
   const isHeroShelf = displayKind === "MusicNotesHeroShelf";
   const isCircleShelf = displayKind === "MusicCircleCoverShelf";
   const isSocialShelf = displayKind === "MusicSocialCardShelf";
-  const isGridShelf = displayKind === "MusicCoverGrid";
   const skeletonItems = Array.from({
-    length: isGridShelf ? 12 : isSocialShelf ? 4 : 7,
+    length: isSocialShelf ? 4 : 7,
   });
 
   return (

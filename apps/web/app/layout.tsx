@@ -1,51 +1,7 @@
 import type { Metadata } from "next";
-import localFont from "next/font/local";
 import { AuthProvider } from "@/components/auth/auth-provider";
+import "./fonts.css";
 import "./globals.css";
-
-const sfPro = localFont({
-  src: [
-    {
-      path: "../public/fonts/SF-Pro/SFPro.woff2",
-      weight: "1 1000",
-      style: "normal",
-    },
-    {
-      path: "../public/fonts/SF-Pro/SFProItalic.woff2",
-      weight: "1 1000",
-      style: "italic",
-    },
-  ],
-  variable: "--font-sf-pro",
-  display: "swap",
-});
-
-const sfProIcons = localFont({
-  src: [
-    {
-      path: "../public/fonts/SF-Pro-Icons/SFProIcons_light.woff",
-      weight: "300",
-      style: "normal",
-    },
-    {
-      path: "../public/fonts/SF-Pro-Icons/SFProIcons_regular.woff",
-      weight: "400",
-      style: "normal",
-    },
-    {
-      path: "../public/fonts/SF-Pro-Icons/SFProIcons_medium.woff",
-      weight: "500",
-      style: "normal",
-    },
-    {
-      path: "../public/fonts/SF-Pro-Icons/SFProIcons_semibold.woff",
-      weight: "600",
-      style: "normal",
-    },
-  ],
-  variable: "--font-sf-pro-icons",
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: "Musical App",
@@ -58,10 +14,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="vi"
-      className={`h-full antialiased ${sfPro.variable} ${sfProIcons.variable}`}
-    >
+    <html lang="vi" className="h-full antialiased">
       <head>
         <link
           rel="preload"

@@ -13,6 +13,8 @@ import ExpansionButton from "../custom-elements/ExpansionButton";
 import AmpContextMenuButton from "../custom-elements/AmpContextMenuButton";
 import AmpPlaybackControlsProgress from "../custom-elements/AmpPlaybackControlsProgress";
 import { usePlayerStore, type PlayerSong } from "@/lib/player/use-player-store";
+import { FavoriteSongButton } from "@/components/songs/favorite-song-button";
+import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { useShallow } from "zustand/react/shallow";
 import { useMsePlayback } from "@/lib/player/use-mse-playback";
 import { usePersistentVolume } from "@/lib/player/use-persistent-volume";
@@ -133,6 +135,10 @@ export function AppPlayerBar() {
     artists: currentSong?.artists,
     fallbackText: currentSong?.artist,
   });
+  const favoriteSongs = useFavoriteStore((state) => state.songs);
+  const isCurrentSongFavorite = Boolean(
+    currentSong && favoriteSongs.some((song) => song.id === currentSong.id),
+  );
 
   const [isExpanded, setIsExpanded] = useState(false);
   const [isProgressExpanded, setIsProgressExpanded] = useState(false);
@@ -449,7 +455,7 @@ export function AppPlayerBar() {
                     </div>
 
                     <div
-                      className={`[--lcd-height:100%] [--lcd-justify-text:start] [--lcd-line-padding:0] self-center [grid-area:metadata] group/metadata ${isProgressExpanded ? "opacity-50" : ""}`}
+                      className={`[--lcd-height:100%] [--lcd-justify-text:start] [--lcd-line-padding:0] self-center [grid-area:metadata] group/metadata ${isProgressExpanded ? "opacity-50" : ""} ${isCurrentSongFavorite ? "[--favoriteButtonStarOutline:var(--keyColor)]" : "hover:[--favoriteButtonStarOutline:var(--systemTertiary)]"}`}
                     >
                       <div className="[--favoriteIconSize:11px] [--favoriteButtonSize:16px] [--menu-position-shift:0px]">
                         <div className="items-[var(--lcd-justify-text,center)] grid-flow-row flex flex-col grow h-[calc(var(--lcd-height,44px)-3px)] justify-center max-w-full overflow-hidden relative">
@@ -471,21 +477,13 @@ export function AppPlayerBar() {
                                     </PlayerBarMarquee>
 
                                     <div className="absolute max-h-4 top-[-1.21px] ml-1 inset-s-[calc(100%+4px)]">
-                                      <div className="-ms-1 relative z-[calc(var(--z-default)+1)] opacity-0 group-hover/metadata:opacity-100 transition-opacity duration-120">
-                                        <button className="group/star [--favoriteIconStarOutline:var(--favoriteButtonStarOutline,transparent)] [--favoriteIconStarFill:var(--favoriteButtonStarFill,transparent)] items-center bg-(--favoriteButtonBackground,transparent) flex h-(--favoriteButtonSize,100%) justify-center leading-none w-(--favoriteButtonSize,100%)">
-                                          <svg
-                                            width="64"
-                                            height="64"
-                                            viewBox="0 0 64 64"
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            className="h-(--favoriteIconSize,9px) w-(--favoriteIconSize,9px)"
-                                          >
-                                            <path
-                                              className="fill-[hsla(0,0%,100%,.4)] group-hover/star:fill-(--keyColor) transition-colors duration-120"
-                                              d="M13.559 60.051c1.102.86 2.5.565 4.166-.645l14.218-10.455L46.19 59.406c1.666 1.21 3.037 1.505 4.166.645 1.102-.833 1.344-2.204.672-4.166l-5.618-16.718 14.353-10.32c1.666-1.183 2.338-2.42 1.908-3.764-.43-1.29-1.693-1.935-3.763-1.908l-17.605.108-5.348-16.8C34.308 4.496 33.34 3.5 31.944 3.5c-1.372 0-2.34.995-2.984 2.984L23.61 23.283l-17.605-.108c-2.07-.027-3.333.618-3.763 1.908-.457 1.344.242 2.58 1.909 3.763l14.352 10.321-5.617 16.718c-.672 1.962-.43 3.333.672 4.166Zm3.87-5.321c-.054-.054-.027-.081 0-.242l5.349-15.374c.376-1.049.161-1.882-.78-2.527L8.613 27.341c-.134-.08-.161-.134-.134-.215.027-.08.08-.08.242-.08l16.26.295c1.103.027 1.802-.43 2.151-1.532l4.677-15.562c.027-.162.08-.215.134-.215.08 0 .135.053.162.215l4.676 15.562c.35 1.102 1.048 1.559 2.15 1.532l16.261-.296c.162 0 .216 0 .243.081.027.08-.027.134-.135.215l-13.385 9.246c-.94.645-1.156 1.478-.78 2.527l5.35 15.374c.026.161.053.188 0 .242-.055.08-.135.026-.243-.054l-12.928-9.864c-.86-.672-1.855-.672-2.715 0l-12.928 9.864c-.107.08-.188.134-.242.054Z"
-                                            ></path>
-                                          </svg>
-                                        </button>
+                                      <div
+                                        className={`-ms-1 relative z-[calc(var(--z-default)+1)] transition-opacity duration-120 ${isCurrentSongFavorite ? "opacity-100" : "opacity-0 group-hover/metadata:opacity-100"}`}
+                                      >
+                                        <FavoriteSongButton
+                                          compact
+                                          songId={currentSong.id}
+                                        />
                                       </div>
                                     </div>
                                   </div>
@@ -621,28 +619,28 @@ export function AppPlayerBar() {
                 {lyricsMounted &&
                   createPortal(
                     <div
-                    data-player-drawer
-                    className={`min-[1000px]:backdrop-saturate-220 min-[1000px]:backdrop-blur-lg min-[1000px]:bg-(--glassMaterialBackground) min-[1000px]:shadow-[0_10px_40px_var(--glassMaterialShadowColor)] min-[1000px]:h-screen min-[1000px]:overflow-y-hidden min-[1000px]:top-0 border-s-[0.5px] border-s-(--systemQuaternary) bottom-0 inset-e-0 overflow-x-hidden fixed scroll-pt-14.5 top-13.5 w-75 z-[calc(var(--z-web-chrome)+1)] [--side-panel-horizontal-padding:20px] transition-transform duration-300 ease-[cubic-bezier(.215,.61,.355,1)] ${showLyrics ? "translate-x-0" : "translate-x-full"}`}
-                  >
-                    <div className="h-[calc(100dvh-58px)] overflow-y-auto">
-                      <div className="[--lyrics-linear-gradient:linear-gradient(180deg,#000,transparent)]">
-                        <div className="[--lyrics-toggle-button-size:26px] bg-(--lyrics-bg) text-[0] my-2.5 mx-4 opacity-0 p-1.25 absolute right-0 align-top z-(--z-default)">
-                          <button className="backdrop-blur-[60px] bg-(--systemQuaternary) rounded-lg p-1 relative z-(--z-default)">
-                            <svg
-                              className="block h-5 w-5 fill-(--systemSecondary)"
-                              xmlns="http://www.w3.org/2000/svg"
-                              width="18"
-                              height="18"
-                              viewBox="0 0 64 64"
-                            >
-                              <path d="M4.857 27.117c1.247 0 2.15-.935 2.15-2.213v-5.173L6.51 9.196l9.412 9.693L26.02 29.081a2.1 2.1 0 0 0 1.496.623c1.34 0 2.307-.873 2.307-2.213a2.34 2.34 0 0 0-.624-1.62L19.007 15.71 9.314 6.328l10.565.53h5.174c1.247 0 2.244-.873 2.244-2.15 0-1.279-.966-2.182-2.244-2.182H6.478c-2.37 0-3.803 1.433-3.803 3.833v18.544c0 1.247.904 2.213 2.182 2.213ZM39.14 61.432h18.576c2.4 0 3.803-1.434 3.803-3.834V39.054c0-1.246-.874-2.213-2.15-2.213-1.28 0-2.183.935-2.183 2.213v5.205l.53 10.503-9.444-9.693-10.098-10.16c-.405-.436-.935-.623-1.496-.623-1.34 0-2.306.872-2.306 2.212 0 .593.218 1.154.654 1.59l10.16 10.16 9.694 9.382-10.566-.53H39.14c-1.246 0-2.212.872-2.244 2.15 0 1.278.967 2.182 2.244 2.182Z"></path>
-                            </svg>
-                          </button>
-                        </div>
+                      data-player-drawer
+                      className={`min-[1000px]:backdrop-saturate-220 min-[1000px]:backdrop-blur-lg min-[1000px]:bg-(--glassMaterialBackground) min-[1000px]:shadow-[0_10px_40px_var(--glassMaterialShadowColor)] min-[1000px]:h-screen min-[1000px]:overflow-y-hidden min-[1000px]:top-0 border-s-[0.5px] border-s-(--systemQuaternary) bottom-0 inset-e-0 overflow-x-hidden fixed scroll-pt-14.5 top-13.5 w-75 z-[calc(var(--z-web-chrome)+1)] [--side-panel-horizontal-padding:20px] transition-transform duration-300 ease-[cubic-bezier(.215,.61,.355,1)] ${showLyrics ? "translate-x-0" : "translate-x-full"}`}
+                    >
+                      <div className="h-[calc(100dvh-58px)] overflow-y-auto">
+                        <div className="[--lyrics-linear-gradient:linear-gradient(180deg,#000,transparent)]">
+                          <div className="[--lyrics-toggle-button-size:26px] bg-(--lyrics-bg) text-[0] my-2.5 mx-4 opacity-0 p-1.25 absolute right-0 align-top z-(--z-default)">
+                            <button className="backdrop-blur-[60px] bg-(--systemQuaternary) rounded-lg p-1 relative z-(--z-default)">
+                              <svg
+                                className="block h-5 w-5 fill-(--systemSecondary)"
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="18"
+                                height="18"
+                                viewBox="0 0 64 64"
+                              >
+                                <path d="M4.857 27.117c1.247 0 2.15-.935 2.15-2.213v-5.173L6.51 9.196l9.412 9.693L26.02 29.081a2.1 2.1 0 0 0 1.496.623c1.34 0 2.307-.873 2.307-2.213a2.34 2.34 0 0 0-.624-1.62L19.007 15.71 9.314 6.328l10.565.53h5.174c1.247 0 2.244-.873 2.244-2.15 0-1.279-.966-2.182-2.244-2.182H6.478c-2.37 0-3.803 1.433-3.803 3.833v18.544c0 1.247.904 2.213 2.182 2.213ZM39.14 61.432h18.576c2.4 0 3.803-1.434 3.803-3.834V39.054c0-1.246-.874-2.213-2.15-2.213-1.28 0-2.183.935-2.183 2.213v5.205l.53 10.503-9.444-9.693-10.098-10.16c-.405-.436-.935-.623-1.496-.623-1.34 0-2.306.872-2.306 2.212 0 .593.218 1.154.654 1.59l10.16 10.16 9.694 9.382-10.566-.53H39.14c-1.246 0-2.212.872-2.244 2.15 0 1.278.967 2.182 2.244 2.182Z"></path>
+                              </svg>
+                            </button>
+                          </div>
 
-                        <AmpLyrics />
+                          <AmpLyrics />
+                        </div>
                       </div>
-                    </div>
                     </div>,
                     document.body,
                   )}
@@ -665,32 +663,32 @@ export function AppPlayerBar() {
                 {queueMounted &&
                   createPortal(
                     <div
-                    data-player-drawer
-                    className={`[--side-panel-horizontal-padding:20px] min-[1000px]:[backdrop-filter:saturate(220%)_blur(16px)] min-[1000px]:bg-(--glassMaterialBackground) min-[1000px]:shadow-[0_10px_40px_var(--glassMaterialShadowColor)] min-[1000px]:h-screen min-[1000px]:overflow-y-hidden min-[1000px]:top-0 border-s-[0.5px] border-s-(--systemQuaternary) bottom-0 inset-e-0 overflow-x-hidden fixed scroll-pt-14.5 top-13.5 w-75 z-[calc(var(--z-web-chrome)+1)] transition-transform duration-300 ease-[cubic-bezier(.215,.61,.355,1)] ${showQueue ? "translate-x-0" : "translate-x-full"}`}
-                  >
-                    <div className="[backdrop-filter:none] bg-transparent flex flex-col pb-3 pe-5 pt-5.75 ps-5 sticky top-0 z-[calc(var(--z-default)+6)]">
-                      <div className="flex justify-between text-(--systemPrimary)">
-                        <h3 className="pe-2.5 [font:var(--title-2-emphasized)]">
-                          Up next
-                        </h3>
-                        <div className="flex items-center">
-                          <div className="pe-2.5">{/* something */}</div>
+                      data-player-drawer
+                      className={`[--side-panel-horizontal-padding:20px] min-[1000px]:[backdrop-filter:saturate(220%)_blur(16px)] min-[1000px]:bg-(--glassMaterialBackground) min-[1000px]:shadow-[0_10px_40px_var(--glassMaterialShadowColor)] min-[1000px]:h-screen min-[1000px]:overflow-y-hidden min-[1000px]:top-0 border-s-[0.5px] border-s-(--systemQuaternary) bottom-0 inset-e-0 overflow-x-hidden fixed scroll-pt-14.5 top-13.5 w-75 z-[calc(var(--z-web-chrome)+1)] transition-transform duration-300 ease-[cubic-bezier(.215,.61,.355,1)] ${showQueue ? "translate-x-0" : "translate-x-full"}`}
+                    >
+                      <div className="[backdrop-filter:none] bg-transparent flex flex-col pb-3 pe-5 pt-5.75 ps-5 sticky top-0 z-[calc(var(--z-default)+6)]">
+                        <div className="flex justify-between text-(--systemPrimary)">
+                          <h3 className="pe-2.5 [font:var(--title-2-emphasized)]">
+                            Up next
+                          </h3>
+                          <div className="flex items-center">
+                            <div className="pe-2.5">{/* something */}</div>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="z-[calc(var(--z-default)+4)] absolute inset-0 flex items-center justify-center size-full m-auto text-center [font:var(--callout)]">
-                      <div
-                        slot="empty"
-                        className="flex items-center justify-center size-full text-center px-(--side-panel-horizontal-padding,0px)"
-                      >
-                        {stationMode
-                          ? "1 song up next"
-                          : queue.length > 0
-                            ? `${queue.length} songs queued.`
-                            : "No upcoming songs"}
+                      <div className="z-[calc(var(--z-default)+4)] absolute inset-0 flex items-center justify-center size-full m-auto text-center [font:var(--callout)]">
+                        <div
+                          slot="empty"
+                          className="flex items-center justify-center size-full text-center px-(--side-panel-horizontal-padding,0px)"
+                        >
+                          {stationMode
+                            ? "1 song up next"
+                            : queue.length > 0
+                              ? `${queue.length} songs queued.`
+                              : "No upcoming songs"}
+                        </div>
                       </div>
-                    </div>
                     </div>,
                     document.body,
                   )}

@@ -167,10 +167,6 @@ function getDisplayKind(
     return "MusicCircleCoverShelf";
   }
 
-  if (sourceKind === "MusicCoverGrid") {
-    return "MusicCoverGrid";
-  }
-
   if (sourceKind === "MusicSocialCardShelf") {
     return "MusicSocialCardShelf";
   }

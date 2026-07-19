@@ -7,6 +7,8 @@ import { formatDuration } from "@/lib/format/duration";
 import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
 import ResponsiveArtwork from "../media/common/responsive-artwork";
 import CatalogPageLoading from "../loading/catalog-page-loading";
+import { FavoriteSongButton } from "../songs/favorite-song-button";
+import { AddSongToPlaylistButton } from "../songs/add-song-to-playlist-button";
 
 type SongDetailPageProps = {
   songId: string;
@@ -51,7 +53,11 @@ export function SongDetailPage({ songId }: SongDetailPageProps) {
     return (
       <div className="mx-(--bodyGutter) pt-8">
         <p className="text-red-500">{error}</p>
-        <button className="mt-3 hover:underline" onClick={() => void reload()} type="button">
+        <button
+          className="mt-3 hover:underline"
+          onClick={() => void reload()}
+          type="button"
+        >
           Thử lại
         </button>
       </div>
@@ -59,7 +65,11 @@ export function SongDetailPage({ songId }: SongDetailPageProps) {
   }
 
   if (!song) {
-    return <p className="mx-(--bodyGutter) pt-8 text-(--systemSecondary)">Không tìm thấy bài hát.</p>;
+    return (
+      <p className="mx-(--bodyGutter) pt-8 text-(--systemSecondary)">
+        Không tìm thấy bài hát.
+      </p>
+    );
   }
 
   return (
@@ -77,7 +87,9 @@ export function SongDetailPage({ songId }: SongDetailPageProps) {
         />
 
         <div className="min-w-0 pb-1">
-          <p className="text-(--systemSecondary) [font:var(--subhead-emphasized)]">Song</p>
+          <p className="text-(--systemSecondary) [font:var(--subhead-emphasized)]">
+            Song
+          </p>
           <h1 className="mt-1 wrap-break-word text-(--systemPrimary) [font:var(--large-title-emphasized-short)]">
             {song.title}
           </h1>
@@ -85,18 +97,28 @@ export function SongDetailPage({ songId }: SongDetailPageProps) {
             <SongArtists artists={song.artists} fallbackText={song.artist} />
           </p>
           <p className="mt-1 text-(--systemSecondary)">
-            {song.albumUrl ? <Link className="hover:underline" href={song.albumUrl}>{song.album}</Link> : song.album}
+            {song.albumUrl ? (
+              <Link className="hover:underline" href={song.albumUrl}>
+                {song.album}
+              </Link>
+            ) : (
+              song.album
+            )}
             <span className="mx-2">·</span>
             {formatDuration(song.durationSec)}
           </p>
-          <button
-            className="mt-5 rounded-full bg-(--keyColor,#000) px-5 py-2 text-white [font:var(--body-emphasized)] disabled:opacity-50"
-            disabled={!song.playbackUrl}
-            onClick={() => setQueue([song])}
-            type="button"
-          >
-            Play
-          </button>
+          <div className="mt-5 flex flex-wrap gap-2">
+            <button
+              className="rounded-full bg-(--keyColor,#000) px-5 py-2 text-white [font:var(--body-emphasized)] disabled:opacity-50"
+              disabled={!song.playbackUrl}
+              onClick={() => setQueue([song])}
+              type="button"
+            >
+              Play
+            </button>
+            <FavoriteSongButton songId={song.id} />
+            <AddSongToPlaylistButton songId={song.id} />
+          </div>
         </div>
       </div>
     </main>
