@@ -2,7 +2,6 @@
 
 import {
   useCallback,
-  useEffect,
   useLayoutEffect,
   useMemo,
   useState,
@@ -18,13 +17,12 @@ import { getRecommendationSection } from "@/lib/recommendations/recommendation.a
 import MediaShelfSkeleton from "@/components/loading/loading";
 import Loading from "@/app/loading";
 
-const MAX_HOME_SHELF_ITEMS = 14;
+const MAX_HOME_SHELF_ITEMS = 12;
 const RECENTLY_PLAYED_SHELF_ID = "user-recently-played";
 const DAILY_MIX_SHELF_ID = "user-daily-mix";
 const STATIONS_FOR_YOU_SHELF_ID = "user-stations-for-you";
 const FEATURED_ARTISTS_SHELF_ID = "global-top-artists";
 const DAILY_MIX_SHELF_GAP = 2;
-const HOME_SCROLL_IDLE_MS = 120;
 
 export default function HomePage() {
   const { data, loading, error, recentlyPlayedItems } =
@@ -130,40 +128,6 @@ export default function HomePage() {
       .querySelector<HTMLElement>("[data-app-scroll-container]")
       ?.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [selectedShelfId]);
-
-  useEffect(() => {
-    const scrollContainer = document.querySelector<HTMLElement>(
-      "[data-app-scroll-container]",
-    );
-    if (!scrollContainer) return;
-
-    let isScrolling = false;
-    let idleTimer: ReturnType<typeof setTimeout> | undefined;
-
-    const finishScrolling = () => {
-      idleTimer = undefined;
-      isScrolling = false;
-      delete scrollContainer.dataset.performanceScrolling;
-    };
-
-    const handleScroll = () => {
-      if (!isScrolling) {
-        isScrolling = true;
-        // Disable costly visual affordances in the same frame as scrolling.
-        scrollContainer.dataset.performanceScrolling = "true";
-      }
-
-      if (idleTimer) clearTimeout(idleTimer);
-      idleTimer = setTimeout(finishScrolling, HOME_SCROLL_IDLE_MS);
-    };
-
-    scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
-    return () => {
-      scrollContainer.removeEventListener("scroll", handleScroll);
-      if (idleTimer) clearTimeout(idleTimer);
-      delete scrollContainer.dataset.performanceScrolling;
-    };
-  }, []);
 
   return (
     <>
