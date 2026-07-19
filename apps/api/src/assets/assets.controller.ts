@@ -22,6 +22,7 @@ import { PermissionsGuard } from '../common/guards/permissions.guard';
 import { StrictJwtAuthGuard } from '../common/guards/strict-jwt-auth.guard';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { AssetsService } from './assets.service';
+import { ArtistOrAdminGuard } from '../common/guards/artist-or-admin.guard';
 
 @Controller('admin/assets')
 @UseGuards(StrictJwtAuthGuard, AdminGuard, PermissionsGuard)
@@ -30,10 +31,7 @@ export class AssetsController {
   constructor(private readonly assetsService: AssetsService) {}
 
   @Post('uploads')
-  requestUpload(
-    @Req() req: Request,
-    @Body() body: RequestAssetUploadRequest,
-  ) {
+  requestUpload(@Req() req: Request, @Body() body: RequestAssetUploadRequest) {
     return this.assetsService.requestUpload({
       ...body,
       actorUserId: (req.user as JwtUser).userId,
@@ -127,7 +125,39 @@ export class AssetsController {
       FAILED: AssetStatus.ASSET_STATUS_FAILED,
       DELETED: AssetStatus.ASSET_STATUS_DELETED,
     };
-    return statuses[String(value).toUpperCase()] ??
-      AssetStatus.ASSET_STATUS_UNSPECIFIED;
+    return (
+      statuses[String(value).toUpperCase()] ??
+      AssetStatus.ASSET_STATUS_UNSPECIFIED
+    );
+  }
+}
+
+@Controller('studio/assets')
+@UseGuards(StrictJwtAuthGuard, ArtistOrAdminGuard)
+export class ArtistStudioAssetsController {
+  constructor(private readonly assetsService: AssetsService) {}
+
+  @Post('uploads')
+  requestUpload(@Req() req: Request, @Body() body: RequestAssetUploadRequest) {
+    return this.assetsService.requestUpload({
+      ...body,
+      actorUserId: (req.user as JwtUser).userId,
+      kind:
+        body.kind === AssetKind.ASSET_KIND_VIDEO
+          ? AssetKind.ASSET_KIND_VIDEO
+          : AssetKind.ASSET_KIND_IMAGE,
+      purpose:
+        body.purpose === AssetPurpose.ASSET_PURPOSE_EDITORIAL_VIDEO
+          ? AssetPurpose.ASSET_PURPOSE_EDITORIAL_VIDEO
+          : AssetPurpose.ASSET_PURPOSE_ARTWORK,
+    });
+  }
+
+  @Post(':assetId/finalize')
+  finalizeUpload(@Req() req: Request, @Param('assetId') assetId: string) {
+    return this.assetsService.finalizeUpload({
+      assetId,
+      actorUserId: (req.user as JwtUser).userId,
+    });
   }
 }

@@ -21,6 +21,10 @@ service SongService {
   // User library
   rpc AddFavorite(FavoriteRequest) returns (FavoriteResponse);
   rpc RemoveFavorite(FavoriteRequest) returns (FavoriteResponse);
+  rpc ListFavoriteSongs(ListFavoriteSongsRequest) returns (ListFavoriteSongsResponse);
+  rpc AddLibraryResource(LibraryResourceRequest) returns (LibraryResourceResponse);
+  rpc RemoveLibraryResource(LibraryResourceRequest) returns (LibraryResourceResponse);
+  rpc ListLibraryResources(ListLibraryResourcesRequest) returns (ListLibraryResourcesResponse);
   rpc RemoveSongOwnership(RemoveSongOwnershipRequest) returns (RemoveSongOwnershipResponse);
   rpc GetPlaylist(GetPlaylistRequest) returns (GetPlaylistResponse);
 
@@ -196,6 +200,39 @@ message FavoriteRequest {
 message FavoriteResponse {
   bool success = 1;
 }
+
+message ListFavoriteSongsRequest {
+  string user_id = 1;
+  int32 limit = 2;
+  string cursor = 3;
+}
+
+message ListFavoriteSongsResponse {
+  repeated SongSummary songs = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message LibraryResourceRequest {
+  string user_id = 1;
+  string resource_type = 2;
+  string resource_id = 3;
+  string title = 4;
+  string subtitle = 5;
+  string artwork_url = 6;
+}
+message LibraryResourceResponse { bool success = 1; }
+message ListLibraryResourcesRequest { string user_id = 1; }
+message LibraryResource {
+  string resource_type = 1;
+  string resource_id = 2;
+  string title = 3;
+  string subtitle = 4;
+  string artwork_url = 5;
+  int64 created_at = 6;
+}
+message ListLibraryResourcesResponse { repeated LibraryResource resources = 1; }
+
 
 message RemoveSongOwnershipRequest {
   string user_id = 1;

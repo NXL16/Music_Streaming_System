@@ -15,6 +15,12 @@ import {
   UpdateSongProcessingResultResponse,
   FavoriteRequest,
   FavoriteResponse,
+  ListFavoriteSongsRequest,
+  ListFavoriteSongsResponse,
+  LibraryResourceRequest,
+  LibraryResourceResponse,
+  ListLibraryResourcesRequest,
+  ListLibraryResourcesResponse,
   RemoveSongOwnershipRequest,
   RemoveSongOwnershipResponse,
   GetPlaylistRequest,
@@ -539,6 +545,107 @@ export class SongsService {
     return { success: true };
   }
 
+  async listFavoriteSongs(
+    request: ListFavoriteSongsRequest,
+  ): Promise<ListFavoriteSongsResponse> {
+    if (!request.userId) this.throwInvalidArgument('USER_ID_REQUIRED');
+
+    const requestedLimit = request.limit || 20;
+    const limit = Math.min(Math.max(requestedLimit, 1), MAX_LIST_LIMIT);
+    const cursor = this.parseCursor(request.cursor);
+    const where: Prisma.FavoriteWhereInput = { userId: request.userId };
+
+    if (cursor) {
+      where.OR = [
+        { createdAt: { lt: cursor.createdAt } },
+        { createdAt: cursor.createdAt, id: { lt: cursor.id } },
+      ];
+    }
+
+    const favorites = await this.prisma.favorite.findMany({
+      where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      select: {
+        id: true,
+        createdAt: true,
+        song: { select: songSummarySelect },
+      },
+    });
+    const hasMore = favorites.length > limit;
+    const results = hasMore ? favorites.slice(0, limit) : favorites;
+
+    return {
+      songs: results.map(({ song }) =>
+        this.mapEntityToSummary(song, request.userId, false),
+      ),
+      nextCursor: hasMore
+        ? `${results[results.length - 1].createdAt.getTime()}:${results[results.length - 1].id}`
+        : '',
+      hasMore,
+    };
+  }
+
+  async addLibraryResource(
+    request: LibraryResourceRequest,
+  ): Promise<LibraryResourceResponse> {
+    if (
+      !request.userId ||
+      !request.resourceId ||
+      !['albums', 'playlists'].includes(request.resourceType)
+    ) {
+      this.throwInvalidArgument('LIBRARY_RESOURCE_INVALID');
+    }
+    await this.prisma.userLibraryResource.upsert({
+      where: {
+        userId_resourceType_resourceId: {
+          userId: request.userId,
+          resourceType: request.resourceType,
+          resourceId: request.resourceId,
+        },
+      },
+      update: {
+        title: request.title,
+        subtitle: request.subtitle,
+        artworkUrl: request.artworkUrl,
+      },
+      create: {
+        userId: request.userId,
+        resourceType: request.resourceType,
+        resourceId: request.resourceId,
+        title: request.title,
+        subtitle: request.subtitle,
+        artworkUrl: request.artworkUrl,
+      },
+    });
+    return { success: true };
+  }
+
+  async listLibraryResources(
+    request: ListLibraryResourcesRequest,
+  ): Promise<ListLibraryResourcesResponse> {
+    if (!request.userId) this.throwInvalidArgument('USER_ID_REQUIRED');
+    const resources = await this.prisma.userLibraryResource.findMany({
+      where: { userId: request.userId },
+      orderBy: { createdAt: 'desc' },
+    });
+    return {
+      resources: resources.map((resource) => ({
+        resourceType: resource.resourceType,
+        resourceId: resource.resourceId,
+        title: resource.title,
+        subtitle: resource.subtitle,
+        artworkUrl: resource.artworkUrl,
+        createdAt: resource.createdAt.getTime(),
+      })),
+    };
+  }
+
+  async removeLibraryResource(request: LibraryResourceRequest): Promise<LibraryResourceResponse> {
+    await this.prisma.userLibraryResource.deleteMany({ where: { userId: request.userId, resourceType: request.resourceType, resourceId: request.resourceId } });
+    return { success: true };
+  }
+
   async removeSongOwnership(
     request: RemoveSongOwnershipRequest,
   ): Promise<RemoveSongOwnershipResponse> {
@@ -711,11 +818,13 @@ export class SongsService {
       select: { userId: true },
     });
     if (!existing) this.throwNotFound('PLAYLIST_NOT_FOUND');
-    if (existing.userId !== userId) this.throwPermissionDenied('PLAYLIST_ACCESS_DENIED');
+    if (existing.userId !== userId)
+      this.throwPermissionDenied('PLAYLIST_ACCESS_DENIED');
 
     const updateData: Record<string, unknown> = {};
     if (data.name !== undefined) updateData.name = data.name.trim();
-    if (data.description !== undefined) updateData.description = data.description.trim();
+    if (data.description !== undefined)
+      updateData.description = data.description.trim();
     if (data.isPublic !== undefined) updateData.isPublic = data.isPublic;
 
     const playlist = await this.prisma.userPlaylist.update({
@@ -741,7 +850,8 @@ export class SongsService {
       select: { userId: true },
     });
     if (!existing) this.throwNotFound('PLAYLIST_NOT_FOUND');
-    if (existing.userId !== userId) this.throwPermissionDenied('PLAYLIST_ACCESS_DENIED');
+    if (existing.userId !== userId)
+      this.throwPermissionDenied('PLAYLIST_ACCESS_DENIED');
 
     await this.prisma.userPlaylist.delete({ where: { id: playlistId } });
     return { success: true };
@@ -804,11 +914,7 @@ export class SongsService {
     };
   }
 
-  async addTrackToPlaylist(
-    userId: string,
-    playlistId: string,
-    songId: string,
-  ) {
+  async addTrackToPlaylist(userId: string, playlistId: string, songId: string) {
     if (!playlistId) this.throwInvalidArgument('PLAYLIST_ID_REQUIRED');
     if (!songId) this.throwInvalidArgument('SONG_ID_REQUIRED');
 
@@ -817,7 +923,8 @@ export class SongsService {
       select: { userId: true },
     });
     if (!playlist) this.throwNotFound('PLAYLIST_NOT_FOUND');
-    if (playlist.userId !== userId) this.throwPermissionDenied('PLAYLIST_ACCESS_DENIED');
+    if (playlist.userId !== userId)
+      this.throwPermissionDenied('PLAYLIST_ACCESS_DENIED');
 
     const song = await this.prisma.song.findUnique({
       where: { id: songId },
@@ -868,7 +975,8 @@ export class SongsService {
       select: { userId: true },
     });
     if (!playlist) this.throwNotFound('PLAYLIST_NOT_FOUND');
-    if (playlist.userId !== userId) this.throwPermissionDenied('PLAYLIST_ACCESS_DENIED');
+    if (playlist.userId !== userId)
+      this.throwPermissionDenied('PLAYLIST_ACCESS_DENIED');
 
     await this.prisma.userPlaylistTrack.deleteMany({
       where: { playlistId, songId },

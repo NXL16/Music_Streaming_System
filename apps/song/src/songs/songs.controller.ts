@@ -17,6 +17,12 @@ import {
   UpdateSongProcessingResultResponse,
   FavoriteRequest,
   FavoriteResponse,
+  ListFavoriteSongsRequest,
+  ListFavoriteSongsResponse,
+  LibraryResourceRequest,
+  LibraryResourceResponse,
+  ListLibraryResourcesRequest,
+  ListLibraryResourcesResponse,
   RemoveSongOwnershipRequest,
   RemoveSongOwnershipResponse,
   GetPlaylistRequest,
@@ -104,6 +110,24 @@ export class SongsController implements SongServiceController {
     return this.songsService.removeFavorite(request);
   }
 
+  async listFavoriteSongs(
+    request: ListFavoriteSongsRequest,
+  ): Promise<ListFavoriteSongsResponse> {
+    return this.songsService.listFavoriteSongs(request);
+  }
+
+  async addLibraryResource(
+    request: LibraryResourceRequest,
+  ): Promise<LibraryResourceResponse> {
+    return this.songsService.addLibraryResource(request);
+  }
+  async listLibraryResources(
+    request: ListLibraryResourcesRequest,
+  ): Promise<ListLibraryResourcesResponse> {
+    return this.songsService.listLibraryResources(request);
+  }
+  async removeLibraryResource(request: LibraryResourceRequest): Promise<LibraryResourceResponse> { return this.songsService.removeLibraryResource(request); }
+
   async removeSongOwnership(
     request: RemoveSongOwnershipRequest,
   ): Promise<RemoveSongOwnershipResponse> {
@@ -114,7 +138,9 @@ export class SongsController implements SongServiceController {
     return this.songsService.getPlaylist(request);
   }
 
-  async createUserPlaylist(request: CreateUserPlaylistRequest): Promise<UserPlaylistInfo> {
+  async createUserPlaylist(
+    request: CreateUserPlaylistRequest,
+  ): Promise<UserPlaylistInfo> {
     return this.songsService.createUserPlaylist(
       request.userId,
       request.name,
@@ -123,8 +149,11 @@ export class SongsController implements SongServiceController {
     );
   }
 
-  async updateUserPlaylist(request: UpdateUserPlaylistRequest): Promise<UserPlaylistInfo> {
-    const data: { name?: string; description?: string; isPublic?: boolean } = {};
+  async updateUserPlaylist(
+    request: UpdateUserPlaylistRequest,
+  ): Promise<UserPlaylistInfo> {
+    const data: { name?: string; description?: string; isPublic?: boolean } =
+      {};
     if (request.hasName) data.name = request.name;
     if (request.hasDescription) data.description = request.description;
     if (request.hasIsPublic) data.isPublic = request.isPublic;
@@ -136,11 +165,18 @@ export class SongsController implements SongServiceController {
     );
   }
 
-  async deleteUserPlaylist(request: DeleteUserPlaylistRequest): Promise<DeleteUserPlaylistResponse> {
-    return this.songsService.deleteUserPlaylist(request.userId, request.playlistId);
+  async deleteUserPlaylist(
+    request: DeleteUserPlaylistRequest,
+  ): Promise<DeleteUserPlaylistResponse> {
+    return this.songsService.deleteUserPlaylist(
+      request.userId,
+      request.playlistId,
+    );
   }
 
-  async listUserPlaylists(request: ListUserPlaylistsRequest): Promise<ListUserPlaylistsResponse> {
+  async listUserPlaylists(
+    request: ListUserPlaylistsRequest,
+  ): Promise<ListUserPlaylistsResponse> {
     return this.songsService.listUserPlaylists(
       request.userId,
       request.requesterUserId,
@@ -149,7 +185,9 @@ export class SongsController implements SongServiceController {
     );
   }
 
-  async addTrackToPlaylist(request: PlaylistTrackRequest): Promise<PlaylistTrackResponse> {
+  async addTrackToPlaylist(
+    request: PlaylistTrackRequest,
+  ): Promise<PlaylistTrackResponse> {
     return this.songsService.addTrackToPlaylist(
       request.userId,
       request.playlistId,
@@ -157,7 +195,9 @@ export class SongsController implements SongServiceController {
     );
   }
 
-  async removeTrackFromPlaylist(request: PlaylistTrackRequest): Promise<PlaylistTrackResponse> {
+  async removeTrackFromPlaylist(
+    request: PlaylistTrackRequest,
+  ): Promise<PlaylistTrackResponse> {
     return this.songsService.removeTrackFromPlaylist(
       request.userId,
       request.playlistId,

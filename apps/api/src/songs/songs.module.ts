@@ -3,9 +3,11 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
 import { SongsController } from './songs.controller';
 import { SongsService } from './songs.service';
 import { R2Module } from '../common/r2/r2.module';
+import { ArtistOrAdminGuard } from '../common/guards/artist-or-admin.guard';
 import { PlaylistsController } from './playlists.controller';
 import {
   CatalogAdminController,
+  ArtistStudioCatalogController,
   CatalogController,
 } from './catalog.controller';
 import {
@@ -35,8 +37,9 @@ import {
     PlaylistsController,
     CatalogController,
     CatalogAdminController,
+    ArtistStudioCatalogController,
   ],
-  providers: [SongsService],
+  providers: [SongsService, ArtistOrAdminGuard],
   exports: [SongsService],
 })
 export class SongsModule {}

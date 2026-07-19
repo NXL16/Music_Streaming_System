@@ -26,6 +26,7 @@ import type { Request } from 'express';
 import { JwtUser } from '@musical/shared-types';
 import { ConfigService } from '@nestjs/config';
 import { StrictJwtAuthGuard } from '../common/guards/strict-jwt-auth.guard';
+import { ArtistOrAdminGuard } from '../common/guards/artist-or-admin.guard';
 
 @Controller('songs')
 export class SongsController {
@@ -35,9 +36,12 @@ export class SongsController {
   ) {}
 
   @Post('request-upload')
-  @UseGuards(StrictJwtAuthGuard)
+  @UseGuards(StrictJwtAuthGuard, ArtistOrAdminGuard)
   @HttpCode(HttpStatus.CREATED)
-  async requestUpload(@Req() req: Request, @Body() requestDto: RequestUploadDto) {
+  async requestUpload(
+    @Req() req: Request,
+    @Body() requestDto: RequestUploadDto,
+  ) {
     const user = req.user as JwtUser;
     return await this.songsService.requestUpload(requestDto, user.userId);
   }
@@ -47,14 +51,15 @@ export class SongsController {
     @Headers('x-internal-token') token: string | undefined,
     @Body() finalizeDto: FinalizeUploadDto,
   ) {
-    const expectedToken = this.configService.get<string>('FINALIZER_INTERNAL_TOKEN');
+    const expectedToken = this.configService.get<string>(
+      'FINALIZER_INTERNAL_TOKEN',
+    );
     if (!expectedToken || token !== expectedToken) {
       throw new UnauthorizedException('INVALID_INTERNAL_TOKEN');
     }
 
     return await this.songsService.finalizeUpload(finalizeDto);
   }
-
 
   @Get()
   async findAll(
@@ -94,6 +99,59 @@ export class SongsController {
     return await this.songsService.listSongs(request);
   }
 
+  @Get('favorites')
+  @UseGuards(StrictJwtAuthGuard)
+  async listFavorites(
+    @Req() req: Request,
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    const user = req.user as JwtUser;
+    return await this.songsService.listFavoriteSongs({
+      userId: user.userId,
+      limit: limit ? Number(limit) : 20,
+      cursor: cursor || '',
+    });
+  }
+
+  @Post('library/resources')
+  @UseGuards(StrictJwtAuthGuard)
+  async addLibraryResource(
+    @Req() req: Request,
+    @Body()
+    body: {
+      resourceType: string;
+      resourceId: string;
+      title?: string;
+      subtitle?: string;
+      artworkUrl?: string;
+    },
+  ) {
+    const user = req.user as JwtUser;
+    return this.songsService.addLibraryResource({
+      userId: user.userId,
+      resourceType: body.resourceType,
+      resourceId: body.resourceId,
+      title: body.title || '',
+      subtitle: body.subtitle || '',
+      artworkUrl: body.artworkUrl || '',
+    });
+  }
+
+  @Get('library/resources')
+  @UseGuards(StrictJwtAuthGuard)
+  async listLibraryResources(@Req() req: Request) {
+    const user = req.user as JwtUser;
+    return this.songsService.listLibraryResources({ userId: user.userId });
+  }
+
+  @Delete('library/resources/:resourceType/:resourceId')
+  @UseGuards(StrictJwtAuthGuard)
+  async removeLibraryResource(@Req() req: Request, @Param('resourceType') resourceType: string, @Param('resourceId') resourceId: string) {
+    const user = req.user as JwtUser;
+    return this.songsService.removeLibraryResource({ userId: user.userId, resourceType, resourceId, title: '', subtitle: '', artworkUrl: '' });
+  }
+
   @Get(':id')
   async findOnePublic(@Param('id') id: string) {
     const request: GetSongRequest = {
@@ -119,7 +177,9 @@ export class SongsController {
     @Headers('x-internal-token') token: string | undefined,
     @Body() updateDto: UpdateSongProcessingResultRequest,
   ) {
-    const expectedToken = this.configService.get<string>('FINALIZER_INTERNAL_TOKEN');
+    const expectedToken = this.configService.get<string>(
+      'FINALIZER_INTERNAL_TOKEN',
+    );
     if (!expectedToken || token !== expectedToken) {
       throw new UnauthorizedException('INVALID_INTERNAL_TOKEN');
     }
@@ -138,7 +198,10 @@ export class SongsController {
   @UseGuards(StrictJwtAuthGuard)
   async unfavorite(@Req() req: Request, @Param('id') songId: string) {
     const user = req.user as JwtUser;
-    return await this.songsService.removeFavorite({ userId: user.userId, songId });
+    return await this.songsService.removeFavorite({
+      userId: user.userId,
+      songId,
+    });
   }
 
   @Delete(':id')

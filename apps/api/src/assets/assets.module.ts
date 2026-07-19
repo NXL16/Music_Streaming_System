@@ -6,7 +6,10 @@ import {
   GRPC_LOADER_OPTIONS,
   resolveProtoPath,
 } from '@musical/shared-proto';
-import { AssetsController } from './assets.controller';
+import {
+  ArtistStudioAssetsController,
+  AssetsController,
+} from './assets.controller';
 import { AssetsService } from './assets.service';
 
 @Module({
@@ -28,7 +31,7 @@ import { AssetsService } from './assets.service';
       },
     ]),
   ],
-  controllers: [AssetsController],
+  controllers: [AssetsController, ArtistStudioAssetsController],
   providers: [AssetsService],
 })
 export class AssetsModule {}

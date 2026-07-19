@@ -56,9 +56,7 @@ function normalizePresentationMode(
     return RecommendationPresentationMode.RECOMMENDATION_PRESENTATION_MODE_FIXED;
   }
   if (typeof value !== 'string') {
-    throw new BadRequestException(
-      'presentationMode must be AUTO or FIXED',
-    );
+    throw new BadRequestException('presentationMode must be AUTO or FIXED');
   }
 
   switch (value.toUpperCase()) {
@@ -67,9 +65,7 @@ function normalizePresentationMode(
     case 'FIXED':
       return RecommendationPresentationMode.RECOMMENDATION_PRESENTATION_MODE_FIXED;
     default:
-      throw new BadRequestException(
-        'presentationMode must be AUTO or FIXED',
-      );
+      throw new BadRequestException('presentationMode must be AUTO or FIXED');
   }
 }
 
@@ -221,6 +217,14 @@ export class RecommendationAdminController {
     private readonly recommendationsService: RecommendationsService,
   ) {}
 
+  @Get('analytics')
+  getListeningAnalytics(@Query('days') days?: string) {
+    return this.recommendationsService.getListeningAnalytics({
+      songIds: [],
+      days: Math.min(90, Math.max(1, Number(days) || 28)),
+    });
+  }
+
   @Get('home')
   getRecommendationPage(
     @Req() req: Request,
@@ -267,8 +271,7 @@ export class RecommendationAdminController {
             }
           : undefined,
       })),
-      status:
-        RecommendationPageStatus.RECOMMENDATION_PAGE_STATUS_DRAFT,
+      status: RecommendationPageStatus.RECOMMENDATION_PAGE_STATUS_DRAFT,
       actorUserId: actor.userId,
     });
   }

@@ -355,3 +355,18 @@ model UserPlaylistTrack {
   @@index([songId])
   @@map("user_playlist_tracks")
 }
+
+model UserLibraryResource {
+  id           String   @id @default(uuid())
+  userId       String   @db.VarChar(128)
+  resourceType String   @db.VarChar(32)
+  resourceId   String   @db.VarChar(128)
+  title        String   @default("") @db.VarChar(255)
+  subtitle     String   @default("") @db.VarChar(255)
+  artworkUrl   String   @default("") @db.VarChar(1000)
+  createdAt    DateTime @default(now()) @db.Timestamptz
+
+  @@unique([userId, resourceType, resourceId])
+  @@index([userId, createdAt])
+  @@map("user_library_resources")
+}

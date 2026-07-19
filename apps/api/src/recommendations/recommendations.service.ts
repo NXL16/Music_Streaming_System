@@ -13,6 +13,8 @@ import {
   RecordListeningEventRequest,
   RecordListeningEventResponse,
   GenerateRecommendationsRequest,
+  GetListeningAnalyticsRequest,
+  ListeningAnalyticsResponse,
 } from '@musical/shared-proto';
 import { grpcFirstValueFrom } from '../common/utils/grpc-timeout';
 import { ConfigService } from '@nestjs/config';
@@ -127,10 +129,7 @@ export class RecommendationsService implements OnModuleInit {
     request: RecordListeningEventRequest,
   ): Promise<RecordListeningEventResponse> {
     return grpcFirstValueFrom(
-      this.recommendationClient.recordListeningEvent(
-        request,
-        this.metadata(),
-      ),
+      this.recommendationClient.recordListeningEvent(request, this.metadata()),
     );
   }
 
@@ -144,6 +143,14 @@ export class RecommendationsService implements OnModuleInit {
           this.metadata(),
         ),
       ),
+    );
+  }
+
+  async getListeningAnalytics(
+    request: GetListeningAnalyticsRequest,
+  ): Promise<ListeningAnalyticsResponse> {
+    return grpcFirstValueFrom(
+      this.recommendationClient.getListeningAnalytics(request, this.metadata()),
     );
   }
 
@@ -180,12 +187,8 @@ export class RecommendationsService implements OnModuleInit {
         id,
         {
           ...resource,
-          attributes: unwrapStructOutput(
-            resource.attributes,
-          ) ?? {},
-          relationships: unwrapStructOutput(
-            resource.relationships,
-          ),
+          attributes: unwrapStructOutput(resource.attributes) ?? {},
+          relationships: unwrapStructOutput(resource.relationships),
         },
       ]),
     );

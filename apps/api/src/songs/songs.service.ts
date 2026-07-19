@@ -27,6 +27,12 @@ import {
   UpdateSongProcessingResultResponse,
   FavoriteRequest,
   FavoriteResponse,
+  ListFavoriteSongsRequest,
+  ListFavoriteSongsResponse,
+  LibraryResourceRequest,
+  LibraryResourceResponse,
+  ListLibraryResourcesRequest,
+  ListLibraryResourcesResponse,
   RemoveSongOwnershipRequest,
   RemoveSongOwnershipResponse,
   GetPlaylistRequest,
@@ -102,13 +108,17 @@ export class SongsService implements OnModuleInit {
   async getSongByChecksum(
     data: GetSongByChecksumRequest,
   ): Promise<GetSongByChecksumResponse> {
-    return await grpcFirstValueFrom(this.songServiceClient.getSongByChecksum(data));
+    return await grpcFirstValueFrom(
+      this.songServiceClient.getSongByChecksum(data),
+    );
   }
 
   async getSongIngestInfo(
     data: GetSongIngestInfoRequest,
   ): Promise<GetSongIngestInfoResponse> {
-    return await grpcFirstValueFrom(this.songServiceClient.getSongIngestInfo(data));
+    return await grpcFirstValueFrom(
+      this.songServiceClient.getSongIngestInfo(data),
+    );
   }
 
   async listSongs(data: ListSongsRequest): Promise<ListSongsResponse> {
@@ -118,7 +128,9 @@ export class SongsService implements OnModuleInit {
   async createSongRecord(
     data: CreateSongRecordRequest,
   ): Promise<CreateSongRecordResponse> {
-    return await grpcFirstValueFrom(this.songServiceClient.createSongRecord(data));
+    return await grpcFirstValueFrom(
+      this.songServiceClient.createSongRecord(data),
+    );
   }
 
   async updateSongProcessingResult(
@@ -134,13 +146,38 @@ export class SongsService implements OnModuleInit {
   }
 
   async removeFavorite(data: FavoriteRequest): Promise<FavoriteResponse> {
-    return await grpcFirstValueFrom(this.songServiceClient.removeFavorite(data));
+    return await grpcFirstValueFrom(
+      this.songServiceClient.removeFavorite(data),
+    );
   }
+
+  async listFavoriteSongs(
+    data: ListFavoriteSongsRequest,
+  ): Promise<ListFavoriteSongsResponse> {
+    return await grpcFirstValueFrom(
+      this.songServiceClient.listFavoriteSongs(data),
+    );
+  }
+  async addLibraryResource(
+    data: LibraryResourceRequest,
+  ): Promise<LibraryResourceResponse> {
+    return grpcFirstValueFrom(this.songServiceClient.addLibraryResource(data));
+  }
+  async listLibraryResources(
+    data: ListLibraryResourcesRequest,
+  ): Promise<ListLibraryResourcesResponse> {
+    return grpcFirstValueFrom(
+      this.songServiceClient.listLibraryResources(data),
+    );
+  }
+  async removeLibraryResource(data: LibraryResourceRequest): Promise<LibraryResourceResponse> { return grpcFirstValueFrom(this.songServiceClient.removeLibraryResource(data)); }
 
   async removeSongOwnership(
     data: RemoveSongOwnershipRequest,
   ): Promise<RemoveSongOwnershipResponse> {
-    return await grpcFirstValueFrom(this.songServiceClient.removeSongOwnership(data));
+    return await grpcFirstValueFrom(
+      this.songServiceClient.removeSongOwnership(data),
+    );
   }
 
   async unlinkSong(
@@ -157,31 +194,41 @@ export class SongsService implements OnModuleInit {
   async createUserPlaylist(
     data: CreateUserPlaylistRequest,
   ): Promise<UserPlaylistInfo> {
-    return await grpcFirstValueFrom(this.songServiceClient.createUserPlaylist(data));
+    return await grpcFirstValueFrom(
+      this.songServiceClient.createUserPlaylist(data),
+    );
   }
 
   async updateUserPlaylist(
     data: UpdateUserPlaylistRequest,
   ): Promise<UserPlaylistInfo> {
-    return await grpcFirstValueFrom(this.songServiceClient.updateUserPlaylist(data));
+    return await grpcFirstValueFrom(
+      this.songServiceClient.updateUserPlaylist(data),
+    );
   }
 
   async deleteUserPlaylist(
     data: DeleteUserPlaylistRequest,
   ): Promise<DeleteUserPlaylistResponse> {
-    return await grpcFirstValueFrom(this.songServiceClient.deleteUserPlaylist(data));
+    return await grpcFirstValueFrom(
+      this.songServiceClient.deleteUserPlaylist(data),
+    );
   }
 
   async listUserPlaylists(
     data: ListUserPlaylistsRequest,
   ): Promise<ListUserPlaylistsResponse> {
-    return await grpcFirstValueFrom(this.songServiceClient.listUserPlaylists(data));
+    return await grpcFirstValueFrom(
+      this.songServiceClient.listUserPlaylists(data),
+    );
   }
 
   async addTrackToPlaylist(
     data: PlaylistTrackRequest,
   ): Promise<PlaylistTrackResponse> {
-    return await grpcFirstValueFrom(this.songServiceClient.addTrackToPlaylist(data));
+    return await grpcFirstValueFrom(
+      this.songServiceClient.addTrackToPlaylist(data),
+    );
   }
 
   async removeTrackFromPlaylist(
@@ -195,7 +242,9 @@ export class SongsService implements OnModuleInit {
   async getCatalogAlbum(
     data: GetCatalogAlbumRequest,
   ): Promise<CatalogResponse> {
-    const response = await grpcFirstValueFrom(this.songServiceClient.getCatalogAlbum(data));
+    const response = await grpcFirstValueFrom(
+      this.songServiceClient.getCatalogAlbum(data),
+    );
     return this.unwrapCatalogResponse(response);
   }
 
@@ -335,9 +384,7 @@ export class SongsService implements OnModuleInit {
   async deleteCatalogDraft(
     data: DeleteCatalogDraftRequest,
   ): Promise<DeleteCatalogDraftResponse> {
-    return grpcFirstValueFrom(
-      this.songServiceClient.deleteCatalogDraft(data),
-    );
+    return grpcFirstValueFrom(this.songServiceClient.deleteCatalogDraft(data));
   }
 
   async requestUpload(request: RequestUploadDto, userId: string) {
@@ -755,8 +802,7 @@ export class SongsService implements OnModuleInit {
 
     if (artists) {
       for (const artist of Object.values(artists)) {
-        if (artist.attributes)
-          this.unwrapArtistAttributes(artist.attributes);
+        if (artist.attributes) this.unwrapArtistAttributes(artist.attributes);
       }
     }
 
@@ -773,9 +819,7 @@ export class SongsService implements OnModuleInit {
     this.unwrapArtwork(attrs.artwork);
     attrs.editorialArtwork = unwrapStructOutput(attrs.editorialArtwork);
     attrs.extendedAssetUrls = unwrapStructOutput(attrs.extendedAssetUrls);
-    attrs.offers = attrs.offers.map(
-      (offer) => unwrapStructOutput(offer) ?? {},
-    );
+    attrs.offers = attrs.offers.map((offer) => unwrapStructOutput(offer) ?? {});
   }
 
   private unwrapAlbumAttributes(attrs: CatalogAlbumAttributes): void {
@@ -783,9 +827,7 @@ export class SongsService implements OnModuleInit {
     attrs.editorialArtwork = unwrapStructOutput(attrs.editorialArtwork);
     attrs.editorialNotes = unwrapStructOutput(attrs.editorialNotes);
     attrs.editorialVideo = unwrapStructOutput(attrs.editorialVideo);
-    attrs.offers = attrs.offers.map(
-      (offer) => unwrapStructOutput(offer) ?? {},
-    );
+    attrs.offers = attrs.offers.map((offer) => unwrapStructOutput(offer) ?? {});
   }
 
   private unwrapPlaylistAttributes(attrs: CatalogPlaylistAttributes): void {
@@ -793,12 +835,8 @@ export class SongsService implements OnModuleInit {
     attrs.editorialArtwork = unwrapStructOutput(attrs.editorialArtwork);
     attrs.editorialNotes = unwrapStructOutput(attrs.editorialNotes);
     attrs.editorialVideo = unwrapStructOutput(attrs.editorialVideo);
-    attrs.plainEditorialCard = unwrapStructOutput(
-      attrs.plainEditorialCard,
-    );
-    attrs.plainEditorialNotes = unwrapStructOutput(
-      attrs.plainEditorialNotes,
-    );
+    attrs.plainEditorialCard = unwrapStructOutput(attrs.plainEditorialCard);
+    attrs.plainEditorialNotes = unwrapStructOutput(attrs.plainEditorialNotes);
   }
 
   private unwrapArtistAttributes(attrs: CatalogArtistAttributes): void {

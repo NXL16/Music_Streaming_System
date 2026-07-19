@@ -23,10 +23,11 @@ import { StrictJwtAuthGuard } from '../common/guards/strict-jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
 import { Permissions } from '../common/decorators/permissions.decorator';
+import { ArtistOrAdminGuard } from '../common/guards/artist-or-admin.guard';
 
 @Controller('catalog/:storefront')
 export class CatalogController {
-  constructor(private readonly songsService: SongsService) { }
+  constructor(private readonly songsService: SongsService) {}
 
   @Get('albums/:albumId')
   getAlbum(
@@ -107,14 +108,41 @@ export class CatalogController {
       cursor: cursor?.trim() ?? '',
     });
   }
+}
 
+@Controller('studio/catalog')
+@UseGuards(StrictJwtAuthGuard, ArtistOrAdminGuard)
+export class ArtistStudioCatalogController {
+  constructor(private readonly songsService: SongsService) {}
+
+  @Post('albums/draft')
+  saveAlbumDraft(
+    @Req() req: Request,
+    @Body() body: SaveCatalogAlbumDraftRequest,
+  ) {
+    return this.songsService.saveCatalogAlbumDraft({
+      ...body,
+      actorUserId: (req.user as JwtUser).userId,
+    });
+  }
+
+  @Post('playlists/draft')
+  savePlaylistDraft(
+    @Req() req: Request,
+    @Body() body: SaveCatalogPlaylistDraftRequest,
+  ) {
+    return this.songsService.saveCatalogPlaylistDraft({
+      ...body,
+      actorUserId: (req.user as JwtUser).userId,
+    });
+  }
 }
 
 @Controller('admin/catalog')
 @UseGuards(StrictJwtAuthGuard, AdminGuard, PermissionsGuard)
 @Permissions('catalog.manage')
 export class CatalogAdminController {
-  constructor(private readonly songsService: SongsService) { }
+  constructor(private readonly songsService: SongsService) {}
 
   @Post('artists/draft')
   saveArtistDraft(
@@ -183,10 +211,7 @@ export class CatalogAdminController {
   }
 
   @Post('drafts/:draftId/publish')
-  publishDraft(
-    @Req() req: Request,
-    @Param('draftId') draftId: string,
-  ) {
+  publishDraft(@Req() req: Request, @Param('draftId') draftId: string) {
     return this.songsService.publishCatalogDraft({
       draftId,
       actorUserId: (req.user as JwtUser).userId,
