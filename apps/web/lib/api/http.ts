@@ -4,7 +4,7 @@ import { refreshAccessToken } from "@/lib/auth/session-refresh";
 
 export const http = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL,
-  timeout: 15000,
+  timeout: 16000,
   withCredentials: true,
 });
 

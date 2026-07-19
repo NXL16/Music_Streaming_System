@@ -18,14 +18,6 @@ const nextConfig: NextConfig = {
   experimental: {
     optimizePackageImports: ["lucide-react", "motion"],
   },
-  images: {
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "i.scdn.co",
-      },
-    ],
-  },
   allowedDevOrigins: ["192.168.1.102"],
 };
 
