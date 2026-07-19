@@ -8,7 +8,7 @@ import {
 } from "./artist-song-pages";
 import type { PlayerSong } from "@/lib/player/use-player-store";
 
-const LOAD_MORE_DELAY_MS = 600;
+const LOAD_MORE_DELAY_MS = 300;
 
 export function useCatalogArtistSongs(artistId: string) {
   const [songs, setSongs] = useState<PlayerSong[]>([]);
