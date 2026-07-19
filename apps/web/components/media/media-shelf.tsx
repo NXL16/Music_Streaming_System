@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  memo,
-  useEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
+import { memo, useEffect, useRef, useState, type CSSProperties } from "react";
 import MediaCardRenderer from "@/components/media/media-card-renderer";
 import type { MediaCardProps } from "@/components/media/media-card.types";
 
@@ -177,7 +171,11 @@ function MediaShelf({
     const scrollContainer = document.querySelector<HTMLElement>(
       "[data-app-scroll-container]",
     );
-    if (!shelfContainer || !scrollContainer || !("IntersectionObserver" in window)) {
+    if (
+      !shelfContainer ||
+      !scrollContainer ||
+      !("IntersectionObserver" in window)
+    ) {
       return;
     }
 
@@ -298,6 +296,35 @@ function MediaShelf({
     const frame = requestAnimationFrame(() => updateShelfDraggable(shelf));
     return () => cancelAnimationFrame(frame);
   }, [items]);
+
+  useEffect(() => {
+    const shelf = listRef.current;
+    if (!shelf) return;
+
+    const initialWillChange = shelf.style.willChange;
+    let releaseTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const promoteWhileScrolling = () => {
+      if (shelf.scrollWidth <= shelf.clientWidth + 1) return;
+
+      shelf.style.willChange = "scroll-position";
+      if (releaseTimer) clearTimeout(releaseTimer);
+      releaseTimer = setTimeout(() => {
+        shelf.style.willChange = initialWillChange;
+        releaseTimer = undefined;
+      }, 160);
+    };
+
+    // Promote only the shelf that is actively moving. Retaining a layer for
+    // every shelf on Home would use substantially more GPU memory.
+    shelf.addEventListener("scroll", promoteWhileScrolling, { passive: true });
+
+    return () => {
+      shelf.removeEventListener("scroll", promoteWhileScrolling);
+      if (releaseTimer) clearTimeout(releaseTimer);
+      shelf.style.willChange = initialWillChange;
+    };
+  }, []);
 
   useEffect(() => {
     const shelf = listRef.current;
@@ -427,7 +454,11 @@ function MediaShelf({
     <div
       ref={shelfContainerRef}
       className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-3"
-      style={!isNearViewport && measuredHeight ? { minHeight: measuredHeight } : undefined}
+      style={
+        !isNearViewport && measuredHeight
+          ? { minHeight: measuredHeight }
+          : undefined
+      }
     >
       <div>
         <div className="flex items-center justify-end mx-(--bodyGutter) mb-3.25">

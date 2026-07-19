@@ -24,6 +24,7 @@ type ArtistTopSongsPageProps = {
 
 const SONG_ROW_HEIGHT = 54;
 const SONG_ROW_OVERSCAN = 8;
+const SONG_RANGE_BLOCK_SIZE = 8;
 
 function SongTableSpacer({ height }: { height: number }) {
   if (height <= 0) return null;
@@ -41,59 +42,74 @@ function SongTableSpacer({ height }: { height: number }) {
 
 function useVisibleSongRange(
   songCount: number,
-  tableRef: React.RefObject<HTMLDivElement | null>,
+  table: HTMLDivElement | null,
 ) {
   const [range, setRange] = useState({ start: 0, end: SONG_ROW_OVERSCAN * 2 });
+  const rangeRef = useRef(range);
 
   useLayoutEffect(() => {
     const scrollContainer = document.querySelector<HTMLElement>(
       "[data-app-scroll-container]",
     );
-    const table = tableRef.current;
     if (!scrollContainer || !table) return;
 
     let frame: number | undefined;
-    const updateRange = () => {
-      frame = undefined;
+    let tableTop = 0;
+    const measureTableTop = () => {
       const containerRect = scrollContainer.getBoundingClientRect();
-      const tableTop =
+      tableTop =
         scrollContainer.scrollTop +
         table.getBoundingClientRect().top -
         containerRect.top;
+    };
+    const updateRange = () => {
+      frame = undefined;
       const viewportStart = Math.max(0, scrollContainer.scrollTop - tableTop);
+      const viewportRowStart = Math.floor(viewportStart / SONG_ROW_HEIGHT);
+      const rangeBlockStart =
+        Math.floor(viewportRowStart / SONG_RANGE_BLOCK_SIZE) *
+        SONG_RANGE_BLOCK_SIZE;
       const start = Math.max(
         0,
-        Math.floor(viewportStart / SONG_ROW_HEIGHT) - SONG_ROW_OVERSCAN,
+        rangeBlockStart - SONG_ROW_OVERSCAN,
       );
       const end = Math.min(
         songCount,
-        Math.ceil(
-          (viewportStart + scrollContainer.clientHeight) / SONG_ROW_HEIGHT,
-        ) + SONG_ROW_OVERSCAN,
+        rangeBlockStart +
+          Math.ceil(scrollContainer.clientHeight / SONG_ROW_HEIGHT) +
+          SONG_RANGE_BLOCK_SIZE +
+          SONG_ROW_OVERSCAN,
       );
 
-      setRange((current) =>
-        current.start === start && current.end === end ? current : { start, end },
-      );
+      if (rangeRef.current.start === start && rangeRef.current.end === end) {
+        return;
+      }
+
+      const nextRange = { start, end };
+      rangeRef.current = nextRange;
+      setRange(nextRange);
     };
     const scheduleRangeUpdate = () => {
       if (frame === undefined) frame = requestAnimationFrame(updateRange);
     };
 
+    measureTableTop();
     updateRange();
     scrollContainer.addEventListener("scroll", scheduleRangeUpdate, {
       passive: true,
     });
-    const resizeObserver = new ResizeObserver(scheduleRangeUpdate);
+    const resizeObserver = new ResizeObserver(() => {
+      measureTableTop();
+      scheduleRangeUpdate();
+    });
     resizeObserver.observe(scrollContainer);
-    resizeObserver.observe(table);
 
     return () => {
       scrollContainer.removeEventListener("scroll", scheduleRangeUpdate);
       resizeObserver.disconnect();
       if (frame !== undefined) cancelAnimationFrame(frame);
     };
-  }, [songCount, tableRef]);
+  }, [songCount, table]);
 
   return {
     start: Math.min(range.start, songCount),
@@ -140,32 +156,43 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
     includeAlbums: false,
     includeSongs: false,
   });
-  const { songs, loading: songsLoading, loadingMore, hasMore, loadMore } =
-    useCatalogArtistSongs(artistId);
+  const {
+    songs,
+    loading: songsLoading,
+    loadingMore,
+    hasMore,
+    loadMore,
+  } = useCatalogArtistSongs(artistId);
   const [selectedSongId, setSelectedSongId] = useState<string | null>(null);
   const setQueue = usePlayerStore((state) => state.setQueue);
   const artistName = artist?.attributes.name ?? "";
-  const loadMoreRef = useRef<HTMLDivElement | null>(null);
-  const songTableRef = useRef<HTMLDivElement | null>(null);
-  const visibleSongRange = useVisibleSongRange(songs.length, songTableRef);
-  const visibleSongs = songs.slice(visibleSongRange.start, visibleSongRange.end);
+  const [loadMoreElement, setLoadMoreElement] =
+    useState<HTMLDivElement | null>(null);
+  const [songTableElement, setSongTableElement] =
+    useState<HTMLDivElement | null>(null);
+  const visibleSongRange = useVisibleSongRange(songs.length, songTableElement);
+  const visibleSongs = songs.slice(
+    visibleSongRange.start,
+    visibleSongRange.end,
+  );
 
   useEffect(() => {
-    const sentinel = loadMoreRef.current;
-    if (!sentinel || !hasMore || loadingMore) return;
+    if (!loadMoreElement || !hasMore || loadingMore) return;
+    const scrollContainer = document.querySelector<HTMLElement>(
+      "[data-app-scroll-container]",
+    );
 
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (!entry.isIntersecting) return;
         void loadMore();
       },
-      // Fetch only after the sentinel reaches the bottom of the viewport.
-      { rootMargin: "0px" },
+      { root: scrollContainer, rootMargin: "0px" },
     );
 
-    observer.observe(sentinel);
+    observer.observe(loadMoreElement);
     return () => observer.disconnect();
-  }, [hasMore, loadMore, loadingMore]);
+  }, [hasMore, loadMore, loadingMore, loadMoreElement]);
 
   if (artistLoading || songsLoading) {
     return <CatalogPageLoading />;
@@ -183,7 +210,7 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
         </div>
 
         <div
-          ref={songTableRef}
+          ref={setSongTableElement}
           className="[--linkColor:var(--systemSecondary)] border-collapse border-spacing-0 table [font:var(--callout)] table-fixed w-[calc(100%-var(--bodyGutter)*2)] ms-(--bodyGutter) me-(--bodyGutter) last:mb-5"
         >
           <div className="text-(--systemSecondary) table-row [font:var(--callout-emphasized)] [clip:rect(1px,1px,1px,1px)] [border:0px] [clip-path:inset(0px_0px_99.9%_99.9%)] h-px overflow-hidden p-0 static w-px">
@@ -433,7 +460,11 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
         {loadingMore && <Loading fullScreen={false} size={46} />}
 
         {hasMore && (
-          <div aria-hidden="true" ref={loadMoreRef} style={{ height: 1 }} />
+          <div
+            aria-hidden="true"
+            ref={setLoadMoreElement}
+            style={{ height: 1 }}
+          />
         )}
       </div>
     </div>

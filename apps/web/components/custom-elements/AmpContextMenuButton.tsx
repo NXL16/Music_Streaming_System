@@ -12,7 +12,7 @@ export default function AmpContextMenuButton({ isHover = false }) {
         className="m-0 p-0 block border-0 outline-none cursor-pointer appearance-none font-inherit text-inherit leading-inherit rounded-(--ctxmenu-trigger-border-radius,50%) bg-(--ctxmenu-trigger-background-color,transparent) transition-opacity duration-100 ease-in opacity-(--ctxmenu-trigger-opacity,1) backdrop-blur-(--ctxmenu-trigger-backdrop-blur,0)"
       >
         <span
-          className={`leading-0 block [--iconCircleFill:var(--contextMenuCircleFillOverride,transparent)] [--iconEllipsisFill:var(--contextMenuEllipsisFillOverride,#fff)] rounded-full h-(--contextMenuButtonSize,30px) w-(--contextMenuButtonSize,30px) backdrop-saturate-180 backdrop-blur-[60px] ${isHover ? "bg-(--systemStandardThinMaterialSover) hover:[--iconCircleFill:var(--contextMenuCircleHoverFill,var(--keyColor))] hover:[--iconEllipsisFill:var(--contextMenuEllipsisHoverFill,#fff)] hover:backdrop-filter-none hover:bg-transparent" : ""}`}
+          className={`leading-0 block [--iconCircleFill:var(--contextMenuCircleFillOverride,transparent)] [--iconEllipsisFill:var(--contextMenuEllipsisFillOverride,#fff)] rounded-full h-(--contextMenuButtonSize,30px) w-(--contextMenuButtonSize,30px) ${isHover ? "backdrop-saturate-180 backdrop-blur-[60px] bg-(--systemStandardThinMaterialSover) hover:[--iconCircleFill:var(--contextMenuCircleHoverFill,var(--keyColor))] hover:[--iconEllipsisFill:var(--contextMenuEllipsisHoverFill,#fff)] hover:backdrop-filter-none hover:bg-transparent" : ""}`}
         >
           <svg
             width="28"
