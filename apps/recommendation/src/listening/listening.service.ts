@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
   ListeningEventType,
+  GetListeningAnalyticsRequest,
+  ListeningAnalyticsResponse,
   RecordListeningEventRequest,
   RecordListeningEventResponse,
 } from '@musical/shared-proto';
@@ -37,19 +39,16 @@ export class ListeningService {
       return { success: false };
     }
 
-    const eventType =
-      EVENT_TYPE_MAP[request.eventType] ?? 'PLAY_START';
+    const eventType = EVENT_TYPE_MAP[request.eventType] ?? 'PLAY_START';
     const albumId = request.albumId?.trim() ?? '';
     const playlistId = request.playlistId?.trim() ?? '';
     const playlistName = request.playlistName?.trim() ?? '';
     const playlistArtworkUrl = request.playlistArtworkUrl?.trim() ?? '';
-    const playlistArtworkBgColor =
-      request.playlistArtworkBgColor?.trim() ?? '';
+    const playlistArtworkBgColor = request.playlistArtworkBgColor?.trim() ?? '';
     const stationId = request.stationId?.trim() ?? '';
     const stationName = request.stationName?.trim() ?? '';
     const stationArtworkUrl = request.stationArtworkUrl?.trim() ?? '';
-    const stationArtworkBgColor =
-      request.stationArtworkBgColor?.trim() ?? '';
+    const stationArtworkBgColor = request.stationArtworkBgColor?.trim() ?? '';
 
     try {
       await this.prisma.listeningEvent.create({
@@ -75,9 +74,11 @@ export class ListeningService {
       });
 
       const isPlayStart =
-        request.eventType === ListeningEventType.LISTENING_EVENT_TYPE_PLAY_START;
+        request.eventType ===
+        ListeningEventType.LISTENING_EVENT_TYPE_PLAY_START;
       const isComplete =
-        request.eventType === ListeningEventType.LISTENING_EVENT_TYPE_PLAY_COMPLETE;
+        request.eventType ===
+        ListeningEventType.LISTENING_EVENT_TYPE_PLAY_COMPLETE;
       const isSkip =
         request.eventType === ListeningEventType.LISTENING_EVENT_TYPE_SKIP;
 
@@ -150,13 +151,16 @@ export class ListeningService {
     });
 
     const songIds = stats.map((s) => s.songId);
-    const snapshots = songIds.length > 0
-      ? await this.prisma.recommendationResourceSnapshot.findMany({
-          where: { resourceType: 'songs', resourceId: { in: songIds } },
-          select: { resourceId: true, genreNames: true },
-        })
-      : [];
-    const songGenres = new Map(snapshots.map((s) => [s.resourceId, s.genreNames]));
+    const snapshots =
+      songIds.length > 0
+        ? await this.prisma.recommendationResourceSnapshot.findMany({
+            where: { resourceType: 'songs', resourceId: { in: songIds } },
+            select: { resourceId: true, genreNames: true },
+          })
+        : [];
+    const songGenres = new Map(
+      snapshots.map((s) => [s.resourceId, s.genreNames]),
+    );
 
     const genreScores = new Map<string, number>();
     const artistScores = new Map<string, number>();
@@ -176,9 +180,10 @@ export class ListeningService {
       totalCompletions += stat.completionCount;
       totalListenSec += stat.totalListenSec;
 
-      const skipPenalty = stat.playCount > 0
-        ? Math.max(0, 1 - (stat.skipCount / stat.playCount) * 0.5)
-        : 1;
+      const skipPenalty =
+        stat.playCount > 0
+          ? Math.max(0, 1 - (stat.skipCount / stat.playCount) * 0.5)
+          : 1;
       // A qualified play is meaningful taste input even before a listener
       // finishes a full track. Completions remain the stronger signal.
       const engagement =
@@ -217,10 +222,7 @@ export class ListeningService {
     };
   }
 
-  async hasListeningHistory(
-    userId: string,
-    minEvents = 3,
-  ): Promise<boolean> {
+  async hasListeningHistory(userId: string, minEvents = 3): Promise<boolean> {
     const count = await this.prisma.userListeningStats.count({
       where: { userId },
     });
@@ -230,22 +232,24 @@ export class ListeningService {
   async getRecentlyPlayed(
     userId: string,
     limit = 20,
-  ): Promise<Array<{
-    songId: string;
-    songTitle: string;
-    artistName: string;
-    albumName: string;
-    albumId: string;
-    playlistId: string;
-    playlistName: string;
-    playlistArtworkUrl: string;
-    playlistArtworkBgColor: string;
-    stationId: string;
-    stationName: string;
-    stationArtworkUrl: string;
-    stationArtworkBgColor: string;
-    lastPlayedAt: Date;
-  }>> {
+  ): Promise<
+    Array<{
+      songId: string;
+      songTitle: string;
+      artistName: string;
+      albumName: string;
+      albumId: string;
+      playlistId: string;
+      playlistName: string;
+      playlistArtworkUrl: string;
+      playlistArtworkBgColor: string;
+      stationId: string;
+      stationName: string;
+      stationArtworkUrl: string;
+      stationArtworkBgColor: string;
+      lastPlayedAt: Date;
+    }>
+  > {
     return this.prisma.userListeningStats.findMany({
       where: { userId },
       orderBy: { lastPlayedAt: 'desc' },
@@ -272,7 +276,9 @@ export class ListeningService {
   async getTopArtistsForUser(
     userId: string,
     limit = 5,
-  ): Promise<Array<{ artistName: string; _sum: { playCount: number | null } }>> {
+  ): Promise<
+    Array<{ artistName: string; _sum: { playCount: number | null } }>
+  > {
     const results = await this.prisma.userListeningStats.groupBy({
       by: ['artistName'],
       where: { userId, artistName: { not: '' } },
@@ -298,9 +304,7 @@ export class ListeningService {
     limit = 20,
   ): Promise<Array<{ songId: string; totalPlays: bigint }>> {
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    return this.prisma.$queryRaw<
-      Array<{ songId: string; totalPlays: bigint }>
-    >`
+    return this.prisma.$queryRaw<Array<{ songId: string; totalPlays: bigint }>>`
       SELECT "songId", SUM("playCount")::bigint AS "totalPlays"
       FROM user_listening_stats
       WHERE "lastPlayedAt" >= ${since}
@@ -330,7 +334,9 @@ export class ListeningService {
   async getTopAlbumsGlobal(
     days = 30,
     limit = 20,
-  ): Promise<Array<{ albumId: string | null; albumName: string; totalPlays: bigint }>> {
+  ): Promise<
+    Array<{ albumId: string | null; albumName: string; totalPlays: bigint }>
+  > {
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     return this.prisma.$queryRaw<
       Array<{ albumId: string | null; albumName: string; totalPlays: bigint }>
@@ -346,5 +352,107 @@ export class ListeningService {
       ORDER BY "totalPlays" DESC
       LIMIT ${limit}
     `;
+  }
+
+  async getListeningAnalytics(
+    request: GetListeningAnalyticsRequest,
+  ): Promise<ListeningAnalyticsResponse> {
+    const days = Math.min(90, Math.max(1, request.days || 28));
+    const since = new Date(Date.now() - days * 86_400_000);
+    const songIds = request.songIds.filter(Boolean);
+    const events = await this.prisma.listeningEvent.findMany({
+      where: {
+        createdAt: { gte: since },
+        ...(songIds.length ? { songId: { in: songIds } } : {}),
+      },
+      select: {
+        userId: true,
+        songId: true,
+        songTitle: true,
+        artistName: true,
+        eventType: true,
+        createdAt: true,
+      },
+    });
+    const trend = new Map<
+      string,
+      {
+        plays: number;
+        completions: number;
+        skips: number;
+        listeners: Set<string>;
+      }
+    >();
+    const top = new Map<
+      string,
+      {
+        title: string;
+        artistName: string;
+        plays: number;
+        completions: number;
+        skips: number;
+        listeners: Set<string>;
+      }
+    >();
+    const listeners = new Set<string>();
+    let plays = 0;
+    let completions = 0;
+    let skips = 0;
+    for (const event of events) {
+      const day = event.createdAt.toISOString().slice(0, 10);
+      const point = trend.get(day) ?? {
+        plays: 0,
+        completions: 0,
+        skips: 0,
+        listeners: new Set<string>(),
+      };
+      const song = top.get(event.songId) ?? {
+        title: event.songTitle,
+        artistName: event.artistName,
+        plays: 0,
+        completions: 0,
+        skips: 0,
+        listeners: new Set<string>(),
+      };
+      listeners.add(event.userId);
+      point.listeners.add(event.userId);
+      song.listeners.add(event.userId);
+      if (event.eventType === 'PLAY_START') {
+        plays++;
+        point.plays++;
+        song.plays++;
+      }
+      if (event.eventType === 'PLAY_COMPLETE') {
+        completions++;
+        point.completions++;
+        song.completions++;
+      }
+      if (event.eventType === 'SKIP') {
+        skips++;
+        point.skips++;
+        song.skips++;
+      }
+      trend.set(day, point);
+      top.set(event.songId, song);
+    }
+    return {
+      plays,
+      completions,
+      skips,
+      listeners: listeners.size,
+      trend: [...trend.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, p]) => ({
+          date,
+          plays: p.plays,
+          completions: p.completions,
+          skips: p.skips,
+          listeners: p.listeners.size,
+        })),
+      topSongs: [...top.entries()]
+        .map(([songId, s]) => ({ songId, ...s, listeners: s.listeners.size }))
+        .sort((a, b) => b.plays - a.plays)
+        .slice(0, 10),
+    };
   }
 }

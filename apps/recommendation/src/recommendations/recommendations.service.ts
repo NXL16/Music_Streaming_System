@@ -52,7 +52,6 @@ const SYSTEM_STATION_ID_PATTERN = /^station-for-you-[a-f0-9]{32}-\d+$/;
 const SUPPORTED_DISPLAY_KINDS = new Set([
   'MusicCircleCoverShelf',
   'MusicConcertsEmptyShelf',
-  'MusicCoverGrid',
   'MusicCoverShelf',
   'MusicNotesHeroShelf',
   'MusicSocialCardShelf',
@@ -2525,7 +2524,7 @@ export class RecommendationsService {
       return 'MusicSocialCardShelf';
     }
     if (items.length >= 8 && resourceTypes.size > 1) {
-      return 'MusicCoverGrid';
+      return 'MusicCoverShelf';
     }
 
     return DEFAULT_DISPLAY_KIND;

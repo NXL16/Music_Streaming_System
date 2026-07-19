@@ -15,6 +15,7 @@ service RecommendationService {
   rpc GetRecommendationPageForAdmin(GetRecommendationPageForAdminRequest) returns (GetHomeRecommendationsResponse);
   rpc RecordListeningEvent(RecordListeningEventRequest) returns (RecordListeningEventResponse);
   rpc GenerateRecommendations(GenerateRecommendationsRequest) returns (GetHomeRecommendationsResponse);
+  rpc GetListeningAnalytics(GetListeningAnalyticsRequest) returns (ListeningAnalyticsResponse);
 }
 
 enum RecommendationPageScope {
@@ -210,4 +211,36 @@ message GenerateRecommendationsRequest {
   string                  locale        = 5;
   string                  timezone      = 6;
   string                  platform      = 7;
+}
+
+message GetListeningAnalyticsRequest {
+  repeated string song_ids = 1;
+  int32 days = 2;
+}
+
+message ListeningAnalyticsTrendPoint {
+  string date = 1;
+  int64 plays = 2;
+  int64 completions = 3;
+  int64 skips = 4;
+  int64 listeners = 5;
+}
+
+message ListeningAnalyticsTopSong {
+  string song_id = 1;
+  string title = 2;
+  string artist_name = 3;
+  int64 plays = 4;
+  int64 completions = 5;
+  int64 skips = 6;
+  int64 listeners = 7;
+}
+
+message ListeningAnalyticsResponse {
+  int64 plays = 1;
+  int64 completions = 2;
+  int64 skips = 3;
+  int64 listeners = 4;
+  repeated ListeningAnalyticsTrendPoint trend = 5;
+  repeated ListeningAnalyticsTopSong top_songs = 6;
 }

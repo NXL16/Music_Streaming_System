@@ -12,6 +12,8 @@ import {
   RecordListeningEventRequest,
   RecordListeningEventResponse,
   GenerateRecommendationsRequest,
+  GetListeningAnalyticsRequest,
+  ListeningAnalyticsResponse,
 } from '@musical/shared-proto';
 import { RecommendationsService } from './recommendations.service';
 import { ListeningService } from '../listening/listening.service';
@@ -31,10 +33,12 @@ export class RecommendationsController implements RecommendationServiceControlle
   async getHomeRecommendations(
     request: GetHomeRecommendationsRequest,
   ): Promise<GetHomeRecommendationsResponse> {
-    let globalResult = await this.recommendationsService.getHomeRecommendations({
-      ...request,
-      userId: '',
-    });
+    let globalResult = await this.recommendationsService.getHomeRecommendations(
+      {
+        ...request,
+        userId: '',
+      },
+    );
 
     const isGlobalStale = await this.generationService.isGlobalPageStale(
       request.name,
@@ -64,7 +68,10 @@ export class RecommendationsController implements RecommendationServiceControlle
     }
 
     return request.userId
-      ? this.recommendationsService.getHomeRecommendations(request, globalResult)
+      ? this.recommendationsService.getHomeRecommendations(
+          request,
+          globalResult,
+        )
       : globalResult;
   }
 
@@ -108,5 +115,11 @@ export class RecommendationsController implements RecommendationServiceControlle
     request: GenerateRecommendationsRequest,
   ): Promise<GetHomeRecommendationsResponse> {
     return this.generationService.generate(request);
+  }
+
+  getListeningAnalytics(
+    request: GetListeningAnalyticsRequest,
+  ): Promise<ListeningAnalyticsResponse> {
+    return this.listeningService.getListeningAnalytics(request);
   }
 }

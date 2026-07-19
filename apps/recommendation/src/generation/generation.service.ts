@@ -1793,7 +1793,7 @@ export class GenerationService {
     return this.buildSection(
       'global-trending',
       'Trending',
-      'MusicCoverGrid',
+      'MusicCoverShelf',
       ['albums'],
       items,
     );
@@ -2050,7 +2050,7 @@ export class GenerationService {
       albums,
       'decade',
     )) {
-      addSection(`global-decade-${key}`, title, candidates, 'MusicCoverGrid');
+      addSection(`global-decade-${key}`, title, candidates, 'MusicCoverShelf');
     }
 
     if (existingSectionCount + sections.length < GLOBAL_SHELF_MIN) {
