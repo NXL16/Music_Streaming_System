@@ -18,6 +18,8 @@ import {
   GetCatalogArtistSongsRequest,
   GetCatalogArtistSongsResponse,
   ProtobufStruct,
+  SearchCatalogRequest,
+  SearchCatalogResponse,
 } from '@musical/shared-proto';
 import { PrismaService } from '../database/prisma.service';
 import type { Prisma } from '../generated/prisma/client';
@@ -1094,6 +1096,84 @@ export class CatalogService {
           : String(offset + page.length)
         : '',
       hasMore,
+    };
+  }
+
+  async searchCatalog(
+    request: SearchCatalogRequest,
+  ): Promise<SearchCatalogResponse> {
+    const storefront = this.storefront(request.storefront);
+    const query = request.query.trim();
+    const limit = Math.min(Math.max(request.limit || 20, 1), 50);
+
+    const requestedTypes = request.types?.length
+      ? request.types
+      : ['songs', 'artists', 'albums'];
+    const wanted = new Set(requestedTypes);
+
+    // Short-circuit on an empty query: LIKE '%%' would scan every row and
+    // return an arbitrary page rather than a relevant match set.
+    if (!query) {
+      return {
+        data: [],
+        resources: { albums: {}, playlists: {}, songs: {}, artists: {} },
+      };
+    }
+
+    const [songs, artists, albums] = await Promise.all([
+      wanted.has('songs')
+        ? this.prisma.song.findMany({
+            where: {
+              storefront,
+              isCatalog: true,
+              catalogTitle: { contains: query, mode: 'insensitive' },
+            },
+            include: songCatalogInclude,
+            orderBy: { catalogTitle: 'asc' },
+            take: limit,
+          })
+        : Promise.resolve([]),
+      wanted.has('artists')
+        ? this.prisma.artist.findMany({
+            where: {
+              storefront,
+              name: { contains: query, mode: 'insensitive' },
+            },
+            orderBy: { name: 'asc' },
+            take: limit,
+          })
+        : Promise.resolve([]),
+      wanted.has('albums')
+        ? this.prisma.album.findMany({
+            where: {
+              storefront,
+              name: { contains: query, mode: 'insensitive' },
+            },
+            include: albumCatalogBrowseInclude,
+            orderBy: { name: 'asc' },
+            take: limit,
+          })
+        : Promise.resolve([]),
+    ]);
+
+    return {
+      data: [
+        ...songs.map((s) => this.reference(s.id, 'songs', storefront)),
+        ...artists.map((a) => this.reference(a.id, 'artists', storefront)),
+        ...albums.map((a) => this.reference(a.id, 'albums', storefront)),
+      ],
+      resources: {
+        albums: Object.fromEntries(
+          albums.map((a) => [a.id, this.albumResource(a, storefront)]),
+        ),
+        playlists: {},
+        songs: Object.fromEntries(
+          songs.map((s) => [s.id, this.songResource(s, storefront)]),
+        ),
+        artists: Object.fromEntries(
+          artists.map((a) => [a.id, this.artistResource(a, storefront)]),
+        ),
+      },
     };
   }
 }

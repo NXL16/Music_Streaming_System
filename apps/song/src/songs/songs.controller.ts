@@ -57,6 +57,8 @@ import {
   PlaylistTrackResponse,
   BrowseCatalogRequest,
   BrowseCatalogResponse,
+  SearchCatalogRequest,
+  SearchCatalogResponse,
 } from '@musical/shared-proto';
 import { CatalogService } from './catalog.service';
 import { CatalogAuthoringService } from './catalog-authoring.service';
@@ -293,5 +295,11 @@ export class SongsController implements SongServiceController {
     request: BrowseCatalogRequest,
   ): Promise<BrowseCatalogResponse> {
     return this.catalogService.browseCatalog(request);
+  }
+
+  async searchCatalog(
+    request: SearchCatalogRequest,
+  ): Promise<SearchCatalogResponse> {
+    return this.catalogService.searchCatalog(request);
   }
 }
