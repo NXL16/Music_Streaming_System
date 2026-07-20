@@ -18,6 +18,7 @@ import {
   PERSONALIZATION_MODEL_VERSION,
   RecommendationEngineService,
 } from './recommendation-engine.service';
+import { PRODUCTION_RECOMMENDATION_POLICY } from './production-recommendation-policy';
 
 const STALE_DURATION_MS = 6 * 60 * 60 * 1000;
 const RELEASE_RADAR_DAYS = 30;
@@ -267,47 +268,16 @@ export class GenerationService {
       );
     }
 
-    const sections: PersonalRecommendationResource[] = [];
-
-    const featured = await this.buildFeaturedAlbumsSection();
-    if (featured) sections.push(featured);
-
-    const trending = await this.buildTrendingSection();
-    if (trending) {
-      sections.push(trending);
-    }
-
-    const newReleases = await this.buildNewReleasesSection();
-    if (newReleases) {
-      sections.push(newReleases);
-    } else {
-      const latestAlbums = await this.buildCatalogBrowseSection(
-        'global-latest-albums', 'Latest Albums', 'albums', 'MusicCoverShelf',
-      );
-      if (latestAlbums) sections.push(latestAlbums);
-    }
-
-    const topAlbums = await this.buildTopAlbumsSection();
-    if (topAlbums) sections.push(topAlbums);
-
-    const genreSections = await this.buildGenreAlbumSections();
-    sections.push(...genreSections);
-
-    const smartAlbumSections = await this.buildSmartGlobalAlbumSections(
-      sections.length,
+    const globalShelves = await this.recommendationEngine.generateGlobalShelves();
+    const sections: PersonalRecommendationResource[] = globalShelves.map(
+      (shelf) => this.buildEngineSection(shelf),
     );
-    sections.push(...smartAlbumSections);
 
     const playlists = await this.buildCatalogBrowseSection(
       'global-playlists', 'Playlists', 'playlists', 'MusicCoverShelf',
     );
     if (playlists && sections.length < GLOBAL_SHELF_LIMIT) {
       sections.push(playlists);
-    }
-
-    const discovery = await this.buildDiscoveryAlbumsSection();
-    if (discovery && sections.length < GLOBAL_SHELF_LIMIT) {
-      sections.push(discovery);
     }
 
     if (sections.length === 0) {
@@ -395,24 +365,37 @@ export class GenerationService {
     const actorUserId = request.actorUserId || 'system:recommendation-engine';
 
     const profile = await this.listeningService.getUserTasteProfile(userId);
-    const sections: PersonalRecommendationResource[] = [];
-
+    // Cold-start users get the stable global editorial page. We do not invent
+    // a fake personal profile or label random catalog results as "For You".
+    if (
+      profile.listenedSongIds.size <
+      PRODUCTION_RECOMMENDATION_POLICY.minimumHistoryEvents
+    ) {
+      return this.recommendationsService.getHomeRecommendations({
+        userId: '',
+        name,
+        locale,
+        timezone,
+        platform,
+      });
+    }
     const recentlyPlayed = await this.buildRecentlyPlayedSection(userId);
-    if (recentlyPlayed) sections.push(recentlyPlayed);
-
-    // System playlists and stations are collection cards on Home. Their track
-    // selection still uses the listener profile, while album shelves come from
-    // the v2 ranking engine below.
     const dailyMix = await this.buildDailyMixPlaylist(userId, profile);
-    if (dailyMix) sections.push(dailyMix);
     const stations = await this.buildStationsForYouSection(userId, profile);
-    if (stations) sections.push(stations);
-
-    const personalizedShelves =
-      await this.recommendationEngine.generateUserShelves(userId);
-    sections.push(
-      ...personalizedShelves.map((shelf) => this.buildEngineSection(shelf)),
+    const moodStations = await this.buildMoodStationsSection(userId, profile);
+    const shelves = await this.recommendationEngine.generateUserShelves(userId);
+    const shelfById = new Map(
+      shelves.map((shelf) => [shelf.id, this.buildEngineSection(shelf)]),
     );
+    const systemSections = new Map<string, PersonalRecommendationResource | null>([
+      ['recently-played', recentlyPlayed],
+      ['made-for-you', dailyMix],
+      ['stations-for-you', stations],
+      ['find-your-mood', moodStations],
+    ]);
+    const sections = PRODUCTION_RECOMMENDATION_POLICY.personalizedOrder
+      .map((slot) => systemSections.get(slot) ?? shelfById.get(`user-${slot}`))
+      .filter((section): section is PersonalRecommendationResource => Boolean(section));
 
     if (sections.length === 0) {
       return this.recommendationsService.getHomeRecommendations({
@@ -1059,6 +1042,7 @@ export class GenerationService {
   private async buildStationsForYouSection(
     userId: string,
     profile: TasteProfile,
+    mode: 'personalized' | 'mood' = 'personalized',
   ): Promise<PersonalRecommendationResource | null> {
     if (profile.listenedSongIds.size < MIN_LISTENED_SONGS) {
       this.logger.warn(`[stations] skip: only ${profile.listenedSongIds.size} listened songs (need ${MIN_LISTENED_SONGS})`);
@@ -1073,7 +1057,7 @@ export class GenerationService {
       this.logger.warn('[stations] skip: no preferred genres found');
       return null;
     }
-    const stationSeeds = [
+    const personalizedSeeds = [
       ...preferredGenres.map((genre) => ({
         title: `${genre} Station`,
         description: `Endless ${genre} picks made for you.`,
@@ -1115,6 +1099,13 @@ export class GenerationService {
         genres: preferredGenres,
       },
     ].slice(0, STATION_LIMIT);
+    const stationSeeds = mode === 'mood'
+      ? PRODUCTION_RECOMMENDATION_POLICY.moodStations.map((title) => ({
+          title: `${title} Station`,
+          description: `${title} music shaped around the sounds you love.`,
+          genres: preferredGenres,
+        }))
+      : personalizedSeeds;
 
     const songSelection = {
       resourceId: true,
@@ -1200,7 +1191,7 @@ export class GenerationService {
         continue;
       }
 
-      const stationId = this.stationId(userId, index);
+      const stationId = this.stationId(userId, index, mode);
       const artworkSource = selected.find((song) => song.artworkUrl) ?? selected[0];
       const { title, description } = seed;
       const relationships = {
@@ -1231,11 +1222,11 @@ export class GenerationService {
         trackCount: selected.length,
         shortDescription: description,
         standardDescription: description,
-        stationKind: 'system-personalized',
+        stationKind: mode === 'mood' ? 'system-mood' : 'system-personalized',
         mediaKind: 'audio',
         attributes: {
           name: title,
-          kind: 'system-personalized',
+          kind: mode === 'mood' ? 'system-mood' : 'system-personalized',
           mediaKind: 'audio',
           trackCount: selected.length,
           artwork: {
@@ -1274,24 +1265,24 @@ export class GenerationService {
     // Preserve valid system Stations from an earlier generation when the
     // current catalog/profile cannot produce enough novel variants. This keeps
     // the shelf stable instead of silently shrinking after a refresh.
-    if (stationItems.length < STATION_LIMIT) {
+    if (stationItems.length < stationSeeds.length) {
       const existingStations = await this.prisma.recommendationResourceSnapshot.findMany({
         where: {
           resourceType: 'stations',
           resourceId: {
             in: Array.from(
-              { length: STATION_LIMIT },
-              (_, index) => this.stationId(userId, index),
+              { length: stationSeeds.length },
+              (_, index) => this.stationId(userId, index, mode),
             ),
           },
-          stationKind: 'system-personalized',
+          stationKind: mode === 'mood' ? 'system-mood' : 'system-personalized',
         },
         select: { resourceId: true },
       });
       const existingStationIds = new Set(stationItems.map((station) => station.id));
 
-      for (let index = 0; index < STATION_LIMIT; index += 1) {
-        const stationId = this.stationId(userId, index);
+      for (let index = 0; index < stationSeeds.length; index += 1) {
+        const stationId = this.stationId(userId, index, mode);
         if (
           existingStations.some((station) => station.resourceId === stationId) &&
           !existingStationIds.has(stationId)
@@ -1305,17 +1296,29 @@ export class GenerationService {
     if (stationItems.length === 0) return null;
 
     return this.buildSection(
-      'user-stations-for-you',
-      'Stations for You',
+      mode === 'mood' ? 'user-find-your-mood' : 'user-stations-for-you',
+      mode === 'mood' ? 'Find Your Mood' : 'Stations for You',
       'MusicCoverShelf',
       ['stations'],
       stationItems,
     );
   }
 
-  private stationId(userId: string, index: number): string {
+  private buildMoodStationsSection(
+    userId: string,
+    profile: TasteProfile,
+  ): Promise<PersonalRecommendationResource | null> {
+    return this.buildStationsForYouSection(userId, profile, 'mood');
+  }
+
+  private stationId(
+    userId: string,
+    index: number,
+    mode: 'personalized' | 'mood' = 'personalized',
+  ): string {
     const digest = createHash('sha256').update(userId).digest('hex');
-    return `station-for-you-${digest.slice(0, 32)}-${index}`;
+    const prefix = mode === 'mood' ? 'mood-station' : 'station-for-you';
+    return `${prefix}-${digest.slice(0, 32)}-${index}`;
   }
 
   private async buildRecentlyPlayedSection(
@@ -1336,7 +1339,6 @@ export class GenerationService {
       string,
       { stationId: string; lastPlayedAt: Date }
     >();
-    const standaloneSongs: Array<{ songId: string; lastPlayedAt: Date }> = [];
 
     for (const entry of recent) {
       // A Station is the item a listener chose. Its tracks still inform taste,
@@ -1375,8 +1377,6 @@ export class GenerationService {
             lastPlayedAt: entry.lastPlayedAt,
           });
         }
-      } else {
-        standaloneSongs.push({ songId: entry.songId, lastPlayedAt: entry.lastPlayedAt });
       }
     }
 
@@ -1422,7 +1422,7 @@ export class GenerationService {
           where: {
             resourceType: 'stations',
             resourceId: { in: stationIds },
-            stationKind: 'system-personalized',
+            stationKind: { in: ['system-personalized', 'system-mood'] },
           },
           select: { resourceId: true },
         })
@@ -1468,10 +1468,6 @@ export class GenerationService {
           time: entry.lastPlayedAt.getTime(),
         });
       }
-    }
-
-    for (const song of standaloneSongs) {
-      items.push({ id: song.songId, type: 'songs', time: song.lastPlayedAt.getTime() });
     }
 
     items.sort((a, b) => b.time - a.time);
