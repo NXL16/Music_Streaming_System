@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
 import { ListeningService, TasteProfile } from '../listening/listening.service';
+import { RecommendationCatalogService } from '../recommendations/recommendation-catalog.service';
 import {
   PRODUCTION_RECOMMENDATION_MODEL_VERSION,
   PRODUCTION_RECOMMENDATION_POLICY as policy,
@@ -41,6 +42,7 @@ export class RecommendationEngineService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly listeningService: ListeningService,
+    private readonly catalogService: RecommendationCatalogService,
   ) {}
 
   async generateUserShelves(userId: string): Promise<GeneratedShelf[]> {
@@ -87,7 +89,10 @@ export class RecommendationEngineService {
       orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
     });
     const popularity = await this.popularAlbumScores();
-    const candidates = albums.map((album) => {
+    const publishedAlbumIds = await this.publishedAlbumIds(
+      albums.map((album) => album.resourceId),
+    );
+    const candidates = albums.filter((album) => publishedAlbumIds.has(album.resourceId)).map((album) => {
       const freshness = this.freshness(album.releaseDate);
       const popularityScore = popularity.get(album.resourceId) ?? 0;
       return {
@@ -130,11 +135,14 @@ export class RecommendationEngineService {
       take: policy.candidateLimit,
       orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
     });
+    const publishedAlbumIds = await this.publishedAlbumIds(
+      albums.map((album) => album.resourceId),
+    );
     const collaborative = await this.collaborativeAlbumScores(userId, [...profile.listenedSongIds]);
     const popularity = await this.popularAlbumScores();
     const artists = new Map(profile.artists.map((entry) => [entry.name, entry.weight]));
     const genres = new Map(profile.genres.map((entry) => [entry.name, entry.weight]));
-    return albums.map((album) => {
+    return albums.filter((album) => publishedAlbumIds.has(album.resourceId)).map((album) => {
       const artistAffinity = artists.get(album.artistName) ?? 0;
       const genreAffinity = Math.min(1, album.genreNames.reduce((sum, genre) => sum + (genres.get(genre) ?? 0), 0));
       const freshness = this.freshness(album.releaseDate);
@@ -282,6 +290,21 @@ export class RecommendationEngineService {
     const timestamp = new Date(releaseDate).getTime();
     if (!Number.isFinite(timestamp)) return 0;
     return Math.max(0, 1 - (Date.now() - timestamp) / (policy.freshnessWindowDays * 86_400_000));
+  }
+
+  /** Snapshots may lag publication changes. Validate candidates against the
+   * catalog source of truth before persisting a recommendation page. */
+  private async publishedAlbumIds(ids: string[]): Promise<Set<string>> {
+    const published = new Set<string>();
+    for (let index = 0; index < ids.length; index += 100) {
+      const resources = await this.catalogService.resolve(
+        ids.slice(index, index + 100).map((id) => ({ id, type: 'albums' })),
+      );
+      for (const resource of resources) {
+        if (resource.type === 'albums') published.add(resource.id);
+      }
+    }
+    return published;
   }
 
   private slug(value: string) {

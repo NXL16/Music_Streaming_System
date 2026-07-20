@@ -38,7 +38,7 @@ const HOME_SHELF_ITEM_LIMIT = 40;
 const HOME_SHELF_PREVIEW_LIMIT = 16;
 const GLOBAL_SHELF_MIN = 16;
 const GLOBAL_SHELF_LIMIT = 20;
-const GLOBAL_PUBLISH_MIN_SHELVES = 6;
+const GLOBAL_PUBLISH_MIN_SHELVES = 3;
 const GLOBAL_HERO_LIMIT = 10;
 const GLOBAL_GENRE_SECTION_LIMIT = 8;
 
@@ -957,6 +957,7 @@ export class GenerationService {
     offset: number,
     limit: number,
     minimumTracks: number,
+    allowSparseCatalogFallback = false,
   ): T[] {
     if (ranked.length === 0) return [];
 
@@ -1002,7 +1003,11 @@ export class GenerationService {
       selectedIds.add(candidate.resourceId);
     }
 
-    if (selected.length < minimumTracks) return [];
+    if (selected.length < minimumTracks) {
+      return allowSparseCatalogFallback
+        ? orderedCandidates.slice(0, Math.min(limit, orderedCandidates.length))
+        : [];
+    }
     if (acceptedTracklists.length === 0) return selected;
 
     const novelCount = selected.filter(
@@ -1015,7 +1020,9 @@ export class GenerationService {
           SYSTEM_VARIANT_MIN_NOVEL_RATIO,
       ),
     );
-    return novelCount >= requiredNovelCount ? selected : [];
+    return novelCount >= requiredNovelCount || allowSparseCatalogFallback
+      ? selected
+      : [];
   }
 
   private async hasZeroArtworkDimensions(userId: string): Promise<boolean> {
@@ -1194,6 +1201,7 @@ export class GenerationService {
         index * STATION_TRACK_LIMIT,
         STATION_TRACK_LIMIT,
         STATION_MIN_TRACKS,
+        mode === 'mood',
       );
       if (selected.length < STATION_MIN_TRACKS) {
         this.logger.debug(
