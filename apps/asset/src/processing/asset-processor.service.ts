@@ -1,38 +1,34 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { execFile, type ChildProcess } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { extname, join } from 'node:path';
-import { pipeline } from 'node:stream/promises';
-import sharp from 'sharp';
-import {
-  Asset,
-  AssetKind,
-  Prisma,
-} from '../generated/prisma/client';
-import { StorageService } from '../storage/storage.service';
-import {
-  AssetProcessingResult,
-  MediaRendition,
-} from './asset-processor.types';
+import { Injectable, OnModuleDestroy } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { execFile, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { extname, join } from "node:path";
+import { pipeline } from "node:stream/promises";
+import sharp from "sharp";
+import { Asset, AssetKind, Prisma } from "../generated/prisma/client";
+import { StorageService } from "../storage/storage.service";
+import { AssetProcessingResult, MediaRendition } from "./asset-processor.types";
 
-// Renditions are aligned with the application's actual artwork consumers:
-// player bar (40/80), regular cards (296/316/592/632), and hero cards
-// (450/600/900/1200). Each source image is only rendered up to its own width.
 const NORMAL_ARTWORK_WIDTHS = [40, 80, 296, 316, 592, 632];
 const HERO_ARTWORK_WIDTHS = [450, 600, 900, 1200];
 const HERO_ASPECT_RATIO = 3 / 4;
-// The extension overlaps the original artwork and fades in gradually. This
-// avoids a visible horizontal seam on bright artwork.
-const HERO_BOTTOM_STRIP_HEIGHT = 72;
-const HERO_BLEND_OVERLAP_HEIGHT = 46;
-const HERO_EXTENSION_BLUR_SIGMA = 34;
-const HERO_TEXT_REGION_START = 0.62;
-const HERO_TEXT_CONTRAST_PERCENTILE = 0.15;
+const HERO_EXTENSION_STRIP = 48;
+const HERO_EXTENSION_BLUR_SIGMA = 28;
+const HERO_DARK_EDGE_MIN_LUMINANCE = 10;
+const HERO_DARK_EDGE_MEAN_LUMINANCE = 35;
+const HERO_TEXT_REGION_START = 0.78;
+const HERO_TEXT_CONTRAST_PERCENTILE = 0.1;
 const MINIMUM_TEXT_CONTRAST = 4.5;
+const HERO_TEXT_PRIMARY = "ffffff";
+const HERO_TEXT_SECONDARY = "ebebf5";
+const HERO_TEXT_TERTIARY = "c7c7cc";
+const HERO_TEXT_QUATERNARY = "8e8e93";
+const HERO_DARK_TEXT_PRIMARY = "000000";
+const HERO_DARK_TEXT_SECONDARY = "3a3a3c";
+const HERO_DARK_TEXT_TERTIARY = "636366";
 const PROCESS_TIMEOUT_MS = 30 * 60 * 1000;
 
 interface ArtworkPalette {
@@ -45,8 +41,11 @@ interface ArtworkPalette {
 }
 
 interface HeroTextPalette {
+  bgColor: string;
   textColor1: string;
   textColor2: string;
+  textColor3: string;
+  textColor4: string;
   scrimColor?: string;
   scrimOpacity?: number;
 }
@@ -72,8 +71,8 @@ export class AssetProcessorService implements OnModuleDestroy {
     private readonly storage: StorageService,
     config: ConfigService,
   ) {
-    this.ffmpegPath = config.get<string>('FFMPEG_PATH') || 'ffmpeg';
-    this.ffprobePath = config.get<string>('FFPROBE_PATH') || 'ffprobe';
+    this.ffmpegPath = config.get<string>("FFMPEG_PATH") || "ffmpeg";
+    this.ffprobePath = config.get<string>("FFPROBE_PATH") || "ffprobe";
   }
 
   process(asset: Asset): Promise<AssetProcessingResult> {
@@ -94,7 +93,7 @@ export class AssetProcessorService implements OnModuleDestroy {
     const width = metadata.width ?? 0;
     const height = metadata.height ?? 0;
     if (width <= 0 || height <= 0) {
-      throw new Error('ARTWORK_DIMENSIONS_INVALID');
+      throw new Error("ARTWORK_DIMENSIONS_INVALID");
     }
     const palette = await this.artworkPalette(normalizedSource);
 
@@ -119,11 +118,11 @@ export class AssetProcessorService implements OnModuleDestroy {
           .webp({ quality: 84, effort: 5 })
           .toBuffer({ resolveWithObject: true });
         const objectKey = `processed/${asset.id}/artwork/${info.width}w.webp`;
-        await this.storage.uploadBuffer(objectKey, data, 'image/webp');
+        await this.storage.uploadBuffer(objectKey, data, "image/webp");
         return {
           objectKey,
           url: this.storage.publicUrl(objectKey),
-          contentType: 'image/webp' as const,
+          contentType: "image/webp" as const,
           width: info.width,
           height: info.height,
           sizeBytes: data.length,
@@ -133,15 +132,18 @@ export class AssetProcessorService implements OnModuleDestroy {
     renditions.push(...results);
 
     const heroHeight = Math.ceil(width / HERO_ASPECT_RATIO);
-    const extendHeight = Math.max(0, heroHeight - height);
+    // Extra height the 3:4 hero needs beyond the (fully preserved) source. When
+    // the source is already tall enough there is nothing to synthesise, so we
+    // just cover-resize down to the target frame.
+    const extensionHeight = Math.max(0, heroHeight - height);
     const heroSource =
-      extendHeight === 0
+      extensionHeight === 0
         ? await sharp(normalizedSource)
             .resize({
               width,
               height: heroHeight,
-              fit: 'cover',
-              position: 'centre',
+              fit: "cover",
+              position: "centre",
             })
             .toBuffer()
         : await this.createHeroArtworkSource(
@@ -149,7 +151,7 @@ export class AssetProcessorService implements OnModuleDestroy {
             width,
             height,
             heroHeight,
-            extendHeight,
+            extensionHeight,
           );
     const heroPalette = await this.heroTextPalette(heroSource);
     const heroMaximumWidth = Math.min(
@@ -166,14 +168,14 @@ export class AssetProcessorService implements OnModuleDestroy {
       heroTargetWidths.map(async (targetWidth) => {
         const { data, info } = await sharp(heroSource)
           .resize({ width: targetWidth, withoutEnlargement: true })
-          .webp({ quality: 84, effort: 5 })
+          .webp({ quality: 84, effort: 5, smartSubsample: true })
           .toBuffer({ resolveWithObject: true });
         const objectKey = `processed/${asset.id}/artwork/hero/${info.width}w.webp`;
-        await this.storage.uploadBuffer(objectKey, data, 'image/webp');
+        await this.storage.uploadBuffer(objectKey, data, "image/webp");
         return {
           objectKey,
           url: this.storage.publicUrl(objectKey),
-          contentType: 'image/webp' as const,
+          contentType: "image/webp" as const,
           width: info.width,
           height: info.height,
           sizeBytes: data.length,
@@ -182,7 +184,7 @@ export class AssetProcessorService implements OnModuleDestroy {
     );
 
     const primary = renditions.at(-1);
-    if (!primary) throw new Error('ARTWORK_RENDITION_MISSING');
+    if (!primary) throw new Error("ARTWORK_RENDITION_MISSING");
 
     return {
       publicUrl: primary.url,
@@ -208,56 +210,160 @@ export class AssetProcessorService implements OnModuleDestroy {
     width: number,
     height: number,
     heroHeight: number,
-    extendHeight: number,
+    extensionHeight: number,
   ): Promise<Buffer> {
-    const stripHeight = Math.min(HERO_BOTTOM_STRIP_HEIGHT, height);
-    const blendHeight = Math.min(HERO_BLEND_OVERLAP_HEIGHT, height);
-    const extensionHeight = extendHeight + blendHeight;
-    const blurredExtension = await sharp(normalizedSource)
-      .extract({ left: 0, top: height - stripHeight, width, height: stripHeight })
-      .resize({ width, height: extensionHeight, fit: 'fill' })
-      .blur(HERO_EXTENSION_BLUR_SIGMA)
-      .toBuffer();
-    const featheredExtension = await sharp(blurredExtension)
-      .removeAlpha()
-      .joinChannel(this.heroFadeMask(width, extensionHeight, blendHeight), {
-        raw: { width, height: extensionHeight, channels: 1 },
-      })
-      .png()
-      .toBuffer();
+    const stripHeight = Math.min(HERO_EXTENSION_STRIP, height);
+    const { buffer: extension, overlap } = await this.buildHeroExtension(
+      normalizedSource,
+      width,
+      height,
+      extensionHeight,
+      stripHeight,
+    );
 
     return sharp({
       create: {
         width,
         height: heroHeight,
-        channels: 4,
-        background: { r: 0, g: 0, b: 0, alpha: 1 },
+        channels: 3,
+        background: { r: 0, g: 0, b: 0 },
       },
     })
       .composite([
         { input: normalizedSource, top: 0, left: 0 },
-        // Composite the blurred background over the lower edge of the source.
-        // Its alpha goes from 0 to 1 across this overlap, yielding a soft,
-        // painterly transition instead of a hard cut.
-        { input: featheredExtension, top: height - blendHeight, left: 0 },
+        { input: extension, top: height - overlap, left: 0 },
       ])
       .png()
       .toBuffer();
   }
 
-  private heroFadeMask(
+  private async buildHeroExtension(
+    source: Buffer,
     width: number,
     height: number,
-    fadeHeight: number,
-  ): Buffer {
-    const alpha = Buffer.alloc(width * height);
-    for (let row = 0; row < height; row += 1) {
-      const progress = Math.min(1, row / Math.max(1, fadeHeight));
-      // Smoothstep avoids a perceptible change in opacity at either edge.
-      const opacity = progress * progress * (3 - 2 * progress);
-      alpha.fill(Math.round(opacity * 255), row * width, (row + 1) * width);
+    extensionHeight: number,
+    stripHeight: number,
+  ): Promise<{ buffer: Buffer; overlap: number }> {
+    // Sample the bottom rows of the source to detect a dark/black edge.
+    const edgeHeight = Math.min(6, height);
+    const edgeStats = await sharp(source)
+      .extract({ left: 0, top: height - edgeHeight, width, height: edgeHeight })
+      .stats();
+
+    const [rMean, gMean, bMean] = edgeStats.channels.map((channel) =>
+      Math.round(channel.mean),
+    );
+    const [rMin, gMin, bMin] = edgeStats.channels.map((channel) => channel.min);
+
+    const minLuminance = 0.299 * rMin + 0.587 * gMin + 0.114 * bMin;
+    const meanLuminance = 0.299 * rMean + 0.587 * gMean + 0.114 * bMean;
+
+    // BRANCH 1: near-black bottom edge. Build a pure black block directly rather
+    // than stretching a razor-thin slice, which would smear grey/colour over any
+    // text. overlap = 0 so the fill starts right below the source's last row.
+    if (
+      minLuminance < HERO_DARK_EDGE_MIN_LUMINANCE &&
+      meanLuminance < HERO_DARK_EDGE_MEAN_LUMINANCE
+    ) {
+      const blackExtension = await sharp({
+        create: {
+          width,
+          height: extensionHeight,
+          channels: 4,
+          background: { r: 0, g: 0, b: 0, alpha: 1 },
+        },
+      })
+        .png()
+        .toBuffer();
+      return { buffer: blackExtension, overlap: 0 };
     }
-    return alpha;
+
+    // BRANCH 2: coloured/complex bottom edge.
+    const sampleHeight = Math.min(stripHeight, height);
+    const overlap = Math.min(
+      Math.round(HERO_EXTENSION_BLUR_SIGMA * 1.5),
+      Math.floor(height / 4),
+      extensionHeight,
+    );
+    const layerHeight = extensionHeight + overlap;
+
+    const stretchedBlur = await sharp(source)
+      .extract({
+        left: 0,
+        top: height - sampleHeight,
+        width,
+        height: sampleHeight,
+      })
+      .resize({ width, height: layerHeight, fit: "fill" })
+      .blur(HERO_EXTENSION_BLUR_SIGMA)
+      .png()
+      .toBuffer();
+
+    // Fade-in mask so the blurred strip eases in from the seam instead of a hard
+    // cut at the top of the overlap band.
+    const overlapFadeInSvg =
+      Buffer.from(`<svg width="${width}" height="${layerHeight}">
+        <defs>
+            <linearGradient id="in" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="black" stop-opacity="0"/>
+                <stop offset="${(overlap / layerHeight).toFixed(4)}" stop-color="black" stop-opacity="1"/>
+                <stop offset="1" stop-color="black" stop-opacity="1"/>
+            </linearGradient>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#in)"/>
+    </svg>`);
+    const fadeInMaskBuffer = await sharp(overlapFadeInSvg).png().toBuffer();
+
+    const blurWithFadeIn = await sharp(stretchedBlur)
+      .composite([{ input: fadeInMaskBuffer, blend: "dest-in" }])
+      .png()
+      .toBuffer();
+
+    // Fade-out mask for the flat dominant-colour wash the extension dissolves
+    // into towards the bottom.
+    const fadeOutOffset = (overlap / layerHeight).toFixed(4);
+    const fadeMaskSvg =
+      Buffer.from(`<svg width="${width}" height="${layerHeight}">
+        <defs>
+            <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="black" stop-opacity="0"/>
+                <stop offset="${fadeOutOffset}" stop-color="black" stop-opacity="0"/>
+                <stop offset="${(overlap / layerHeight + 0.65 * (1 - overlap / layerHeight)).toFixed(4)}" stop-color="black" stop-opacity="0.55"/>
+                <stop offset="1" stop-color="black" stop-opacity="1"/>
+            </linearGradient>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#fade)"/>
+    </svg>`);
+    const fadeOutMaskBuffer = await sharp(fadeMaskSvg).png().toBuffer();
+
+    const flatColorLayer = await sharp({
+      create: {
+        width,
+        height: layerHeight,
+        channels: 3,
+        background: { r: rMean, g: gMean, b: bMean },
+      },
+    })
+      .composite([{ input: fadeOutMaskBuffer, blend: "dest-in" }])
+      .png()
+      .toBuffer();
+
+    const buffer = await sharp({
+      create: {
+        width,
+        height: layerHeight,
+        channels: 4,
+        background: { r: rMean, g: gMean, b: bMean, alpha: 0 },
+      },
+    })
+      .composite([
+        { input: blurWithFadeIn, top: 0, left: 0 },
+        { input: flatColorLayer, top: 0, left: 0 },
+      ])
+      .png()
+      .toBuffer();
+
+    return { buffer, overlap };
   }
 
   private async artworkPalette(source: Buffer): Promise<ArtworkPalette> {
@@ -270,9 +376,8 @@ export class AssetProcessorService implements OnModuleDestroy {
     const luminance =
       (0.2126 * background.r + 0.7152 * background.g + 0.0722 * background.b) /
       255;
-    const foreground = luminance > 0.52
-      ? { r: 0, g: 0, b: 0 }
-      : { r: 255, g: 255, b: 255 };
+    const foreground =
+      luminance > 0.52 ? { r: 0, g: 0, b: 0 } : { r: 255, g: 255, b: 255 };
     const textColor = (opacity: number) =>
       this.hexColor({
         r: Math.round(background.r * (1 - opacity) + foreground.r * opacity),
@@ -290,65 +395,82 @@ export class AssetProcessorService implements OnModuleDestroy {
     };
   }
 
-  /**
-   * Hero metadata always sits at the bottom, so a whole-image dominant color
-   * is not reliable enough. Analyse the final hero artwork's lower area and
-   * choose the text colour with the strongest lower-percentile WCAG contrast.
-   * A directional scrim is emitted only for mixed backgrounds where neither
-   * black nor white can keep the target contrast across that area.
-   */
   private async heroTextPalette(source: Buffer): Promise<HeroTextPalette> {
     const metadata = await sharp(source).metadata();
     const width = metadata.width ?? 0;
     const height = metadata.height ?? 0;
     if (width <= 0 || height <= 0) {
-      return { textColor1: 'ffffff', textColor2: 'ffffff' };
+      return {
+        bgColor: "2c2c2e",
+        textColor1: HERO_TEXT_PRIMARY,
+        textColor2: HERO_TEXT_SECONDARY,
+        textColor3: HERO_TEXT_TERTIARY,
+        textColor4: HERO_TEXT_QUATERNARY,
+        scrimColor: "000000",
+        scrimOpacity: 0.3,
+      };
     }
 
-    const top = Math.min(height - 1, Math.floor(height * HERO_TEXT_REGION_START));
+    const top = Math.min(
+      height - 1,
+      Math.floor(height * HERO_TEXT_REGION_START),
+    );
     const { data, info } = await sharp(source)
       .extract({ left: 0, top, width, height: height - top })
       .removeAlpha()
-      .resize({ width: 96, height: 96, fit: 'fill' })
+      .resize({ width: 96, height: 96, fit: "fill" })
       .raw()
       .toBuffer({ resolveWithObject: true });
 
     const luminances: number[] = [];
+    let redTotal = 0;
+    let greenTotal = 0;
+    let blueTotal = 0;
     for (let offset = 0; offset < data.length; offset += info.channels) {
       const red = data[offset] ?? 0;
       const green = data[offset + 1] ?? 0;
       const blue = data[offset + 2] ?? 0;
+      redTotal += red;
+      greenTotal += green;
+      blueTotal += blue;
       luminances.push(this.relativeLuminance(red, green, blue));
     }
     luminances.sort((left, right) => left - right);
 
-    const darkest = this.percentile(luminances, HERO_TEXT_CONTRAST_PERCENTILE);
     const brightest = this.percentile(
       luminances,
       1 - HERO_TEXT_CONTRAST_PERCENTILE,
     );
-    const blackContrast = (darkest + 0.05) / 0.05;
-    const whiteContrast = 1.05 / (brightest + 0.05);
-    const useBlackText = blackContrast >= whiteContrast;
-    const contrast = useBlackText ? blackContrast : whiteContrast;
-
-    if (contrast >= MINIMUM_TEXT_CONTRAST) {
-      const color = useBlackText ? '000000' : 'ffffff';
-      return { textColor1: color, textColor2: color };
+    const sampleCount = Math.max(1, luminances.length);
+    const background = {
+      r: Math.round(redTotal / sampleCount),
+      g: Math.round(greenTotal / sampleCount),
+      b: Math.round(blueTotal / sampleCount),
+    };
+    const usesDarkText = this.isNearWhite(background);
+    if (usesDarkText) {
+      return {
+        bgColor: this.hexColor(background),
+        textColor1: HERO_DARK_TEXT_PRIMARY,
+        textColor2: HERO_DARK_TEXT_SECONDARY,
+        textColor3: HERO_DARK_TEXT_TERTIARY,
+        textColor4: HERO_TEXT_QUATERNARY,
+      };
     }
 
-    const targetLuminance = useBlackText ? 0.175 : 1 / 4.5 - 0.05;
-    const baseLuminance = useBlackText ? darkest : brightest;
-    const requiredOpacity = useBlackText
-      ? (targetLuminance - baseLuminance) / Math.max(0.001, 1 - baseLuminance)
-      : 1 - targetLuminance / Math.max(0.001, baseLuminance);
-    const color = useBlackText ? '000000' : 'ffffff';
-
+    const maximumReadableLuminance = 1.05 / MINIMUM_TEXT_CONTRAST - 0.05;
+    const requiredOpacity =
+      brightest <= maximumReadableLuminance
+        ? 0
+        : 1 - maximumReadableLuminance / brightest;
     return {
-      textColor1: color,
-      textColor2: color,
-      scrimColor: useBlackText ? 'ffffff' : '000000',
-      scrimOpacity: Math.max(0.18, Math.min(0.72, requiredOpacity + 0.06)),
+      bgColor: this.hexColor(background),
+      textColor1: HERO_TEXT_PRIMARY,
+      textColor2: HERO_TEXT_SECONDARY,
+      textColor3: HERO_TEXT_TERTIARY,
+      textColor4: HERO_TEXT_QUATERNARY,
+      scrimColor: "000000",
+      scrimOpacity: Math.max(0.24, Math.min(0.72, requiredOpacity + 0.08)),
     };
   }
 
@@ -360,7 +482,15 @@ export class AssetProcessorService implements OnModuleDestroy {
         : ((value + 0.055) / 1.055) ** 2.4;
     };
 
-    return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue);
+    return (
+      0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+    );
+  }
+
+  private isNearWhite(color: { r: number; g: number; b: number }): boolean {
+    const maximum = Math.max(color.r, color.g, color.b);
+    const minimum = Math.min(color.r, color.g, color.b);
+    return maximum >= 238 && minimum >= 220 && maximum - minimum <= 28;
   }
 
   private percentile(values: number[], percentile: number) {
@@ -374,23 +504,25 @@ export class AssetProcessorService implements OnModuleDestroy {
 
   private hexColor(color: { r: number; g: number; b: number }): string {
     return [color.r, color.g, color.b]
-      .map((channel) => Math.max(0, Math.min(255, channel)).toString(16).padStart(2, '0'))
-      .join('');
+      .map((channel) =>
+        Math.max(0, Math.min(255, channel)).toString(16).padStart(2, "0"),
+      )
+      .join("");
   }
 
   private async processVideo(asset: Asset): Promise<AssetProcessingResult> {
-    const workDirectory = await mkdtemp(join(tmpdir(), 'musical-asset-'));
-    const sourceExtension = extname(asset.filename) || '.video';
+    const workDirectory = await mkdtemp(join(tmpdir(), "musical-asset-"));
+    const sourceExtension = extname(asset.filename) || ".video";
     const sourcePath = join(workDirectory, `source${sourceExtension}`);
-    const rawPosterPath = join(workDirectory, 'poster-raw.png');
-    const poster2400Path = join(workDirectory, 'poster-2400w.webp');
-    const poster1200Path = join(workDirectory, 'poster-1200w.webp');
+    const rawPosterPath = join(workDirectory, "poster-raw.png");
+    const poster2400Path = join(workDirectory, "poster-2400w.webp");
+    const poster1200Path = join(workDirectory, "poster-1200w.webp");
 
     const TARGET_RESOLUTIONS = [
-      { name: '720p', width: 1280, bitrate: '2800k', bandwidth: 2800000 },
-      { name: '1080p', width: 1920, bitrate: '5000k', bandwidth: 5000000 },
-      { name: '1440p', width: 2560, bitrate: '9000k', bandwidth: 9000000 },
-      { name: '2160p', width: 3840, bitrate: '14000k', bandwidth: 14000000 },
+      { name: "720p", width: 1280, bitrate: "2800k", bandwidth: 2800000 },
+      { name: "1080p", width: 1920, bitrate: "5000k", bandwidth: 5000000 },
+      { name: "1440p", width: 2560, bitrate: "9000k", bandwidth: 9000000 },
+      { name: "2160p", width: 3840, bitrate: "14000k", bandwidth: 14000000 },
     ];
 
     try {
@@ -398,7 +530,7 @@ export class AssetProcessorService implements OnModuleDestroy {
       this.verifyChecksum(asset, await this.fileChecksum(sourcePath));
       const sourceProbe = await this.probe(sourcePath);
       const sourceVideo = sourceProbe.streams?.find(
-        (stream) => stream.codec_type === 'video',
+        (stream) => stream.codec_type === "video",
       );
       const sourceWidth = sourceVideo?.width ?? 0;
       const sourceHeight = sourceVideo?.height ?? 0;
@@ -409,7 +541,7 @@ export class AssetProcessorService implements OnModuleDestroy {
         !Number.isFinite(durationSeconds) ||
         durationSeconds <= 0
       ) {
-        throw new Error('VIDEO_METADATA_INVALID');
+        throw new Error("VIDEO_METADATA_INVALID");
       }
 
       // Filter resolutions to only target widths <= sourceWidth
@@ -424,45 +556,51 @@ export class AssetProcessorService implements OnModuleDestroy {
       // First segment is 1 second (hls_init_time) for instant startup/playback.
       // The remaining duration is split into approximately 6 segments.
       const hlsInitTime = 1;
-      const hlsTime = Math.max(1.5, Math.round(((durationSeconds - hlsInitTime) / 6) * 10) / 10);
+      const hlsTime = Math.max(
+        1.5,
+        Math.round(((durationSeconds - hlsInitTime) / 6) * 10) / 10,
+      );
 
       // Transcode each resolution
       for (const res of activeResolutions) {
         const playlistPath = join(workDirectory, `video-${res.name}.m3u8`);
-        const segmentPattern = join(workDirectory, `segment-${res.name}_%03d.ts`);
+        const segmentPattern = join(
+          workDirectory,
+          `segment-${res.name}_%03d.ts`,
+        );
 
         await this.run(this.ffmpegPath, [
-          '-y',
-          '-i',
+          "-y",
+          "-i",
           sourcePath,
-          '-map',
-          '0:v:0',
-          '-an',
-          '-vf',
+          "-map",
+          "0:v:0",
+          "-an",
+          "-vf",
           `scale=w='min(${res.width},iw)':h=-2`,
-          '-c:v',
-          'libx264',
-          '-preset',
-          'medium',
-          '-crf',
-          '23',
-          '-b:v',
+          "-c:v",
+          "libx264",
+          "-preset",
+          "medium",
+          "-crf",
+          "23",
+          "-b:v",
           res.bitrate,
-          '-maxrate',
+          "-maxrate",
           res.bitrate,
-          '-bufsize',
+          "-bufsize",
           `${parseInt(res.bitrate) * 2}k`,
-          '-pix_fmt',
-          'yuv420p',
-          '-g',
-          '60',
-          '-hls_init_time',
+          "-pix_fmt",
+          "yuv420p",
+          "-g",
+          "60",
+          "-hls_init_time",
           String(hlsInitTime),
-          '-hls_time',
+          "-hls_time",
           String(hlsTime),
-          '-hls_playlist_type',
-          'vod',
-          '-hls_segment_filename',
+          "-hls_playlist_type",
+          "vod",
+          "-hls_segment_filename",
           segmentPattern,
           playlistPath,
         ]);
@@ -470,29 +608,29 @@ export class AssetProcessorService implements OnModuleDestroy {
 
       // Extract raw poster frame
       await this.run(this.ffmpegPath, [
-        '-y',
-        '-ss',
+        "-y",
+        "-ss",
         String(Math.min(1, durationSeconds / 10)),
-        '-i',
+        "-i",
         sourcePath,
-        '-frames:v',
-        '1',
+        "-frames:v",
+        "1",
         rawPosterPath,
       ]);
 
       // Generate 2400w and 1200w WebP poster images using sharp
       await sharp(rawPosterPath)
-        .resize(2400, 1350, { fit: 'cover' })
+        .resize(2400, 1350, { fit: "cover" })
         .webp({ quality: 85 })
         .toFile(poster2400Path);
 
       await sharp(rawPosterPath)
-        .resize(1200, 675, { fit: 'cover' })
+        .resize(1200, 675, { fit: "cover" })
         .webp({ quality: 85 })
         .toFile(poster1200Path);
 
       // Write master default.m3u8 playlist file
-      let masterPlaylistContent = '#EXTM3U\n#EXT-X-VERSION:3\n';
+      let masterPlaylistContent = "#EXTM3U\n#EXT-X-VERSION:3\n";
       const parsedRenditions: Array<{
         name: string;
         width: number;
@@ -506,16 +644,18 @@ export class AssetProcessorService implements OnModuleDestroy {
         // Find actual resolution of transcoded segments
         const allFiles = await readdir(workDirectory);
         const resSegments = allFiles.filter(
-          (f) => f.startsWith(`segment-${res.name}_`) && f.endsWith('.ts'),
+          (f) => f.startsWith(`segment-${res.name}_`) && f.endsWith(".ts"),
         );
         let actualWidth = res.width;
         let actualHeight = Math.round((res.width * sourceHeight) / sourceWidth);
 
         if (resSegments[0]) {
           try {
-            const probeResult = await this.probe(join(workDirectory, resSegments[0]));
+            const probeResult = await this.probe(
+              join(workDirectory, resSegments[0]),
+            );
             const videoStream = probeResult.streams?.find(
-              (stream) => stream.codec_type === 'video',
+              (stream) => stream.codec_type === "video",
             );
             if (videoStream?.width && videoStream?.height) {
               actualWidth = videoStream.width;
@@ -537,8 +677,8 @@ export class AssetProcessorService implements OnModuleDestroy {
         });
       }
 
-      const masterPlaylistPath = join(workDirectory, 'default.m3u8');
-      await writeFile(masterPlaylistPath, masterPlaylistContent, 'utf8');
+      const masterPlaylistPath = join(workDirectory, "default.m3u8");
+      await writeFile(masterPlaylistPath, masterPlaylistContent, "utf8");
 
       // Upload all segments, sub-playlists, master playlist and WebP poster variants to S3/R2 storage
       const finalFiles = await readdir(workDirectory);
@@ -547,12 +687,19 @@ export class AssetProcessorService implements OnModuleDestroy {
           const filePath = join(workDirectory, file);
           const objectKey = `processed/${asset.id}/video/${file}`;
 
-          if (file.endsWith('.ts')) {
-            await this.storage.uploadFile(objectKey, filePath, 'video/MP2T');
-          } else if (file.endsWith('.m3u8')) {
-            await this.storage.uploadFile(objectKey, filePath, 'application/x-mpegURL');
-          } else if (file === 'poster-2400w.webp' || file === 'poster-1200w.webp') {
-            await this.storage.uploadFile(objectKey, filePath, 'image/webp');
+          if (file.endsWith(".ts")) {
+            await this.storage.uploadFile(objectKey, filePath, "video/MP2T");
+          } else if (file.endsWith(".m3u8")) {
+            await this.storage.uploadFile(
+              objectKey,
+              filePath,
+              "application/x-mpegURL",
+            );
+          } else if (
+            file === "poster-2400w.webp" ||
+            file === "poster-1200w.webp"
+          ) {
+            await this.storage.uploadFile(objectKey, filePath, "image/webp");
           }
         }),
       );
@@ -570,15 +717,17 @@ export class AssetProcessorService implements OnModuleDestroy {
         {
           objectKey: masterPlaylistObjectKey,
           url: masterPlaylistUrl,
-          contentType: 'application/x-mpegURL',
+          contentType: "application/x-mpegURL",
           width: sourceWidth,
           height: sourceHeight,
           sizeBytes: masterFileStats.size,
         },
         ...parsedRenditions.map((item) => ({
           objectKey: `processed/${asset.id}/video/${item.playlistFile}`,
-          url: this.storage.publicUrl(`processed/${asset.id}/video/${item.playlistFile}`),
-          contentType: 'application/x-mpegURL',
+          url: this.storage.publicUrl(
+            `processed/${asset.id}/video/${item.playlistFile}`,
+          ),
+          contentType: "application/x-mpegURL",
           width: item.width,
           height: item.height,
           sizeBytes: 0,
@@ -601,7 +750,7 @@ export class AssetProcessorService implements OnModuleDestroy {
           poster: {
             objectKey: poster2400ObjectKey,
             url: this.storage.publicUrl(poster2400ObjectKey),
-            contentType: 'image/webp',
+            contentType: "image/webp",
             width: 2400,
             height: 1350,
             sizeBytes: poster2400FileStats.size,
@@ -610,7 +759,7 @@ export class AssetProcessorService implements OnModuleDestroy {
                 {
                   objectKey: poster1200ObjectKey,
                   url: this.storage.publicUrl(poster1200ObjectKey),
-                  contentType: 'image/webp',
+                  contentType: "image/webp",
                   width: 1200,
                   height: 675,
                   sizeBytes: poster1200FileStats.size,
@@ -618,7 +767,7 @@ export class AssetProcessorService implements OnModuleDestroy {
                 {
                   objectKey: poster2400ObjectKey,
                   url: this.storage.publicUrl(poster2400ObjectKey),
-                  contentType: 'image/webp',
+                  contentType: "image/webp",
                   width: 2400,
                   height: 1350,
                   sizeBytes: poster2400FileStats.size,
@@ -635,12 +784,12 @@ export class AssetProcessorService implements OnModuleDestroy {
 
   private async probe(filePath: string): Promise<ProbeResult> {
     const { stdout } = await this.run(this.ffprobePath, [
-      '-v',
-      'error',
-      '-show_streams',
-      '-show_format',
-      '-of',
-      'json',
+      "-v",
+      "error",
+      "-show_streams",
+      "-show_format",
+      "-of",
+      "json",
       filePath,
     ]);
     return JSON.parse(stdout) as ProbeResult;
@@ -655,7 +804,7 @@ export class AssetProcessorService implements OnModuleDestroy {
         executable,
         args,
         {
-          encoding: 'utf8',
+          encoding: "utf8",
           maxBuffer: 4 * 1024 * 1024,
           timeout: PROCESS_TIMEOUT_MS,
           windowsHide: true,
@@ -663,7 +812,11 @@ export class AssetProcessorService implements OnModuleDestroy {
         (error, stdout, stderr) => {
           this.activeChild = undefined;
           if (error) {
-            reject(error);
+            reject(
+              error instanceof Error
+                ? error
+                : new Error("ASSET_PROCESS_COMMAND_FAILED"),
+            );
             return;
           }
           resolve({ stdout, stderr });
@@ -678,7 +831,7 @@ export class AssetProcessorService implements OnModuleDestroy {
   }
 
   abort(): void {
-    this.activeChild?.kill('SIGTERM');
+    this.activeChild?.kill("SIGTERM");
   }
 
   private json(value: object): Prisma.InputJsonObject {
@@ -686,18 +839,18 @@ export class AssetProcessorService implements OnModuleDestroy {
   }
 
   private bufferChecksum(value: Buffer): string {
-    return createHash('sha256').update(value).digest('hex');
+    return createHash("sha256").update(value).digest("hex");
   }
 
   private async fileChecksum(filePath: string): Promise<string> {
-    const hash = createHash('sha256');
+    const hash = createHash("sha256");
     await pipeline(createReadStream(filePath), hash);
-    return hash.digest('hex');
+    return hash.digest("hex");
   }
 
   private verifyChecksum(asset: Asset, checksum: string): void {
     if (checksum !== asset.checksum) {
-      throw new Error('ASSET_CHECKSUM_MISMATCH');
+      throw new Error("ASSET_CHECKSUM_MISMATCH");
     }
   }
 }
