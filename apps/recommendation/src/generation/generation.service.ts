@@ -144,11 +144,22 @@ export class GenerationService {
         locale: locale || 'en-GB',
         status: 'PUBLISHED',
       },
-      select: { staleAfter: true },
+      select: {
+        staleAfter: true,
+        sections: {
+          where: { externalId: 'global-featured-now' },
+          select: { version: true },
+        },
+      },
     });
     if (!page) return true;
     if (!page.staleAfter) return true;
-    return page.staleAfter <= new Date();
+    return (
+      page.staleAfter <= new Date() ||
+      !page.sections.some(
+        (section) => section.version >= PERSONALIZATION_MODEL_VERSION,
+      )
+    );
   }
 
   async tryLazyGenerateGlobal(
