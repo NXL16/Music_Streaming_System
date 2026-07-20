@@ -183,18 +183,15 @@ function albumReleaseKey(album, tracks) {
     album.artistName || album.collectionArtistName || '',
   );
   const releaseDate = String(album.releaseDate || '').slice(0, 10);
-  const tracklist = [...tracks]
-    .sort(
-      (left, right) =>
-        (left.discNumber || 1) - (right.discNumber || 1) ||
-        (left.trackNumber || 0) - (right.trackNumber || 0),
-    )
-    .map((track) =>
-      recordingKey(track.trackName || track.title, track.artistName || artist),
-    )
-    .join('|');
 
-  return `${title}::${artist}::${releaseDate}::${tracklist}`;
+  // Danh sách track (và số lượng) CỐ TÌNH không đưa vào khoá: một release được
+  // nhà cung cấp lộ ra qua nhiều collectionId thường lệch nhau một bài bonus
+  // hoặc thứ tự (deluxe/standard, bản explicit/clean), nhưng với người nghe vẫn
+  // là MỘT release. Khoá này khớp với lá chắn catalog (assertNoSemanticAlbumDuplicate)
+  // và khoá hiển thị (albumPresentationKey) để cùng một release không lọt thành
+  // hai thẻ giống hệt. `tracks` giữ lại trong chữ ký hàm cho tương thích lời gọi.
+  void tracks;
+  return `${title}::${artist}::${releaseDate}`;
 }
 
 function uniqueAlbumsByCollectionId(albums) {
