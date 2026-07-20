@@ -600,7 +600,7 @@ export class CatalogAuthoringService {
         this.href(draft.storefront, RESOURCE_TYPES.ALBUM, draft.resourceId),
     };
 
-    await this.assertNoSemanticAlbumDuplicate(tx, draft, data, tracks);
+    await this.assertNoSemanticAlbumDuplicate(tx, draft, data);
 
     await tx.album.upsert({
       where: { id: draft.resourceId },
@@ -635,9 +635,15 @@ export class CatalogAuthoringService {
 
   /**
    * A provider can expose one release through multiple external collection
-   * IDs. Resource IDs are intentionally opaque, so reject a second catalog
-   * album only when its normalised metadata and full ordered song list are
-   * identical to an existing release in the same storefront.
+   * IDs, often with a slightly different tracklist (a deluxe/standard pair, a
+   * bonus track, or a reordered import). Resource IDs are intentionally opaque,
+   * so reject a second catalog album when its release identity — normalised
+   * name + artist + release date — matches an existing album in the same
+   * storefront. isSingle is deliberately excluded: the same release can surface
+   * as a single (≤3 tracks) and an album (>3 tracks) across two collection IDs,
+   * and both are one release to a listener. This matches the recommendation
+   * display key and the seed tool's release key so a release cannot enter the
+   * catalog twice and surface as two look-alike cards.
    */
   private async assertNoSemanticAlbumDuplicate(
     tx: Prisma.TransactionClient,
@@ -649,36 +655,30 @@ export class CatalogAuthoringService {
       trackCount: number;
       isSingle: boolean;
     },
-    tracks: Array<{ songId: string; position: number; discNumber: number }>,
   ): Promise<void> {
     // Missing date or artist metadata is too weak a signal for a hard reject.
     // The importer still catches those cases; the catalog guard remains
     // deliberately conservative to permit legitimate reissues.
     if (!album.releaseDate || !album.artistName.trim()) return;
 
+    // Query only by storefront + release date, then compare the normalised
+    // fingerprint in memory. Pre-filtering on an exact name/isSingle match would
+    // defeat the fingerprint — Vietnamese diacritics, punctuation, whitespace,
+    // and single-vs-album splits would all slip past. releaseDate keeps the scan
+    // narrow enough without weakening the semantic comparison.
     const candidates = await tx.album.findMany({
       where: {
         storefront: draft.storefront,
         id: { not: draft.resourceId },
-        name: { equals: album.name, mode: 'insensitive' },
-        artistName: { equals: album.artistName, mode: 'insensitive' },
         releaseDate: album.releaseDate,
-        trackCount: album.trackCount,
-        isSingle: album.isSingle,
       },
-      include: {
-        tracks: {
-          select: { songId: true, position: true, discNumber: true },
-          orderBy: [{ discNumber: 'asc' }, { position: 'asc' }],
-        },
-      },
+      select: { id: true, name: true, artistName: true, releaseDate: true },
     });
 
     const incomingFingerprint = this.albumSemanticFingerprint(
       album.name,
       album.artistName,
       album.releaseDate,
-      tracks,
     );
     const duplicate = candidates.find(
       (candidate) =>
@@ -686,7 +686,6 @@ export class CatalogAuthoringService {
           candidate.name,
           candidate.artistName,
           candidate.releaseDate,
-          candidate.tracks,
         ) === incomingFingerprint,
     );
 
@@ -701,21 +700,14 @@ export class CatalogAuthoringService {
     name: string,
     artistName: string,
     releaseDate: Date | null,
-    tracks: Array<{ songId: string; position: number; discNumber: number }>,
   ): string {
-    const orderedTracks = [...tracks]
-      .sort(
-        (left, right) =>
-          left.discNumber - right.discNumber || left.position - right.position,
-      )
-      .map((track) => `${track.discNumber}:${track.position}:${track.songId}`)
-      .join('|');
-
+    // Tracklist and track count are intentionally excluded: two collection IDs
+    // for one release frequently differ by a bonus track or ordering, yet are
+    // one release to a listener. Release identity is name + artist + date.
     return [
       this.normalizedCatalogText(name),
       this.normalizedCatalogText(artistName),
       releaseDate?.toISOString().slice(0, 10) ?? '',
-      orderedTracks,
     ].join('::');
   }
 
