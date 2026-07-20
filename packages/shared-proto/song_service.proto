@@ -44,6 +44,7 @@ service SongService {
   rpc GetCatalogArtistAlbums(GetCatalogArtistAlbumsRequest) returns (CatalogResponse);
   rpc GetCatalogArtistSongs(GetCatalogArtistSongsRequest) returns (GetCatalogArtistSongsResponse);
   rpc BrowseCatalog(BrowseCatalogRequest) returns (BrowseCatalogResponse);
+  rpc SearchCatalog(SearchCatalogRequest) returns (SearchCatalogResponse);
 
   // Internal catalog authoring. Drafts never affect public catalog reads until
   // they are published atomically into the relational catalog tables.
@@ -741,4 +742,20 @@ message BrowseCatalogRequest {
   int32 limit = 3;
   string sort = 4;
   string cursor = 5;
+}
+
+message SearchCatalogRequest {
+  string storefront = 1;
+  string query = 2;
+  // Per-group result cap. Applied independently to songs, artists and albums.
+  int32 limit = 3;
+  // Optional whitelist of resource types to search. Empty means search the
+  // default set (songs, artists, albums).
+  repeated string types = 4;
+}
+
+message SearchCatalogResponse {
+  // References grouped by relevance, ordered songs → artists → albums.
+  repeated CatalogReference data = 1;
+  CatalogResources resources = 2;
 }
