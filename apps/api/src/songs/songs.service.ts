@@ -44,6 +44,7 @@ import {
   GetCatalogArtistAlbumsRequest,
   GetCatalogArtistSongsRequest,
   CatalogResponse,
+  SearchCatalogRequest,
   SaveCatalogArtistDraftRequest,
   SaveCatalogSongDraftRequest,
   SaveCatalogAlbumDraftRequest,
@@ -299,6 +300,15 @@ export class SongsService implements OnModuleInit {
       ...this.unwrapCatalogResponse(response.catalog),
       nextCursor: response.nextCursor || undefined,
     };
+  }
+
+  async searchCatalog(
+    data: SearchCatalogRequest,
+  ): Promise<CatalogResponse> {
+    const response = await grpcFirstValueFrom(
+      this.songServiceClient.searchCatalog(data),
+    );
+    return this.unwrapCatalogResponse(response);
   }
 
   async saveCatalogArtistDraft(

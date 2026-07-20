@@ -92,6 +92,29 @@ export class CatalogController {
     return this.songsService.getCatalogArtistAlbums({ storefront, artistId });
   }
 
+  @Get('search')
+  @UseGuards(StrictJwtAuthGuard)
+  search(
+    @Param('storefront') storefront: string,
+    @Query('q') query?: string,
+    @Query('limit') limit?: string,
+    @Query('types') types?: string,
+  ) {
+    const parsedLimit = Number(limit);
+
+    return this.songsService.searchCatalog({
+      storefront,
+      query: query?.trim() ?? '',
+      limit: Number.isInteger(parsedLimit) ? parsedLimit : 0,
+      types: types
+        ? types
+            .split(',')
+            .map((type) => type.trim())
+            .filter(Boolean)
+        : [],
+    });
+  }
+
   @Get('artists/:artistId/songs')
   getArtistSongs(
     @Param('storefront') storefront: string,
