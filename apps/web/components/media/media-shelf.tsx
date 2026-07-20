@@ -338,6 +338,24 @@ function MediaShelf({
     let suppressClickTimer: ReturnType<typeof setTimeout> | undefined;
     let pendingScrollLeft: number | undefined;
     let dragScrollFrame: number | undefined;
+    let releaseDragLayerTimer: ReturnType<typeof setTimeout> | undefined;
+    let dragLayerActive = false;
+
+    const promoteDragLayer = () => {
+      if (dragLayerActive) return;
+
+      dragLayerActive = true;
+      shelf.style.willChange = "scroll-position";
+    };
+
+    const releaseDragLayer = () => {
+      if (releaseDragLayerTimer) clearTimeout(releaseDragLayerTimer);
+      releaseDragLayerTimer = setTimeout(() => {
+        dragLayerActive = false;
+        shelf.style.removeProperty("will-change");
+        releaseDragLayerTimer = undefined;
+      }, 160);
+    };
 
     const flushDragScroll = () => {
       dragScrollFrame = undefined;
@@ -375,6 +393,8 @@ function MediaShelf({
       if (shelf.hasPointerCapture(activePointerId)) {
         shelf.releasePointerCapture(activePointerId);
       }
+
+      releaseDragLayer();
     };
 
     const handlePointerDown = (event: PointerEvent) => {
@@ -407,6 +427,12 @@ function MediaShelf({
         shelf.dataset.dragging = "true";
         shelf.style.scrollBehavior = "auto";
         shelf.setPointerCapture(event.pointerId);
+        promoteDragLayer();
+
+        // Apply the first dragged position now. Deferring this initial write
+        // to the next frame makes a mouse drag feel one frame behind.
+        shelf.scrollLeft = startScrollLeft - distance;
+        return;
       }
 
       event.preventDefault();
@@ -445,8 +471,10 @@ function MediaShelf({
 
       if (suppressClickTimer) clearTimeout(suppressClickTimer);
       if (dragScrollFrame !== undefined) cancelAnimationFrame(dragScrollFrame);
+      if (releaseDragLayerTimer) clearTimeout(releaseDragLayerTimer);
       delete shelf.dataset.dragging;
       shelf.style.removeProperty("scroll-behavior");
+      shelf.style.removeProperty("will-change");
     };
   }, []);
 

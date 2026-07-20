@@ -25,7 +25,7 @@ export default function HeroCardMetadata({
             <span className="">{title}</span>
           </p>
 
-          <div className="line-clamp-2 mb-0 text-(--metadata-primary-color,var(--systemPrimary-onDark)) [font:var(--subhead)]">
+          <div className="line-clamp-2 mb-0 text-(--metadata-tertiary-color,var(--metadata-primary-color,var(--systemPrimary-onDark))) [font:var(--subhead)]">
             <p className="-outline-offset-2 [outline-width:2px] pointer-events-auto line-clamp-1">
               <span className="inline-flex">{description ?? subtitle}</span>
             </p>

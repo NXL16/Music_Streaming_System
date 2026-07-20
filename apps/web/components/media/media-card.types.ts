@@ -25,6 +25,7 @@ export interface MediaCardProps {
     main: string;
     textPrimary?: string;
     textSecondary?: string;
+    textTertiary?: string;
     textScrimColor?: string;
     textScrimOpacity?: number;
   };

@@ -18,6 +18,7 @@ export default function HeroCard(props: HeroCardProps) {
       artworkColor={props.artworkColors.main}
       metadataTextPrimary={props.artworkColors.textPrimary}
       metadataTextSecondary={props.artworkColors.textSecondary}
+      metadataTextTertiary={props.artworkColors.textTertiary}
     >
       <div className="h-full rounded-(--global-border-radius-xlarge,14px) overflow-hidden relative z-(--z-default)">
         <div className="h-full relative z-[calc(var(--z-default)-1)]">
@@ -32,7 +33,7 @@ export default function HeroCard(props: HeroCardProps) {
               aria-hidden="true"
               className="absolute inset-0 pointer-events-none z-2"
               style={{
-                background: `linear-gradient(to bottom, transparent 42%, ${props.artworkColors.textScrimColor} 100%)`,
+                background: `linear-gradient(to bottom, transparent 64%, ${props.artworkColors.textScrimColor} 100%)`,
                 opacity: props.artworkColors.textScrimOpacity,
               }}
             />

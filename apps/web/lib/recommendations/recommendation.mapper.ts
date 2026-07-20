@@ -74,8 +74,11 @@ function contrastTextColor(backgroundColor: string) {
 }
 
 type HeroTextPalette = {
+  bgColor?: string;
   textColor1?: string;
   textColor2?: string;
+  textColor3?: string;
+  textColor4?: string;
   scrimColor?: string;
   scrimOpacity?: number;
 };
@@ -93,8 +96,11 @@ function getHeroTextPalette(artwork: Artwork): HeroTextPalette | undefined {
 
   const value = palette as HeroTextPalette;
   return {
+    bgColor: value.bgColor,
     textColor1: value.textColor1,
     textColor2: value.textColor2,
+    textColor3: value.textColor3,
+    textColor4: value.textColor4,
     scrimColor: value.scrimColor,
     scrimOpacity:
       typeof value.scrimOpacity === "number" ? value.scrimOpacity : undefined,
@@ -353,14 +359,16 @@ export function mapHomeRecommendations(
       const artwork = selectArtwork(resource.attributes, videoAsset, isHero);
       if (!artwork?.url) return [];
 
-      const color = `#${artwork.bgColor?.replace(/^#/, "") || "2c2c2e"}`;
       const heroPalette = isHero ? getHeroTextPalette(artwork) : undefined;
+      const color =
+        formatColor(heroPalette?.bgColor ?? artwork.bgColor) ?? "#2c2c2e";
       const primaryTextColor =
         formatColor(heroPalette?.textColor1 ?? artwork.textColor1) ??
         contrastTextColor(color);
       const secondaryTextColor =
         formatColor(heroPalette?.textColor2 ?? artwork.textColor2) ??
         primaryTextColor;
+      const tertiaryTextColor = formatColor(heroPalette?.textColor3);
       const scrimColor = formatColor(heroPalette?.scrimColor);
       const subtitle = getSubtitle(resource.attributes);
       const notes = resource.attributes.plainEditorialNotes;
@@ -396,6 +404,7 @@ export function mapHomeRecommendations(
             main: color,
             textPrimary: primaryTextColor,
             textSecondary: secondaryTextColor,
+            ...(tertiaryTextColor ? { textTertiary: tertiaryTextColor } : {}),
             ...(scrimColor && heroPalette?.scrimOpacity !== undefined
               ? {
                   textScrimColor: scrimColor,
