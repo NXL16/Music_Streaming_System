@@ -7,6 +7,7 @@ import { useAuthStore } from "@/lib/auth/auth-store";
 
 function getPageTitle(pathname: string) {
   if (pathname.startsWith("/home")) return "Trang chủ";
+  if (pathname.startsWith("/search")) return "Tìm kiếm";
   if (pathname.startsWith("/library")) return "Library";
   if (pathname.startsWith("/dashboard")) return "Dashboard";
   if (pathname.startsWith("/settings/security")) return "Security";

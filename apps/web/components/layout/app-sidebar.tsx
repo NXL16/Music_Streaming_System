@@ -24,7 +24,7 @@ const primaryNavigationItems: SidebarItem[] = [
   {
     key: "search",
     label: "Search",
-    href: "/#",
+    href: "/search",
     icon: (
       <svg height="24" viewBox="0 0 24 24" width="24" aria-hidden="true">
         <path

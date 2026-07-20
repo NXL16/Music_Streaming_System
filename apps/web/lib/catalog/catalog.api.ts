@@ -52,6 +52,20 @@ export async function getCatalogResources(
   return response.data;
 }
 
+export async function searchCatalog(
+  query: string,
+  signal?: AbortSignal,
+) {
+  const response = await http.get<CatalogResponse>(
+    `/catalog/${STOREFRONT}/search`,
+    {
+      params: { q: query },
+      signal,
+    },
+  );
+  return response.data;
+}
+
 export async function getCatalogArtist(
   artistId: string,
   signal?: AbortSignal,
