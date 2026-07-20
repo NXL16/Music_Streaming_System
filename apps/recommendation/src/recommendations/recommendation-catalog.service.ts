@@ -255,7 +255,8 @@ export class RecommendationCatalogService implements OnModuleInit {
 
   private truncateStringArray(value: unknown, maxItemLength: number): unknown {
     if (!Array.isArray(value)) return value;
-    return value.map((item) =>
+    const values: unknown[] = value;
+    return values.map((item) =>
       typeof item === 'string' && item.length > maxItemLength
         ? item.slice(0, maxItemLength)
         : item,

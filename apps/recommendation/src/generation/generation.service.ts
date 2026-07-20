@@ -424,13 +424,19 @@ export class GenerationService {
       });
     }
 
+    // Two catalog album IDs can represent one release. The global page already
+    // collapses them; the personalised page must do the same or the listener
+    // sees the same album twice across their shelves.
+    const publishableSections =
+      await this.deduplicateSemanticAlbumItems(sections);
+
     await this.recommendationsService.replaceHomeRecommendations({
       userId,
       name,
       locale,
       timezone,
       platform,
-      sections,
+      sections: publishableSections,
       resources: [],
       scope: RecommendationPageScope.RECOMMENDATION_PAGE_SCOPE_USER,
       status: RecommendationPageStatus.RECOMMENDATION_PAGE_STATUS_DRAFT,
@@ -2283,17 +2289,17 @@ export class GenerationService {
     const artist = this.normalizedRecommendationText(
       album.artistName || album.subtitle,
     );
-    if (!name || !artist || !album.releaseDate || album.trackCount <= 0) {
+    if (!name || !artist || !album.releaseDate) {
       return `id:${album.resourceId}`;
     }
 
-    return [
-      name,
-      artist,
-      album.releaseDate,
-      album.trackCount,
-      album.isSingle ? 'single' : 'album',
-    ].join('::');
+    // trackCount and isSingle are intentionally excluded: a deluxe/standard
+    // pair or a provider tracklist that differs by one bonus track is still one
+    // release to a listener, and the same release can surface as a single
+    // (≤3 tracks) and an album (>3 tracks) across two collection IDs. Keeping
+    // either field let those variants show as two identical-looking cards. This
+    // matches the catalog guard's fingerprint and the seed tool's release key.
+    return [name, artist, album.releaseDate].join('::');
   }
 
   private normalizedRecommendationText(value: string): string {
