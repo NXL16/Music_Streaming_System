@@ -23,6 +23,9 @@ type WorkerSongCompletionEvent = {
   format?: string | null;
   error_message?: string | null;
   retry_count?: number | null;
+  mood_tags?: string[] | null;
+  mood_analysis_version?: string | null;
+  mood_analysis_scores?: Record<string, number> | null;
 };
 
 @Injectable()

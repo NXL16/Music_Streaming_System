@@ -425,6 +425,7 @@ message SaveCatalogSongDraftRequest {
   bool is_vocal_attenuation_allowed = 28;
   string artwork_asset_id = 29;
   string editorial_artwork_asset_id = 30;
+  repeated string mood_tags = 31;
 }
 
 message SaveCatalogAlbumDraftRequest {
@@ -630,6 +631,7 @@ message CatalogSongAttributes {
   bool is_vocal_attenuation_allowed = 25;
   string artwork_asset_id = 26;
   string editorial_artwork_asset_id = 27;
+  repeated string mood_tags = 28;
 }
 
 message CatalogAlbumAttributes {

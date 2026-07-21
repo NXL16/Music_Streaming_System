@@ -113,6 +113,9 @@ type WorkerSongCompletionEvent = {
   codec?: string | null;
   format?: string | null;
   error_message?: string | null;
+  mood_tags?: string[] | null;
+  mood_analysis_version?: string | null;
+  mood_analysis_scores?: Record<string, number> | null;
 };
 
 type AssetCleanupOutboxRepo = {
@@ -1004,6 +1007,18 @@ export class SongsService {
       format: succeeded ? (event.format ?? 'fmp4') : '',
       errorMessage: event.error_message ?? '',
     });
+
+    if (succeeded && event.mood_tags?.length) {
+      await this.prisma.song.update({
+        where: { id: event.song_id },
+        data: {
+          moodTags: event.mood_tags,
+          moodAnalysisVersion: event.mood_analysis_version ?? '',
+          moodAnalysisScores: event.mood_analysis_scores ?? undefined,
+          moodAnalyzedAt: new Date(),
+        },
+      });
+    }
   }
 
   private mapEntityToSummary(

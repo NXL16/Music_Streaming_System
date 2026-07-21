@@ -83,6 +83,7 @@ export class CatalogAuthoringService {
   ): Promise<CatalogDraftInfo> {
     const artistIds = this.list(request.artistIds);
     const audioTraits = this.list(request.audioTraits);
+    const moodTags = this.list(request.moodTags);
     const composerIds = this.list(request.composerIds);
     const genreNames = this.list(request.genreNames);
     const offers = this.list(request.offers);
@@ -92,6 +93,7 @@ export class CatalogAuthoringService {
     this.requireText(request.name, 'name', 255);
     this.validateCredits(artistIds, composerIds);
     this.validateStringArray(audioTraits, 'audio_traits', 64);
+    this.validateStringArray(moodTags, 'mood_tags', 64);
     this.validateStringArray(genreNames, 'genre_names', 128);
     this.validateDate(request.releaseDate, 'release_date');
     this.rejectDirectAssetMetadata(request.artwork, 'artwork');
@@ -119,6 +121,7 @@ export class CatalogAuthoringService {
         offers: offers.map((offer) => this.unwrapStruct(offer) ?? {}),
         audioLocale: (request.audioLocale || '').trim(),
         audioTraits,
+        moodTags,
         composerName: (request.composerName || '').trim(),
         contentRating: (request.contentRating || '').trim(),
         discNumber: Math.max(1, request.discNumber || 1),
@@ -503,6 +506,13 @@ export class CatalogAuthoringService {
         offers: this.jsonNullable(payload.offers),
         audioLocale: this.string(payload.audioLocale),
         audioTraits: this.strings(payload.audioTraits),
+        // Keep an automatic mood result produced while audio was ingested when
+        // this draft has no curated override.  A non-empty draft value remains
+        // the editor's explicit choice.
+        moodTags:
+          this.strings(payload.moodTags).length > 0
+            ? this.strings(payload.moodTags)
+            : undefined,
         composerName: this.string(payload.composerName),
         contentRating: this.string(payload.contentRating),
         discNumber: Math.max(1, this.integer(payload.discNumber, 1)),

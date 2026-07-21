@@ -672,6 +672,7 @@ export class CatalogService {
         offers: this.toStructArray(song.offers),
         audioLocale: song.audioLocale,
         audioTraits: song.audioTraits,
+        moodTags: song.moodTags,
         composerName: song.composerName,
         contentRating: song.contentRating,
         discNumber: song.discNumber,
