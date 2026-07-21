@@ -1,6 +1,7 @@
 use anyhow::Result;
 use redis::aio::ConnectionManager;
 use serde::Serialize;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Serialize)]
 pub struct SongCompletionEvent {
@@ -11,6 +12,12 @@ pub struct SongCompletionEvent {
     pub bitrate_kbps: Option<i32>,
     pub codec: Option<String>,
     pub format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mood_tags: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mood_analysis_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mood_analysis_scores: Option<BTreeMap<String, f64>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
 }

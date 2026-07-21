@@ -17,6 +17,9 @@ pub struct PipelineContext {
     pub encrypted_size_bytes: Option<usize>,
     pub duration: Option<f64>,
     pub output_key: Option<String>,
+    pub mood_tags: Vec<String>,
+    pub mood_analysis_version: Option<String>,
+    pub mood_analysis_scores: Option<std::collections::BTreeMap<String, f64>>,
 }
 
 impl PipelineContext {
@@ -30,6 +33,9 @@ impl PipelineContext {
             encrypted_size_bytes: None,
             duration: None,
             output_key: None,
+            mood_tags: Vec::new(),
+            mood_analysis_version: None,
+            mood_analysis_scores: None,
         }
     }
 }

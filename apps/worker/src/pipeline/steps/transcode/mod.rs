@@ -4,6 +4,7 @@ mod waveform;
 
 use crate::crypto::kdf::derive_song_key;
 use crate::metadata::client as metadata_client;
+use crate::mood_analysis;
 use crate::pipeline::context::PipelineContext;
 use aes::Aes256;
 use anyhow::Context;
@@ -242,6 +243,21 @@ pub async fn transcode(ctx: &mut PipelineContext) -> anyhow::Result<()> {
                     Vec::new()
                 }
             };
+
+        // Analyse the original temporary source before it is removed. A model
+        // failure never blocks upload readiness; it can be safely backfilled.
+        match mood_analysis::analyze_file(&waveform_source_path).await {
+            Ok(Some(result)) => {
+                ctx.mood_tags = result.mood_tags;
+                ctx.mood_analysis_version = Some(result.version);
+                ctx.mood_analysis_scores = Some(result.scores);
+            }
+            Ok(None) => {}
+            Err(err) => eprintln!(
+                "pipeline song_id={} warn=mood_analysis_failed error={}",
+                ctx.job.song_id, err
+            ),
+        }
 
         let metadata_started_at = Instant::now();
         metadata_client::update_technical_meta(

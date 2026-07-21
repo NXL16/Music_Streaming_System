@@ -31,6 +31,9 @@ pub async fn handle_with_options(
                 bitrate_kbps: Some(128),
                 codec: Some("aac".to_string()),
                 format: Some("fmp4".to_string()),
+                mood_tags: (!ctx.mood_tags.is_empty()).then_some(ctx.mood_tags),
+                mood_analysis_version: ctx.mood_analysis_version,
+                mood_analysis_scores: ctx.mood_analysis_scores,
                 error_message: None,
             };
 
@@ -47,6 +50,9 @@ pub async fn handle_with_options(
                     bitrate_kbps: None,
                     codec: None,
                     format: None,
+                    mood_tags: None,
+                    mood_analysis_version: None,
+                    mood_analysis_scores: None,
                     error_message: Some(e.to_string()),
                 };
                 let _ = redis.publish_song_completion(event).await;
