@@ -15,6 +15,8 @@ import { RecommendationCatalogService } from './recommendation-catalog.service';
 import { GenerationService } from '../generation/generation.service';
 import { CatalogSynchronizationService } from './catalog-synchronization.service';
 import { RecommendationEngineService } from '../generation/recommendation-engine.service';
+import { RecommendationRpcMetricsService } from '../common/observability/recommendation-rpc-metrics.service';
+import { RecommendationRpcMetricsInterceptor } from '../common/observability/recommendation-rpc-metrics.interceptor';
 
 @Module({
   imports: [
@@ -44,6 +46,8 @@ import { RecommendationEngineService } from '../generation/recommendation-engine
     CatalogSynchronizationService,
     GenerationService,
     RecommendationEngineService,
+    RecommendationRpcMetricsService,
+    RecommendationRpcMetricsInterceptor,
     InternalGrpcGuard,
   ],
   exports: [RecommendationsService],

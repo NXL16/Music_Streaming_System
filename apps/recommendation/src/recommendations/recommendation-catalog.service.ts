@@ -48,6 +48,7 @@ const LIMITED_STRING_FIELDS = new Set([
 const LIMITED_STRING_ARRAY_FIELDS = new Set([
   'artistNames',
   'audioTraits',
+  'moodTags',
   'genreNames',
 ]);
 

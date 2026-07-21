@@ -1,0 +1,5 @@
+-- RenameIndex
+ALTER INDEX "recommendation_interactions_resourceType_resourceId_occurredAt_" RENAME TO "recommendation_interactions_resourceType_resourceId_occurre_idx";
+
+-- RenameIndex
+ALTER INDEX "recommendation_interactions_sectionId_resourceType_resourceId_e" RENAME TO "recommendation_interactions_sectionId_resourceType_resource_idx";

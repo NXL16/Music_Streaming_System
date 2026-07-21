@@ -14,6 +14,9 @@ import {
   RecommendationResources,
   ReplaceHomeRecommendationsRequest,
   RefreshRecommendationSectionRequest,
+  RecordRecommendationInteractionRequest,
+  RecordRecommendationInteractionResponse,
+  RecommendationInteractionType,
 } from '@musical/shared-proto';
 import { PrismaService } from '../database/prisma.service';
 import { RpcException } from '@nestjs/microservices';
@@ -23,6 +26,7 @@ import {
   RecommendationPageScope as PrismaPageScope,
   RecommendationPageStatus as PrismaPageStatus,
   RecommendationPresentationMode as PrismaPresentationMode,
+  RecommendationInteractionType as PrismaInteractionType,
 } from '../generated/prisma/client';
 import { RecommendationCatalogService } from './recommendation-catalog.service';
 import { ListeningService, TasteProfile } from '../listening/listening.service';
@@ -47,6 +51,7 @@ const GLOBAL_SCOPE_KEY = 'GLOBAL';
 const GLOBAL_TIMEZONE = '*';
 const DEFAULT_DISPLAY_KIND = 'MusicCoverShelf';
 const HOME_PREVIEW_ITEM_LIMIT = 12;
+const INTERACTION_DEDUPE_WINDOW_MS = 30_000;
 const SYSTEM_DAILY_MIX_ID_PATTERN = /^daily-mix-[a-f0-9]{32}(?:-\d+)?$/;
 const SYSTEM_STATION_ID_PATTERN = /^station-for-you-[a-f0-9]{32}-\d+$/;
 const SUPPORTED_DISPLAY_KINDS = new Set([
@@ -168,6 +173,125 @@ export class RecommendationsService {
     private readonly listeningService: ListeningService,
   ) {}
 
+  async recordRecommendationInteraction(
+    request: RecordRecommendationInteractionRequest,
+  ): Promise<RecordRecommendationInteractionResponse> {
+    if (
+      !request.userId ||
+      !request.sectionId ||
+      !request.resourceType ||
+      !request.resourceId
+    ) {
+      return { success: false };
+    }
+    const eventTypes: Record<number, PrismaInteractionType> = {
+      [RecommendationInteractionType.RECOMMENDATION_INTERACTION_TYPE_IMPRESSION]:
+        PrismaInteractionType.IMPRESSION,
+      [RecommendationInteractionType.RECOMMENDATION_INTERACTION_TYPE_OPEN]:
+        PrismaInteractionType.OPEN,
+      [RecommendationInteractionType.RECOMMENDATION_INTERACTION_TYPE_PLAY]:
+        PrismaInteractionType.PLAY,
+      [RecommendationInteractionType.RECOMMENDATION_INTERACTION_TYPE_DISMISS]:
+        PrismaInteractionType.DISMISS,
+    };
+    const eventType = eventTypes[request.eventType];
+    if (!eventType) return { success: false };
+
+    // Feedback is accepted only for a card that was actually served on the
+    // caller's currently published Home (personal or global cold-start page).
+    // Besides preventing forged popularity signals, this keeps metrics tied to
+    // a concrete recommendation section and model version.
+    const servedItem = await this.prisma.recommendationSection.findFirst({
+      where: {
+        externalId: request.sectionId,
+        items: {
+          some: {
+            resourceType: request.resourceType,
+            resourceId: request.resourceId,
+          },
+        },
+        page: {
+          status: PrismaPageStatus.PUBLISHED,
+          OR: [
+            { scope: PrismaPageScope.GLOBAL },
+            {
+              scope: PrismaPageScope.USER,
+              userId: request.userId,
+            },
+          ],
+        },
+      },
+      select: { pageId: true },
+    });
+    if (!servedItem) return { success: false };
+
+    const occurredAt = new Date();
+    const dedupeKey = this.interactionDedupeKey(request, eventType, occurredAt);
+    try {
+      await this.prisma.recommendationInteraction.create({
+        data: {
+          userId: request.userId,
+          pageId: servedItem.pageId,
+          sectionId: request.sectionId,
+          resourceType: request.resourceType,
+          resourceId: request.resourceId,
+          position: Math.min(1_000, Math.max(0, request.position)),
+          modelVersion: Math.min(1_000_000, Math.max(1, request.modelVersion)),
+          eventType,
+          dedupeKey,
+          occurredAt,
+        },
+      });
+    } catch (error) {
+      // Duplicate delivery is expected for browser retries, multiple tabs,
+      // and at-least-once network delivery. The unique key is the atomic
+      // server-side guard; never make a telemetry retry fail the UI.
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        return { success: true };
+      }
+      throw error;
+    }
+
+    // A strong positive/negative action should affect the next Home request;
+    // impressions and ordinary opens are accumulated without rebuilding a
+    // page for every scroll or navigation.
+    if (
+      eventType === PrismaInteractionType.PLAY ||
+      eventType === PrismaInteractionType.DISMISS
+    ) {
+      await this.prisma.recommendationPage.updateMany({
+        where: {
+          scope: PrismaPageScope.USER,
+          userId: request.userId,
+          status: PrismaPageStatus.PUBLISHED,
+        },
+        data: { staleAfter: new Date() },
+      });
+    }
+    return { success: true };
+  }
+
+  private interactionDedupeKey(
+    request: RecordRecommendationInteractionRequest,
+    eventType: PrismaInteractionType,
+    occurredAt: Date,
+  ): string {
+    const bucket = Math.floor(
+      occurredAt.getTime() / INTERACTION_DEDUPE_WINDOW_MS,
+    );
+    return [
+      request.userId,
+      request.sectionId,
+      request.resourceType,
+      request.resourceId,
+      eventType,
+      bucket,
+    ].join(':');
+  }
+
   async upsertCatalogResources(resources: CatalogResource[]): Promise<number> {
     const catalogResources = resources.filter(
       (resource) => resource.id && resource.type && resource.attributes,
@@ -280,9 +404,13 @@ export class RecommendationsService {
       }
     }
 
+    // Global is already allocated and validated by the generation pipeline.
+    // Do not run it through the personalised Home preview transformer: doing
+    // so can silently change an editorial page while it is being used as the
+    // cold-start fallback for a signed-in listener.
     return request.userId
       ? this.personalizeHomeResponse(response, request.userId, name)
-      : this.deduplicateHomePreviewResources(response);
+      : response;
   }
 
   private homeResponseForPage(
@@ -308,48 +436,26 @@ export class RecommendationsService {
       return userResponse.resources ? userResponse : globalResponse;
     }
 
-    const hero = globalResponse.data.find(
-      (ref) => ref.id === 'global-featured-albums',
-    );
-    const userSectionKeys = new Set(
-      userResponse.data.map((ref) => `${ref.type}:${ref.id}`),
+    const userHero = userResponse.data.find(
+      (ref) => ref.id === 'user-top-picks',
     );
     const userSections = userResponse.data.filter(
-      (ref) => `${ref.type}:${ref.id}` !== `${hero?.type}:${hero?.id}`,
+      (ref) => ref.id !== userHero?.id,
     );
-    const globalFallback = globalResponse.data.filter((ref) => {
-      const key = `${ref.type}:${ref.id}`;
-      return key !== `${hero?.type}:${hero?.id}` && !userSectionKeys.has(key);
-    });
 
-    return {
-      data: hero ? [hero, ...userSections, ...globalFallback] : [
-        ...userSections,
-        ...globalFallback,
-      ],
-      resources: {
-        personalRecommendation: {
-          ...globalResponse.resources.personalRecommendation,
-          ...userResponse.resources.personalRecommendation,
-        },
-        albums: { ...globalResponse.resources.albums, ...userResponse.resources.albums },
-        playlists: {
-          ...globalResponse.resources.playlists,
-          ...userResponse.resources.playlists,
-        },
-        stations: {
-          ...globalResponse.resources.stations,
-          ...userResponse.resources.stations,
-        },
-        editorialItems: {
-          ...globalResponse.resources.editorialItems,
-          ...userResponse.resources.editorialItems,
-        },
-        artists: { ...globalResponse.resources.artists, ...userResponse.resources.artists },
-        songs: { ...globalResponse.resources.songs, ...userResponse.resources.songs },
-      },
-      meta: globalResponse.meta,
-    };
+    // A Home response has exactly one owner. Combining a personalised page
+    // with the Global editorial page made equivalent shelves and albums fight
+    // each other. Global is therefore used only for cold-start; once a user
+    // page exists, all cards and destinations must come from that page.
+    if (userHero || userSections.length > 0) {
+      return {
+        data: userHero ? [userHero, ...userSections] : userSections,
+        resources: userResponse.resources,
+        meta: userResponse.meta,
+      };
+    }
+
+    return globalResponse;
   }
 
   async getRecommendationSection(
@@ -981,7 +1087,9 @@ export class RecommendationsService {
     insertedRef: RecommendationRef,
   ): RecommendationRef[] {
     const filtered = refs.filter((ref) => ref.id !== insertedRef.id);
-    const heroIndex = filtered.findIndex((ref) => ref.id === 'global-featured-albums');
+    const heroIndex = filtered.findIndex(
+      (ref) => ref.id === 'global-top-picks' || ref.id === 'user-top-picks',
+    );
     if (heroIndex < 0) return [insertedRef, ...filtered];
 
     return [
@@ -1705,6 +1813,7 @@ export class RecommendationsService {
       case 'stations':
         return this.compactObject({
           ...common,
+          description: this.description(resource),
           editorialArtwork: this.jsonValue(resource?.editorialArtwork),
           editorialVideo: this.jsonValue(resource?.editorialVideo),
           isLive: resource?.isLive ?? false,
@@ -1854,6 +1963,11 @@ export class RecommendationsService {
     this.optionalStringArray(
       attributes.audioTraits,
       'resource.attributes.audioTraits',
+      64,
+    );
+    this.optionalStringArray(
+      attributes.moodTags,
+      'resource.attributes.moodTags',
       64,
     );
     this.optionalStringArray(
@@ -2301,6 +2415,7 @@ export class RecommendationsService {
       editorialNotesShort: this.stringValue(plainEditorialNotes?.short),
       editorialNotes: this.stringValue(plainEditorialNotes?.standard),
       audioTraits: this.stringArrayValue(attributes.audioTraits),
+      moodTags: this.stringArrayValue(attributes.moodTags),
       genreNames: this.stringArrayValue(attributes.genreNames),
       contentRating: this.stringValue(attributes.contentRating),
       copyright: this.stringValue(attributes.copyright),
@@ -2375,6 +2490,7 @@ export class RecommendationsService {
     { column: 'editorialNotesShort', kind: 'text' },
     { column: 'editorialNotes', kind: 'text' },
     { column: 'audioTraits', kind: 'array' },
+    { column: 'moodTags', kind: 'array' },
     { column: 'genreNames', kind: 'array' },
     { column: 'contentRating', kind: 'text' },
     { column: 'copyright', kind: 'text' },

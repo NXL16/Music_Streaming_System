@@ -24,6 +24,13 @@ enum RecommendationPresentationMode {
     FIXED
 }
 
+enum RecommendationInteractionType {
+    IMPRESSION
+    OPEN
+    PLAY
+    DISMISS
+}
+
 model RecommendationPage {
     id          String                   @id @default(uuid())
     name        String                   @db.VarChar(64) // listen-now
@@ -113,6 +120,27 @@ model RecommendationSectionItem {
     @@map("recommendation_section_items")
 }
 
+model RecommendationInteraction {
+    id           String                        @id @default(uuid())
+    userId       String                        @db.VarChar(128)
+    pageId       String?                       @db.VarChar(128)
+    sectionId    String                        @db.VarChar(128)
+    resourceType String                        @db.VarChar(64)
+    resourceId   String                        @db.VarChar(128)
+    position     Int                           @default(0)
+    modelVersion Int                           @default(1)
+    eventType    RecommendationInteractionType
+    dedupeKey    String?                       @unique @db.VarChar(512)
+    occurredAt   DateTime                      @default(now()) @db.Timestamptz
+
+    @@index([userId, occurredAt])
+    @@index([userId, resourceType, occurredAt])
+    @@index([resourceType, occurredAt])
+    @@index([sectionId, resourceType, resourceId, eventType])
+    @@index([resourceType, resourceId, occurredAt])
+    @@map("recommendation_interactions")
+}
+
 model RecommendationResourceSnapshot {
     id           String @id @default(uuid())
     resourceType String @db.VarChar(64)
@@ -144,6 +172,7 @@ model RecommendationResourceSnapshot {
     editorialNotes      String @default("") @db.Text
 
     audioTraits String[] @default([])
+    moodTags    String[] @default([])
     genreNames  String[] @default([])
 
     contentRating        String  @default("") @db.VarChar(64)
@@ -250,6 +279,7 @@ model UserListeningStats {
     @@index([userId, lastPlayedAt])
     @@index([userId, playCount])
     @@index([songId, playCount])
+    @@index([songId, lastPlayedAt])
     @@index([albumId, lastPlayedAt])
     @@index([playlistId, lastPlayedAt])
     @@index([stationId, lastPlayedAt])

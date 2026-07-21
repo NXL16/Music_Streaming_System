@@ -16,6 +16,7 @@ service RecommendationService {
   rpc RecordListeningEvent(RecordListeningEventRequest) returns (RecordListeningEventResponse);
   rpc GenerateRecommendations(GenerateRecommendationsRequest) returns (GetHomeRecommendationsResponse);
   rpc GetListeningAnalytics(GetListeningAnalyticsRequest) returns (ListeningAnalyticsResponse);
+  rpc RecordRecommendationInteraction(RecordRecommendationInteractionRequest) returns (RecordRecommendationInteractionResponse);
 }
 
 enum RecommendationPageScope {
@@ -177,6 +178,28 @@ enum ListeningEventType {
   LISTENING_EVENT_TYPE_PLAY_START    = 1;
   LISTENING_EVENT_TYPE_PLAY_COMPLETE = 2;
   LISTENING_EVENT_TYPE_SKIP          = 3;
+}
+
+enum RecommendationInteractionType {
+  RECOMMENDATION_INTERACTION_TYPE_UNSPECIFIED = 0;
+  RECOMMENDATION_INTERACTION_TYPE_IMPRESSION = 1;
+  RECOMMENDATION_INTERACTION_TYPE_OPEN = 2;
+  RECOMMENDATION_INTERACTION_TYPE_PLAY = 3;
+  RECOMMENDATION_INTERACTION_TYPE_DISMISS = 4;
+}
+
+message RecordRecommendationInteractionRequest {
+  string user_id = 1;
+  string section_id = 2;
+  string resource_type = 3;
+  string resource_id = 4;
+  int32 position = 5;
+  int32 model_version = 6;
+  RecommendationInteractionType event_type = 7;
+}
+
+message RecordRecommendationInteractionResponse {
+  bool success = 1;
 }
 
 message RecordListeningEventRequest {

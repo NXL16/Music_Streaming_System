@@ -29,6 +29,9 @@ const DAILY_MIX_MIN_TRACKS = 5;
 const DAILY_MIX_LIMIT = 4;
 const STATION_TRACK_LIMIT = 80;
 const STATION_MIN_TRACKS = 5;
+// Small local catalogs should still expose a truthful mood station once it has
+// enough variety to avoid immediately repeating a track.
+const MOOD_STATION_MIN_TRACKS = 5;
 const STATION_LIMIT = 8;
 const SYSTEM_VARIANT_MAX_OVERLAP_RATIO = 0.6;
 const SYSTEM_VARIANT_MIN_NOVEL_RATIO = 0.25;
@@ -36,9 +39,8 @@ const MIN_LISTENED_SONGS = 3;
 const HOME_SHELF_ITEM_MIN = 10;
 const HOME_SHELF_ITEM_LIMIT = 40;
 const HOME_SHELF_PREVIEW_LIMIT = 16;
-const GLOBAL_SHELF_MIN = 16;
-const GLOBAL_SHELF_LIMIT = 20;
-const GLOBAL_PUBLISH_MIN_SHELVES = 3;
+const GLOBAL_PUBLISH_MIN_SHELVES = 12;
+const GLOBAL_SHELF_LIMIT = 22;
 const GLOBAL_HERO_LIMIT = 10;
 const GLOBAL_GENRE_SECTION_LIMIT = 8;
 
@@ -84,9 +86,14 @@ type SnapshotRow = {
   resourceType: string;
   artistName: string;
   genreNames: string[];
+  audioTraits?: string[];
+  moodTags?: string[];
   releaseDate: string;
   isSingle: boolean;
 };
+
+type MoodStationProfile =
+  (typeof PRODUCTION_RECOMMENDATION_POLICY.moodStations)[number];
 
 type AlbumShelfCandidate = {
   resourceId: string;
@@ -147,7 +154,7 @@ export class GenerationService {
       select: {
         staleAfter: true,
         sections: {
-          where: { externalId: 'global-featured-now' },
+          where: { externalId: 'global-top-picks' },
           select: { version: true },
         },
       },
@@ -280,16 +287,19 @@ export class GenerationService {
     }
 
     const globalShelves = await this.recommendationEngine.generateGlobalShelves();
-    const sections: PersonalRecommendationResource[] = globalShelves.map(
+    const albumSections = globalShelves.map(
       (shelf) => this.buildEngineSection(shelf),
     );
 
+    const moodStations = await this.buildGlobalMoodStationsSection();
     const playlists = await this.buildCatalogBrowseSection(
-      'global-playlists', 'Playlists', 'playlists', 'MusicCoverShelf',
+      'global-playlists', 'Playlist Picks', 'playlists', 'MusicCoverShelf',
     );
-    if (playlists && sections.length < GLOBAL_SHELF_LIMIT) {
-      sections.push(playlists);
-    }
+    const sections = this.composeGlobalHomeSections(
+      albumSections,
+      playlists,
+      moodStations,
+    );
 
     if (sections.length === 0) {
       return this.recommendationsService.getHomeRecommendations({
@@ -301,13 +311,13 @@ export class GenerationService {
       });
     }
 
-    const sectionsWithoutDuplicateAlbums =
-      await this.deduplicateSemanticAlbumItems(
-        this.removeDuplicateSections(sections),
-      );
-    const publishableSections = this.diversifyHomeAlbumPreviews(
-      sectionsWithoutDuplicateAlbums,
-    ).slice(0, GLOBAL_SHELF_LIMIT);
+    // Global is an editorial page, not one personalised queue. It may reuse a
+    // release across genuinely different topics when the local catalog is
+    // small; removing every repeated card was what collapsed Home to 3 shelves.
+    const publishableSections = this.removeDuplicateSections(sections).slice(
+      0,
+      GLOBAL_SHELF_LIMIT,
+    );
 
     // Never replace a usable Home page with a thin, half-populated page while
     // catalog ingestion is still in progress. The user will continue to see
@@ -407,6 +417,17 @@ export class GenerationService {
     const sections = PRODUCTION_RECOMMENDATION_POLICY.personalizedOrder
       .map((slot) => systemSections.get(slot) ?? shelfById.get(`user-${slot}`))
       .filter((section): section is PersonalRecommendationResource => Boolean(section));
+
+    const sectionIds = new Set(sections.map((section) => section.id));
+    for (const shelf of shelves) {
+      const section = shelfById.get(shelf.id);
+      if (!section || sectionIds.has(section.id)) continue;
+      sections.push(section);
+      sectionIds.add(section.id);
+      if (sections.length >= PRODUCTION_RECOMMENDATION_POLICY.maxHomeShelves) {
+        break;
+      }
+    }
 
     if (sections.length === 0) {
       return this.recommendationsService.getHomeRecommendations({
@@ -521,6 +542,315 @@ export class GenerationService {
     return result;
   }
 
+  /**
+   * Personalized track lists blend the listener's direct taste profile with two independent
+   * discovery signals: qualified popularity and neighbours with overlapping
+   * listening histories. This keeps the mix personal without becoming an
+   * echo chamber of only artists the listener already knows.
+   */
+  private async rankPersonalizedTracks(
+    userId: string,
+    candidates: SnapshotRow[],
+    profile: TasteProfile,
+    limit: number,
+    maxPerArtist: number,
+  ): Promise<ScoredItem[]> {
+    const candidateIds = candidates.map((candidate) => candidate.resourceId);
+    const [popularity, collaborative] = await Promise.all([
+      this.dailyMixPopularityScores(candidateIds),
+      this.dailyMixCollaborativeScores(
+        userId,
+        [...profile.listenedSongIds],
+        candidateIds,
+      ),
+    ]);
+    const scored = candidates
+      .map((candidate) => ({
+        id: candidate.resourceId,
+        type: candidate.resourceType,
+        artistName: candidate.artistName,
+        score:
+          this.scoreSong(candidate, profile) * 0.65 +
+          (popularity.get(candidate.resourceId) ?? 0) * 0.15 +
+          (collaborative.get(candidate.resourceId) ?? 0) * 0.2,
+      }))
+      .sort(
+        (left, right) =>
+          right.score - left.score || left.id.localeCompare(right.id),
+      );
+
+    const artistCounts = new Map<string, number>();
+    const result: ScoredItem[] = [];
+    for (const item of scored) {
+      if (result.length >= limit) break;
+      if ((artistCounts.get(item.artistName) ?? 0) >= maxPerArtist) {
+        continue;
+      }
+      artistCounts.set(item.artistName, (artistCounts.get(item.artistName) ?? 0) + 1);
+      result.push(item);
+    }
+    return result;
+  }
+
+  /**
+   * Mood names are promises to the listener, not display-only labels. A song
+   * must carry a matching audio/mood trait or a deliberately mapped genre to
+   * be eligible; unrelated personal taste never fills a sparse mood station.
+   */
+  private async rankMoodStationTracks(
+    userId: string,
+    candidates: Array<SnapshotRow & { attributes?: unknown }>,
+    profile: TasteProfile,
+    mood: MoodStationProfile,
+  ): Promise<ScoredItem[]> {
+    const eligible = candidates
+      .map((candidate) => ({
+        candidate,
+        moodScore: this.moodMatchScore(candidate, mood),
+      }))
+      .filter(({ moodScore }) => moodScore > 0);
+    if (eligible.length < MOOD_STATION_MIN_TRACKS) return [];
+
+    const personalized = await this.rankPersonalizedTracks(
+      userId,
+      eligible.map(({ candidate }) => candidate),
+      profile,
+      eligible.length,
+      DAILY_MIX_MAX_PER_ARTIST,
+    );
+    const personalizedScores = new Map(
+      personalized.map((item) => [item.id, item.score]),
+    );
+    const maxPersonalizedScore = Math.max(1, ...personalizedScores.values());
+
+    return eligible
+      .map(({ candidate, moodScore }) => ({
+        id: candidate.resourceId,
+        type: candidate.resourceType,
+        artistName: candidate.artistName,
+        score:
+          moodScore * 0.8 +
+          ((personalizedScores.get(candidate.resourceId) ?? 0) /
+            maxPersonalizedScore) *
+            0.2,
+      }))
+      .sort(
+        (left, right) =>
+          right.score - left.score || left.id.localeCompare(right.id),
+      );
+  }
+
+  private moodMatchScore(
+    song: Pick<SnapshotRow, 'genreNames' | 'audioTraits' | 'moodTags'> & {
+      attributes?: unknown;
+    },
+    mood: MoodStationProfile,
+  ) {
+    const traits = this.moodTokens(
+      song.audioTraits ?? [],
+      song.moodTags ?? [],
+      song.attributes,
+    );
+    const genres = song.genreNames.map((genre) => this.normalizeMoodToken(genre));
+    const traitMatches = mood.traits.filter((term) =>
+      this.hasMoodTerm(traits, term),
+    ).length;
+    const genreMatches = mood.genres.filter((genre) =>
+      this.hasMoodTerm(genres, genre),
+    ).length;
+    if (
+      traitMatches === 0 &&
+      (!mood.allowGenreFallback || genreMatches === 0)
+    ) {
+      return 0;
+    }
+
+    const avoided = mood.avoidTraits.some((term) =>
+      this.hasMoodTerm(traits, term),
+    );
+    const traitScore = traitMatches / mood.traits.length;
+    const genreScore = genreMatches / mood.genres.length;
+    return Math.max(0, traitScore * 0.8 + genreScore * 0.2 - (avoided ? 0.45 : 0));
+  }
+
+  private moodTokens(
+    audioTraits: string[],
+    moodTags: string[],
+    attributes?: unknown,
+  ) {
+    const attributeTags = isRecord(attributes)
+      ? ['moods', 'moodTags', 'tags'].flatMap((key) => {
+          const value = attributes[key];
+          return Array.isArray(value)
+            ? value.filter((item): item is string => typeof item === 'string')
+            : typeof value === 'string'
+              ? [value]
+              : [];
+        })
+      : [];
+    return [...audioTraits, ...moodTags, ...attributeTags].map((value) =>
+      this.normalizeMoodToken(value),
+    );
+  }
+
+  private normalizeMoodToken(value: string) {
+    return value.trim().toLowerCase().replace(/[\s_-]+/g, '-');
+  }
+
+  private hasMoodTerm(tokens: string[], term: string) {
+    const normalizedTerm = this.normalizeMoodToken(term);
+    return tokens.some(
+      (token) =>
+        token === normalizedTerm ||
+        token.startsWith(`${normalizedTerm}-`) ||
+        token.endsWith(`-${normalizedTerm}`),
+    );
+  }
+
+  private async dailyMixPopularityScores(songIds: string[]) {
+    if (!songIds.length) return new Map<string, number>();
+    const rows = await this.prisma.userListeningStats.groupBy({
+      by: ['songId'],
+      where: { songId: { in: songIds }, playCount: { gt: 0 } },
+      _sum: { playCount: true, completionCount: true, skipCount: true },
+      orderBy: { _sum: { playCount: 'desc' } },
+    });
+    const raw = new Map(
+      rows.map((row) => {
+        const plays = row._sum.playCount ?? 0;
+        const engagement = Math.max(
+          0,
+          (row._sum.completionCount ?? 0) + plays * 0.25 - (row._sum.skipCount ?? 0),
+        );
+        return [row.songId, engagement] as const;
+      }),
+    );
+    const maximum = Math.max(1, ...raw.values());
+    return new Map([...raw].map(([id, score]) => [id, score / maximum]));
+  }
+
+  private async dailyMixCollaborativeScores(
+    userId: string,
+    listenedSongIds: string[],
+    candidateSongIds: string[],
+  ) {
+    if (!listenedSongIds.length || !candidateSongIds.length) {
+      return new Map<string, number>();
+    }
+    const historyStart = new Date(
+      Date.now() - PRODUCTION_RECOMMENDATION_POLICY.historyWindowDays * 86_400_000,
+    );
+    const overlaps = await this.prisma.userListeningStats.findMany({
+      where: {
+        userId: { not: userId },
+        songId: { in: listenedSongIds },
+        playCount: { gt: 0 },
+        lastPlayedAt: { gte: historyStart },
+      },
+      select: { userId: true, playCount: true, completionCount: true, skipCount: true },
+      orderBy: [{ lastPlayedAt: 'desc' }, { userId: 'asc' }, { songId: 'asc' }],
+      take: PRODUCTION_RECOMMENDATION_POLICY.collaborativeOverlapLimit,
+    });
+    const neighbours = new Map<string, number>();
+    for (const row of overlaps) {
+      const signal = Math.max(
+        0,
+        row.completionCount + row.playCount * 0.25 - row.skipCount,
+      );
+      neighbours.set(row.userId, (neighbours.get(row.userId) ?? 0) + signal);
+    }
+    const topNeighbours = [...neighbours.entries()]
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+      .slice(0, PRODUCTION_RECOMMENDATION_POLICY.collaborativeNeighbourLimit);
+    if (!topNeighbours.length) return new Map<string, number>();
+
+    const neighbourWeights = new Map(topNeighbours);
+    const rows = await this.prisma.userListeningStats.findMany({
+      where: {
+        userId: { in: topNeighbours.map(([id]) => id) },
+        songId: { in: candidateSongIds },
+        playCount: { gt: 0 },
+        lastPlayedAt: { gte: historyStart },
+      },
+      select: { userId: true, songId: true, playCount: true, completionCount: true, skipCount: true },
+      orderBy: [
+        { playCount: 'desc' },
+        { lastPlayedAt: 'desc' },
+        { userId: 'asc' },
+        { songId: 'asc' },
+      ],
+      take: PRODUCTION_RECOMMENDATION_POLICY.collaborativeCandidateLimit,
+    });
+    const raw = new Map<string, number>();
+    for (const row of rows) {
+      const engagement = Math.max(
+        0,
+        row.completionCount + row.playCount * 0.25 - row.skipCount,
+      );
+      raw.set(
+        row.songId,
+        (raw.get(row.songId) ?? 0) +
+          engagement * (neighbourWeights.get(row.userId) ?? 0),
+      );
+    }
+    const maximum = Math.max(1, ...raw.values());
+    return new Map([...raw].map(([id, score]) => [id, score / maximum]));
+  }
+
+  /**
+   * Ranking determines *which* tracks belong in a personalized list; this pass determines
+   * their listening order. It avoids consecutive artist and album repeats so
+   * a mix feels intentionally programmed rather than like album playback.
+   */
+  private sequencePersonalizedTracks<
+    T extends { resourceId: string; artistName: string; attributes?: unknown },
+  >(tracks: T[]): T[] {
+    const remaining = [...tracks];
+    const ordered: T[] = [];
+    let previousArtist = '';
+    let previousAlbum = '';
+
+    while (remaining.length > 0) {
+      const nextIndex = remaining.findIndex(
+        (track) =>
+          track.artistName !== previousArtist &&
+          this.personalizedTrackAlbumKey(track) !== previousAlbum,
+      );
+      const differentArtistIndex = remaining.findIndex(
+        (track) => track.artistName !== previousArtist,
+      );
+      const differentAlbumIndex = remaining.findIndex(
+        (track) => this.personalizedTrackAlbumKey(track) !== previousAlbum,
+      );
+      const index =
+        nextIndex >= 0
+          ? nextIndex
+          : differentArtistIndex >= 0
+            ? differentArtistIndex
+            : differentAlbumIndex >= 0
+              ? differentAlbumIndex
+              : 0;
+      const [next] = remaining.splice(index, 1);
+      ordered.push(next);
+      previousArtist = next.artistName;
+      previousAlbum = this.personalizedTrackAlbumKey(next);
+    }
+
+    return ordered;
+  }
+
+  private personalizedTrackAlbumKey(track: { resourceId: string; attributes?: unknown }) {
+    if (isRecord(track.attributes)) {
+      for (const key of ['albumId', 'albumName']) {
+        const value = track.attributes[key];
+        if (typeof value === 'string' && value.trim()) {
+          return `${key}:${value.trim().toLowerCase()}`;
+        }
+      }
+    }
+    return `song:${track.resourceId}`;
+  }
+
   private async groupSongsByAlbum(
     items: Array<{ id: string; type: string }>,
   ): Promise<Array<{ id: string; type: string }>> {
@@ -627,6 +957,8 @@ export class GenerationService {
       resourceType: true,
       artistName: true,
       genreNames: true,
+      audioTraits: true,
+      moodTags: true,
       releaseDate: true,
       isSingle: true,
       name: true,
@@ -645,6 +977,7 @@ export class GenerationService {
             genreNames: { hasSome: preferredGenres },
           },
           take: 150,
+          orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
           select: songSelection,
         })
       : [];
@@ -656,9 +989,10 @@ export class GenerationService {
             where: {
               resourceType: 'songs',
               resourceId: { notIn: excludedSongIds },
-            },
-            take: 200,
-            select: songSelection,
+          },
+          take: 200,
+          orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
+          select: songSelection,
           });
 
     let candidates = [
@@ -680,6 +1014,7 @@ export class GenerationService {
           resourceId: { in: excludedSongIds },
         },
         take: 200,
+        orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
         select: songSelection,
       });
       const seenIds = new Set(candidates.map((c) => c.resourceId));
@@ -689,7 +1024,8 @@ export class GenerationService {
       ];
     }
 
-    const ranked = this.scoreAndRank(
+    const ranked = await this.rankPersonalizedTracks(
+      userId,
       candidates,
       profile,
       DAILY_MIX_TRACK_LIMIT * DAILY_MIX_LIMIT,
@@ -703,10 +1039,12 @@ export class GenerationService {
     const selectedById = new Map(
       candidates.map((candidate) => [candidate.resourceId, candidate]),
     );
-    const selected = ranked.slice(0, DAILY_MIX_TRACK_LIMIT).flatMap((item) => {
-      const snapshot = selectedById.get(item.id);
-      return snapshot ? [snapshot] : [];
-    });
+    const selected = this.sequencePersonalizedTracks(
+      ranked.slice(0, DAILY_MIX_TRACK_LIMIT).flatMap((item) => {
+        const snapshot = selectedById.get(item.id);
+        return snapshot ? [snapshot] : [];
+      }),
+    );
     if (selected.length < DAILY_MIX_MIN_TRACKS) return null;
 
     const playlistId = this.dailyMixId(userId);
@@ -809,13 +1147,15 @@ export class GenerationService {
     const mixTracklists = [selected.map((song) => song.resourceId)];
     for (let mixIndex = 1; mixIndex < DAILY_MIX_LIMIT; mixIndex += 1) {
       const variantId = this.dailyMixId(userId, mixIndex);
-      const variantSelected = this.selectDiverseSystemVariant(
-        ranked,
-        selectedById,
-        mixTracklists,
-        mixIndex * DAILY_MIX_TRACK_LIMIT,
-        DAILY_MIX_TRACK_LIMIT,
-        DAILY_MIX_MIN_TRACKS,
+      const variantSelected = this.sequencePersonalizedTracks(
+        this.selectDiverseSystemVariant(
+          ranked,
+          selectedById,
+          mixTracklists,
+          mixIndex * DAILY_MIX_TRACK_LIMIT,
+          DAILY_MIX_TRACK_LIMIT,
+          DAILY_MIX_MIN_TRACKS,
+        ),
       );
       if (variantSelected.length < DAILY_MIX_MIN_TRACKS) {
         this.logger.debug(
@@ -931,7 +1271,7 @@ export class GenerationService {
 
     return this.buildSection(
       'user-daily-mix',
-      'Your Daily Mix',
+      'Playlist Made for You',
       'MusicNotesHeroShelf',
       ['playlists'],
       playlistItems,
@@ -1062,16 +1402,19 @@ export class GenerationService {
     profile: TasteProfile,
     mode: 'personalized' | 'mood' = 'personalized',
   ): Promise<PersonalRecommendationResource | null> {
-    if (profile.listenedSongIds.size < MIN_LISTENED_SONGS) {
+    const isGlobalMood = mode === 'mood' && !userId;
+    if (mode === 'personalized' && profile.listenedSongIds.size < MIN_LISTENED_SONGS) {
       this.logger.warn(`[stations] skip: only ${profile.listenedSongIds.size} listened songs (need ${MIN_LISTENED_SONGS})`);
       return null;
     }
 
-    const preferredGenres = profile.genres
-      .filter((genre) => genre.weight > 0.05)
-      .slice(0, STATION_LIMIT)
-      .map((genre) => genre.name);
-    if (preferredGenres.length === 0) {
+    const preferredGenres = mode === 'personalized'
+      ? profile.genres
+          .filter((genre) => genre.weight > 0.05)
+          .slice(0, STATION_LIMIT)
+          .map((genre) => genre.name)
+      : [];
+    if (mode === 'personalized' && preferredGenres.length === 0) {
       this.logger.warn('[stations] skip: no preferred genres found');
       return null;
     }
@@ -1118,10 +1461,11 @@ export class GenerationService {
       },
     ].slice(0, STATION_LIMIT);
     const stationSeeds = mode === 'mood'
-      ? PRODUCTION_RECOMMENDATION_POLICY.moodStations.map((title) => ({
-          title: `${title} Station`,
-          description: `${title} music shaped around the sounds you love.`,
-          genres: preferredGenres,
+      ? PRODUCTION_RECOMMENDATION_POLICY.moodStations.map((mood) => ({
+          title: mood.title,
+          description: mood.subtitle,
+          genres: mood.genres,
+          mood,
         }))
       : personalizedSeeds;
 
@@ -1130,6 +1474,8 @@ export class GenerationService {
       resourceType: true,
       artistName: true,
       genreNames: true,
+      audioTraits: true,
+      moodTags: true,
       releaseDate: true,
       isSingle: true,
       artworkUrl: true,
@@ -1143,33 +1489,50 @@ export class GenerationService {
     const stationTracklists: string[][] = [];
 
     for (const [index, seed] of stationSeeds.entries()) {
-      const genreCandidates = await this.prisma.recommendationResourceSnapshot.findMany({
-        where: {
+      const mood = 'mood' in seed ? seed.mood : undefined;
+      const minimumTracks = mood ? MOOD_STATION_MIN_TRACKS : STATION_MIN_TRACKS;
+      const candidateWhere = mood
+        ? {
+            resourceType: 'songs',
+            OR: [
+              { audioTraits: { hasSome: [...mood.traits] } },
+              { moodTags: { hasSome: [...mood.traits] } },
+              ...(mood.allowGenreFallback
+                ? [{ genreNames: { hasSome: [...mood.genres] } }]
+                : []),
+            ],
+          }
+        : {
           resourceType: 'songs',
           resourceId: { notIn: excludedSongIds },
-          genreNames: { hasSome: seed.genres },
-        },
+          genreNames: { hasSome: [...seed.genres] },
+          };
+      const genreCandidates = await this.prisma.recommendationResourceSnapshot.findMany({
+        where: candidateWhere,
+        orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
         take: 250,
         select: songSelection,
       });
-      let candidates = genreCandidates.length >= STATION_MIN_TRACKS
-        ? genreCandidates
-        : await this.prisma.recommendationResourceSnapshot.findMany({
+      let candidates = !mood && genreCandidates.length < minimumTracks
+        ? await this.prisma.recommendationResourceSnapshot.findMany({
             where: {
               resourceType: 'songs',
               resourceId: { notIn: excludedSongIds },
               genreNames: { hasSome: preferredGenres },
             },
+            orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
             take: 250,
             select: songSelection,
-          });
+          })
+        : genreCandidates;
 
-      if (candidates.length < STATION_MIN_TRACKS) {
+      if (!mood && candidates.length < minimumTracks) {
         const listenedFallback = await this.prisma.recommendationResourceSnapshot.findMany({
           where: {
             resourceType: 'songs',
-            genreNames: { hasSome: seed.genres },
+            genreNames: { hasSome: [...seed.genres] },
           },
+          orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
           take: 250,
           select: songSelection,
         });
@@ -1180,30 +1543,36 @@ export class GenerationService {
         ];
       }
 
-      const ranked = this.scoreAndRank(
-        candidates,
-        profile,
-        STATION_TRACK_LIMIT,
-        DAILY_MIX_MAX_PER_ARTIST,
-      );
-      if (ranked.length < STATION_MIN_TRACKS) {
-        this.logger.warn(`[stations] seed[${index}] skip: only ${ranked.length} ranked (need ${STATION_MIN_TRACKS})`);
+      const ranked = mood
+        ? await this.rankMoodStationTracks(userId, candidates, profile, mood)
+        : await this.rankPersonalizedTracks(
+            userId,
+            candidates,
+            profile,
+            STATION_TRACK_LIMIT,
+            DAILY_MIX_MAX_PER_ARTIST,
+          );
+      if (ranked.length < minimumTracks) {
+        this.logger.warn(
+          `[stations] seed[${index}] skip: only ${ranked.length} mood-qualified tracks (need ${minimumTracks})`,
+        );
         continue;
       }
-
       const candidatesById = new Map(
         candidates.map((candidate) => [candidate.resourceId, candidate]),
       );
-      const selected = this.selectDiverseSystemVariant(
-        ranked,
-        candidatesById,
-        stationTracklists,
-        index * STATION_TRACK_LIMIT,
-        STATION_TRACK_LIMIT,
-        STATION_MIN_TRACKS,
-        mode === 'mood',
+      const selected = this.sequencePersonalizedTracks(
+        this.selectDiverseSystemVariant(
+          ranked,
+          candidatesById,
+          stationTracklists,
+          index * STATION_TRACK_LIMIT,
+          STATION_TRACK_LIMIT,
+          minimumTracks,
+          mode === 'mood',
+        ),
       );
-      if (selected.length < STATION_MIN_TRACKS) {
+      if (selected.length < minimumTracks) {
         this.logger.debug(
           `[stations] seed[${index}] skipped: insufficient novel tracks`,
         );
@@ -1248,6 +1617,7 @@ export class GenerationService {
           kind: mode === 'mood' ? 'system-mood' : 'system-personalized',
           mediaKind: 'audio',
           trackCount: selected.length,
+          description: { short: description, standard: description },
           artwork: {
             url: artworkSource.artworkUrl,
             width: stationArtworkWidth,
@@ -1281,10 +1651,10 @@ export class GenerationService {
       stationTracklists.push(selected.map((song) => song.resourceId));
     }
 
-    // Preserve valid system Stations from an earlier generation when the
-    // current catalog/profile cannot produce enough novel variants. This keeps
-    // the shelf stable instead of silently shrinking after a refresh.
-    if (stationItems.length < stationSeeds.length) {
+    // Personalized Stations can stay stable when a catalog refresh is sparse.
+    // Mood Stations must not reuse an older list: its title is a content promise
+    // and an unqualified fallback would make that promise false.
+    if (mode === 'personalized' && stationItems.length < stationSeeds.length) {
       const existingStations = await this.prisma.recommendationResourceSnapshot.findMany({
         where: {
           resourceType: 'stations',
@@ -1294,7 +1664,7 @@ export class GenerationService {
               (_, index) => this.stationId(userId, index, mode),
             ),
           },
-          stationKind: mode === 'mood' ? 'system-mood' : 'system-personalized',
+          stationKind: 'system-personalized',
         },
         select: { resourceId: true },
       });
@@ -1315,7 +1685,11 @@ export class GenerationService {
     if (stationItems.length === 0) return null;
 
     return this.buildSection(
-      mode === 'mood' ? 'user-find-your-mood' : 'user-stations-for-you',
+      isGlobalMood
+        ? 'global-find-your-mood'
+        : mode === 'mood'
+          ? 'user-find-your-mood'
+          : 'user-stations-for-you',
       mode === 'mood' ? 'Find Your Mood' : 'Stations for You',
       'MusicCoverShelf',
       ['stations'],
@@ -1328,6 +1702,22 @@ export class GenerationService {
     profile: TasteProfile,
   ): Promise<PersonalRecommendationResource | null> {
     return this.buildStationsForYouSection(userId, profile, 'mood');
+  }
+
+  private async buildGlobalMoodStationsSection(): Promise<PersonalRecommendationResource | null> {
+    return this.buildStationsForYouSection('', this.emptyTasteProfile(), 'mood');
+  }
+
+  private emptyTasteProfile(): TasteProfile {
+    return {
+      genres: [],
+      artists: [],
+      avgCompletionRate: 0,
+      totalListenTimeSec: 0,
+      listenedSongIds: new Set(),
+      listenedAlbumIds: new Set(),
+      listenedAlbumNames: new Set(),
+    };
   }
 
   private stationId(
@@ -2074,7 +2464,7 @@ export class GenerationService {
       addSection(`global-decade-${key}`, title, candidates, 'MusicCoverShelf');
     }
 
-    if (existingSectionCount + sections.length < GLOBAL_SHELF_MIN) {
+    if (existingSectionCount + sections.length < GLOBAL_PUBLISH_MIN_SHELVES) {
       const windows = [
         ['global-more-new-music', 'More New Music', latest.slice(24)],
         ['global-editors-picks', 'Editors Picks', refreshed.slice(24)],
@@ -2431,10 +2821,14 @@ export class GenerationService {
   private buildEngineSection(
     shelf: GeneratedShelf,
   ): PersonalRecommendationResource {
+    const displayKind =
+      shelf.id === 'user-top-picks' || shelf.id === 'global-top-picks'
+        ? 'MusicNotesHeroShelf'
+        : 'MusicCoverShelf';
     const section = this.buildSection(
       shelf.id,
       shelf.title,
-      'MusicCoverShelf',
+      displayKind,
       ['albums'],
       shelf.items,
     );
@@ -2446,6 +2840,50 @@ export class GenerationService {
         version: shelf.modelVersion,
       },
     };
+  }
+
+  /**
+   * Global is a composed editorial surface, not a flat ranked list. Keep the
+   * first screen balanced between timely albums, a playlist destination and
+   * the playable mood stations; remaining album shelves retain their ranked
+   * order and fill the lower page.
+   */
+  private composeGlobalHomeSections(
+    albumSections: PersonalRecommendationResource[],
+    playlistSection: PersonalRecommendationResource | null,
+    moodSection: PersonalRecommendationResource | null,
+  ): PersonalRecommendationResource[] {
+    const consumed = new Set<string>();
+    const take = (id: string) => {
+      const section = albumSections.find((candidate) => candidate.id === id);
+      if (!section || consumed.has(section.id)) return undefined;
+      consumed.add(section.id);
+      return section;
+    };
+    const takeFirstGenre = () => {
+      const section = albumSections.find(
+        (candidate) =>
+          candidate.id.startsWith('global-genre-') && !consumed.has(candidate.id),
+      );
+      if (section) consumed.add(section.id);
+      return section;
+    };
+
+    return [
+      take('global-top-picks'),
+      take('global-trending-now'),
+      take('global-new-releases'),
+      takeFirstGenre(),
+      playlistSection ?? undefined,
+      moodSection ?? undefined,
+      take('global-popular-now'),
+      take('global-discover'),
+      ...albumSections.filter((section) => !consumed.has(section.id)),
+    ]
+      .filter(
+        (section): section is PersonalRecommendationResource => Boolean(section),
+      )
+      .slice(0, GLOBAL_SHELF_LIMIT);
   }
 
   private slugify(text: string): string {
@@ -2467,10 +2905,7 @@ export class GenerationService {
         HOME_SHELF_ITEM_LIMIT,
         'latest',
       );
-      if (
-        resourceType === 'albums' &&
-        items.length < HOME_SHELF_ITEM_MIN
-      ) {
+      if (items.length < HOME_SHELF_ITEM_MIN) {
         return null;
       }
       if (items.length === 0) return null;

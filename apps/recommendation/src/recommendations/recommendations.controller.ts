@@ -1,4 +1,4 @@
-import { Controller, UseGuards } from '@nestjs/common';
+import { Controller, Logger, UseGuards, UseInterceptors } from '@nestjs/common';
 import {
   GetHomeRecommendationsRequest,
   GetHomeRecommendationsResponse,
@@ -11,6 +11,8 @@ import {
   RefreshRecommendationSectionRequest,
   RecordListeningEventRequest,
   RecordListeningEventResponse,
+  RecordRecommendationInteractionRequest,
+  RecordRecommendationInteractionResponse,
   GenerateRecommendationsRequest,
   GetListeningAnalyticsRequest,
   ListeningAnalyticsResponse,
@@ -19,11 +21,15 @@ import { RecommendationsService } from './recommendations.service';
 import { ListeningService } from '../listening/listening.service';
 import { GenerationService } from '../generation/generation.service';
 import { InternalGrpcGuard } from '../common/guards/internal-grpc.guard';
+import { RecommendationRpcMetricsInterceptor } from '../common/observability/recommendation-rpc-metrics.interceptor';
 
 @Controller()
 @UseGuards(InternalGrpcGuard)
+@UseInterceptors(RecommendationRpcMetricsInterceptor)
 @RecommendationServiceControllerMethods()
 export class RecommendationsController implements RecommendationServiceController {
+  private readonly logger = new Logger(RecommendationsController.name);
+
   constructor(
     private readonly recommendationsService: RecommendationsService,
     private readonly listeningService: ListeningService,
@@ -45,7 +51,7 @@ export class RecommendationsController implements RecommendationServiceControlle
       request.locale,
     );
 
-    if (globalResult.data.length === 0 || isGlobalStale) {
+    if (globalResult.data.length === 0) {
       const generated = await this.generationService.tryLazyGenerateGlobal(
         request.name,
         request.locale,
@@ -55,16 +61,37 @@ export class RecommendationsController implements RecommendationServiceControlle
       if (generated && generated.data.length > 0) {
         globalResult = generated;
       }
+    } else if (isGlobalStale) {
+      // Serve the last published page immediately and refresh it in the
+      // background. A stale Home must never make a listener wait for catalog
+      // synchronization, candidate scoring, and page persistence.
+      void this.generationService
+        .tryLazyGenerateGlobal(
+          request.name,
+          request.locale,
+          request.timezone,
+          request.platform,
+        )
+        .catch((error: unknown) =>
+          this.logger.warn('Background global generation failed', error),
+        );
     }
 
     if (request.userId) {
-      await this.generationService.tryLazyGenerateUser(
-        request.userId,
-        request.name,
-        request.locale,
-        request.timezone,
-        request.platform,
-      );
+      // User regeneration follows the same stale-while-revalidate contract.
+      // The current request keeps its fast path (published user page or global
+      // cold-start fallback), while the next request receives the fresh page.
+      void this.generationService
+        .tryLazyGenerateUser(
+          request.userId,
+          request.name,
+          request.locale,
+          request.timezone,
+          request.platform,
+        )
+        .catch((error: unknown) =>
+          this.logger.warn('Background user generation failed', error),
+        );
     }
 
     return request.userId
@@ -109,6 +136,12 @@ export class RecommendationsController implements RecommendationServiceControlle
     request: RecordListeningEventRequest,
   ): Promise<RecordListeningEventResponse> {
     return this.listeningService.recordEvent(request);
+  }
+
+  recordRecommendationInteraction(
+    request: RecordRecommendationInteractionRequest,
+  ): Promise<RecordRecommendationInteractionResponse> {
+    return this.recommendationsService.recordRecommendationInteraction(request);
   }
 
   generateRecommendations(

@@ -12,6 +12,8 @@ import {
   RefreshRecommendationSectionRequest,
   RecordListeningEventRequest,
   RecordListeningEventResponse,
+  RecordRecommendationInteractionRequest,
+  RecordRecommendationInteractionResponse,
   GenerateRecommendationsRequest,
   GetListeningAnalyticsRequest,
   ListeningAnalyticsResponse,
@@ -130,6 +132,17 @@ export class RecommendationsService implements OnModuleInit {
   ): Promise<RecordListeningEventResponse> {
     return grpcFirstValueFrom(
       this.recommendationClient.recordListeningEvent(request, this.metadata()),
+    );
+  }
+
+  async recordRecommendationInteraction(
+    request: RecordRecommendationInteractionRequest,
+  ): Promise<RecordRecommendationInteractionResponse> {
+    return grpcFirstValueFrom(
+      this.recommendationClient.recordRecommendationInteraction(
+        request,
+        this.metadata(),
+      ),
     );
   }
 

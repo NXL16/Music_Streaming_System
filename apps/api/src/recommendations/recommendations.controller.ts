@@ -22,6 +22,7 @@ import {
   RecommendationPageStatus,
   RecommendationPresentationMode,
   ListeningEventType,
+  RecommendationInteractionType,
 } from '@musical/shared-proto';
 import { StrictJwtAuthGuard } from '../common/guards/strict-jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
@@ -109,6 +110,17 @@ function normalizeEventType(value: unknown): ListeningEventType {
       return ListeningEventType.LISTENING_EVENT_TYPE_SKIP;
     default:
       return ListeningEventType.LISTENING_EVENT_TYPE_PLAY_START;
+  }
+}
+
+function normalizeInteractionType(value: unknown): RecommendationInteractionType {
+  if (typeof value === 'number') return value;
+  switch (String(value).toUpperCase()) {
+    case 'IMPRESSION': return RecommendationInteractionType.RECOMMENDATION_INTERACTION_TYPE_IMPRESSION;
+    case 'OPEN': return RecommendationInteractionType.RECOMMENDATION_INTERACTION_TYPE_OPEN;
+    case 'PLAY': return RecommendationInteractionType.RECOMMENDATION_INTERACTION_TYPE_PLAY;
+    case 'DISMISS': return RecommendationInteractionType.RECOMMENDATION_INTERACTION_TYPE_DISMISS;
+    default: return RecommendationInteractionType.RECOMMENDATION_INTERACTION_TYPE_UNSPECIFIED;
   }
 }
 
@@ -206,6 +218,65 @@ export class RecommendationsController {
       stationArtworkUrl: body.stationArtworkUrl ?? '',
       stationArtworkBgColor: body.stationArtworkBgColor ?? '',
     });
+  }
+
+  @Post('interactions')
+  recordRecommendationInteraction(
+    @Req() req: Request,
+    @Body() body: {
+      sectionId: string; resourceType: string; resourceId: string;
+      position?: number; modelVersion?: number; eventType: string;
+    },
+  ) {
+    const user = req.user as JwtUser;
+    return this.recommendationsService.recordRecommendationInteraction({
+      userId: user.userId,
+      sectionId: body.sectionId,
+      resourceType: body.resourceType,
+      resourceId: body.resourceId,
+      position: body.position ?? 0,
+      modelVersion: body.modelVersion ?? 1,
+      eventType: normalizeInteractionType(body.eventType),
+    });
+  }
+
+  @Post('interactions/batch')
+  async recordRecommendationInteractionBatch(
+    @Req() req: Request,
+    @Body()
+    body: {
+      interactions?: Array<{
+        sectionId: string;
+        resourceType: string;
+        resourceId: string;
+        position?: number;
+        modelVersion?: number;
+        eventType: string;
+      }>;
+    },
+  ) {
+    const user = req.user as JwtUser;
+    const interactions = Array.isArray(body.interactions)
+      ? body.interactions.slice(0, 48)
+      : [];
+    const results = await Promise.all(
+      interactions.map((interaction) =>
+        this.recommendationsService.recordRecommendationInteraction({
+          userId: user.userId,
+          sectionId: interaction.sectionId,
+          resourceType: interaction.resourceType,
+          resourceId: interaction.resourceId,
+          position: interaction.position ?? 0,
+          modelVersion: interaction.modelVersion ?? 1,
+          eventType: normalizeInteractionType(interaction.eventType),
+        }),
+      ),
+    );
+
+    return {
+      accepted: interactions.length,
+      recorded: results.filter((result) => result.success).length,
+    };
   }
 }
 

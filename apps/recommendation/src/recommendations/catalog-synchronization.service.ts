@@ -6,6 +6,10 @@ const RESOURCE_TYPES = ['albums', 'songs', 'artists', 'playlists'] as const;
 const PAGE_SIZE = 100;
 const MIN_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
+function homeCacheDisabled(): boolean {
+  return process.env.HOME_CACHE_MODE?.trim().toLowerCase() === 'off';
+}
+
 export type CatalogSynchronizationResult = {
   totalResources: number;
   resourcesByType: Record<string, number>;
@@ -24,6 +28,11 @@ export class CatalogSynchronizationService {
   ) {}
 
   async ensureFreshCatalog(): Promise<CatalogSynchronizationResult> {
+    // Development can demand immediate catalog correctness after imports or
+    // backfills. Production retains the six-hour guard unless explicitly off.
+    if (homeCacheDisabled()) {
+      return this.synchronizeCatalog();
+    }
     if (
       this.lastResult &&
       Date.now() - this.lastResult.synchronizedAt.getTime() < MIN_SYNC_INTERVAL_MS
