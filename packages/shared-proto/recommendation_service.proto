@@ -17,6 +17,18 @@ service RecommendationService {
   rpc GenerateRecommendations(GenerateRecommendationsRequest) returns (GetHomeRecommendationsResponse);
   rpc GetListeningAnalytics(GetListeningAnalyticsRequest) returns (ListeningAnalyticsResponse);
   rpc RecordRecommendationInteraction(RecordRecommendationInteractionRequest) returns (RecordRecommendationInteractionResponse);
+  rpc UpsertSystemStationArtwork(UpsertSystemStationArtworkRequest) returns (SystemStationArtworkResponse);
+}
+
+message UpsertSystemStationArtworkRequest {
+  string station_key = 1;
+  string asset_id = 2;
+  string actor_user_id = 3;
+}
+
+message SystemStationArtworkResponse {
+  string station_key = 1;
+  string asset_id = 2;
 }
 
 enum RecommendationPageScope {

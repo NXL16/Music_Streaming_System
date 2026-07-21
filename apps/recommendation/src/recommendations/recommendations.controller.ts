@@ -16,12 +16,15 @@ import {
   GenerateRecommendationsRequest,
   GetListeningAnalyticsRequest,
   ListeningAnalyticsResponse,
+  UpsertSystemStationArtworkRequest,
+  SystemStationArtworkResponse,
 } from '@musical/shared-proto';
 import { RecommendationsService } from './recommendations.service';
 import { ListeningService } from '../listening/listening.service';
 import { GenerationService } from '../generation/generation.service';
 import { InternalGrpcGuard } from '../common/guards/internal-grpc.guard';
 import { RecommendationRpcMetricsInterceptor } from '../common/observability/recommendation-rpc-metrics.interceptor';
+import { SystemStationArtworkService } from './system-station-artwork.service';
 
 @Controller()
 @UseGuards(InternalGrpcGuard)
@@ -34,6 +37,7 @@ export class RecommendationsController implements RecommendationServiceControlle
     private readonly recommendationsService: RecommendationsService,
     private readonly listeningService: ListeningService,
     private readonly generationService: GenerationService,
+    private readonly systemStationArtworkService: SystemStationArtworkService,
   ) {}
 
   async getHomeRecommendations(
@@ -154,5 +158,15 @@ export class RecommendationsController implements RecommendationServiceControlle
     request: GetListeningAnalyticsRequest,
   ): Promise<ListeningAnalyticsResponse> {
     return this.listeningService.getListeningAnalytics(request);
+  }
+
+  async upsertSystemStationArtwork(
+    request: UpsertSystemStationArtworkRequest,
+  ): Promise<SystemStationArtworkResponse> {
+    const artwork = await this.systemStationArtworkService.bind(
+      request.stationKey,
+      request.assetId,
+    );
+    return { stationKey: request.stationKey, assetId: artwork.assetId };
   }
 }

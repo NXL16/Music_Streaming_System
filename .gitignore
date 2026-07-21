@@ -32,7 +32,12 @@ Cargo.lock
 .env
 .env.local
 .env.*.local
+.env.development
 .dev.vars
+
+# Local source files consumed by the controlled Asset-service import tool.
+# Production serves only processed R2/WebP renditions.
+apps/web/public/station/
 
 # IDE
 .vscode/

@@ -221,6 +221,18 @@ model RecommendationResourceSnapshot {
     @@map("recommendation_resource_snapshots")
 }
 
+// The asset itself remains owned by Asset service. This registry only binds a
+// stable generated station key (for example `focus`) to a processed artwork.
+model SystemStationArtwork {
+    stationKey String   @id @db.VarChar(64)
+    assetId    String   @unique @db.VarChar(128)
+    artwork    Json
+    createdAt  DateTime @default(now()) @db.Timestamptz
+    updatedAt  DateTime @updatedAt @db.Timestamptz
+
+    @@map("system_station_artworks")
+}
+
 model ListeningEvent {
     id          String   @id @default(uuid())
     userId      String   @db.VarChar(128)

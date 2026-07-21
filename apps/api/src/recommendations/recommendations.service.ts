@@ -17,6 +17,8 @@ import {
   GenerateRecommendationsRequest,
   GetListeningAnalyticsRequest,
   ListeningAnalyticsResponse,
+  SystemStationArtworkResponse,
+  UpsertSystemStationArtworkRequest,
 } from '@musical/shared-proto';
 import { grpcFirstValueFrom } from '../common/utils/grpc-timeout';
 import { ConfigService } from '@nestjs/config';
@@ -164,6 +166,17 @@ export class RecommendationsService implements OnModuleInit {
   ): Promise<ListeningAnalyticsResponse> {
     return grpcFirstValueFrom(
       this.recommendationClient.getListeningAnalytics(request, this.metadata()),
+    );
+  }
+
+  upsertSystemStationArtwork(
+    request: UpsertSystemStationArtworkRequest,
+  ): Promise<SystemStationArtworkResponse> {
+    return grpcFirstValueFrom(
+      this.recommendationClient.upsertSystemStationArtwork(
+        request,
+        this.metadata(),
+      ),
     );
   }
 

@@ -62,6 +62,18 @@ export async function deleteAsset(assetId: string) {
     .data;
 }
 
+export async function bindSystemStationArtwork(
+  stationKey: string,
+  assetId: string,
+) {
+  return (
+    await http.put(
+      `/admin/recommendations/station-artwork/${encodeURIComponent(stationKey)}`,
+      { assetId },
+    )
+  ).data;
+}
+
 export async function getAdminHomeRecommendations(params: AdminPayload = {}) {
   return (await http.get("/admin/recommendations/home", { params })).data;
 }

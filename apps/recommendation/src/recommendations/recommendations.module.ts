@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import {
   GRPC_LOADER_OPTIONS,
+  ASSET,
   resolveProtoPath,
   SONG,
 } from '@musical/shared-proto';
@@ -17,6 +18,7 @@ import { CatalogSynchronizationService } from './catalog-synchronization.service
 import { RecommendationEngineService } from '../generation/recommendation-engine.service';
 import { RecommendationRpcMetricsService } from '../common/observability/recommendation-rpc-metrics.service';
 import { RecommendationRpcMetricsInterceptor } from '../common/observability/recommendation-rpc-metrics.interceptor';
+import { SystemStationArtworkService } from './system-station-artwork.service';
 
 @Module({
   imports: [
@@ -37,6 +39,20 @@ import { RecommendationRpcMetricsInterceptor } from '../common/observability/rec
           },
         }),
       },
+      {
+        name: 'ASSET_SERVICE',
+        imports: [ConfigModule],
+        inject: [ConfigService],
+        useFactory: (config: ConfigService) => ({
+          transport: Transport.GRPC,
+          options: {
+            url: config.getOrThrow<string>('ASSET_GRPC_URL'),
+            package: ASSET.PACKAGE,
+            protoPath: resolveProtoPath(ASSET.PROTO_FILE),
+            loader: GRPC_LOADER_OPTIONS,
+          },
+        }),
+      },
     ]),
   ],
   controllers: [RecommendationsController],
@@ -48,6 +64,7 @@ import { RecommendationRpcMetricsInterceptor } from '../common/observability/rec
     RecommendationEngineService,
     RecommendationRpcMetricsService,
     RecommendationRpcMetricsInterceptor,
+    SystemStationArtworkService,
     InternalGrpcGuard,
   ],
   exports: [RecommendationsService],

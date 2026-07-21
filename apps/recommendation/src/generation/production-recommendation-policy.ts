@@ -57,6 +57,7 @@ export const PRODUCTION_RECOMMENDATION_POLICY = {
   ],
   moodStations: [
     {
+      key: 'focus',
       title: 'Focus',
       subtitle: 'Limitless music to help you stay in the zone.',
       traits: ['focus', 'study', 'concentration', 'instrumental', 'lofi', 'lo-fi', 'ambient'],
@@ -65,6 +66,7 @@ export const PRODUCTION_RECOMMENDATION_POLICY = {
       allowGenreFallback: true,
     },
     {
+      key: 'feeling-blue',
       title: 'Feeling Blue',
       subtitle: 'Sad songs that understand exactly how you feel.',
       traits: ['feeling-blue', 'sad', 'blue', 'melancholy', 'melancholic', 'somber', 'emotional'],
@@ -73,6 +75,7 @@ export const PRODUCTION_RECOMMENDATION_POLICY = {
       allowGenreFallback: false,
     },
     {
+      key: 'energy',
       title: 'Energy',
       subtitle: 'Keep it moving with non-stop high-voltage tracks.',
       traits: ['energy', 'energetic', 'upbeat', 'dance', 'workout', 'party'],
@@ -81,6 +84,7 @@ export const PRODUCTION_RECOMMENDATION_POLICY = {
       allowGenreFallback: true,
     },
     {
+      key: 'heartbreak',
       title: 'Heartbreak',
       subtitle: 'Get over it, one tear-jerking anthem at a time.',
       traits: ['heartbreak', 'breakup', 'sad', 'melancholy', 'emotional'],
@@ -89,6 +93,7 @@ export const PRODUCTION_RECOMMENDATION_POLICY = {
       allowGenreFallback: false,
     },
     {
+      key: 'relax',
       title: 'Relax',
       subtitle: 'Soothing sounds to help you unwind and breathe easy.',
       traits: ['relax', 'relaxing', 'calm', 'chill', 'acoustic', 'ambient', 'sleep'],
@@ -97,6 +102,7 @@ export const PRODUCTION_RECOMMENDATION_POLICY = {
       allowGenreFallback: true,
     },
     {
+      key: 'feel-good',
       title: 'Feel Good',
       subtitle: 'The most uplifting tracks to brighten your day.',
       traits: ['feel-good', 'happy', 'positive', 'uplifting', 'sunny', 'upbeat'],
@@ -105,6 +111,7 @@ export const PRODUCTION_RECOMMENDATION_POLICY = {
       allowGenreFallback: false,
     },
     {
+      key: 'love',
       title: 'Love',
       subtitle: 'Romantic music that captures the perfect mood.',
       traits: ['love', 'romance', 'romantic', 'valentine', 'date-night'],

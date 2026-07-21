@@ -385,4 +385,21 @@ export class RecommendationAdminController {
       platform: b.platform || 'web',
     });
   }
+
+  @Put('station-artwork/:stationKey')
+  bindSystemStationArtwork(
+    @Req() req: Request,
+    @Param('stationKey') stationKey: string,
+    @Body() body: { assetId?: string },
+  ) {
+    const actor = req.user as JwtUser;
+    if (!body?.assetId?.trim()) {
+      throw new BadRequestException('assetId is required');
+    }
+    return this.recommendationsService.upsertSystemStationArtwork({
+      stationKey,
+      assetId: body.assetId.trim(),
+      actorUserId: actor.userId,
+    });
+  }
 }

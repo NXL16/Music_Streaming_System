@@ -13,6 +13,7 @@ import { ListeningService, TasteProfile } from '../listening/listening.service';
 import { RecommendationsService } from '../recommendations/recommendations.service';
 import { RecommendationCatalogService } from '../recommendations/recommendation-catalog.service';
 import { CatalogSynchronizationService } from '../recommendations/catalog-synchronization.service';
+import { SystemStationArtworkService } from '../recommendations/system-station-artwork.service';
 import {
   GeneratedShelf,
   PERSONALIZATION_MODEL_VERSION,
@@ -124,6 +125,7 @@ export class GenerationService {
     private readonly catalogService: RecommendationCatalogService,
     private readonly catalogSynchronizationService: CatalogSynchronizationService,
     private readonly recommendationEngine: RecommendationEngineService,
+    private readonly systemStationArtworkService: SystemStationArtworkService,
   ) {}
 
   async generate(
@@ -1468,6 +1470,11 @@ export class GenerationService {
           mood,
         }))
       : personalizedSeeds;
+    const stationArtworkByKey = mode === 'mood'
+      ? await this.systemStationArtworkService.byStationKeys(
+          stationSeeds.flatMap((seed) => ('mood' in seed ? [seed.mood.key] : [])),
+        )
+      : new Map();
 
     const songSelection = {
       resourceId: true,
@@ -1581,6 +1588,9 @@ export class GenerationService {
 
       const stationId = this.stationId(userId, index, mode);
       const artworkSource = selected.find((song) => song.artworkUrl) ?? selected[0];
+      const configuredArtwork = mood
+        ? stationArtworkByKey.get(mood.key)
+        : undefined;
       const { title, description } = seed;
       const relationships = {
         tracks: {
@@ -1592,9 +1602,11 @@ export class GenerationService {
           })),
         },
       };
-      const stationArtworkWidth = artworkSource.artworkWidth || 1000;
-      const stationArtworkHeight = artworkSource.artworkHeight || 1000;
-      const stationArtworkVariants = artworkVariantsFromAttributes(
+      const stationArtworkUrl = configuredArtwork?.url || artworkSource.artworkUrl;
+      const stationArtworkWidth = configuredArtwork?.width || artworkSource.artworkWidth || 1000;
+      const stationArtworkHeight = configuredArtwork?.height || artworkSource.artworkHeight || 1000;
+      const stationArtworkBgColor = configuredArtwork?.bgColor || artworkSource.artworkBgColor;
+      const stationArtworkVariants = configuredArtwork?.variants ?? artworkVariantsFromAttributes(
         artworkSource.attributes,
       );
       const stationData = {
@@ -1603,8 +1615,8 @@ export class GenerationService {
         curatorName: 'Musical',
         href: '',
         externalUrl: '',
-        artworkUrl: artworkSource.artworkUrl,
-        artworkBgColor: artworkSource.artworkBgColor,
+        artworkUrl: stationArtworkUrl,
+        artworkBgColor: stationArtworkBgColor,
         artworkWidth: stationArtworkWidth,
         artworkHeight: stationArtworkHeight,
         trackCount: selected.length,
@@ -1619,10 +1631,10 @@ export class GenerationService {
           trackCount: selected.length,
           description: { short: description, standard: description },
           artwork: {
-            url: artworkSource.artworkUrl,
+            url: stationArtworkUrl,
             width: stationArtworkWidth,
             height: stationArtworkHeight,
-            bgColor: artworkSource.artworkBgColor,
+            bgColor: stationArtworkBgColor,
             alt: title,
             ...(stationArtworkVariants
               ? { variants: stationArtworkVariants }
