@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "predev": "pnpm proto:gen",
-    "dev": "turbo run dev --parallel",
+    "dev": "node tools/scripts/dev.mjs",
     "prebuild": "pnpm proto:gen",
     "build": "turbo run build",
     "test": "turbo run test",
