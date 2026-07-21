@@ -115,6 +115,8 @@ const mediaShelfPresets = {
 };
 
 const MOUSE_DRAG_THRESHOLD = 6;
+const MOUSE_WHEEL_IDLE_DELAY = 160;
+const MOUSE_WHEEL_LINE_HEIGHT = 16;
 const SHELF_RENDER_AHEAD_ROOT_MARGIN = 96;
 const ESTIMATED_SHELF_HEIGHT: Record<MediaShelfDisplayKind, number> = {
   MusicNotesHeroShelf: 320,
@@ -310,6 +312,70 @@ function MediaShelf({
     return () => {
       delete shelf.dataset.scrollActive;
       delete shelf.dataset.resizeActive;
+    };
+  }, []);
+
+  useEffect(() => {
+    const shelf = listRef.current;
+    if (!shelf) return;
+
+    let pendingDelta = 0;
+    let wheelFrame: number | undefined;
+    let wheelIdleTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const flushWheelScroll = () => {
+      wheelFrame = undefined;
+      if (pendingDelta === 0) return;
+
+      shelf.scrollLeft += pendingDelta;
+      pendingDelta = 0;
+    };
+
+    const finishWheelScroll = () => {
+      delete shelf.dataset.wheeling;
+      wheelIdleTimer = undefined;
+    };
+
+    const handleWheel = (event: WheelEvent) => {
+      // Preserve native pixel-based scrolling for precision touchpads. A
+      // conventional mouse wheel sends line deltas; Shift + wheel is the
+      // usual mouse gesture for scrolling a horizontal shelf on Windows.
+      const isMouseWheel =
+        event.shiftKey || event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL;
+      if (
+        !isMouseWheel ||
+        shelf.dataset.dragging === "true" ||
+        shelf.scrollWidth <= shelf.clientWidth + 1
+      ) {
+        return;
+      }
+
+      const rawDelta = event.shiftKey ? event.deltaY : event.deltaX;
+      if (rawDelta === 0) return;
+
+      event.preventDefault();
+      const multiplier =
+        event.deltaMode === WheelEvent.DOM_DELTA_LINE
+          ? MOUSE_WHEEL_LINE_HEIGHT
+          : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+            ? shelf.clientWidth
+            : 1;
+      pendingDelta += rawDelta * multiplier;
+      shelf.dataset.wheeling = "true";
+
+      if (wheelFrame === undefined) {
+        wheelFrame = requestAnimationFrame(flushWheelScroll);
+      }
+      if (wheelIdleTimer) clearTimeout(wheelIdleTimer);
+      wheelIdleTimer = setTimeout(finishWheelScroll, MOUSE_WHEEL_IDLE_DELAY);
+    };
+
+    shelf.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      shelf.removeEventListener("wheel", handleWheel);
+      if (wheelFrame !== undefined) cancelAnimationFrame(wheelFrame);
+      if (wheelIdleTimer) clearTimeout(wheelIdleTimer);
+      delete shelf.dataset.wheeling;
     };
   }, []);
 

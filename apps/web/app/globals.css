@@ -619,14 +619,32 @@ html[dir=rtl] .chrome-volume__slider.svelte-13xdpwq.svelte-13xdpwq {
   will-change: scroll-position;
 }
 
+/* A conventional mouse wheel produces discrete steps. Disable smooth/snap
+   between steps so the rAF-batched handler can move the shelf continuously. */
+.shelf-grid__list[data-wheeling="true"] {
+  scroll-behavior: auto;
+  scroll-snap-type: none;
+  will-change: scroll-position;
+}
+
 /* Hover affordances use blur/opacity transitions. They are not useful while
    dragging, and skipping them prevents a repaint of every moving card. */
 .shelf-grid__list[data-dragging="true"] .media-card-interaction {
   transition: none !important;
 }
 
+.shelf-grid__list[data-wheeling="true"] .media-card-interaction {
+  transition: none !important;
+}
+
 .shelf-grid__list[data-dragging="true"] .media-card-play-button svg,
 .shelf-grid__list[data-dragging="true"] .media-card-context-menu button {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.shelf-grid__list[data-wheeling="true"] .media-card-play-button svg,
+.shelf-grid__list[data-wheeling="true"] .media-card-context-menu button {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
