@@ -1,3 +1,13 @@
+/**
+ * export ADMIN_ACCESS_TOKEN='TOKEN_ADMIN_MOI'
+  node tools/scripts/import-station-artwork.mjs
+  unset ADMIN_ACCESS_TOKEN
+
+  Thay 1 ảnh: 
+  node tools/scripts/import-station-artwork.mjs --station focus
+ */
+
+
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
