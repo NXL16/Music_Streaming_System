@@ -117,6 +117,7 @@ const mediaShelfPresets = {
 const MOUSE_DRAG_THRESHOLD = 6;
 const MOUSE_WHEEL_IDLE_DELAY = 160;
 const MOUSE_WHEEL_LINE_HEIGHT = 16;
+const DISCRETE_WHEEL_PIXEL_DELTA = 40;
 const SHELF_RENDER_AHEAD_ROOT_MARGIN = 96;
 const ESTIMATED_SHELF_HEIGHT: Record<MediaShelfDisplayKind, number> = {
   MusicNotesHeroShelf: 320,
@@ -337,11 +338,18 @@ function MediaShelf({
     };
 
     const handleWheel = (event: WheelEvent) => {
-      // Preserve native pixel-based scrolling for precision touchpads. A
-      // conventional mouse wheel sends line deltas; Shift + wheel is the
-      // usual mouse gesture for scrolling a horizontal shelf on Windows.
+      const rawDelta = event.shiftKey ? event.deltaY : event.deltaX;
+      // Preserve native small, continuous deltas from a precision touchpad.
+      // Some browser/driver pairs report a conventional mouse wheel in pixel
+      // mode after a reload, usually as a large discrete delta (for example
+      // 100px), so deltaMode alone is not a reliable discriminator.
+      const isDiscretePixelDelta =
+        Math.abs(rawDelta) >= DISCRETE_WHEEL_PIXEL_DELTA &&
+        Number.isInteger(rawDelta);
       const isMouseWheel =
-        event.shiftKey || event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL;
+        event.shiftKey ||
+        event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL ||
+        isDiscretePixelDelta;
       if (
         !isMouseWheel ||
         shelf.dataset.dragging === "true" ||
@@ -350,7 +358,6 @@ function MediaShelf({
         return;
       }
 
-      const rawDelta = event.shiftKey ? event.deltaY : event.deltaX;
       if (rawDelta === 0) return;
 
       event.preventDefault();
