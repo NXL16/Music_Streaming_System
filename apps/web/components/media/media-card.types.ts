@@ -35,4 +35,6 @@ export interface MediaCardProps {
   videoSrc?: string;
   altText?: string;
   artists?: MediaCardArtist[];
+  onOpen?: () => void;
+  onPlay?: () => void;
 }

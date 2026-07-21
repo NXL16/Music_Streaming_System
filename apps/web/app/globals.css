@@ -782,8 +782,25 @@ html[dir=rtl] .chrome-volume__slider.svelte-13xdpwq.svelte-13xdpwq {
   }
 }
 
-/* Keep keyboard focus visually neutral across the product. */
-:where(*:focus, *:focus-visible) {
+/* Keep focus visually neutral across the product. Keyboard controls remain
+   available; this only suppresses their visual ring. */
+:where(a,
+  button,
+  input,
+  select,
+  textarea,
+  summary,
+  [tabindex]:not([tabindex="-1"])):focus {
+  outline: none;
+}
+
+:where(a,
+  button,
+  input,
+  select,
+  textarea,
+  summary,
+[tabindex]:not([tabindex="-1"])):focus-visible {
   outline: none !important;
   box-shadow: none !important;
 }

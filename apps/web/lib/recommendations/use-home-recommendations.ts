@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   getCachedHomeRecommendations,
   getHomeRecommendations,
+  invalidateHomeRecommendationsCache,
 } from "./recommendation.api";
 import type { RecommendationResponse } from "./recommendation.types";
 import {
@@ -23,29 +24,31 @@ export function useHomeRecommendations() {
   const [loading, setLoading] = useState(cached === null);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = useCallback((showLoading = false, signal?: AbortSignal) => {
+  const refresh = useCallback(async (
+    showLoading = false,
+    signal?: AbortSignal,
+    force = false,
+  ) => {
     if (signal?.aborted) return;
+    if (force) invalidateHomeRecommendationsCache();
     if (showLoading) setLoading(true);
 
-    getHomeRecommendations()
-      .then((nextData) => {
-        if (signal?.aborted) return;
-        setData(nextData);
-        setError(null);
-      })
-      .catch(() => {
-        if (signal?.aborted) return;
-        setError("Không thể tải nội dung đề xuất.");
-      })
-      .finally(() => {
-        if (signal?.aborted) return;
-        setLoading(false);
-      });
+    try {
+      const nextData = await getHomeRecommendations();
+      if (signal?.aborted) return;
+      setData(nextData);
+      setError(null);
+    } catch {
+      if (signal?.aborted) return;
+      setError("Không thể tải nội dung đề xuất.");
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
     const controller = new AbortController();
-    queueMicrotask(() => refresh(false, controller.signal));
+    queueMicrotask(() => void refresh(false, controller.signal));
 
     return () => {
       controller.abort();
@@ -99,5 +102,7 @@ export function useHomeRecommendations() {
     };
   }, []);
 
-  return { data, loading, error, refresh, recentlyPlayedItems };
+  const retry = useCallback(() => refresh(true, undefined, true), [refresh]);
+
+  return { data, loading, error, refresh, retry, recentlyPlayedItems };
 }

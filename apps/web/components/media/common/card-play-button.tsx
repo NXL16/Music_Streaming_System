@@ -2,11 +2,13 @@ import { memo } from "react";
 
 type CardPlayButtonProps = {
   variant: "hero" | "cover" | "station";
+  ariaLabel: string;
   onPlay?: () => void;
 };
 
 const CardPlayButton = memo(function CardPlayButton({
   variant,
+  ariaLabel,
   onPlay,
 }: CardPlayButtonProps) {
   const handlePlay: React.MouseEventHandler<HTMLButtonElement> = (event) => {
@@ -19,7 +21,9 @@ const CardPlayButton = memo(function CardPlayButton({
     return (
       <div className="absolute bottom-20.5 inset-s-auto inset-e-(--badge-x-inset) z-(--z-default) opacity-0 group-hover:opacity-100 transition-all duration-300 ease-in-out">
         <button
+          aria-label={ariaLabel}
           onClick={handlePlay}
+          type="button"
           className="media-card-play-button rounded-[50%] [--iconCircleFillBG:var(--iconCircleFillBGOverride,var(--systemQuaternary))] [--iconFillArrow:var(--playButtonIconColor,#fff)] relative leading-0 pointer-events-auto z-(--z-default) [--nonPlatterIconFill:var(--playButtonIconColor,#fff)] [--playingBarColor:var(--nonPlatterIconFill,#fff)] not-[.play-button--artwork-overlay]:block not-[.play-button--artwork-overlay]:leading-0 hover:bg-[rgba(40,40,40,.5)]"
         >
           <svg
@@ -38,7 +42,9 @@ const CardPlayButton = memo(function CardPlayButton({
     return (
       <div className="absolute inset-0 m-auto z-1 [--iconCircleFillBGOverride:transparent]">
         <button
+          aria-label={ariaLabel}
           onClick={handlePlay}
+          type="button"
           className="media-card-play-button size-full [--iconCircleFillBG:var(--iconCircleFillBGOverride,var(--systemQuaternary))] [--iconFillArrow:var(--playButtonIconColor,#fff)] rounded-none [--nonPlatterIconFill:var(--playButtonIconColor,#fff)] [--playingBarColor:var(--nonPlatterIconFill,#fff)] leading-0 pointer-events-auto relative z-(--z-default) block hover:[--iconCircleFillBG:var(--keyColor)] hover:[--iconFillArrow:#fff]"
         >
           <svg
@@ -56,7 +62,9 @@ const CardPlayButton = memo(function CardPlayButton({
   return (
     <div className="[--iconCircleFillBGOverride:transparent] bottom-2.5 inset-s-2.5 leading-0 absolute z-(--z-default)">
       <button
+        aria-label={ariaLabel}
         onClick={handlePlay}
+        type="button"
         className="media-card-play-button [--iconCircleFillBG:var(--iconCircleFillBGOverride,var(--systemQuaternary))] [--iconFillArrow:var(--playButtonIconColor,#fff)] rounded-[50%] [--nonPlatterIconFill:var(--playButtonIconColor,#fff)] [--playingBarColor:var(--nonPlatterIconFill,#fff)] leading-0 pointer-events-auto relative z-(--z-default) block hover:[--iconCircleFillBG:var(--keyColor)] hover:[--iconFillArrow:#fff]"
       >
         <svg

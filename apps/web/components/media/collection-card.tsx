@@ -29,6 +29,7 @@ export default function CollectionCard(props: CollectionCardProps) {
               <Link
                 className="text-transparent block size-full absolute inset-0 z-(--z-default) wrap-break-word"
                 href={props.slug}
+                onClick={props.onOpen}
               >
                 {props.title}
               </Link>
@@ -36,8 +37,10 @@ export default function CollectionCard(props: CollectionCardProps) {
 
             {props.resourceType !== "user-playlist" && (
               <CardPlayButton
+                ariaLabel={`Play ${props.title}`}
                 variant="cover"
                 onPlay={() => {
+                  props.onPlay?.();
                   void playCatalogResource(props.resourceType, props.resourceId);
                 }}
               />

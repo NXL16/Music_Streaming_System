@@ -206,6 +206,7 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
                 {latestRelease && (
                   <div className="media-card-interaction rounded-[inherit] size-full opacity-(--scrimOpacity,0) absolute top-0 transition-(--global-transition) z-[calc(var(--z-default)+1)]">
                     <CardPlayButton
+                      ariaLabel={`Play ${latestRelease.attributes.name}`}
                       variant="cover"
                       onPlay={() => {
                         void playCatalogResource("albums", latestRelease.id);

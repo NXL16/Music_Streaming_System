@@ -26,6 +26,7 @@ export type HomeShelf = {
   title: string;
   displayKind: MediaShelfDisplayKind;
   sourceDisplayKind: string;
+  modelVersion: number;
   hasMore: boolean;
   items: MediaCardProps[];
 };
@@ -433,6 +434,7 @@ export function mapHomeRecommendations(
         title: sectionTitle,
         displayKind,
         sourceDisplayKind,
+        modelVersion: section.attributes?.version ?? 1,
         hasMore: Boolean(section.attributes?.hasSeeAll),
         items,
       },

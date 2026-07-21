@@ -21,6 +21,11 @@ export type MediaShelfProps = {
   onSelect?: (shelfId: string) => void;
   /** @deprecated Use shelfId + onSelect instead */
   onTitleClick?: () => void;
+  onCardInteraction?: (
+    eventType: "impression" | "open" | "play",
+    card: MediaCardProps,
+    position: number,
+  ) => void;
 };
 
 const mediaShelfPresets = {
@@ -111,6 +116,12 @@ const mediaShelfPresets = {
 
 const MOUSE_DRAG_THRESHOLD = 6;
 const SHELF_RENDER_AHEAD_ROOT_MARGIN = 96;
+const ESTIMATED_SHELF_HEIGHT: Record<MediaShelfDisplayKind, number> = {
+  MusicNotesHeroShelf: 320,
+  MusicCoverShelf: 250,
+  MusicCircleCoverShelf: 225,
+  MusicSocialCardShelf: 340,
+};
 let shelfResizeFrame: number | undefined;
 const pendingShelfDraggabilityUpdates = new Set<HTMLUListElement>();
 
@@ -148,13 +159,60 @@ function MediaShelf({
   scrollToStartKey,
   onSelect,
   onTitleClick,
+  onCardInteraction,
 }: MediaShelfProps) {
   const isHeroShelf = displayKind === "MusicNotesHeroShelf";
   const shelfContainerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const measuredHeightRef = useRef<number | undefined>(undefined);
   const [measuredHeight, setMeasuredHeight] = useState<number>();
-  const [isNearViewport, setIsNearViewport] = useState(true);
+  // Mount only the first discovery shelf (or hero) on the initial paint.
+  // Offscreen shelves retain an estimated height until the observer brings
+  // them into the render buffer, preventing a 20-shelf Home from creating a
+  // large initial card/image/layout burst.
+  const [isNearViewport, setIsNearViewport] = useState(
+    () => prioritizeFirstCard || isHeroShelf,
+  );
+  const trackedImpressionsRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    const shelf = listRef.current;
+    if (!isNearViewport || !onCardInteraction || !shelf) return;
+
+    const record = (position: number) => {
+      const card = items[position];
+      if (!card) return;
+
+      const key = `${shelfId}:${card.id}`;
+      if (trackedImpressionsRef.current.has(key)) return;
+      trackedImpressionsRef.current.add(key);
+      onCardInteraction("impression", card, position);
+    };
+
+    // A rendered horizontal shelf can contain twelve cards while only a few
+    // are actually on screen. An impression is meaningful only after the
+    // card itself is substantially visible, not merely because its shelf
+    // entered the vertical render buffer.
+    if (!("IntersectionObserver" in window)) {
+      record(0);
+      return;
+    }
+
+    const cards = Array.from(shelf.children);
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting || entry.intersectionRatio < 0.6) return;
+          const position = cards.indexOf(entry.target);
+          if (position >= 0) record(position);
+        });
+      },
+      { root: shelf, threshold: 0.6 },
+    );
+
+    cards.forEach((card) => observer.observe(card));
+    return () => observer.disconnect();
+  }, [isNearViewport, items, onCardInteraction, shelfId]);
 
   const handleTitleClick = () => {
     if (onSelect && shelfId) {
@@ -483,8 +541,11 @@ function MediaShelf({
       ref={shelfContainerRef}
       className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-3"
       style={
-        !isNearViewport && measuredHeight
-          ? { minHeight: measuredHeight }
+        !isNearViewport
+          ? {
+              minHeight:
+                measuredHeight ?? ESTIMATED_SHELF_HEIGHT[displayKind],
+            }
           : undefined
       }
     >
@@ -532,6 +593,8 @@ function MediaShelf({
                       priority={
                         (prioritizeFirstCard || isHeroShelf) && index === 0
                       }
+                      onOpen={() => onCardInteraction?.("open", card, index)}
+                      onPlay={() => onCardInteraction?.("play", card, index)}
                     />
                   ))}
               </ul>

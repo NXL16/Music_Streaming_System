@@ -5,7 +5,7 @@ import CardArtwork from "./common/card-artwork";
 import CardPlayButton from "./common/card-play-button";
 import CardContextMenu from "./common/card-context-menu";
 import StationCardMetadata from "./station-card-metadata";
-import { playStationsForYou } from "@/lib/recommendations/stations-for-you";
+import { playSystemStation } from "@/lib/recommendations/stations-for-you";
 
 type StationCardProps = MediaCardProps & {
   cardType: "station";
@@ -13,7 +13,8 @@ type StationCardProps = MediaCardProps & {
 
 export default function StationCard(props: StationCardProps) {
   const handlePlay = () => {
-    void playStationsForYou(props.resourceId);
+    props.onPlay?.();
+    void playSystemStation(props.resourceId);
   };
 
   return (
@@ -33,6 +34,7 @@ export default function StationCard(props: StationCardProps) {
               <Link
                 className="text-transparent block size-full absolute z-(--z-default)"
                 href={props.slug}
+                onClick={props.onOpen}
               >
                 {props.title}
               </Link>
@@ -48,6 +50,7 @@ export default function StationCard(props: StationCardProps) {
             )}
 
             <CardPlayButton
+              ariaLabel={`Play ${props.title}`}
               variant="station"
               onPlay={handlePlay}
             />

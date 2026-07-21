@@ -93,18 +93,16 @@ function shuffleQueue(songs: PlayerSong[], currentSongId: string) {
   return currentSong ? [currentSong, ...remaining] : remaining;
 }
 
-function randomPlayableIndex(
-  songs: PlayerSong[],
-  currentIndex = -1,
-): number {
-  const playableIndexes = songs.flatMap((song, index) =>
-    song.playbackUrl && (songs.length === 1 || index !== currentIndex)
-      ? [index]
-      : [],
-  );
-  if (playableIndexes.length === 0) return -1;
-
-  return playableIndexes[Math.floor(Math.random() * playableIndexes.length)];
+function shuffleAllSongs(songs: PlayerSong[]) {
+  const shuffled = [...songs];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const targetIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[targetIndex]] = [
+      shuffled[targetIndex],
+      shuffled[index],
+    ];
+  }
+  return shuffled;
 }
 
 export const usePlayerStore = create<PlayerState>((set) => ({
@@ -161,18 +159,21 @@ export const usePlayerStore = create<PlayerState>((set) => ({
     }),
   startStation: (songs) =>
     set(() => {
-      const currentIndex = randomPlayableIndex(songs);
-      const currentSong = currentIndex >= 0 ? songs[currentIndex] : null;
+      // A Station is shuffled once, then consumed in order. This guarantees a
+      // track cannot repeat until the listener explicitly starts the station again.
+      const queue = shuffleAllSongs(songs);
+      const currentIndex = findPlayableIndex(queue, 0, 1);
+      const currentSong = currentIndex >= 0 ? queue[currentIndex] : null;
 
       return {
         currentSong,
-        queue: songs,
-        originalQueue: songs,
+        queue,
+        originalQueue: queue,
         currentIndex,
         playing: Boolean(currentSong),
         shuffleEnabled: true,
         stationMode: true,
-        repeatMode: 2,
+        repeatMode: 0,
       };
     }),
   togglePlayback: () =>
@@ -211,12 +212,13 @@ export const usePlayerStore = create<PlayerState>((set) => ({
   next: (stopAtEnd = false) =>
     set((state) => {
       if (state.stationMode) {
-        const stationIndex = randomPlayableIndex(
+        const stationIndex = findPlayableIndex(
           state.queue,
-          state.currentIndex,
+          state.currentIndex + 1,
+          1,
         );
         if (stationIndex < 0) {
-          return stopAtEnd ? { playing: false } : state;
+          return { playing: false };
         }
         return {
           currentIndex: stationIndex,
@@ -245,9 +247,10 @@ export const usePlayerStore = create<PlayerState>((set) => ({
   previous: () =>
     set((state) => {
       if (state.stationMode) {
-        const stationIndex = randomPlayableIndex(
+        const stationIndex = findPlayableIndex(
           state.queue,
-          state.currentIndex,
+          state.currentIndex - 1,
+          -1,
         );
         if (stationIndex < 0) return state;
         return {

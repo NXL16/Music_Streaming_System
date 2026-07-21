@@ -45,13 +45,16 @@ export default function HeroCard(props: HeroCardProps) {
               <Link
                 href={props.slug}
                 aria-label={props.title}
+                onClick={props.onOpen}
                 className="block h-full w-full rounded-none"
               />
             )}
           </div>
           <CardPlayButton
+            ariaLabel={`Play ${props.title}`}
             variant="hero"
             onPlay={() => {
+              props.onPlay?.();
               void playCatalogResource(props.resourceType, props.resourceId);
             }}
           />

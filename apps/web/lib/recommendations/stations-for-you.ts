@@ -3,18 +3,27 @@ import { getArtworkRenditionUrl, getArtworkSrcSet } from "@/lib/media/artwork";
 import { usePlayerStore } from "@/lib/player/use-player-store";
 import { getHomeRecommendations } from "./recommendation.api";
 
-const STATION_ID_PATTERN = /^station-for-you-[a-f0-9]{32}-\d+$/;
+const SYSTEM_STATION_ID_PATTERN = /^(?:station-for-you|mood-station)-[a-f0-9]{32}-\d+$/;
+const PLAYABLE_SYSTEM_STATION_KINDS = new Set([
+  "system-personalized",
+  "system-mood",
+]);
 
-export function isStationsForYouId(stationId: string): boolean {
-  return STATION_ID_PATTERN.test(stationId);
+export function isPlayableSystemStationId(stationId: string): boolean {
+  return SYSTEM_STATION_ID_PATTERN.test(stationId);
 }
 
-export async function playStationsForYou(stationId: string): Promise<boolean> {
-  if (!isStationsForYouId(stationId)) return false;
+/** Plays both personalised and mood stations from their persisted tracklist. */
+export async function playSystemStation(stationId: string): Promise<boolean> {
+  if (!isPlayableSystemStationId(stationId)) return false;
 
   const response = await getHomeRecommendations();
   const station = response.resources?.stations[stationId];
-  if (station?.attributes?.kind !== "system-personalized") return false;
+  const attributes = station?.attributes;
+  const kind = typeof attributes?.kind === "string" ? attributes.kind : "";
+  if (!station || !attributes || !PLAYABLE_SYSTEM_STATION_KINDS.has(kind)) {
+    return false;
+  }
 
   const trackIds = (station.relationships?.tracks?.data ?? [])
     .filter((reference) => reference.type === "songs")
@@ -25,10 +34,10 @@ export async function playStationsForYou(stationId: string): Promise<boolean> {
     (await loadCatalogTracks(trackIds)).map((track) => [track.id, track]),
   );
 
-  const stationArtwork = station.attributes.artwork;
+  const stationArtwork = attributes.artwork;
   const sourceStation = {
     id: stationId,
-    name: station.attributes.name ?? "Station",
+    name: typeof attributes.name === "string" ? attributes.name : "Station",
     artworkUrl: getArtworkRenditionUrl(stationArtwork, 632),
     artworkSrcSet: getArtworkSrcSet(stationArtwork, [296, 316, 592, 632]),
     artworkBgColor: stationArtwork?.bgColor
@@ -45,3 +54,8 @@ export async function playStationsForYou(stationId: string): Promise<boolean> {
   usePlayerStore.getState().startStation(tracks);
   return true;
 }
+
+// Kept as a compatibility alias for callers that only know the original
+// personalised-station name. The implementation now supports mood stations.
+export const isStationsForYouId = isPlayableSystemStationId;
+export const playStationsForYou = playSystemStation;

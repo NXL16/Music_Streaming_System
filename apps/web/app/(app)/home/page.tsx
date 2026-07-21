@@ -13,7 +13,10 @@ import {
   mapHomeRecommendations,
   type HomeShelf,
 } from "@/lib/recommendations/recommendation.mapper";
-import { getRecommendationSection } from "@/lib/recommendations/recommendation.api";
+import {
+  getRecommendationSection,
+  recordRecommendationInteraction,
+} from "@/lib/recommendations/recommendation.api";
 import MediaShelfSkeleton from "@/components/loading/loading";
 import Loading from "@/app/loading";
 
@@ -22,10 +25,24 @@ const RECENTLY_PLAYED_SHELF_ID = "user-recently-played";
 const DAILY_MIX_SHELF_ID = "user-daily-mix";
 const STATIONS_FOR_YOU_SHELF_ID = "user-stations-for-you";
 const FEATURED_ARTISTS_SHELF_ID = "global-top-artists";
-const DAILY_MIX_SHELF_GAP = 2;
+const PERSONALIZED_HOME_ORDER = [
+  "user-top-picks",
+  "global-top-picks",
+  RECENTLY_PLAYED_SHELF_ID,
+  "user-more-like-1",
+  "user-genre-1",
+  DAILY_MIX_SHELF_ID,
+  STATIONS_FOR_YOU_SHELF_ID,
+  "user-find-your-mood",
+  "user-new-releases",
+  "user-more-like-2",
+  "user-fans-like",
+  "user-more-like-3",
+  "user-genre-2",
+] as const;
 
 export default function HomePage() {
-  const { data, loading, error, recentlyPlayedItems } =
+  const { data, loading, error, retry, recentlyPlayedItems } =
     useHomeRecommendations();
   const [selectedShelfId, setSelectedShelfId] = useState<string | null>(null);
   const [loadedShelves, setLoadedShelves] = useState<Record<string, HomeShelf>>(
@@ -45,7 +62,7 @@ export default function HomePage() {
   );
   const shelvesWithRecentlyPlayed = useMemo(
     () =>
-      positionDailyMixShelf(
+      orderPersonalizedHomeShelves(
         ensureRecentlyPlayedShelf(shelves, recentlyPlayedItems),
       ),
     [recentlyPlayedItems, shelves],
@@ -160,7 +177,14 @@ export default function HomePage() {
         </>
       )}
 
-      {error && <p className="mx-(--bodyGutter) text-red-500">{error}</p>}
+      {error && (
+        <div role="alert">
+          <p className="mx-(--bodyGutter) text-red-500">{error}</p>
+          <button onClick={() => void retry()} type="button">
+            Thử lại
+          </button>
+        </div>
+      )}
       {shelfLoadError && (
         <p className="mx-(--bodyGutter) text-red-500">{shelfLoadError}</p>
       )}
@@ -184,6 +208,16 @@ export default function HomePage() {
                       : undefined
                   }
                   onSelect={shelf.hasMore ? handleSelectShelf : undefined}
+                  onCardInteraction={(eventType, card, position) => {
+                    void recordRecommendationInteraction({
+                      sectionId: shelf.id,
+                      resourceType: card.resourceType,
+                      resourceId: card.resourceId,
+                      position,
+                      modelVersion: shelf.modelVersion,
+                      eventType,
+                    });
+                  }}
                 />
               );
             }))}
@@ -209,6 +243,7 @@ function ensureRecentlyPlayedShelf(
     title: "Recently Played",
     displayKind: "MusicCoverShelf",
     sourceDisplayKind: "MusicCoverShelf",
+    modelVersion: 1,
     hasMore: false,
     items: recentlyPlayedItems,
   } satisfies ReturnType<typeof mapHomeRecommendations>[number];
@@ -226,39 +261,63 @@ function ensureRecentlyPlayedShelf(
   ];
 }
 
-function positionDailyMixShelf(
+function orderPersonalizedHomeShelves(
   shelves: ReturnType<typeof mapHomeRecommendations>,
 ) {
-  const dailyMix = shelves.find((shelf) => shelf.id === DAILY_MIX_SHELF_ID);
-  const stationsForYou = shelves.find(
-    (shelf) => shelf.id === STATIONS_FOR_YOU_SHELF_ID,
+  const order = new Map<string, number>(
+    PERSONALIZED_HOME_ORDER.map((id, index) => [id, index]),
   );
-  const recentlyPlayedIndex = shelves.findIndex(
+  const ordered = shelves
+    .map((shelf, index) => ({ shelf, index }))
+    .sort(
+      (left, right) =>
+        (order.get(left.shelf.id) ?? Number.MAX_SAFE_INTEGER) -
+          (order.get(right.shelf.id) ?? Number.MAX_SAFE_INTEGER) ||
+        left.index - right.index,
+    )
+    .map(({ shelf }) => shelf);
+
+  const recentlyPlayedIndex = ordered.findIndex(
     (shelf) => shelf.id === RECENTLY_PLAYED_SHELF_ID,
   );
+  const playlistIndex = ordered.findIndex(
+    (shelf) => shelf.id === DAILY_MIX_SHELF_ID,
+  );
 
-  if (!dailyMix || recentlyPlayedIndex < 0) return shelves;
+  // The Home rhythm is intentional: two discovery shelves separate recent
+  // listening from the made-for-you playlist. If a sparse taste profile could
+  // not generate More Like or Genre, promote the next meaningful shelf rather
+  // than letting Playlist Made for You jump directly below Recently Played.
+  if (recentlyPlayedIndex < 0 || playlistIndex < 0) return ordered;
 
-  const shelvesWithoutSystemMixes = shelves.filter(
+  const recentlyPlayed = ordered[recentlyPlayedIndex];
+  const playlist = ordered[playlistIndex];
+  const beforeRecentlyPlayed = ordered
+    .slice(0, recentlyPlayedIndex)
+    .filter((shelf) => shelf.id !== DAILY_MIX_SHELF_ID);
+  const afterRecentlyPlayed = ordered
+    .slice(recentlyPlayedIndex + 1)
+    .filter((shelf) => shelf.id !== DAILY_MIX_SHELF_ID);
+  // Stations and moods are listening destinations, not discovery bridges.
+  // They must stay after Playlist Made for You even when More Like/Genre is
+  // unavailable for a sparse profile.
+  const bridgeCandidates = afterRecentlyPlayed.filter(
     (shelf) =>
-      shelf.id !== DAILY_MIX_SHELF_ID && shelf.id !== STATIONS_FOR_YOU_SHELF_ID,
+      shelf.id !== STATIONS_FOR_YOU_SHELF_ID &&
+      shelf.id !== "user-find-your-mood",
   );
-  const recentIndexWithoutSystemMixes = shelvesWithoutSystemMixes.findIndex(
-    (shelf) => shelf.id === RECENTLY_PLAYED_SHELF_ID,
+  const bridgeShelves = bridgeCandidates.slice(0, 2);
+  const bridgeIds = new Set(bridgeShelves.map((shelf) => shelf.id));
+  const rest = afterRecentlyPlayed.filter(
+    (shelf) => !bridgeIds.has(shelf.id),
   );
-  const targetIndex = Math.min(
-    recentIndexWithoutSystemMixes + DAILY_MIX_SHELF_GAP + 1,
-    shelvesWithoutSystemMixes.length,
-  );
-  const systemMixShelves = [
-    dailyMix,
-    ...(stationsForYou ? [stationsForYou] : []),
-  ];
 
   return [
-    ...shelvesWithoutSystemMixes.slice(0, targetIndex),
-    ...systemMixShelves,
-    ...shelvesWithoutSystemMixes.slice(targetIndex),
+    ...beforeRecentlyPlayed,
+    recentlyPlayed,
+    ...bridgeShelves,
+    playlist,
+    ...rest,
   ];
 }
 

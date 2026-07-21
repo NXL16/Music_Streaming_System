@@ -18,20 +18,16 @@ export function useCatalogSearch(query: string) {
   const [results, setResults] = useState<SearchResults>(EMPTY_RESULTS);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasQuery = Boolean(query.trim());
 
   useEffect(() => {
     const trimmed = query.trim();
 
-    if (!trimmed) {
-      setResults(EMPTY_RESULTS);
-      setLoading(false);
-      setError(null);
-      return;
-    }
+    if (!trimmed) return;
 
-    setLoading(true);
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
+      setLoading(true);
       searchCatalog(trimmed, controller.signal)
         .then((response) => {
           setResults(mapSearchResults(response));
@@ -54,5 +50,12 @@ export function useCatalogSearch(query: string) {
     };
   }, [query]);
 
-  return { results, loading, error };
+  // Empty-query state is derived instead of synchronously resetting state in
+  // the effect. This avoids an unnecessary render cascade when the user
+  // clears the search input while preserving the same visible result.
+  return {
+    results: hasQuery ? results : EMPTY_RESULTS,
+    loading: hasQuery && loading,
+    error: hasQuery ? error : null,
+  };
 }

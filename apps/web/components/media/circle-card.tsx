@@ -29,12 +29,13 @@ export default function CircleCard(props: CircleCardProps) {
               <Link
                 className="text-transparent block size-full absolute inset-0 z-(--z-default) wrap-break-word"
                 href={props.slug}
+                onClick={props.onOpen}
               >
                 {props.title}
               </Link>
             )}
 
-            <CardPlayButton variant="station" />
+            <CardPlayButton ariaLabel={`Play ${props.title}`} variant="station" />
           </div>
         </div>
 
