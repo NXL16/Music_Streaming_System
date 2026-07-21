@@ -35,7 +35,11 @@ function recentlyPlayedCard(song: PlayerSong): MediaCardProps {
       resourceType: "stations",
       cardType: "station",
       title: station.name,
-      subtitle: "",
+      subtitle: station.description || "Musical Station",
+      // Station cards render their supporting copy from `description` (not
+      // `subtitle`). Keep the optimistic Recently Played card aligned with
+      // the server-mapped card shown after a reload.
+      description: station.description || "Musical Station",
       imageUrl: station.artworkUrl,
       imageSrcSet: station.artworkSrcSet || station.artworkUrl,
       artworkColors: {

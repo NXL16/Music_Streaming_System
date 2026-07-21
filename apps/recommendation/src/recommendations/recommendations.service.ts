@@ -1334,7 +1334,11 @@ export class RecommendationsService {
           where: {
             resourceType: 'stations',
             resourceId: { in: stationIds },
-            stationKind: 'system-personalized',
+            // Both personalised stations and Find Your Mood stations are
+            // first-class station contexts in listening history. Filtering
+            // only personalised stations made mood stations disappear after
+            // a Home reload, despite their play event being recorded.
+            stationKind: { in: ['system-personalized', 'system-mood'] },
           },
         })
       : [];

@@ -1746,7 +1746,9 @@ export class GenerationService {
     userId: string,
   ): Promise<PersonalRecommendationResource | null> {
     const recent = await this.listeningService.getRecentlyPlayed(userId, 50);
-    if (recent.length < 3) return null;
+    // Recently Played is a direct record of a listener's choice. Unlike taste
+    // modelling, it must retain the very first qualified station/album play.
+    if (recent.length === 0) return null;
 
     const albumLastPlayed = new Map<
       string,

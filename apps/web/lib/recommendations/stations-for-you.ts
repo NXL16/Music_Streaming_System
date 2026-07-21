@@ -35,9 +35,16 @@ export async function playSystemStation(stationId: string): Promise<boolean> {
   );
 
   const stationArtwork = attributes.artwork;
+  const stationDescription =
+    typeof attributes.description?.short === "string"
+      ? attributes.description.short
+      : typeof attributes.description?.standard === "string"
+        ? attributes.description.standard
+        : "";
   const sourceStation = {
     id: stationId,
     name: typeof attributes.name === "string" ? attributes.name : "Station",
+    description: stationDescription,
     artworkUrl: getArtworkRenditionUrl(stationArtwork, 632),
     artworkSrcSet: getArtworkSrcSet(stationArtwork, [296, 316, 592, 632]),
     artworkBgColor: stationArtwork?.bgColor

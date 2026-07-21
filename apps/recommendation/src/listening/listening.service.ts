@@ -250,9 +250,13 @@ export class ListeningService {
       lastPlayedAt: Date;
     }>
   > {
-    return this.prisma.userListeningStats.findMany({
-      where: { userId },
-      orderBy: { lastPlayedAt: 'desc' },
+    // `UserListeningStats` is an aggregate keyed by user and song. A later
+    // standalone play of the same song overwrites its station context, so it
+    // cannot represent a reliable Recently Played history. Use immutable play
+    // events and retain the original source station/playlist metadata.
+    const events = await this.prisma.listeningEvent.findMany({
+      where: { userId, eventType: 'PLAY_START' },
+      orderBy: { createdAt: 'desc' },
       take: limit,
       select: {
         songId: true,
@@ -268,9 +272,13 @@ export class ListeningService {
         stationName: true,
         stationArtworkUrl: true,
         stationArtworkBgColor: true,
-        lastPlayedAt: true,
+        createdAt: true,
       },
     });
+    return events.map((event) => ({
+      ...event,
+      lastPlayedAt: event.createdAt,
+    }));
   }
 
   async getTopArtistsForUser(

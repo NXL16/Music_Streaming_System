@@ -33,6 +33,7 @@ export type PlayerSong = {
   sourceStation?: {
     id: string;
     name: string;
+    description?: string;
     artworkUrl: string;
     artworkSrcSet?: string;
     artworkBgColor?: string;
