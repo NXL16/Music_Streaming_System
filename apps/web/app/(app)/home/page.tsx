@@ -14,6 +14,7 @@ import {
 } from "@/lib/recommendations/recommendation.api";
 import MediaShelfSkeleton from "@/components/loading/loading";
 import Loading from "@/app/loading";
+import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
 
 const MAX_HOME_SHELF_ITEMS = 12;
 const RECENTLY_PLAYED_SHELF_ID = "user-recently-played";
@@ -39,12 +40,16 @@ const PERSONALIZED_HOME_ORDER = [
 export default function HomePage() {
   const { data, loading, error, retry, recentlyPlayedItems } =
     useHomeRecommendations();
+  const showHomeLoading = useMinimumLoadingDuration(loading);
   const [selectedShelfId, setSelectedShelfId] = useState<string | null>(null);
   const [loadedShelves, setLoadedShelves] = useState<Record<string, HomeShelf>>(
     {},
   );
   const [loadingShelfId, setLoadingShelfId] = useState<string | null>(null);
   const [shelfLoadError, setShelfLoadError] = useState<string | null>(null);
+  const showShelfDetailLoading = useMinimumLoadingDuration(
+    Boolean(loadingShelfId),
+  );
 
   const shelves = useMemo(
     () =>
@@ -144,7 +149,7 @@ export default function HomePage() {
 
   return (
     <>
-      {loadingShelfId ? (
+      {showShelfDetailLoading ? (
         <ShelfDetailLoading />
       ) : selectedShelfWithOverlay ? (
         <ShelfDetailView
@@ -165,7 +170,7 @@ export default function HomePage() {
         </>
       )}
 
-      {loading && (
+      {showHomeLoading && (
         <>
           <MediaShelfSkeleton displayKind="MusicNotesHeroShelf" />
           <MediaShelfSkeleton displayKind="MusicCoverShelf" />
@@ -185,7 +190,7 @@ export default function HomePage() {
         <p className="mx-(--bodyGutter) text-red-500">{shelfLoadError}</p>
       )}
 
-      {!loading &&
+      {!showHomeLoading &&
         !error &&
         (selectedShelf
           ? null

@@ -7,6 +7,7 @@ import { formatDuration } from "@/lib/format/duration";
 import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
 import ResponsiveArtwork from "../media/common/responsive-artwork";
 import CatalogPageLoading from "../loading/catalog-page-loading";
+import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
 import { FavoriteSongButton } from "../songs/favorite-song-button";
 import { AddSongToPlaylistButton } from "../songs/add-song-to-playlist-button";
 
@@ -43,9 +44,10 @@ function SongArtists({
 
 export function SongDetailPage({ songId }: SongDetailPageProps) {
   const { song, loading, error, reload } = useCatalogSong(songId);
+  const showLoading = useMinimumLoadingDuration(loading);
   const setQueue = usePlayerStore((state) => state.setQueue);
 
-  if (loading) {
+  if (showLoading) {
     return <CatalogPageLoading />;
   }
 

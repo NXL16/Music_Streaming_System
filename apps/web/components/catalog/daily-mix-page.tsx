@@ -11,6 +11,7 @@ import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
 import { getArtworkRenditionUrl, getArtworkSrcSet } from "@/lib/media/artwork";
 import { formatDuration, formatSummaryDuration } from "@/lib/format/duration";
 import CatalogPageLoading from "../loading/catalog-page-loading";
+import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
 import { AddToLibraryButton } from "../songs/add-to-library-button";
 
 type DailyMixPageProps = {
@@ -71,7 +72,9 @@ export default function DailyMixPage({ playlistId }: DailyMixPageProps) {
     };
   }, [playlistId]);
 
-  if (!mix && !error) {
+  const showLoading = useMinimumLoadingDuration(!mix && !error);
+
+  if (showLoading) {
     return <CatalogPageLoading />;
   }
 

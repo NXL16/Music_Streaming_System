@@ -18,6 +18,7 @@ import { formatDuration, formatSummaryDuration } from "@/lib/format/duration";
 import { artistRoute } from "@/lib/catalog/artist-route";
 import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
 import CatalogPageLoading from "../loading/catalog-page-loading";
+import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
 import { AddToLibraryButton } from "../songs/add-to-library-button";
 
 type CatalogDetailPageProps = {
@@ -70,6 +71,7 @@ export function CatalogDetailPage({
     resourceType,
     resourceId,
   );
+  const showInitialLoading = useMinimumLoadingDuration(loading && !data);
   const setQueue = usePlayerStore((state) => state.setQueue);
   const tracks = useMemo(() => (data ? mapCatalogTracks(data) : []), [data]);
 
@@ -223,9 +225,9 @@ export function CatalogDetailPage({
 
   return (
     <>
-      {loading && !data && <CatalogPageLoading />}
+      {showInitialLoading && <CatalogPageLoading />}
 
-      {error && (
+      {!showInitialLoading && error && (
         <div className="mx-(--bodyGutter) pt-8 text-red-500">
           <p>{error}</p>
           <button type="button" onClick={() => void reload()}>
@@ -234,7 +236,7 @@ export function CatalogDetailPage({
         </div>
       )}
 
-      {resource && (
+      {!showInitialLoading && resource && (
         <>
           <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width)">
             <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">

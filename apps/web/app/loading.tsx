@@ -12,16 +12,15 @@ export default function Loading({
   size,
 }: LoadingProps) {
   const loaderSize = size ?? 56;
+  const containerClassName = fullScreen
+    ? "h-screen w-screen flex items-center justify-center select-none"
+    : inline
+      ? "inline-flex items-center justify-center select-none"
+      : "flex items-center justify-center py-4 select-none";
 
   return (
     <div
-      className={
-        fullScreen
-          ? "h-screen w-screen flex items-center justify-center select-none"
-          : inline
-            ? "inline-flex items-center justify-center select-none"
-          : "flex items-center justify-center py-4 select-none"
-      }
+      className={containerClassName}
       role="status"
       aria-label="Đang tải"
     >

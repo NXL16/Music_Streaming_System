@@ -17,6 +17,7 @@ import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
 import { usePlayerStore } from "@/lib/player/use-player-store";
 import Loading from "@/app/loading";
 import CatalogPageLoading from "../loading/catalog-page-loading";
+import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
 
 type ArtistTopSongsPageProps = {
   artistId: string;
@@ -164,6 +165,10 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
     loadMore,
   } = useCatalogArtistSongs(artistId);
   const [selectedSongId, setSelectedSongId] = useState<string | null>(null);
+  const showInitialLoading = useMinimumLoadingDuration(
+    artistLoading || songsLoading,
+  );
+  const showLoadingMore = useMinimumLoadingDuration(loadingMore);
   const setQueue = usePlayerStore((state) => state.setQueue);
   const artistName = artist?.attributes.name ?? "";
   const [loadMoreElement, setLoadMoreElement] =
@@ -194,7 +199,7 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
     return () => observer.disconnect();
   }, [hasMore, loadMore, loadingMore, loadMoreElement]);
 
-  if (artistLoading || songsLoading) {
+  if (showInitialLoading) {
     return <CatalogPageLoading />;
   }
 
@@ -457,7 +462,7 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
           />
         </div>
 
-        {loadingMore && <Loading fullScreen={false} size={46} />}
+        {showLoadingMore && <Loading fullScreen={false} size={46} />}
 
         {hasMore && (
           <div

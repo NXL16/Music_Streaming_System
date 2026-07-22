@@ -16,12 +16,6 @@ export default function RootLayout({
   return (
     <html lang="vi" className="h-full antialiased">
       <head>
-        <link
-          rel="preload"
-          href="/Loading.svg?v=20260715"
-          as="image"
-          type="image/svg+xml"
-        />
         {process.env.NEXT_PUBLIC_CDN_URL && (
           <>
             <link
