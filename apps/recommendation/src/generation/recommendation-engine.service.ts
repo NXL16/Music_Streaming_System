@@ -128,7 +128,7 @@ export class RecommendationEngineService {
     if (topGenres[0])
       add(
         'user-genre-1',
-        `${topGenres[0]} Music`,
+        `${topGenres[0]}`,
         this.forGenre(candidates, topGenres[0]),
       );
     add(
@@ -169,7 +169,7 @@ export class RecommendationEngineService {
     if (topGenres[1])
       add(
         'user-genre-2',
-        `${topGenres[1]} Music`,
+        `${topGenres[1]}`,
         this.forGenre(candidates, topGenres[1]),
       );
     for (const [index, seed] of seeds.slice(3, 5).entries()) {
@@ -188,7 +188,7 @@ export class RecommendationEngineService {
     for (const [index, genre] of topGenres.slice(2).entries()) {
       add(
         `user-genre-${index + 3}`,
-        `${genre} Music`,
+        `${genre}`,
         this.forGenre(candidates, genre),
       );
     }
@@ -384,7 +384,7 @@ export class RecommendationEngineService {
     for (const genre of genres)
       add(
         `global-genre-${this.slug(genre)}`,
-        `${genre} Music`,
+        `${genre}`,
         this.forGenre(candidates, genre),
       );
     for (const spotlightArtist of spotlightArtists) {
