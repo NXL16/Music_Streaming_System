@@ -16,10 +16,7 @@ import { artistRoute } from "@/lib/catalog/artist-route";
 import { albumRoute } from "@/lib/catalog/album-route";
 import { songRoute } from "@/lib/catalog/song-route";
 import { formatArtistNames } from "@/lib/media/artist-names";
-import {
-  getArtworkRenditionUrl,
-  getArtworkSrcSet,
-} from "@/lib/media/artwork";
+import { getArtworkRenditionUrl, getArtworkSrcSet } from "@/lib/media/artwork";
 
 export type HomeShelf = {
   id: string;
@@ -28,6 +25,15 @@ export type HomeShelf = {
   sourceDisplayKind: string;
   modelVersion: number;
   hasMore: boolean;
+  headerArtwork?: {
+    imageSrcSet: string;
+    artworkColors: {
+      bg: string;
+      main: string;
+    };
+    altText: string;
+  };
+  sourceAlbumHref?: string;
   items: MediaCardProps[];
 };
 
@@ -60,6 +66,16 @@ function formatColor(color: string | undefined) {
   return normalized && /^[0-9a-f]{6}$/i.test(normalized)
     ? `#${normalized}`
     : undefined;
+}
+
+function compactArtworkSrcSet(artworkUrl: string) {
+  const match = artworkUrl.match(/^(.*\/)\d+w(\.[a-z0-9]+)$/i);
+  if (!match) return artworkUrl;
+
+  const [, baseUrl, extension] = match;
+  return [40, 80]
+    .map((width) => `${baseUrl}${width}w${extension} ${width}w`)
+    .join(", ");
 }
 
 function contrastTextColor(backgroundColor: string) {
@@ -153,9 +169,7 @@ function selectHeroVideo(
   return undefined;
 }
 
-function getDisplayKind(
-  sourceKind: string,
-): MediaShelfDisplayKind | undefined {
+function getDisplayKind(sourceKind: string): MediaShelfDisplayKind | undefined {
   if (
     sourceKind === "MusicNotesHeroShelf" ||
     sourceKind === "MusicSuperHeroShelf"
@@ -203,14 +217,13 @@ function closestArtwork(
   if (!artworks) return undefined;
 
   return Object.values(artworks)
-    .filter(
-      (artwork): artwork is Artwork =>
-        Boolean(
-          artwork?.url &&
-            artwork.width > 0 &&
-            artwork.height > 0 &&
-            Math.abs(artwork.width / artwork.height - targetRatio) <= tolerance,
-        ),
+    .filter((artwork): artwork is Artwork =>
+      Boolean(
+        artwork?.url &&
+        artwork.width > 0 &&
+        artwork.height > 0 &&
+        Math.abs(artwork.width / artwork.height - targetRatio) <= tolerance,
+      ),
     )
     .sort(
       (left, right) =>
@@ -347,6 +360,29 @@ export function mapHomeRecommendations(
       section.attributes?.title?.stringForDisplay ??
       section.attributes?.titleWithoutName?.stringForDisplay ??
       "For You";
+
+    const sourceAlbumId = section.attributes?.sourceAlbumId;
+    const sourceAlbumName = section.attributes?.sourceAlbumName ?? sectionTitle;
+    const sourceAlbumArtworkUrl = section.attributes?.sourceAlbumArtworkUrl;
+    const sourceAlbumArtworkColor =
+      formatColor(section.attributes?.sourceAlbumArtworkBgColor) ?? "#2c2c2e";
+
+    const headerArtwork = sourceAlbumArtworkUrl
+      ? {
+          imageSrcSet: compactArtworkSrcSet(sourceAlbumArtworkUrl),
+          artworkColors: {
+            bg: sourceAlbumArtworkColor,
+            main: sourceAlbumArtworkColor,
+          },
+          altText: sourceAlbumName,
+        }
+      : undefined;
+
+    const sourceAlbumHref =
+      sourceAlbumId && section.attributes?.sourceAlbumUrl
+        ? albumRoute(section.attributes.sourceAlbumUrl, sourceAlbumId)
+        : undefined;
+
     const refs = getSectionRefs(
       section.relationships?.contents?.data,
       section.relationships?.primaryContent?.data,
@@ -388,18 +424,17 @@ export function mapHomeRecommendations(
             ? artworkUrl(artwork, 600, true)
             : artworkUrl(artwork, 632),
           imageSrcSet: isHero
-            ? artworkSrcSet(artwork, [
-                [450, 600],
-                [600, 800],
-              [900, 1200],
-              [1200, 1600],
-              ], true)
-            : artworkSrcSet(artwork, [
-                [296],
-                [316],
-                [592],
-                [632],
-              ]),
+            ? artworkSrcSet(
+                artwork,
+                [
+                  [450, 600],
+                  [600, 800],
+                  [900, 1200],
+                  [1200, 1600],
+                ],
+                true,
+              )
+            : artworkSrcSet(artwork, [[296], [316], [592], [632]]),
           artworkColors: {
             bg: color,
             main: color,
@@ -432,6 +467,8 @@ export function mapHomeRecommendations(
       {
         id: section.id,
         title: sectionTitle,
+        headerArtwork,
+        sourceAlbumHref,
         displayKind,
         sourceDisplayKind,
         modelVersion: section.attributes?.version ?? 1,

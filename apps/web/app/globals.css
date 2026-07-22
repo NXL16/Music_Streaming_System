@@ -98,6 +98,7 @@
     --title-2-emphasized: 700 17px/ 1.2941176471 var(--apple-music-font);
     --title-3-semibold: 600 15px/ 1.3333833333 var(--apple-music-font);
     --title-3-tall: 400 15px/ 1.4666666667 var(--apple-music-font);
+    --title-3: 400 15px/ 1.3333833333 var(--apple-music-font);
     --callout: 400 12px/ 1.25 var(--apple-music-font);
     --callout-emphasized: 600 12px/ 1.25 var(--apple-music-font);
     --callout-medium: 500 12px/ 1.25 var(--apple-music-font);

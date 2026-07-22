@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  useCallback,
-  useLayoutEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useCallback, useLayoutEffect, useMemo, useState } from "react";
 import MediaShelf from "@/components/media/media-shelf";
 import MediaCardRenderer from "@/components/media/media-card-renderer";
 import { useHomeRecommendations } from "@/lib/recommendations/use-home-recommendations";
@@ -121,6 +116,7 @@ export default function HomePage() {
       }),
     [recentlyPlayedItems, shelvesWithRecentlyPlayed],
   );
+
   const selectedShelf = useMemo(
     () =>
       (selectedShelfId ? loadedShelves[selectedShelfId] : undefined) ??
@@ -218,6 +214,8 @@ export default function HomePage() {
                       eventType,
                     });
                   }}
+                  headerArtwork={shelf.headerArtwork}
+                  sourceAlbumHref={shelf.sourceAlbumHref}
                 />
               );
             }))}
@@ -308,9 +306,7 @@ function orderPersonalizedHomeShelves(
   );
   const bridgeShelves = bridgeCandidates.slice(0, 2);
   const bridgeIds = new Set(bridgeShelves.map((shelf) => shelf.id));
-  const rest = afterRecentlyPlayed.filter(
-    (shelf) => !bridgeIds.has(shelf.id),
-  );
+  const rest = afterRecentlyPlayed.filter((shelf) => !bridgeIds.has(shelf.id));
 
   return [
     ...beforeRecentlyPlayed,

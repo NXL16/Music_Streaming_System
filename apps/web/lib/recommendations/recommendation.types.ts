@@ -96,6 +96,20 @@ export type RecommendationSection = {
       stringForDisplay?: string;
     };
     version?: number;
+    headerArtwork?: {
+      imageSrcSet: string;
+      artworkColors: {
+        bg: string;
+        main: string;
+      };
+      altText: string;
+    };
+    sourceAlbumHref?: string;
+    sourceAlbumId?: string;
+    sourceAlbumName?: string;
+    sourceAlbumUrl?: string;
+    sourceAlbumArtworkUrl?: string;
+    sourceAlbumArtworkBgColor?: string;
   };
   relationships?: {
     contents?: RecommendationRelationship;

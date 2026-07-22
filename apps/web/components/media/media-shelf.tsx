@@ -3,6 +3,8 @@
 import { memo, useEffect, useRef, useState, type CSSProperties } from "react";
 import MediaCardRenderer from "@/components/media/media-card-renderer";
 import type { MediaCardProps } from "@/components/media/media-card.types";
+import CardArtwork from "./common/card-artwork";
+import Link from "next/link";
 
 export type MediaShelfDisplayKind =
   | "MusicNotesHeroShelf"
@@ -26,6 +28,15 @@ export type MediaShelfProps = {
     card: MediaCardProps,
     position: number,
   ) => void;
+  headerArtwork?: {
+    imageSrcSet: string;
+    artworkColors: {
+      bg: string;
+      main: string;
+    };
+    altText: string;
+  };
+  sourceAlbumHref?: string;
 };
 
 const mediaShelfPresets = {
@@ -119,6 +130,57 @@ const MOUSE_WHEEL_IDLE_DELAY = 160;
 const MOUSE_WHEEL_LINE_HEIGHT = 16;
 const DISCRETE_WHEEL_PIXEL_DELTA = 40;
 const SHELF_RENDER_AHEAD_ROOT_MARGIN = 96;
+
+type ShelfTitleButtonProps = {
+  title: string;
+  isClickable: boolean;
+  onClick: () => void;
+  href?: string;
+};
+
+function ShelfTitleButton({
+  title,
+  isClickable,
+  onClick,
+  href,
+}: ShelfTitleButtonProps) {
+  const content = (
+    <>
+      <span dir="auto">{title}</span>
+      {isClickable && (
+        <svg
+          className="h-(--header-title-chevron-size,12px) fill-(--header-title-chevron-color,var(--dropdownLightGrayIcon))"
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 64 64"
+          aria-hidden="true"
+        >
+          <path d="M19.817 61.863c1.48 0 2.672-.515 3.702-1.546l24.243-23.63c1.352-1.385 1.996-2.737 2.028-4.443 0-1.674-.644-3.09-2.028-4.443L23.519 4.138c-1.03-.998-2.253-1.513-3.702-1.513-2.994 0-5.409 2.382-5.409 5.344 0 1.481.612 2.833 1.739 3.96l20.99 20.347-20.99 20.283c-1.127 1.126-1.739 2.478-1.739 3.96 0 2.93 2.415 5.344 5.409 5.344Z" />
+        </svg>
+      )}
+    </>
+  );
+
+  if (!isClickable) return <span>{content}</span>;
+
+  if (href) {
+    return (
+      <Link href={href} className="flex items-center gap-x-1 appearance-none no-underline">
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <button
+      className="flex items-center gap-x-1 appearance-none"
+      onClick={onClick}
+      type="button"
+    >
+      {content}
+    </button>
+  );
+}
+
 const ESTIMATED_SHELF_HEIGHT: Record<MediaShelfDisplayKind, number> = {
   MusicNotesHeroShelf: 320,
   MusicCoverShelf: 250,
@@ -163,20 +225,21 @@ function MediaShelf({
   onSelect,
   onTitleClick,
   onCardInteraction,
+  headerArtwork,
+  sourceAlbumHref,
 }: MediaShelfProps) {
   const isHeroShelf = displayKind === "MusicNotesHeroShelf";
   const shelfContainerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const measuredHeightRef = useRef<number | undefined>(undefined);
   const [measuredHeight, setMeasuredHeight] = useState<number>();
-  // Mount only the first discovery shelf (or hero) on the initial paint.
-  // Offscreen shelves retain an estimated height until the observer brings
-  // them into the render buffer, preventing a 20-shelf Home from creating a
-  // large initial card/image/layout burst.
+
   const [isNearViewport, setIsNearViewport] = useState(
     () => prioritizeFirstCard || isHeroShelf,
   );
   const trackedImpressionsRef = useRef(new Set<string>());
+
+  const isMoreLikeShelf = shelfId?.startsWith("user-more-like-");
 
   useEffect(() => {
     const shelf = listRef.current;
@@ -192,10 +255,6 @@ function MediaShelf({
       onCardInteraction("impression", card, position);
     };
 
-    // A rendered horizontal shelf can contain twelve cards while only a few
-    // are actually on screen. An impression is meaningful only after the
-    // card itself is substantially visible, not merely because its shelf
-    // entered the vertical render buffer.
     if (!("IntersectionObserver" in window)) {
       record(0);
       return;
@@ -242,9 +301,6 @@ function MediaShelf({
 
     const observer = new IntersectionObserver(
       ([entry]) => {
-        // Keep the first render intact until ResizeObserver has measured the
-        // real shelf height. A virtualized shelf then retains that exact
-        // height, so mounting/unmounting cards cannot move the sidebar.
         if (!entry.isIntersecting && measuredHeightRef.current === undefined) {
           return;
         }
@@ -305,8 +361,6 @@ function MediaShelf({
     const shelf = listRef.current;
     if (!shelf) return;
 
-    // Native scrolling preserves scrollLeft. Keeping shelves active avoids
-    // observer-driven writes while the page is scrolling vertically.
     shelf.dataset.scrollActive = "true";
     shelf.dataset.resizeActive = "true";
 
@@ -339,10 +393,6 @@ function MediaShelf({
 
     const handleWheel = (event: WheelEvent) => {
       const rawDelta = event.shiftKey ? event.deltaY : event.deltaX;
-      // Preserve native small, continuous deltas from a precision touchpad.
-      // Some browser/driver pairs report a conventional mouse wheel in pixel
-      // mode after a reload, usually as a large discrete delta (for example
-      // 100px), so deltaMode alone is not a reliable discriminator.
       const isDiscretePixelDelta =
         Math.abs(rawDelta) >= DISCRETE_WHEEL_PIXEL_DELTA &&
         Number.isInteger(rawDelta);
@@ -391,8 +441,6 @@ function MediaShelf({
     const shelf = listRef.current;
     if (!shelf) return;
 
-    // Recently Played prepends qualified plays. Preserve no previous scroll
-    // offset here, otherwise the new first card remains hidden to the left.
     const frame = requestAnimationFrame(() => {
       shelf.scrollLeft = 0;
       queueShelfDraggabilityUpdate(shelf);
@@ -446,8 +494,6 @@ function MediaShelf({
       }, 160);
     };
 
-    // Promote only the shelf that is actively moving. Retaining a layer for
-    // every shelf on Home would use substantially more GPU memory.
     shelf.addEventListener("scroll", promoteWhileScrolling, { passive: true });
 
     return () => {
@@ -547,8 +593,6 @@ function MediaShelf({
     const handlePointerMove = (event: PointerEvent) => {
       if (pointerId !== event.pointerId) return;
 
-      // Pointer events can arrive faster than the display refresh rate. Keep
-      // the latest coalesced position and commit only once per paint frame.
       const latestEvent = event.getCoalescedEvents?.().at(-1) ?? event;
       const distance = latestEvent.clientX - startX;
       if (!didDrag && Math.abs(distance) < MOUSE_DRAG_THRESHOLD) return;
@@ -560,8 +604,6 @@ function MediaShelf({
         shelf.setPointerCapture(event.pointerId);
         promoteDragLayer();
 
-        // Apply the first dragged position now. Deferring this initial write
-        // to the next frame makes a mouse drag feel one frame behind.
         shelf.scrollLeft = startScrollLeft - distance;
         return;
       }
@@ -616,35 +658,58 @@ function MediaShelf({
       style={
         !isNearViewport
           ? {
-              minHeight:
-                measuredHeight ?? ESTIMATED_SHELF_HEIGHT[displayKind],
+              minHeight: measuredHeight ?? ESTIMATED_SHELF_HEIGHT[displayKind],
             }
           : undefined
       }
     >
       <div>
         <div className="flex items-center justify-end mx-(--bodyGutter) mb-3.25">
-          <div className="flex-1">
-            <h2 className="inline-block text-(--header-title-color,var(--systemPrimary,#000)) [font:var(--header-title-font,var(--title-2-emphasized))]">
-              <button
-                className="flex items-center gap-x-1 appearance-none"
-                onClick={handleTitleClick}
-                type="button"
-              >
-                <span dir="auto">{title}</span>
-                {isClickable && (
-                  <svg
-                    className="h-(--header-title-chevron-size,12px) fill-(--header-title-chevron-color,var(--dropdownLightGrayIcon))"
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 64 64"
-                    aria-hidden="true"
-                  >
-                    <path d="M19.817 61.863c1.48 0 2.672-.515 3.702-1.546l24.243-23.63c1.352-1.385 1.996-2.737 2.028-4.443 0-1.674-.644-3.09-2.028-4.443L23.519 4.138c-1.03-.998-2.253-1.513-3.702-1.513-2.994 0-5.409 2.382-5.409 5.344 0 1.481.612 2.833 1.739 3.96l20.99 20.347-20.99 20.283c-1.127 1.126-1.739 2.478-1.739 3.96 0 2.93 2.415 5.344 5.409 5.344Z"></path>
-                  </svg>
-                )}
-              </button>
-            </h2>
-          </div>
+          {isMoreLikeShelf ? (
+            <>
+              <div className="rounded-[5px] mt-0.75 pe-3">
+                <CardArtwork
+                  variant="cover"
+                  containerClassName="contain-content [--artwork-override-width:calc(40px*var(--aspect-ratio))] [--artwork-override-height:40px]"
+                  sizes="40px"
+                  title={headerArtwork?.altText ?? title}
+                  altText={headerArtwork?.altText ?? title}
+                  imageSrcSet={headerArtwork?.imageSrcSet ?? ""}
+                  artworkColors={
+                    headerArtwork?.artworkColors ?? {
+                      bg: "#2c2c2e",
+                      main: "#2c2c2e",
+                    }
+                  }
+                />
+              </div>
+
+              <div className="flex-1">
+                <p className="text-(--systemSecondary,#ccc) [font:var(--title-3)] mt-0.75">
+                  More Like
+                </p>
+
+                <h2 className="text-(--header-title-color,var(--systemPrimary,#000)) inline-block [font:var(--header-title-font,var(--title-2-emphasized))]">
+                  <ShelfTitleButton
+                    title={title.replace(/^More Like\s+/i, "")}
+                    isClickable={Boolean(sourceAlbumHref)}
+                    href={sourceAlbumHref}
+                    onClick={handleTitleClick}
+                  />
+                </h2>
+              </div>
+            </>
+          ) : (
+            <div className="flex-1">
+              <h2 className="inline-block text-(--header-title-color,var(--systemPrimary,#000)) [font:var(--header-title-font,var(--title-2-emphasized))]">
+                <ShelfTitleButton
+                  title={title}
+                  isClickable={isClickable}
+                  onClick={handleTitleClick}
+                />
+              </h2>
+            </div>
+          )}
         </div>
 
         <div className="pb-8">
