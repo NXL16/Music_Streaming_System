@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { getApiErrorMessage } from "@/lib/api/api-error";
+import { developmentCacheDisabled } from "@/lib/config/development-cache";
 import {
   getCatalogArtist,
   getCatalogArtistAlbums,
@@ -35,6 +36,7 @@ type UseCatalogArtistOptions = {
 };
 
 function getCachedValue<T>(cache: Map<string, CacheEntry<T>>, key: string) {
+  if (developmentCacheDisabled) return undefined;
   const cached = cache.get(key);
   if (!cached || cached.expiresAt <= Date.now()) {
     if (cached) cache.delete(key);
@@ -51,6 +53,7 @@ function cacheValue<T>(
   key: string,
   value: T,
 ) {
+  if (developmentCacheDisabled) return;
   cache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
 
   while (cache.size > MAX_CACHE_ENTRIES) {

@@ -1,6 +1,7 @@
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import type { ClientGrpc } from '@nestjs/microservices';
 import { grpcFirstValueFrom } from '../common/utils/grpc-timeout';
+import { developmentCacheDisabled } from '../common/configs/development-cache';
 import type {
   GetStreamDataRequest,
   MetadataServiceClient,
@@ -55,7 +56,7 @@ export class MetadataService implements OnModuleInit {
   async getCompactStreamData(songId: string): Promise<CompactMetadataResponse> {
     const now = Date.now();
     const cached = this.streamDataCache.get(songId);
-    if (cached && cached.expiresAt > now) {
+    if (!developmentCacheDisabled() && cached && cached.expiresAt > now) {
       return cached.data;
     }
 
@@ -84,6 +85,8 @@ export class MetadataService implements OnModuleInit {
         data.encryptionStartOffset || data.mediaOffset || 0,
       waveform: data.waveform || [],
     };
+
+    if (developmentCacheDisabled()) return compact;
 
     if (this.streamDataCache.size >= META_CACHE_MAX_ITEMS) {
       this.purgeExpiredEntries(now);

@@ -1,14 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { developmentCacheDisabled } from '../common/configs/development-cache';
 import { RecommendationCatalogService } from './recommendation-catalog.service';
 import { RecommendationsService } from './recommendations.service';
 
 const RESOURCE_TYPES = ['albums', 'songs', 'artists', 'playlists'] as const;
 const PAGE_SIZE = 100;
 const MIN_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
-
-function homeCacheDisabled(): boolean {
-  return process.env.HOME_CACHE_MODE?.trim().toLowerCase() === 'off';
-}
 
 export type CatalogSynchronizationResult = {
   totalResources: number;
@@ -30,7 +27,7 @@ export class CatalogSynchronizationService {
   async ensureFreshCatalog(): Promise<CatalogSynchronizationResult> {
     // Development can demand immediate catalog correctness after imports or
     // backfills. Production retains the six-hour guard unless explicitly off.
-    if (homeCacheDisabled()) {
+    if (developmentCacheDisabled()) {
       return this.synchronizeCatalog();
     }
     if (

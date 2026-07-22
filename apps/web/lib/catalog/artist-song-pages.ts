@@ -1,5 +1,6 @@
 import { getCatalogArtistSongs } from "./catalog.api";
 import { mapCatalogTracks } from "./catalog.mapper";
+import { developmentCacheDisabled } from "@/lib/config/development-cache";
 import type { PlayerSong } from "@/lib/player/use-player-store";
 
 export const ARTIST_SONGS_PAGE_SIZE = 20;
@@ -24,6 +25,7 @@ function pageKey(artistId: string, cursor?: string) {
 }
 
 function readCache(key: string) {
+  if (developmentCacheDisabled) return undefined;
   const cached = pageCache.get(key);
   if (!cached || cached.expiresAt <= Date.now()) {
     if (cached) pageCache.delete(key);
@@ -36,6 +38,7 @@ function readCache(key: string) {
 }
 
 function writeCache(key: string, value: ArtistSongPage) {
+  if (developmentCacheDisabled) return;
   pageCache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
 
   while (pageCache.size > MAX_CACHE_ENTRIES) {

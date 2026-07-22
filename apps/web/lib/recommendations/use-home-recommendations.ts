@@ -22,6 +22,7 @@ export function useHomeRecommendations() {
     MediaCardProps[]
   >([]);
   const [loading, setLoading] = useState(cached === null);
+  const [needsInitialRequest] = useState(cached === null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async (
@@ -47,13 +48,14 @@ export function useHomeRecommendations() {
   }, []);
 
   useEffect(() => {
+    if (!needsInitialRequest) return;
     const controller = new AbortController();
     queueMicrotask(() => void refresh(false, controller.signal));
 
     return () => {
       controller.abort();
     };
-  }, [refresh]);
+  }, [needsInitialRequest, refresh]);
 
   useEffect(() => {
     const handleRecommendationRefresh = () => refresh(false);

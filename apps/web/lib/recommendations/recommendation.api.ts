@@ -1,17 +1,20 @@
 import { http } from "@/lib/api/http";
+import { developmentCacheDisabled } from "@/lib/config/development-cache";
 import type { RecommendationResponse } from "./recommendation.types";
 
 const RECOMMENDATION_LOCALE = "en-GB";
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const NAVIGATION_HANDOFF_TTL_MS = 15_000;
 // Local development can opt out of every client-side Home cache so database
 // and recommendation changes are visible on the very next navigation.
-const HOME_CACHE_DISABLED =
-  process.env.NEXT_PUBLIC_DISABLE_HOME_CACHE === "true";
+const HOME_CACHE_DISABLED = developmentCacheDisabled;
 
 let pendingHomeRecommendations: Promise<RecommendationResponse> | null = null;
 let cachedResponse: RecommendationResponse | null = null;
 let cacheExpiresAt = 0;
 let cacheGeneration = 0;
+let navigationHandoff: RecommendationResponse | null = null;
+let navigationHandoffExpiresAt = 0;
 const IMPRESSION_BATCH_DELAY_MS = 250;
 const MAX_IMPRESSIONS_PER_BATCH = 48;
 
@@ -90,17 +93,36 @@ function getBrowserTimezone() {
 // Đọc cache đồng bộ (không gọi mạng). Dùng để khởi tạo state ngay khi data
 // đã được splash prefetch xong → trang home không chớp skeleton thừa.
 export function getCachedHomeRecommendations(): RecommendationResponse | null {
-  if (HOME_CACHE_DISABLED) return null;
+  if (HOME_CACHE_DISABLED) {
+    if (navigationHandoff && Date.now() < navigationHandoffExpiresAt) {
+      return navigationHandoff;
+    }
+    navigationHandoff = null;
+    navigationHandoffExpiresAt = 0;
+    return null;
+  }
   if (cachedResponse && Date.now() < cacheExpiresAt) {
     return cachedResponse;
   }
   return null;
 }
 
+// This is intentionally not a general cache. It lets Home reuse the exact
+// response fetched by the Welcome screen during the immediately following
+// navigation, even while development caching is disabled.
+export function handoffHomeRecommendations(
+  response: RecommendationResponse,
+) {
+  navigationHandoff = response;
+  navigationHandoffExpiresAt = Date.now() + NAVIGATION_HANDOFF_TTL_MS;
+}
+
 export function invalidateHomeRecommendationsCache() {
   cacheGeneration += 1;
   cachedResponse = null;
   cacheExpiresAt = 0;
+  navigationHandoff = null;
+  navigationHandoffExpiresAt = 0;
   // Do not reuse a request started before a playback event. It can resolve
   // after invalidation and otherwise make Recently Played appear unchanged.
   pendingHomeRecommendations = null;

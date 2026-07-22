@@ -25,6 +25,7 @@ import { GenerationService } from '../generation/generation.service';
 import { InternalGrpcGuard } from '../common/guards/internal-grpc.guard';
 import { RecommendationRpcMetricsInterceptor } from '../common/observability/recommendation-rpc-metrics.interceptor';
 import { SystemStationArtworkService } from './system-station-artwork.service';
+import { developmentCacheDisabled } from '../common/configs/development-cache';
 
 @Controller()
 @UseGuards(InternalGrpcGuard)
@@ -43,6 +44,7 @@ export class RecommendationsController implements RecommendationServiceControlle
   async getHomeRecommendations(
     request: GetHomeRecommendationsRequest,
   ): Promise<GetHomeRecommendationsResponse> {
+    const bypassCache = developmentCacheDisabled();
     let globalResult = await this.recommendationsService.getHomeRecommendations(
       {
         ...request,
@@ -55,7 +57,7 @@ export class RecommendationsController implements RecommendationServiceControlle
       request.locale,
     );
 
-    if (globalResult.data.length === 0) {
+    if (globalResult.data.length === 0 || (bypassCache && isGlobalStale)) {
       const generated = await this.generationService.tryLazyGenerateGlobal(
         request.name,
         request.locale,
@@ -82,20 +84,31 @@ export class RecommendationsController implements RecommendationServiceControlle
     }
 
     if (request.userId) {
-      // User regeneration follows the same stale-while-revalidate contract.
-      // The current request keeps its fast path (published user page or global
-      // cold-start fallback), while the next request receives the fresh page.
-      void this.generationService
-        .tryLazyGenerateUser(
+      if (bypassCache) {
+        // Development requires source changes to be reflected by this request,
+        // not by a later stale-while-revalidate request.
+        await this.generationService.tryLazyGenerateUser(
           request.userId,
           request.name,
           request.locale,
           request.timezone,
           request.platform,
-        )
-        .catch((error: unknown) =>
-          this.logger.warn('Background user generation failed', error),
         );
+      } else {
+        // User regeneration follows the stale-while-revalidate contract in
+        // normal operation, preserving the fast path for listeners.
+        void this.generationService
+          .tryLazyGenerateUser(
+            request.userId,
+            request.name,
+            request.locale,
+            request.timezone,
+            request.platform,
+          )
+          .catch((error: unknown) =>
+            this.logger.warn('Background user generation failed', error),
+          );
+      }
     }
 
     return request.userId

@@ -24,6 +24,7 @@ import {
   RecommendationEngineService,
 } from './recommendation-engine.service';
 import { PRODUCTION_RECOMMENDATION_POLICY } from './production-recommendation-policy';
+import { developmentCacheDisabled } from '../common/configs/development-cache';
 
 const STALE_DURATION_MS = 6 * 60 * 60 * 1000;
 const RELEASE_RADAR_DAYS = 30;
@@ -159,6 +160,7 @@ export class GenerationService {
   private generatingGlobal = false;
 
   async isGlobalPageStale(name: string, locale: string): Promise<boolean> {
+    if (developmentCacheDisabled()) return true;
     const page = await this.prisma.recommendationPage.findFirst({
       where: {
         scopeKey: 'GLOBAL',
@@ -248,6 +250,7 @@ export class GenerationService {
       },
     });
     const isStale =
+      developmentCacheDisabled() ||
       !existingPage?.staleAfter ||
       existingPage.staleAfter <= new Date() ||
       !existingPage.sections.some(
