@@ -139,6 +139,7 @@ type RecommendationSectionRecord = {
   isGroupRecommendation: boolean;
   nextUpdateAt: Date | null;
   version: number;
+  attributes: unknown;
   items: RecommendationItemRecord[];
 };
 
@@ -525,8 +526,7 @@ export class RecommendationsService {
   ): Promise<GetHomeRecommendationsResponse> {
     const response = await this.getRecommendationSection(request);
     const resources = response.resources;
-    const section =
-      resources?.personalRecommendation?.[request.sectionId];
+    const section = resources?.personalRecommendation?.[request.sectionId];
     const relationships = section?.relationships;
     const contentsRelationship = relationships?.contents;
     const contents = contentsRelationship?.data;
@@ -646,9 +646,7 @@ export class RecommendationsService {
               locale,
               timezone,
               publishedAt:
-                pageStatus === PrismaPageStatus.PUBLISHED
-                  ? new Date()
-                  : null,
+                pageStatus === PrismaPageStatus.PUBLISHED ? new Date() : null,
               createdBy: hydratedRequest.actorUserId,
               updatedBy: hydratedRequest.actorUserId,
             },
@@ -657,9 +655,7 @@ export class RecommendationsService {
               userId,
               status: pageStatus,
               publishedAt:
-                pageStatus === PrismaPageStatus.PUBLISHED
-                  ? new Date()
-                  : null,
+                pageStatus === PrismaPageStatus.PUBLISHED ? new Date() : null,
               updatedBy: hydratedRequest.actorUserId,
             },
           });
@@ -691,7 +687,10 @@ export class RecommendationsService {
             isPrimary: boolean;
           }> = [];
 
-          for (const [sectionIndex, section] of hydratedRequest.sections.entries()) {
+          for (const [
+            sectionIndex,
+            section,
+          ] of hydratedRequest.sections.entries()) {
             const attributes = section.attributes!;
             const relationships = section.relationships;
             const contents = relationships?.contents?.data ?? [];
@@ -699,6 +698,16 @@ export class RecommendationsService {
             const presentationMode = this.presentationMode(
               attributes.presentationMode,
             );
+            const sourceAlbumAttributes = attributes.sourceAlbumId
+              ? {
+                  sourceAlbumId: attributes.sourceAlbumId,
+                  sourceAlbumName: attributes.sourceAlbumName,
+                  sourceAlbumUrl: attributes.sourceAlbumUrl,
+                  sourceAlbumArtworkUrl: attributes.sourceAlbumArtworkUrl,
+                  sourceAlbumArtworkBgColor:
+                    attributes.sourceAlbumArtworkBgColor,
+                }
+              : undefined;
 
             const created = await tx.recommendationSection.create({
               data: {
@@ -710,7 +719,7 @@ export class RecommendationsService {
                 presentationMode,
                 displayKind:
                   presentationMode === PrismaPresentationMode.FIXED
-                    ? attributes.display?.kind ?? ''
+                    ? (attributes.display?.kind ?? '')
                     : '',
                 displayDecorations: attributes.display?.decorations ?? [],
                 sectionKind: attributes.kind || 'music-recommendations',
@@ -720,9 +729,13 @@ export class RecommendationsService {
                 sortOrder: sectionIndex,
                 nextUpdateAt: this.parseDate(attributes.nextUpdateDate),
                 version: attributes.version || 1,
+                // Generated shelves only persist their extra header metadata;
+                // the standard section fields already have dedicated columns.
                 attributes: preserveImportedRaw
                   ? this.toInputJson(attributes)
-                  : Prisma.DbNull,
+                  : sourceAlbumAttributes
+                    ? this.toInputJson(sourceAlbumAttributes)
+                    : Prisma.DbNull,
                 relationships: relationships
                   ? this.toInputJson(relationships)
                   : Prisma.DbNull,
@@ -764,17 +777,13 @@ export class RecommendationsService {
       ),
     );
 
-    return this.getRecommendationPage(
-      scopeKey,
-      pageStatus,
-      {
-        userId: hydratedRequest.userId,
-        name,
-        locale,
-        timezone: requestedTimezone,
-        platform: hydratedRequest.platform || 'web',
-      },
-    );
+    return this.getRecommendationPage(scopeKey, pageStatus, {
+      userId: hydratedRequest.userId,
+      name,
+      locale,
+      timezone: requestedTimezone,
+      platform: hydratedRequest.platform || 'web',
+    });
   }
 
   async publishRecommendationPage(
@@ -862,17 +871,13 @@ export class RecommendationsService {
       });
     }
 
-    return this.getRecommendationPage(
-      scopeKey,
-      PrismaPageStatus.PUBLISHED,
-      {
-        userId: request.userId,
-        name,
-        locale,
-        timezone: requestedTimezone,
-        platform: request.platform || 'web',
-      },
-    );
+    return this.getRecommendationPage(scopeKey, PrismaPageStatus.PUBLISHED, {
+      userId: request.userId,
+      name,
+      locale,
+      timezone: requestedTimezone,
+      platform: request.platform || 'web',
+    });
   }
 
   async getRecommendationPageForAdmin(
@@ -948,9 +953,7 @@ export class RecommendationsService {
               primaryContent: section.relationships.primaryContent
                 ? {
                     ...section.relationships.primaryContent,
-                    data: this.list(
-                      section.relationships.primaryContent.data,
-                    ),
+                    data: this.list(section.relationships.primaryContent.data),
                   }
                 : undefined,
             }
@@ -1029,7 +1032,6 @@ export class RecommendationsService {
     for (const section of sections) {
       resources.personalRecommendation[section.externalId] =
         this.mapSectionResource(section, pageName);
-
     }
 
     const catalogRecords =
@@ -1099,7 +1101,9 @@ export class RecommendationsService {
     ];
   }
 
-  private cloneResources(resources: RecommendationResources): RecommendationResources {
+  private cloneResources(
+    resources: RecommendationResources,
+  ): RecommendationResources {
     return {
       personalRecommendation: { ...resources.personalRecommendation },
       albums: { ...resources.albums },
@@ -1125,10 +1129,7 @@ export class RecommendationsService {
       const section = personalRecommendation[sectionRef.id];
       const contents = section?.relationships?.contents;
       const primaryContent = section?.relationships?.primaryContent;
-      const refs = [
-        ...(contents?.data ?? []),
-        ...(primaryContent?.data ?? []),
-      ];
+      const refs = [...(contents?.data ?? []), ...(primaryContent?.data ?? [])];
       if (!section || refs.length === 0) {
         data.push(sectionRef);
         continue;
@@ -1272,7 +1273,9 @@ export class RecommendationsService {
       }
 
       if (item.albumId || item.albumName) {
-        const key = item.albumId ? `id:${item.albumId}` : `name:${item.albumName}`;
+        const key = item.albumId
+          ? `id:${item.albumId}`
+          : `name:${item.albumName}`;
         const existing = albumLastPlayed.get(key);
         if (!existing || item.lastPlayedAt > existing.lastPlayedAt) {
           albumLastPlayed.set(key, {
@@ -1286,32 +1289,37 @@ export class RecommendationsService {
       }
     }
 
-    const albumIds = [...new Set(
-      [...albumLastPlayed.values()]
-        .map((item) => item.albumId)
-        .filter(Boolean),
-    )];
-    const legacyAlbumNames = [...new Set(
-      [...albumLastPlayed.values()]
-        .filter((item) => !item.albumId)
-        .map((item) => item.albumName)
-        .filter(Boolean),
-    )];
+    const albumIds = [
+      ...new Set(
+        [...albumLastPlayed.values()]
+          .map((item) => item.albumId)
+          .filter(Boolean),
+      ),
+    ];
+    const legacyAlbumNames = [
+      ...new Set(
+        [...albumLastPlayed.values()]
+          .filter((item) => !item.albumId)
+          .map((item) => item.albumName)
+          .filter(Boolean),
+      ),
+    ];
     const playlistIds = [...playlistLastPlayed.keys()];
     const stationIds = [...stationLastPlayed.keys()];
-    const albumSnapshots = albumIds.length || legacyAlbumNames.length
-      ? await this.prisma.recommendationResourceSnapshot.findMany({
-          where: {
-            resourceType: 'albums',
-            OR: [
-              ...(albumIds.length ? [{ resourceId: { in: albumIds } }] : []),
-              ...(legacyAlbumNames.length
-                ? [{ name: { in: legacyAlbumNames } }]
-                : []),
-            ],
-          },
-        })
-      : [];
+    const albumSnapshots =
+      albumIds.length || legacyAlbumNames.length
+        ? await this.prisma.recommendationResourceSnapshot.findMany({
+            where: {
+              resourceType: 'albums',
+              OR: [
+                ...(albumIds.length ? [{ resourceId: { in: albumIds } }] : []),
+                ...(legacyAlbumNames.length
+                  ? [{ name: { in: legacyAlbumNames } }]
+                  : []),
+              ],
+            },
+          })
+        : [];
     const songSnapshots = songLastPlayed.size
       ? await this.prisma.recommendationResourceSnapshot.findMany({
           where: {
@@ -1327,7 +1335,7 @@ export class RecommendationsService {
             resourceId: { in: playlistIds },
             playlistType: 'system-personalized',
           },
-      })
+        })
       : [];
     const stationSnapshots = stationIds.length
       ? await this.prisma.recommendationResourceSnapshot.findMany({
@@ -1362,14 +1370,18 @@ export class RecommendationsService {
       })),
       ...playlistSnapshots.map((snapshot) => ({
         snapshot,
-        lastPlayedAt: playlistLastPlayed.get(snapshot.resourceId) ?? new Date(0),
+        lastPlayedAt:
+          playlistLastPlayed.get(snapshot.resourceId) ?? new Date(0),
       })),
       ...stationSnapshots.map((snapshot) => ({
         snapshot,
         lastPlayedAt: stationLastPlayed.get(snapshot.resourceId) ?? new Date(0),
       })),
     ]
-      .sort((left, right) => right.lastPlayedAt.getTime() - left.lastPlayedAt.getTime())
+      .sort(
+        (left, right) =>
+          right.lastPlayedAt.getTime() - left.lastPlayedAt.getTime(),
+      )
       .slice(0, 20);
 
     if (items.length === 0) return null;
@@ -1400,6 +1412,11 @@ export class RecommendationsService {
         version: 1,
         presentationMode:
           RecommendationPresentationMode.RECOMMENDATION_PRESENTATION_MODE_FIXED,
+        sourceAlbumId: '',
+        sourceAlbumName: '',
+        sourceAlbumUrl: '',
+        sourceAlbumArtworkUrl: '',
+        sourceAlbumArtworkBgColor: '',
       },
       relationships: {
         contents: {
@@ -1484,7 +1501,10 @@ export class RecommendationsService {
       ]),
     );
 
-    const globalAlbums = await this.listeningService.getTopAlbumsGlobal(30, 100);
+    const globalAlbums = await this.listeningService.getTopAlbumsGlobal(
+      30,
+      100,
+    );
     const albumNameToId = await this.albumNameToId(
       globalAlbums
         .filter((album) => !album.albumId)
@@ -1503,7 +1523,9 @@ export class RecommendationsService {
 
     const recentAlbumIds = await this.recentAlbumIds(userId);
 
-    const artistWeights = new Map(profile.artists.map((a) => [a.name, a.weight]));
+    const artistWeights = new Map(
+      profile.artists.map((a) => [a.name, a.weight]),
+    );
     const genreWeights = new Map(profile.genres.map((g) => [g.name, g.weight]));
 
     return {
@@ -1524,14 +1546,13 @@ export class RecommendationsService {
     const key = `${ref.type}:${ref.id}`;
     const snapshot = context.snapshotByKey.get(key);
     const artistScore = snapshot?.artistName
-      ? context.artistWeights.get(snapshot.artistName) ?? 0
+      ? (context.artistWeights.get(snapshot.artistName) ?? 0)
       : 0;
     const genreScore = snapshot?.genreNames?.length
       ? Math.min(
           1,
           snapshot.genreNames.reduce(
-            (total, genre) =>
-              total + (context.genreWeights.get(genre) ?? 0),
+            (total, genre) => total + (context.genreWeights.get(genre) ?? 0),
             0,
           ),
         )
@@ -1545,12 +1566,13 @@ export class RecommendationsService {
         : 1;
 
     return (
-      popularityScore * 0.35 +
-      artistScore * 0.22 +
-      genreScore * 0.18 +
-      recentScore * 0.15 +
-      freshnessScore * 0.1
-    ) * skipPenalty;
+      (popularityScore * 0.35 +
+        artistScore * 0.22 +
+        genreScore * 0.18 +
+        recentScore * 0.15 +
+        freshnessScore * 0.1) *
+      skipPenalty
+    );
   }
 
   private responseContentRefs(
@@ -1569,7 +1591,9 @@ export class RecommendationsService {
     });
   }
 
-  private async albumNameToId(albumNames: string[]): Promise<Map<string, string>> {
+  private async albumNameToId(
+    albumNames: string[],
+  ): Promise<Map<string, string>> {
     if (albumNames.length === 0) return new Map();
     const albums = await this.prisma.recommendationResourceSnapshot.findMany({
       where: {
@@ -1583,15 +1607,15 @@ export class RecommendationsService {
 
   private async recentAlbumIds(userId: string): Promise<Set<string>> {
     const recent = await this.listeningService.getRecentlyPlayed(userId, 30);
-    const directAlbumIds = recent
-      .map((item) => item.albumId)
-      .filter(Boolean);
-    const albumNames = [...new Set(
-      recent
-        .filter((item) => !item.albumId)
-        .map((item) => item.albumName)
-        .filter(Boolean),
-    )];
+    const directAlbumIds = recent.map((item) => item.albumId).filter(Boolean);
+    const albumNames = [
+      ...new Set(
+        recent
+          .filter((item) => !item.albumId)
+          .map((item) => item.albumName)
+          .filter(Boolean),
+      ),
+    ];
     const nameToId = await this.albumNameToId(albumNames);
     return new Set([...directAlbumIds, ...nameToId.values()]);
   }
@@ -1613,6 +1637,7 @@ export class RecommendationsService {
     section: RecommendationSectionRecord,
     pageName: string,
   ): PersonalRecommendationResource {
+    const storedAttributes = this.jsonObject(section.attributes);
     const contents = section.items
       .filter((item) => !item.isPrimary)
       .map((item) => this.itemRef(item));
@@ -1645,6 +1670,15 @@ export class RecommendationsService {
           section.presentationMode === PrismaPresentationMode.AUTO
             ? RecommendationPresentationMode.RECOMMENDATION_PRESENTATION_MODE_AUTO
             : RecommendationPresentationMode.RECOMMENDATION_PRESENTATION_MODE_FIXED,
+        sourceAlbumId: this.stringValue(storedAttributes?.sourceAlbumId),
+        sourceAlbumName: this.stringValue(storedAttributes?.sourceAlbumName),
+        sourceAlbumUrl: this.stringValue(storedAttributes?.sourceAlbumUrl),
+        sourceAlbumArtworkUrl: this.stringValue(
+          storedAttributes?.sourceAlbumArtworkUrl,
+        ),
+        sourceAlbumArtworkBgColor: this.stringValue(
+          storedAttributes?.sourceAlbumArtworkBgColor,
+        ),
       },
       relationships: {
         contents: {
@@ -1935,11 +1969,7 @@ export class RecommendationsService {
 
     const attributes = this.unwrapStruct(resource.attributes);
     if (resource.type === 'editorial-items') {
-      this.optionalString(
-        attributes.name,
-        'resource.attributes.name',
-        255,
-      );
+      this.optionalString(attributes.name, 'resource.attributes.name', 255);
     } else {
       if (typeof attributes.name !== 'string') {
         this.invalidArgument('resource.attributes.name must be a string');
@@ -2092,9 +2122,7 @@ export class RecommendationsService {
     }
   }
 
-  private validateSection(
-    section: PersonalRecommendationResource,
-  ): void {
+  private validateSection(section: PersonalRecommendationResource): void {
     this.requireText(section.id, 'section.id', 128);
 
     if (section.type && section.type !== 'personal-recommendation') {
@@ -2108,19 +2136,13 @@ export class RecommendationsService {
       this.invalidArgument(`section ${section.id} is missing attributes`);
     }
     const display = attributes.display;
-    const presentationMode = this.presentationMode(
-      attributes.presentationMode,
-    );
+    const presentationMode = this.presentationMode(attributes.presentationMode);
 
     if (presentationMode === PrismaPresentationMode.FIXED) {
       if (!display?.kind) {
         this.invalidArgument(`section ${section.id} is missing display.kind`);
       }
-      this.requireText(
-        display.kind,
-        `section ${section.id} display.kind`,
-        64,
-      );
+      this.requireText(display.kind, `section ${section.id} display.kind`, 64);
       if (!SUPPORTED_DISPLAY_KINDS.has(display.kind)) {
         this.invalidArgument(
           `section ${section.id} uses unsupported display.kind ${display.kind}`,
@@ -2267,9 +2289,7 @@ export class RecommendationsService {
     );
     const hydrated = await this.catalogService.resolve(catalogRefs);
     const hydratedKeys = new Set(
-      hydrated.map((resource) =>
-        this.resourceKey(resource.type, resource.id),
-      ),
+      hydrated.map((resource) => this.resourceKey(resource.type, resource.id)),
     );
     const unpublishedCatalogRefs = catalogRefs.filter(
       (ref) => !hydratedKeys.has(this.resourceKey(ref.type, ref.id)),
@@ -2602,9 +2622,7 @@ export class RecommendationsService {
           : Prisma.sql`ARRAY[]::text[]`;
       }
       case 'json':
-        return value === Prisma.DbNull ||
-          value === null ||
-          value === undefined
+        return value === Prisma.DbNull || value === null || value === undefined
           ? Prisma.sql`NULL`
           : Prisma.sql`${JSON.stringify(value)}::jsonb`;
       default:
@@ -2622,9 +2640,7 @@ export class RecommendationsService {
 
     const contentItems = section.items.filter((item) => !item.isPrimary);
     const items = contentItems.length ? contentItems : section.items;
-    const resourceTypes = new Set(
-      items.map((item) => item.resourceType),
-    );
+    const resourceTypes = new Set(items.map((item) => item.resourceType));
     const hasPrimaryVideo = section.items.some(
       (item) =>
         item.isPrimary &&
@@ -2637,10 +2653,7 @@ export class RecommendationsService {
     if (resourceTypes.size === 1 && resourceTypes.has('stations')) {
       return 'MusicCircleCoverShelf';
     }
-    if (
-      resourceTypes.size === 1 &&
-      resourceTypes.has('editorial-items')
-    ) {
+    if (resourceTypes.size === 1 && resourceTypes.has('editorial-items')) {
       return 'MusicSocialCardShelf';
     }
     if (items.length >= 8 && resourceTypes.size > 1) {
@@ -2932,7 +2945,9 @@ export class RecommendationsService {
       return undefined;
     }
 
-    const storedAttributes = this.objectValue(this.jsonValue(resource?.attributes));
+    const storedAttributes = this.objectValue(
+      this.jsonValue(resource?.attributes),
+    );
     const storedArtwork = this.objectValue(storedAttributes?.artwork);
     const variants = this.jsonValue(storedArtwork?.variants);
 

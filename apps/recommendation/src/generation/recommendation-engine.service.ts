@@ -38,6 +38,11 @@ export type GeneratedShelf = {
   title: string;
   items: Array<{ id: string; type: 'albums' }>;
   modelVersion: number;
+  sourceAlbumId?: string;
+  sourceAlbumName?: string;
+  sourceAlbumUrl?: string;
+  sourceAlbumArtworkUrl?: string;
+  sourceAlbumArtworkBgColor?: string;
 };
 
 /**
@@ -80,6 +85,11 @@ export class RecommendationEngineService {
       title: string,
       ranked: AlbumCandidate[],
       limit = perShelfLimit,
+      sourceAlbumId?: string,
+      sourceAlbumName?: string,
+      sourceAlbumUrl?: string,
+      sourceAlbumArtworkUrl?: string,
+      sourceAlbumArtworkBgColor?: string,
     ) => {
       const items = this.allocate(ranked, allocated, limit);
       if (items.length < policy.minimumShelfSize) return;
@@ -89,6 +99,11 @@ export class RecommendationEngineService {
         title,
         items,
         modelVersion: PERSONALIZATION_MODEL_VERSION,
+        sourceAlbumId,
+        sourceAlbumName,
+        sourceAlbumUrl,
+        sourceAlbumArtworkUrl,
+        sourceAlbumArtworkBgColor,
       });
     };
 
@@ -98,18 +113,76 @@ export class RecommendationEngineService {
       candidates,
       Math.min(policy.topPicksLimit, perShelfLimit),
     );
-    if (seeds[0]) add('user-more-like-1', `More Like ${seeds[0].name}`, this.nearSeed(candidates, seeds[0]));
-    if (topGenres[0]) add('user-genre-1', `${topGenres[0]} Music`, this.forGenre(candidates, topGenres[0]));
-    add('user-new-releases', 'New Releases for You', this.byFreshness(candidates));
-    if (seeds[1]) add('user-more-like-2', `More Like ${seeds[1].name}`, this.nearSeed(candidates, seeds[1]));
-    if (topArtists[0]) add('user-fans-like', `Fans of ${topArtists[0]} Also Like`, this.forFans(candidates, topArtists[0]));
-    if (seeds[2]) add('user-more-like-3', `More Like ${seeds[2].name}`, this.nearSeed(candidates, seeds[2]));
-    if (topGenres[1]) add('user-genre-2', `${topGenres[1]} Music`, this.forGenre(candidates, topGenres[1]));
+    if (seeds[0])
+      add(
+        'user-more-like-1',
+        `More Like ${seeds[0].name}`,
+        this.nearSeed(candidates, seeds[0]),
+        perShelfLimit,
+        seeds[0].id,
+        seeds[0].name,
+        seeds[0].url,
+        seeds[0].artworkUrl,
+        seeds[0].artworkBgColor,
+      );
+    if (topGenres[0])
+      add(
+        'user-genre-1',
+        `${topGenres[0]} Music`,
+        this.forGenre(candidates, topGenres[0]),
+      );
+    add(
+      'user-new-releases',
+      'New Releases for You',
+      this.byFreshness(candidates),
+    );
+    if (seeds[1])
+      add(
+        'user-more-like-2',
+        `More Like ${seeds[1].name}`,
+        this.nearSeed(candidates, seeds[1]),
+        perShelfLimit,
+        seeds[1].id,
+        seeds[1].name,
+        seeds[1].url,
+        seeds[1].artworkUrl,
+        seeds[1].artworkBgColor,
+      );
+    if (topArtists[0])
+      add(
+        'user-fans-like',
+        `${topArtists[0]} Fans Like`,
+        this.forFans(candidates, topArtists[0]),
+      );
+    if (seeds[2])
+      add(
+        'user-more-like-3',
+        `More Like ${seeds[2].name}`,
+        this.nearSeed(candidates, seeds[2]),
+        perShelfLimit,
+        seeds[2].id,
+        seeds[2].name,
+        seeds[2].url,
+        seeds[2].artworkUrl,
+        seeds[2].artworkBgColor,
+      );
+    if (topGenres[1])
+      add(
+        'user-genre-2',
+        `${topGenres[1]} Music`,
+        this.forGenre(candidates, topGenres[1]),
+      );
     for (const [index, seed] of seeds.slice(3, 5).entries()) {
       add(
         `user-more-like-${index + 4}`,
         `More Like ${seed.name}`,
         this.nearSeed(candidates, seed),
+        perShelfLimit,
+        seed.id,
+        seed.name,
+        seed.url,
+        seed.artworkUrl,
+        seed.artworkBgColor,
       );
     }
     for (const [index, genre] of topGenres.slice(2).entries()) {
@@ -122,7 +195,7 @@ export class RecommendationEngineService {
     for (const artist of topArtists.slice(1)) {
       add(
         `user-fans-like-${this.slug(artist)}`,
-        `Fans of ${artist} Also Like`,
+        `${artist} Fans Like`,
         this.forFans(candidates, artist),
       );
     }
@@ -186,30 +259,37 @@ export class RecommendationEngineService {
     const publishedAlbumIds = await this.publishedAlbumIds(
       albums.map((album) => album.resourceId),
     );
-    const candidates = albums.filter((album) => publishedAlbumIds.has(album.resourceId)).map((album) => {
-      const freshness = this.freshness(album.releaseDate);
-      const popularityScore = popularity.get(album.resourceId) ?? 0;
-      const feedbackScore = feedback.get(album.resourceId) ?? 0;
-      return {
-        id: album.resourceId,
-        artistName: album.artistName,
-        genreNames: album.genreNames,
-        audioTraits: album.audioTraits,
-        releaseDate: album.releaseDate,
-        artistAffinity: 0,
-        genreAffinity: 0,
-        contentSimilarity: 0,
-        collaborative: 0,
-        popularity: popularityScore,
-        freshness,
-        feedback: feedbackScore,
-        sources: new Set<CandidateSource>([
-          ...(freshness > 0 ? ['fresh' as const] : []),
-          ...(popularityScore > 0 ? ['popular' as const] : []),
-        ]),
-        score: freshness * 0.52 + popularityScore * 0.36 + feedbackScore * 0.12,
-      };
-    }).sort((left, right) => right.score - left.score || left.id.localeCompare(right.id));
+    const candidates = albums
+      .filter((album) => publishedAlbumIds.has(album.resourceId))
+      .map((album) => {
+        const freshness = this.freshness(album.releaseDate);
+        const popularityScore = popularity.get(album.resourceId) ?? 0;
+        const feedbackScore = feedback.get(album.resourceId) ?? 0;
+        return {
+          id: album.resourceId,
+          artistName: album.artistName,
+          genreNames: album.genreNames,
+          audioTraits: album.audioTraits,
+          releaseDate: album.releaseDate,
+          artistAffinity: 0,
+          genreAffinity: 0,
+          contentSimilarity: 0,
+          collaborative: 0,
+          popularity: popularityScore,
+          freshness,
+          feedback: feedbackScore,
+          sources: new Set<CandidateSource>([
+            ...(freshness > 0 ? ['fresh' as const] : []),
+            ...(popularityScore > 0 ? ['popular' as const] : []),
+          ]),
+          score:
+            freshness * 0.52 + popularityScore * 0.36 + feedbackScore * 0.12,
+        };
+      })
+      .sort(
+        (left, right) =>
+          right.score - left.score || left.id.localeCompare(right.id),
+      );
     const allocated = new Set<string>();
     const shelves: GeneratedShelf[] = [];
     const genreCounts = new Map<string, number>();
@@ -229,12 +309,16 @@ export class RecommendationEngineService {
     }
     const genres = [...genreCounts.entries()]
       .filter(([, count]) => count >= policy.globalMinimumShelfSize)
-      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+      .sort(
+        (left, right) => right[1] - left[1] || left[0].localeCompare(right[0]),
+      )
       .slice(0, policy.globalGenreShelfLimit)
       .map(([genre]) => genre);
     const spotlightArtists = [...artistCounts.entries()]
       .filter(([, count]) => count >= policy.globalMinimumShelfSize)
-      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+      .sort(
+        (left, right) => right[1] - left[1] || left[0].localeCompare(right[0]),
+      )
       .slice(0, policy.globalArtistShelfLimit)
       .map(([artist]) => artist);
     // The global page must remain a complete Home even with a modest local
@@ -253,7 +337,12 @@ export class RecommendationEngineService {
       const items = this.allocateGlobal(ranked, allocated, limit);
       if (items.length < policy.globalMinimumShelfSize) return;
       items.forEach((item) => allocated.add(item.id));
-      shelves.push({ id, title, items, modelVersion: PERSONALIZATION_MODEL_VERSION });
+      shelves.push({
+        id,
+        title,
+        items,
+        modelVersion: PERSONALIZATION_MODEL_VERSION,
+      });
     };
     add(
       'global-top-picks',
@@ -261,16 +350,50 @@ export class RecommendationEngineService {
       candidates,
       Math.min(policy.topPicksLimit, perShelfLimit),
     );
-    add('global-trending-now', 'Trending Now', [...candidates].sort((left, right) => right.popularity - left.popularity || right.freshness - left.freshness || left.id.localeCompare(right.id)));
+    add(
+      'global-trending-now',
+      'Trending Now',
+      [...candidates].sort(
+        (left, right) =>
+          right.popularity - left.popularity ||
+          right.freshness - left.freshness ||
+          left.id.localeCompare(right.id),
+      ),
+    );
     add('global-new-releases', 'New Releases', this.byFreshness(candidates));
-    add('global-popular-now', 'Popular Now', [...candidates].sort((left, right) => right.feedback - left.feedback || right.popularity - left.popularity || left.id.localeCompare(right.id)));
-    add('global-discover', 'Discover Something New', [...candidates].sort((left, right) => right.freshness - left.freshness || right.score - left.score || left.id.localeCompare(right.id)));
-    for (const genre of genres) add(`global-genre-${this.slug(genre)}`, `${genre} Music`, this.forGenre(candidates, genre));
+    add(
+      'global-popular-now',
+      'Popular Now',
+      [...candidates].sort(
+        (left, right) =>
+          right.feedback - left.feedback ||
+          right.popularity - left.popularity ||
+          left.id.localeCompare(right.id),
+      ),
+    );
+    add(
+      'global-discover',
+      'Discover Something New',
+      [...candidates].sort(
+        (left, right) =>
+          right.freshness - left.freshness ||
+          right.score - left.score ||
+          left.id.localeCompare(right.id),
+      ),
+    );
+    for (const genre of genres)
+      add(
+        `global-genre-${this.slug(genre)}`,
+        `${genre} Music`,
+        this.forGenre(candidates, genre),
+      );
     for (const spotlightArtist of spotlightArtists) {
       add(
         `global-artist-${this.slug(spotlightArtist)}`,
         `More from ${spotlightArtist}`,
-        candidates.filter((candidate) => candidate.artistName === spotlightArtist),
+        candidates.filter(
+          (candidate) => candidate.artistName === spotlightArtist,
+        ),
       );
     }
 
@@ -325,9 +448,15 @@ export class RecommendationEngineService {
     return shelves;
   }
 
-  private async collectAlbumCandidates(userId: string, profile: TasteProfile): Promise<AlbumCandidate[]> {
+  private async collectAlbumCandidates(
+    userId: string,
+    profile: TasteProfile,
+  ): Promise<AlbumCandidate[]> {
     const albums = await this.prisma.recommendationResourceSnapshot.findMany({
-      where: { resourceType: 'albums', resourceId: { notIn: [...profile.listenedAlbumIds] } },
+      where: {
+        resourceType: 'albums',
+        resourceId: { notIn: [...profile.listenedAlbumIds] },
+      },
       select: {
         resourceId: true,
         artistName: true,
@@ -346,49 +475,65 @@ export class RecommendationEngineService {
       this.popularAlbumScores(),
       this.interactionScores(userId),
     ]);
-    const artists = new Map(profile.artists.map((entry) => [entry.name, entry.weight]));
-    const genres = new Map(profile.genres.map((entry) => [entry.name, entry.weight]));
+    const artists = new Map(
+      profile.artists.map((entry) => [entry.name, entry.weight]),
+    );
+    const genres = new Map(
+      profile.genres.map((entry) => [entry.name, entry.weight]),
+    );
     const seeds = await this.recentAlbumSeeds(userId);
-    return albums.filter((album) => publishedAlbumIds.has(album.resourceId)).map((album) => {
-      const artistAffinity = artists.get(album.artistName) ?? 0;
-      const genreAffinity = Math.min(1, album.genreNames.reduce((sum, genre) => sum + (genres.get(genre) ?? 0), 0));
-      const freshness = this.freshness(album.releaseDate);
-      const collaborativeScore = collaborative.get(album.resourceId) ?? 0;
-      const popularityScore = popularity.get(album.resourceId) ?? 0;
-      const feedbackScore = feedback.get(album.resourceId) ?? 0;
-      const contentSimilarity = this.contentAffinity(album, seeds);
-      const novelty = artistAffinity === 0 ? 1 : 0;
-      const sources = new Set<CandidateSource>();
-      if (artistAffinity || genreAffinity) sources.add('taste');
-      if (contentSimilarity > 0) sources.add('content');
-      if (freshness > 0) sources.add('fresh');
-      if (collaborativeScore > 0) sources.add('collaborative');
-      if (popularityScore > 0) sources.add('popular');
-      return {
-        id: album.resourceId,
-        artistName: album.artistName,
-        genreNames: album.genreNames,
-        audioTraits: album.audioTraits,
-        releaseDate: album.releaseDate,
-        artistAffinity,
-        genreAffinity,
-        contentSimilarity,
-        collaborative: collaborativeScore,
-        popularity: popularityScore,
-        freshness,
-        feedback: feedbackScore,
-        sources,
-        score:
-          artistAffinity * policy.weights.artistAffinity +
-          genreAffinity * policy.weights.genreAffinity +
-          contentSimilarity * policy.weights.contentSimilarity +
-          collaborativeScore * policy.weights.collaborative +
-          popularityScore * policy.weights.popularity +
-          freshness * policy.weights.freshness +
-          novelty * policy.weights.novelty +
-          feedbackScore * policy.weights.feedback,
-      };
-    }).sort((left, right) => right.score - left.score || left.id.localeCompare(right.id));
+    return albums
+      .filter((album) => publishedAlbumIds.has(album.resourceId))
+      .map((album) => {
+        const artistAffinity = artists.get(album.artistName) ?? 0;
+        const genreAffinity = Math.min(
+          1,
+          album.genreNames.reduce(
+            (sum, genre) => sum + (genres.get(genre) ?? 0),
+            0,
+          ),
+        );
+        const freshness = this.freshness(album.releaseDate);
+        const collaborativeScore = collaborative.get(album.resourceId) ?? 0;
+        const popularityScore = popularity.get(album.resourceId) ?? 0;
+        const feedbackScore = feedback.get(album.resourceId) ?? 0;
+        const contentSimilarity = this.contentAffinity(album, seeds);
+        const novelty = artistAffinity === 0 ? 1 : 0;
+        const sources = new Set<CandidateSource>();
+        if (artistAffinity || genreAffinity) sources.add('taste');
+        if (contentSimilarity > 0) sources.add('content');
+        if (freshness > 0) sources.add('fresh');
+        if (collaborativeScore > 0) sources.add('collaborative');
+        if (popularityScore > 0) sources.add('popular');
+        return {
+          id: album.resourceId,
+          artistName: album.artistName,
+          genreNames: album.genreNames,
+          audioTraits: album.audioTraits,
+          releaseDate: album.releaseDate,
+          artistAffinity,
+          genreAffinity,
+          contentSimilarity,
+          collaborative: collaborativeScore,
+          popularity: popularityScore,
+          freshness,
+          feedback: feedbackScore,
+          sources,
+          score:
+            artistAffinity * policy.weights.artistAffinity +
+            genreAffinity * policy.weights.genreAffinity +
+            contentSimilarity * policy.weights.contentSimilarity +
+            collaborativeScore * policy.weights.collaborative +
+            popularityScore * policy.weights.popularity +
+            freshness * policy.weights.freshness +
+            novelty * policy.weights.novelty +
+            feedbackScore * policy.weights.feedback,
+        };
+      })
+      .sort(
+        (left, right) =>
+          right.score - left.score || left.id.localeCompare(right.id),
+      );
   }
 
   private async recentAlbumSeeds(userId: string) {
@@ -399,8 +544,11 @@ export class RecommendationEngineService {
       select: { albumId: true, albumName: true },
     });
     const uniqueRows = rows
-      .filter((row, index, all) =>
-        row.albumId && all.findIndex((candidate) => candidate.albumId === row.albumId) === index,
+      .filter(
+        (row, index, all) =>
+          row.albumId &&
+          all.findIndex((candidate) => candidate.albumId === row.albumId) ===
+            index,
       )
       .slice(0, 3);
     const snapshots = uniqueRows.length
@@ -409,17 +557,35 @@ export class RecommendationEngineService {
             resourceType: 'albums',
             resourceId: { in: uniqueRows.map((row) => row.albumId) },
           },
-          select: { resourceId: true, artistName: true, genreNames: true, audioTraits: true },
+          select: {
+            resourceId: true,
+            name: true,
+            externalUrl: true,
+            artworkUrl: true,
+            artworkBgColor: true,
+            artistName: true,
+            genreNames: true,
+            audioTraits: true,
+          },
         })
       : [];
-    const metadata = new Map(snapshots.map((snapshot) => [snapshot.resourceId, snapshot]));
-    return uniqueRows.map((row) => ({
-      id: row.albumId,
-      name: row.albumName || 'Your recent favorite',
-      artistName: metadata.get(row.albumId)?.artistName ?? '',
-      genreNames: metadata.get(row.albumId)?.genreNames ?? [],
-      audioTraits: metadata.get(row.albumId)?.audioTraits ?? [],
-    }));
+    const metadata = new Map(
+      snapshots.map((snapshot) => [snapshot.resourceId, snapshot]),
+    );
+    return uniqueRows.map((row) => {
+      const snapshot = metadata.get(row.albumId);
+
+      return {
+        id: row.albumId,
+        name: snapshot?.name || row.albumName || 'Your recent favorite',
+        url: snapshot?.externalUrl ?? '',
+        artworkUrl: snapshot?.artworkUrl ?? '',
+        artworkBgColor: snapshot?.artworkBgColor ?? '',
+        artistName: snapshot?.artistName ?? '',
+        genreNames: snapshot?.genreNames ?? [],
+        audioTraits: snapshot?.audioTraits ?? [],
+      };
+    });
   }
 
   private nearSeed(
@@ -431,7 +597,12 @@ export class RecommendationEngineService {
       audioTraits: string[];
     },
   ) {
-    return [...candidates].sort((left, right) => this.seedScore(right, seed) - this.seedScore(left, seed) || right.score - left.score || left.id.localeCompare(right.id));
+    return [...candidates].sort(
+      (left, right) =>
+        this.seedScore(right, seed) - this.seedScore(left, seed) ||
+        right.score - left.score ||
+        left.id.localeCompare(right.id),
+    );
   }
 
   private seedScore(
@@ -444,9 +615,12 @@ export class RecommendationEngineService {
     },
   ) {
     if (candidate.id === seed.id) return -1;
-    return this.contentSimilarity(candidate, seed) * 0.6 +
+    return (
+      this.contentSimilarity(candidate, seed) * 0.6 +
       (candidate.artistName === seed.artistName ? 1 : 0) * 0.15 +
-      candidate.collaborative * 0.15 + candidate.freshness * 0.1;
+      candidate.collaborative * 0.15 +
+      candidate.freshness * 0.1
+    );
   }
 
   /**
@@ -460,7 +634,10 @@ export class RecommendationEngineService {
     candidate: Pick<AlbumCandidate, 'genreNames' | 'audioTraits'>,
     seed: Pick<AlbumCandidate, 'genreNames' | 'audioTraits'>,
   ) {
-    const traitSimilarity = this.jaccard(candidate.audioTraits, seed.audioTraits);
+    const traitSimilarity = this.jaccard(
+      candidate.audioTraits,
+      seed.audioTraits,
+    );
     const genreSimilarity = this.jaccard(candidate.genreNames, seed.genreNames);
     if (candidate.audioTraits.length && seed.audioTraits.length) {
       return traitSimilarity * 0.75 + genreSimilarity * 0.25;
@@ -476,25 +653,43 @@ export class RecommendationEngineService {
     }>,
   ) {
     return seeds.reduce(
-      (maximum, seed) => Math.max(maximum, this.contentSimilarity(candidate, seed)),
+      (maximum, seed) =>
+        Math.max(maximum, this.contentSimilarity(candidate, seed)),
       0,
     );
   }
 
   private jaccard(left: string[], right: string[]) {
-    const leftValues = new Set(left.map((value) => value.trim().toLowerCase()).filter(Boolean));
-    const rightValues = new Set(right.map((value) => value.trim().toLowerCase()).filter(Boolean));
+    const leftValues = new Set(
+      left.map((value) => value.trim().toLowerCase()).filter(Boolean),
+    );
+    const rightValues = new Set(
+      right.map((value) => value.trim().toLowerCase()).filter(Boolean),
+    );
     if (!leftValues.size || !rightValues.size) return 0;
-    const intersection = [...leftValues].filter((value) => rightValues.has(value)).length;
+    const intersection = [...leftValues].filter((value) =>
+      rightValues.has(value),
+    ).length;
     return intersection / new Set([...leftValues, ...rightValues]).size;
   }
 
   private forGenre(candidates: AlbumCandidate[], genre: string) {
-    return candidates.filter((candidate) => candidate.genreNames.includes(genre)).sort((left, right) => right.score - left.score || left.id.localeCompare(right.id));
+    return candidates
+      .filter((candidate) => candidate.genreNames.includes(genre))
+      .sort(
+        (left, right) =>
+          right.score - left.score || left.id.localeCompare(right.id),
+      );
   }
 
   private byFreshness(candidates: AlbumCandidate[]) {
-    return [...candidates].sort((left, right) => right.freshness - left.freshness || right.genreAffinity - left.genreAffinity || right.score - left.score || left.id.localeCompare(right.id));
+    return [...candidates].sort(
+      (left, right) =>
+        right.freshness - left.freshness ||
+        right.genreAffinity - left.genreAffinity ||
+        right.score - left.score ||
+        left.id.localeCompare(right.id),
+    );
   }
 
   private forFans(candidates: AlbumCandidate[], artist: string) {
@@ -503,7 +698,12 @@ export class RecommendationEngineService {
       candidate.genreAffinity * 0.25 +
       candidate.popularity * 0.2 -
       (candidate.artistName === artist ? 0.08 : 0);
-    return [...candidates].sort((left, right) => score(right) - score(left) || right.score - left.score || left.id.localeCompare(right.id));
+    return [...candidates].sort(
+      (left, right) =>
+        score(right) - score(left) ||
+        right.score - left.score ||
+        left.id.localeCompare(right.id),
+    );
   }
 
   private allocate(
@@ -516,11 +716,23 @@ export class RecommendationEngineService {
     const selected: Array<{ id: string; type: 'albums' }> = [];
     for (const candidate of candidates) {
       if (selected.length >= limit) break;
-      if (allocated.has(candidate.id) || (artistCounts.get(candidate.artistName) ?? 0) >= policy.maxPerArtist) continue;
+      if (
+        allocated.has(candidate.id) ||
+        (artistCounts.get(candidate.artistName) ?? 0) >= policy.maxPerArtist
+      )
+        continue;
       const primaryGenre = candidate.genreNames[0] ?? '';
-      if (primaryGenre && (genreCounts.get(primaryGenre) ?? 0) >= policy.maxPerGenre) continue;
-      artistCounts.set(candidate.artistName, (artistCounts.get(candidate.artistName) ?? 0) + 1);
-      if (primaryGenre) genreCounts.set(primaryGenre, (genreCounts.get(primaryGenre) ?? 0) + 1);
+      if (
+        primaryGenre &&
+        (genreCounts.get(primaryGenre) ?? 0) >= policy.maxPerGenre
+      )
+        continue;
+      artistCounts.set(
+        candidate.artistName,
+        (artistCounts.get(candidate.artistName) ?? 0) + 1,
+      );
+      if (primaryGenre)
+        genreCounts.set(primaryGenre, (genreCounts.get(primaryGenre) ?? 0) + 1);
       selected.push({ id: candidate.id, type: 'albums' });
     }
     return selected;
@@ -559,7 +771,18 @@ export class RecommendationEngineService {
       take: policy.candidateLimit,
     });
     const maximum = stats[0]?._sum.playCount ?? 1;
-    return new Map(stats.map((stat) => [stat.albumId, ((stat._sum.playCount ?? 0) / maximum) * Math.max(0.2, 1 + ((stat._sum.completionCount ?? 0) - (stat._sum.skipCount ?? 0)) / Math.max(1, stat._sum.playCount ?? 1))]));
+    return new Map(
+      stats.map((stat) => [
+        stat.albumId,
+        ((stat._sum.playCount ?? 0) / maximum) *
+          Math.max(
+            0.2,
+            1 +
+              ((stat._sum.completionCount ?? 0) - (stat._sum.skipCount ?? 0)) /
+                Math.max(1, stat._sum.playCount ?? 1),
+          ),
+      ]),
+    );
   }
 
   private async interactionScores(userId?: string) {
@@ -589,18 +812,23 @@ export class RecommendationEngineService {
       // Recent feedback is much more representative than a click from months
       // ago. A 90-day half-life preserves durable taste without allowing old
       // events to dominate the current Home forever.
-      const ageDays = Math.max(0, Date.now() - event.occurredAt.getTime()) / 86_400_000;
+      const ageDays =
+        Math.max(0, Date.now() - event.occurredAt.getTime()) / 86_400_000;
       const recency = Math.pow(0.5, ageDays / 90);
       const weight = baseWeight * recency;
-      scores.set(event.resourceId, Math.max(0, (scores.get(event.resourceId) ?? 0) + weight));
+      scores.set(
+        event.resourceId,
+        Math.max(0, (scores.get(event.resourceId) ?? 0) + weight),
+      );
     }
     const maximum = Math.max(1, ...scores.values());
-    return new Map(
-      [...scores].map(([id, score]) => [id, score / maximum]),
-    );
+    return new Map([...scores].map(([id, score]) => [id, score / maximum]));
   }
 
-  private async collaborativeAlbumScores(userId: string, listenedSongIds: string[]) {
+  private async collaborativeAlbumScores(
+    userId: string,
+    listenedSongIds: string[],
+  ) {
     if (!listenedSongIds.length) return new Map<string, number>();
     const historyStart = new Date(
       Date.now() - policy.historyWindowDays * 86_400_000,
@@ -612,14 +840,29 @@ export class RecommendationEngineService {
         playCount: { gt: 0 },
         lastPlayedAt: { gte: historyStart },
       },
-      select: { userId: true, playCount: true, completionCount: true, skipCount: true },
+      select: {
+        userId: true,
+        playCount: true,
+        completionCount: true,
+        skipCount: true,
+      },
       orderBy: [{ lastPlayedAt: 'desc' }, { userId: 'asc' }, { songId: 'asc' }],
       take: policy.collaborativeOverlapLimit,
     });
     const neighbours = new Map<string, number>();
-    for (const row of overlaps) neighbours.set(row.userId, (neighbours.get(row.userId) ?? 0) + Math.max(0, row.completionCount + row.playCount * 0.25 - row.skipCount));
+    for (const row of overlaps)
+      neighbours.set(
+        row.userId,
+        (neighbours.get(row.userId) ?? 0) +
+          Math.max(
+            0,
+            row.completionCount + row.playCount * 0.25 - row.skipCount,
+          ),
+      );
     const topNeighbours = [...neighbours.entries()]
-      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+      .sort(
+        (left, right) => right[1] - left[1] || left[0].localeCompare(right[0]),
+      )
       .slice(0, policy.collaborativeNeighbourLimit);
     if (!topNeighbours.length) return new Map<string, number>();
     const weights = new Map(topNeighbours);
@@ -631,7 +874,13 @@ export class RecommendationEngineService {
         playCount: { gt: 0 },
         lastPlayedAt: { gte: historyStart },
       },
-      select: { userId: true, albumId: true, playCount: true, completionCount: true, skipCount: true },
+      select: {
+        userId: true,
+        albumId: true,
+        playCount: true,
+        completionCount: true,
+        skipCount: true,
+      },
       orderBy: [
         { playCount: 'desc' },
         { lastPlayedAt: 'desc' },
@@ -641,15 +890,29 @@ export class RecommendationEngineService {
       take: policy.collaborativeCandidateLimit,
     });
     const raw = new Map<string, number>();
-    for (const row of rows) raw.set(row.albumId, (raw.get(row.albumId) ?? 0) + Math.max(0, row.completionCount + row.playCount * 0.25 - row.skipCount) * (weights.get(row.userId) ?? 0));
+    for (const row of rows)
+      raw.set(
+        row.albumId,
+        (raw.get(row.albumId) ?? 0) +
+          Math.max(
+            0,
+            row.completionCount + row.playCount * 0.25 - row.skipCount,
+          ) *
+            (weights.get(row.userId) ?? 0),
+      );
     const maximum = Math.max(1, ...raw.values());
-    return new Map([...raw].map(([albumId, score]) => [albumId, score / maximum]));
+    return new Map(
+      [...raw].map(([albumId, score]) => [albumId, score / maximum]),
+    );
   }
 
   private freshness(releaseDate: string) {
     const timestamp = new Date(releaseDate).getTime();
     if (!Number.isFinite(timestamp)) return 0;
-    return Math.max(0, 1 - (Date.now() - timestamp) / (policy.freshnessWindowDays * 86_400_000));
+    return Math.max(
+      0,
+      1 - (Date.now() - timestamp) / (policy.freshnessWindowDays * 86_400_000),
+    );
   }
 
   /** Snapshots may lag publication changes. Validate candidates against the
@@ -668,6 +931,11 @@ export class RecommendationEngineService {
   }
 
   private slug(value: string) {
-    return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'music';
+    return (
+      value
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '') || 'music'
+    );
   }
 }
