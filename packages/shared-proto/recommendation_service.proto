@@ -21,14 +21,14 @@ service RecommendationService {
 }
 
 message UpsertSystemStationArtworkRequest {
-  string station_key = 1;
-  string asset_id = 2;
+  string station_key   = 1;
+  string asset_id      = 2;
   string actor_user_id = 3;
 }
 
 message SystemStationArtworkResponse {
   string station_key = 1;
-  string asset_id = 2;
+  string asset_id    = 2;
 }
 
 enum RecommendationPageScope {
@@ -75,25 +75,25 @@ message RefreshRecommendationSectionRequest {
 }
 
 message ReplaceHomeRecommendationsRequest {
-  string                                  user_id   = 1;
-  string                                  name      = 2;
-  string                                  locale    = 3;
-  string                                  timezone  = 4;
-  string                                  platform  = 5;
-  repeated PersonalRecommendationResource sections = 6;
-  repeated CatalogResource                resources = 7;
-  RecommendationPageScope                 scope = 8;
-  RecommendationPageStatus                status = 9;
+  string                                  user_id       = 1;
+  string                                  name          = 2;
+  string                                  locale        = 3;
+  string                                  timezone      = 4;
+  string                                  platform      = 5;
+  repeated PersonalRecommendationResource sections      = 6;
+  repeated CatalogResource                resources     = 7;
+  RecommendationPageScope                 scope         = 8;
+  RecommendationPageStatus                status        = 9;
   string                                  actor_user_id = 10;
 }
 
 message PublishRecommendationPageRequest {
-  string                  user_id      = 1;
-  string                  name         = 2;
-  string                  locale       = 3;
-  string                  timezone     = 4;
-  string                  platform     = 5;
-  RecommendationPageScope scope        = 6;
+  string                  user_id       = 1;
+  string                  name          = 2;
+  string                  locale        = 3;
+  string                  timezone      = 4;
+  string                  platform      = 5;
+  RecommendationPageScope scope         = 6;
   string                  actor_user_id = 7;
 }
 
@@ -134,31 +134,36 @@ message DisplayTitle {
 }
 
 message PersonalRecommendationAttributes {
-  RecommendationDisplay display                 = 1;
-  bool                  has_see_all             = 2;
-  bool                  is_group_recommendation = 3;
-  string                kind                    = 4;
-  string                next_update_date        = 5;
-  repeated string       resource_types          = 6;
-  DisplayTitle          title                   = 7;
-  DisplayTitle          title_without_name      = 8;
-  int32                 version                 = 9;
-  RecommendationPresentationMode presentation_mode = 10;
+  RecommendationDisplay          display                       = 1;
+  bool                           has_see_all                   = 2;
+  bool                           is_group_recommendation       = 3;
+  string                         kind                          = 4;
+  string                         next_update_date              = 5;
+  repeated string                resource_types                = 6;
+  DisplayTitle                   title                         = 7;
+  DisplayTitle                   title_without_name            = 8;
+  int32                          version                       = 9;
+  RecommendationPresentationMode presentation_mode             = 10;
+  string                         source_album_id               = 11;
+  string                         source_album_name             = 12;
+  string                         source_album_url              = 13;
+  string                         source_album_artwork_url      = 14;
+  string                         source_album_artwork_bg_color = 15;
 }
 
 message PersonalRecommendationResource {
-  string                               id            = 1;
-  string                               type          = 2;
-  string                               href          = 3;
-  PersonalRecommendationAttributes     attributes    = 4;
-  RecommendationRelationships          relationships = 5;
+  string                           id            = 1;
+  string                           type          = 2;
+  string                           href          = 3;
+  PersonalRecommendationAttributes attributes    = 4;
+  RecommendationRelationships      relationships = 5;
 }
 
 message CatalogResource {
-  string                 id         = 1;
-  string                 type       = 2;
-  string                 href       = 3;
-  google.protobuf.Struct attributes = 4;
+  string                 id            = 1;
+  string                 type          = 2;
+  string                 href          = 3;
+  google.protobuf.Struct attributes    = 4;
   google.protobuf.Struct relationships = 5;
 }
 
@@ -186,7 +191,7 @@ message GetHomeRecommendationsResponse {
 }
 
 enum ListeningEventType {
-  LISTENING_EVENT_TYPE_UNSPECIFIED    = 0;
+  LISTENING_EVENT_TYPE_UNSPECIFIED   = 0;
   LISTENING_EVENT_TYPE_PLAY_START    = 1;
   LISTENING_EVENT_TYPE_PLAY_COMPLETE = 2;
   LISTENING_EVENT_TYPE_SKIP          = 3;
@@ -194,20 +199,20 @@ enum ListeningEventType {
 
 enum RecommendationInteractionType {
   RECOMMENDATION_INTERACTION_TYPE_UNSPECIFIED = 0;
-  RECOMMENDATION_INTERACTION_TYPE_IMPRESSION = 1;
-  RECOMMENDATION_INTERACTION_TYPE_OPEN = 2;
-  RECOMMENDATION_INTERACTION_TYPE_PLAY = 3;
-  RECOMMENDATION_INTERACTION_TYPE_DISMISS = 4;
+  RECOMMENDATION_INTERACTION_TYPE_IMPRESSION  = 1;
+  RECOMMENDATION_INTERACTION_TYPE_OPEN        = 2;
+  RECOMMENDATION_INTERACTION_TYPE_PLAY        = 3;
+  RECOMMENDATION_INTERACTION_TYPE_DISMISS     = 4;
 }
 
 message RecordRecommendationInteractionRequest {
-  string user_id = 1;
-  string section_id = 2;
-  string resource_type = 3;
-  string resource_id = 4;
-  int32 position = 5;
-  int32 model_version = 6;
-  RecommendationInteractionType event_type = 7;
+  string                        user_id       = 1;
+  string                        section_id    = 2;
+  string                        resource_type = 3;
+  string                        resource_id   = 4;
+  int32                         position      = 5;
+  int32                         model_version = 6;
+  RecommendationInteractionType event_type    = 7;
 }
 
 message RecordRecommendationInteractionResponse {
@@ -215,23 +220,23 @@ message RecordRecommendationInteractionResponse {
 }
 
 message RecordListeningEventRequest {
-  string             user_id      = 1;
-  string             song_id      = 2;
-  ListeningEventType event_type   = 3;
-  int32              duration_sec = 4;
-  int32              total_sec    = 5;
-  string             song_title   = 6;
-  string             artist_name  = 7;
-  string             album_name   = 8;
-  string             album_id     = 9;
-  string             playlist_id  = 10;
-  string             playlist_name = 11;
-  string             playlist_artwork_url = 12;
+  string             user_id                   = 1;
+  string             song_id                   = 2;
+  ListeningEventType event_type                = 3;
+  int32              duration_sec              = 4;
+  int32              total_sec                 = 5;
+  string             song_title                = 6;
+  string             artist_name               = 7;
+  string             album_name                = 8;
+  string             album_id                  = 9;
+  string             playlist_id               = 10;
+  string             playlist_name             = 11;
+  string             playlist_artwork_url      = 12;
   string             playlist_artwork_bg_color = 13;
-  string             station_id = 14;
-  string             station_name = 15;
-  string             station_artwork_url = 16;
-  string             station_artwork_bg_color = 17;
+  string             station_id                = 14;
+  string             station_name              = 15;
+  string             station_artwork_url       = 16;
+  string             station_artwork_bg_color  = 17;
 }
 
 message RecordListeningEventResponse {
@@ -250,32 +255,32 @@ message GenerateRecommendationsRequest {
 
 message GetListeningAnalyticsRequest {
   repeated string song_ids = 1;
-  int32 days = 2;
+  int32           days     = 2;
 }
 
 message ListeningAnalyticsTrendPoint {
-  string date = 1;
-  int64 plays = 2;
-  int64 completions = 3;
-  int64 skips = 4;
-  int64 listeners = 5;
+  string date        = 1;
+  int64  plays       = 2;
+  int64  completions = 3;
+  int64  skips       = 4;
+  int64  listeners   = 5;
 }
 
 message ListeningAnalyticsTopSong {
-  string song_id = 1;
-  string title = 2;
+  string song_id     = 1;
+  string title       = 2;
   string artist_name = 3;
-  int64 plays = 4;
-  int64 completions = 5;
-  int64 skips = 6;
-  int64 listeners = 7;
+  int64  plays       = 4;
+  int64  completions = 5;
+  int64  skips       = 6;
+  int64  listeners   = 7;
 }
 
 message ListeningAnalyticsResponse {
-  int64 plays = 1;
-  int64 completions = 2;
-  int64 skips = 3;
-  int64 listeners = 4;
-  repeated ListeningAnalyticsTrendPoint trend = 5;
-  repeated ListeningAnalyticsTopSong top_songs = 6;
+  int64                                 plays       = 1;
+  int64                                 completions = 2;
+  int64                                 skips       = 3;
+  int64                                 listeners   = 4;
+  repeated ListeningAnalyticsTrendPoint trend       = 5;
+  repeated ListeningAnalyticsTopSong    top_songs   = 6;
 }
