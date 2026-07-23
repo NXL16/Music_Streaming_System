@@ -408,12 +408,10 @@ export class RecommendationsService {
       }
     }
 
-    // Global is already allocated and validated by the generation pipeline.
-    // Do not run it through the personalised Home preview transformer: doing
-    // so can silently change an editorial page while it is being used as the
-    // cold-start fallback for a signed-in listener.
+    // Home base là snapshot đã publish. Recently Played được lấy từ endpoint
+    // section riêng để playback không làm thay đổi các shelf nền.
     return request.userId
-      ? this.personalizeHomeResponse(response, request.userId, name)
+      ? this.deduplicateHomePreviewResources(response)
       : response;
   }
 
@@ -1142,61 +1140,6 @@ export class RecommendationsService {
     };
   }
 
-  private async personalizeHomeResponse(
-    response: GetHomeRecommendationsResponse,
-    userId: string,
-    pageName: string,
-  ): Promise<GetHomeRecommendationsResponse> {
-    if (!response.resources) return response;
-
-    const resources = this.cloneResources(response.resources);
-    const recentRef = await this.addRuntimeRecentlyPlayedSection(
-      userId,
-      pageName,
-      resources,
-      HOME_SHELF_PREVIEW_LIMIT,
-    );
-
-    return this.deduplicateHomePreviewResources({
-      ...response,
-      data: recentRef
-        ? this.insertAfterHeroShelf(response.data, recentRef)
-        : response.data,
-      resources,
-    });
-  }
-
-  private insertAfterHeroShelf(
-    refs: RecommendationRef[],
-    insertedRef: RecommendationRef,
-  ): RecommendationRef[] {
-    const filtered = refs.filter((ref) => ref.id !== insertedRef.id);
-    const heroIndex = filtered.findIndex(
-      (ref) => ref.id === 'global-top-picks' || ref.id === 'user-top-picks',
-    );
-    if (heroIndex < 0) return [insertedRef, ...filtered];
-
-    return [
-      ...filtered.slice(0, heroIndex + 1),
-      insertedRef,
-      ...filtered.slice(heroIndex + 1),
-    ];
-  }
-
-  private cloneResources(
-    resources: RecommendationResources,
-  ): RecommendationResources {
-    return {
-      personalRecommendation: { ...resources.personalRecommendation },
-      albums: { ...resources.albums },
-      playlists: { ...resources.playlists },
-      stations: { ...resources.stations },
-      editorialItems: { ...resources.editorialItems },
-      artists: { ...resources.artists },
-      songs: { ...resources.songs },
-    };
-  }
-
   private deduplicateHomePreviewResources(
     response: GetHomeRecommendationsResponse,
   ): GetHomeRecommendationsResponse {
@@ -1205,6 +1148,9 @@ export class RecommendationsService {
     const personalRecommendation = {
       ...response.resources.personalRecommendation,
     };
+
+    delete personalRecommendation['user-recently-played'];
+
     const data: RecommendationRef[] = [];
 
     for (const sectionRef of response.data) {
@@ -1217,10 +1163,7 @@ export class RecommendationsService {
         continue;
       }
 
-      if (sectionRef.id === 'user-recently-played') {
-        data.push(sectionRef);
-        continue;
-      }
+      if (sectionRef.id === 'user-recently-played') continue;
 
       const preview: RecommendationRef[] = [];
       const sectionResources = new Set<string>();

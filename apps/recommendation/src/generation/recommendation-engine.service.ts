@@ -12,11 +12,7 @@ export const PERSONALIZATION_MODEL_VERSION =
   PRODUCTION_RECOMMENDATION_MODEL_VERSION;
 
 type CandidateSource =
-  | 'taste'
-  | 'content'
-  | 'fresh'
-  | 'popular'
-  | 'collaborative';
+  'taste' | 'content' | 'fresh' | 'popular' | 'collaborative';
 type AlbumCandidate = {
   id: string;
   artistName: string;
