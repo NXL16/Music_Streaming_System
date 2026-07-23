@@ -236,23 +236,29 @@ export function AppPlayerBar() {
   };
 
   const handleNext = () => {
-    if (currentSong) {
-      if (trackedSongRef.current === currentSong.id) {
-        emitEvent(currentSong, "SKIP", audioRef.current?.currentTime);
-      }
-      trackedSongRef.current = null;
+    if (!currentSong) return;
+
+    const didChangeTrack = next();
+    if (!didChangeTrack) return;
+
+    if (trackedSongRef.current === currentSong.id) {
+      emitEvent(currentSong, "SKIP", audioRef.current?.currentTime);
     }
-    next();
+
+    trackedSongRef.current = null;
   };
 
   const handlePrevious = () => {
-    if (currentSong) {
-      if (trackedSongRef.current === currentSong.id) {
-        emitEvent(currentSong, "SKIP", audioRef.current?.currentTime);
-      }
-      trackedSongRef.current = null;
+    if (!currentSong) return;
+
+    const didChangeTrack = previous();
+    if (!didChangeTrack) return;
+
+    if (trackedSongRef.current === currentSong.id) {
+      emitEvent(currentSong, "SKIP", audioRef.current?.currentTime);
     }
-    previous();
+
+    trackedSongRef.current = null;
   };
 
   const toggleMute = () => {

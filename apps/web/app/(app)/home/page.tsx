@@ -15,6 +15,7 @@ import {
 import MediaShelfSkeleton from "@/components/loading/loading";
 import Loading from "@/app/loading";
 import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
+import { useRecentlyPlayedSection } from "@/lib/recommendations/use-recently-played-section";
 import { HOME_SHELF_PREVIEW_LIMIT } from "@musical/shared-constants";
 
 const RECENTLY_PLAYED_SHELF_ID = "user-recently-played";
@@ -38,8 +39,8 @@ const PERSONALIZED_HOME_ORDER = [
 ] as const;
 
 export default function HomePage() {
-  const { data, loading, error, retry, recentlyPlayedItems } =
-    useHomeRecommendations();
+  const { data, loading, error, retry } = useHomeRecommendations();
+  const { shelf: recentlyPlayedShelf } = useRecentlyPlayedSection();
   const showHomeLoading = useMinimumLoadingDuration(loading);
   const [selectedShelfId, setSelectedShelfId] = useState<string | null>(null);
   const [loadedShelves, setLoadedShelves] = useState<Record<string, HomeShelf>>(
@@ -60,13 +61,15 @@ export default function HomePage() {
         : [],
     [data],
   );
+
   const shelvesWithRecentlyPlayed = useMemo(
     () =>
       orderPersonalizedHomeShelves(
-        ensureRecentlyPlayedShelf(shelves, recentlyPlayedItems),
+        ensureRecentlyPlayedShelf(shelves, recentlyPlayedShelf),
       ),
-    [recentlyPlayedItems, shelves],
+    [recentlyPlayedShelf, shelves],
   );
+
   const handleSelectShelf = useCallback(
     async (shelfId: string) => {
       const localShelf = shelvesWithRecentlyPlayed.find(
@@ -103,22 +106,19 @@ export default function HomePage() {
   const homeShelves = useMemo(
     () =>
       shelvesWithRecentlyPlayed.map((shelf) => {
-        const previewItems = previewShelfItems(shelf, recentlyPlayedItems);
+        const previewItems = previewShelfItems(shelf);
+
         return {
           ...shelf,
           items: previewItems,
           hasMore:
-            // The API may have overflow before Home removes duplicates shared
-            // with earlier shelves. Only expose the detail chevron when this
-            // shelf itself fills its 12-card Home preview.
             (shelf.hasMore &&
               previewItems.length >= HOME_SHELF_PREVIEW_LIMIT) ||
             (shelf.id === RECENTLY_PLAYED_SHELF_ID &&
-              mergeShelfItems(recentlyPlayedItems, shelf.items).length >
-                HOME_SHELF_PREVIEW_LIMIT),
+              shelf.items.length > HOME_SHELF_PREVIEW_LIMIT),
         };
       }),
-    [recentlyPlayedItems, shelvesWithRecentlyPlayed],
+    [shelvesWithRecentlyPlayed],
   );
 
   const selectedShelf = useMemo(
@@ -128,16 +128,15 @@ export default function HomePage() {
       null,
     [loadedShelves, selectedShelfId, shelvesWithRecentlyPlayed],
   );
-  const selectedShelfWithOverlay = useMemo(
-    () =>
-      selectedShelf?.id === RECENTLY_PLAYED_SHELF_ID
-        ? {
-            ...selectedShelf,
-            items: mergeShelfItems(recentlyPlayedItems, selectedShelf.items),
-          }
-        : selectedShelf,
-    [recentlyPlayedItems, selectedShelf],
-  );
+
+  const selectedShelfWithOverlay = useMemo(() => {
+    if (selectedShelf?.id !== RECENTLY_PLAYED_SHELF_ID) {
+      return selectedShelf;
+    }
+
+    return recentlyPlayedShelf ?? selectedShelf;
+  }, [recentlyPlayedShelf, selectedShelf]);
+
   useLayoutEffect(() => {
     if (!selectedShelfId) return;
 
@@ -229,37 +228,25 @@ export default function HomePage() {
 
 function ensureRecentlyPlayedShelf(
   shelves: ReturnType<typeof mapHomeRecommendations>,
-  recentlyPlayedItems: ReturnType<
-    typeof useHomeRecommendations
-  >["recentlyPlayedItems"],
+  recentlyPlayedShelf: HomeShelf | null,
 ) {
-  if (
-    recentlyPlayedItems.length === 0 ||
-    shelves.some((shelf) => shelf.id === RECENTLY_PLAYED_SHELF_ID)
-  ) {
-    return shelves;
-  }
+  const shelvesWithoutRecentlyPlayed = shelves.filter(
+    (shelf) => shelf.id !== RECENTLY_PLAYED_SHELF_ID,
+  );
 
-  const recentShelf = {
-    id: RECENTLY_PLAYED_SHELF_ID,
-    title: "Recently Played",
-    displayKind: "MusicCoverShelf",
-    sourceDisplayKind: "MusicCoverShelf",
-    modelVersion: 1,
-    hasMore: false,
-    items: recentlyPlayedItems,
-  } satisfies ReturnType<typeof mapHomeRecommendations>[number];
+  if (!recentlyPlayedShelf) return shelvesWithoutRecentlyPlayed;
 
-  const heroIndex = shelves.findIndex(
+  const heroIndex = shelvesWithoutRecentlyPlayed.findIndex(
     (shelf) => shelf.displayKind === "MusicNotesHeroShelf",
   );
 
-  if (heroIndex < 0) return [recentShelf, ...shelves];
+  if (heroIndex < 0)
+    return [recentlyPlayedShelf, ...shelvesWithoutRecentlyPlayed];
 
   return [
-    ...shelves.slice(0, heroIndex + 1),
-    recentShelf,
-    ...shelves.slice(heroIndex + 1),
+    ...shelvesWithoutRecentlyPlayed.slice(0, heroIndex + 1),
+    recentlyPlayedShelf,
+    ...shelvesWithoutRecentlyPlayed.slice(heroIndex + 1),
   ];
 }
 
@@ -323,29 +310,8 @@ function orderPersonalizedHomeShelves(
 
 function previewShelfItems(
   shelf: ReturnType<typeof mapHomeRecommendations>[number],
-  recentlyPlayedItems: ReturnType<
-    typeof useHomeRecommendations
-  >["recentlyPlayedItems"],
 ) {
-  const sourceItems =
-    shelf.id === RECENTLY_PLAYED_SHELF_ID
-      ? mergeShelfItems(recentlyPlayedItems, shelf.items)
-      : shelf.items;
-
-  return sourceItems.slice(0, HOME_SHELF_PREVIEW_LIMIT);
-}
-
-function mergeShelfItems<
-  T extends { resourceId: string; resourceType: string },
->(leadingItems: T[], baseItems: T[]) {
-  const seen = new Set<string>();
-
-  return [...leadingItems, ...baseItems].filter((item) => {
-    const key = `${item.resourceType}:${item.resourceId}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return shelf.items.slice(0, HOME_SHELF_PREVIEW_LIMIT);
 }
 
 type ShelfDetailViewProps = {

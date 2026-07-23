@@ -1,10 +1,7 @@
 import { http } from "@/lib/api/http";
-import { invalidateHomeRecommendationsCache } from "./recommendation.api";
 import type { MediaCardProps } from "@/components/media/media-card.types";
 
 export type ListeningEventType = "PLAY_START" | "PLAY_COMPLETE" | "SKIP";
-export const HOME_RECOMMENDATIONS_REFRESH_EVENT =
-  "home-recommendations:refresh";
 export const RECENTLY_PLAYED_ITEM_EVENT = "recently-played:item";
 
 type ListeningEventPayload = {
@@ -42,16 +39,5 @@ export async function sendListeningEvent(payload: ListeningEventPayload) {
 
   try {
     await http.post("/me/recommendations/listening-events", payload);
-    if (payload.eventType === "PLAY_START") {
-      invalidateHomeRecommendationsCache();
-      if (typeof window !== "undefined") {
-        // The optimistic item above updates an already-mounted Home. This
-        // event makes the source of truth refresh too, including when Home
-        // mounted after the qualified three-second play was recorded.
-        window.dispatchEvent(
-          new Event(HOME_RECOMMENDATIONS_REFRESH_EVENT),
-        );
-      }
-    }
   } catch {}
 }

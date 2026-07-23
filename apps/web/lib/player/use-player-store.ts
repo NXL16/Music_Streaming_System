@@ -60,8 +60,8 @@ type PlayerState = {
   toggleShuffle: () => void;
   cycleRepeatMode: () => void;
   pause: () => void;
-  next: (stopAtEnd?: boolean) => void;
-  previous: () => void;
+  next: (stopAtEnd?: boolean) => boolean;
+  previous: () => boolean;
   clear: () => void;
 };
 
@@ -135,17 +135,14 @@ export const usePlayerStore = create<PlayerState>((set) => ({
           ? -1
           : Math.min(Math.max(startIndex, 0), songs.length - 1);
       const nextPlayableIndex =
-        requestedIndex < 0
-          ? -1
-          : findPlayableIndex(songs, requestedIndex, 1);
+        requestedIndex < 0 ? -1 : findPlayableIndex(songs, requestedIndex, 1);
       const normalizedIndex =
         requestedIndex < 0
           ? -1
           : nextPlayableIndex >= 0
             ? nextPlayableIndex
             : findPlayableIndex(songs, requestedIndex - 1, -1);
-      const selectedSong =
-        normalizedIndex >= 0 ? songs[normalizedIndex] : null;
+      const selectedSong = normalizedIndex >= 0 ? songs[normalizedIndex] : null;
 
       return {
         queue: songs,
@@ -205,12 +202,13 @@ export const usePlayerStore = create<PlayerState>((set) => ({
     set((state) => {
       if (state.stationMode) return state;
       return {
-        repeatMode:
-          state.repeatMode === 0 ? 2 : state.repeatMode === 2 ? 1 : 0,
+        repeatMode: state.repeatMode === 0 ? 2 : state.repeatMode === 2 ? 1 : 0,
       };
     }),
   pause: () => set({ playing: false }),
-  next: (stopAtEnd = false) =>
+  next: (stopAtEnd = false) => {
+    let didChangeTrack = false;
+
     set((state) => {
       if (state.stationMode) {
         const stationIndex = findPlayableIndex(
@@ -218,9 +216,12 @@ export const usePlayerStore = create<PlayerState>((set) => ({
           state.currentIndex + 1,
           1,
         );
-        if (stationIndex < 0) {
-          return { playing: false };
-        }
+
+        if (stationIndex < 0) return stopAtEnd ? { playing: false } : state;
+        if (stationIndex === state.currentIndex) return state;
+
+        didChangeTrack = true;
+
         return {
           currentIndex: stationIndex,
           currentSong: state.queue[stationIndex],
@@ -228,24 +229,28 @@ export const usePlayerStore = create<PlayerState>((set) => ({
         };
       }
 
-      let nextIndex = findPlayableIndex(
-        state.queue,
-        state.currentIndex + 1,
-        1,
-      );
-      if (nextIndex < 0 && state.repeatMode === 2) {
+      let nextIndex = findPlayableIndex(state.queue, state.currentIndex + 1, 1);
+
+      if (nextIndex < 0 && state.repeatMode === 2)
         nextIndex = findPlayableIndex(state.queue, 0, 1);
-      }
-      if (nextIndex < 0) {
-        return stopAtEnd ? { playing: false } : state;
-      }
+      if (nextIndex < 0) return stopAtEnd ? { playing: false } : state;
+      if (nextIndex === state.currentIndex) return state;
+
+      didChangeTrack = true;
+
       return {
         currentIndex: nextIndex,
         currentSong: state.queue[nextIndex],
         playing: true,
       };
-    }),
-  previous: () =>
+    });
+
+    return didChangeTrack;
+  },
+
+  previous: () => {
+    let didChangeTrack = false;
+
     set((state) => {
       if (state.stationMode) {
         const stationIndex = findPlayableIndex(
@@ -253,18 +258,24 @@ export const usePlayerStore = create<PlayerState>((set) => ({
           state.currentIndex - 1,
           -1,
         );
-        if (stationIndex < 0) return state;
+
+        if (stationIndex < 0 || stationIndex === state.currentIndex)
+          return state;
+
+        didChangeTrack = true;
         return {
           currentIndex: stationIndex,
           currentSong: state.queue[stationIndex],
           playing: true,
         };
       }
+
       let previousIndex = findPlayableIndex(
         state.queue,
         state.currentIndex - 1,
         -1,
       );
+
       if (previousIndex < 0 && state.repeatMode === 2) {
         previousIndex = findPlayableIndex(
           state.queue,
@@ -272,13 +283,21 @@ export const usePlayerStore = create<PlayerState>((set) => ({
           -1,
         );
       }
-      if (previousIndex < 0) return state;
+
+      if (previousIndex < 0 || previousIndex === state.currentIndex)
+        return state;
+
+      didChangeTrack = true;
       return {
         currentIndex: previousIndex,
         currentSong: state.queue[previousIndex],
         playing: true,
       };
-    }),
+    });
+
+    return didChangeTrack;
+  },
+
   clear: () =>
     set({
       currentSong: null,

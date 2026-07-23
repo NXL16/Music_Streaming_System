@@ -7,20 +7,10 @@ import {
   invalidateHomeRecommendationsCache,
 } from "./recommendation.api";
 import type { RecommendationResponse } from "./recommendation.types";
-import {
-  HOME_RECOMMENDATIONS_REFRESH_EVENT,
-  RECENTLY_PLAYED_ITEM_EVENT,
-} from "./listening-events";
-import type { MediaCardProps } from "@/components/media/media-card.types";
-import { RECENTLY_PLAYED_CONTEXT_LIMIT } from "@musical/shared-constants";
 
 export function useHomeRecommendations() {
-  // Nếu splash đã prefetch xong, dùng luôn cache → không hiện skeleton lại.
   const cached = getCachedHomeRecommendations();
   const [data, setData] = useState<RecommendationResponse | null>(cached);
-  const [recentlyPlayedItems, setRecentlyPlayedItems] = useState<
-    MediaCardProps[]
-  >([]);
   const [loading, setLoading] = useState(cached === null);
   const [needsInitialRequest] = useState(cached === null);
   const [error, setError] = useState<string | null>(null);
@@ -56,54 +46,7 @@ export function useHomeRecommendations() {
     };
   }, [needsInitialRequest, refresh]);
 
-  useEffect(() => {
-    const handleRecommendationRefresh = () => refresh(false);
-    window.addEventListener(
-      HOME_RECOMMENDATIONS_REFRESH_EVENT,
-      handleRecommendationRefresh,
-    );
-    return () => {
-      window.removeEventListener(
-        HOME_RECOMMENDATIONS_REFRESH_EVENT,
-        handleRecommendationRefresh,
-      );
-    };
-  }, [refresh]);
-
-  useEffect(() => {
-    const handleRecentlyPlayedItem = (event: Event) => {
-      const item = (event as CustomEvent<MediaCardProps>).detail;
-      if (!item) return;
-
-      setRecentlyPlayedItems((currentItems) => {
-        const itemKey = `${item.resourceType}:${item.resourceId}`;
-        const nextItems = [
-          item,
-          ...currentItems.filter(
-            (currentItem) =>
-              `${currentItem.resourceType}:${currentItem.resourceId}` !==
-              itemKey,
-          ),
-        ];
-
-        return nextItems.slice(0, RECENTLY_PLAYED_CONTEXT_LIMIT);
-      });
-    };
-
-    window.addEventListener(
-      RECENTLY_PLAYED_ITEM_EVENT,
-      handleRecentlyPlayedItem,
-    );
-
-    return () => {
-      window.removeEventListener(
-        RECENTLY_PLAYED_ITEM_EVENT,
-        handleRecentlyPlayedItem,
-      );
-    };
-  }, []);
-
   const retry = useCallback(() => refresh(true, undefined, true), [refresh]);
 
-  return { data, loading, error, refresh, retry, recentlyPlayedItems };
+  return { data, loading, error, refresh, retry };
 }

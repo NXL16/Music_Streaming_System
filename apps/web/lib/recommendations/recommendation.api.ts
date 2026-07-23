@@ -10,6 +10,10 @@ const NAVIGATION_HANDOFF_TTL_MS = 15_000;
 const HOME_CACHE_DISABLED = developmentCacheDisabled;
 
 let pendingHomeRecommendations: Promise<RecommendationResponse> | null = null;
+const pendingRecommendationSections = new Map<
+  string,
+  Promise<RecommendationResponse>
+>();
 let cachedResponse: RecommendationResponse | null = null;
 let cacheExpiresAt = 0;
 let cacheGeneration = 0;
@@ -177,28 +181,37 @@ export async function getHomeRecommendations() {
   return request;
 }
 
-export async function getRecommendationSection(sectionId: string) {
-  const response = await http.get<RecommendationResponse>(
-    `/me/recommendations/${encodeURIComponent(sectionId)}`,
-    {
-      params: {
-        name: "listen-now",
-        l: RECOMMENDATION_LOCALE,
-        timezone: getBrowserTimezone(),
-        ...(HOME_CACHE_DISABLED ? { _fresh: Date.now() } : {}),
-      },
-      ...(HOME_CACHE_DISABLED
-        ? {
-            headers: {
-              "Cache-Control": "no-store, no-cache, max-age=0",
-              Pragma: "no-cache",
-            },
-          }
-        : {}),
-    },
-  );
+export function getRecommendationSection(sectionId: string) {
+  const pending = pendingRecommendationSections.get(sectionId);
+  if (pending) return pending;
 
-  return response.data;
+  const request = http
+    .get<RecommendationResponse>(
+      `/me/recommendations/${encodeURIComponent(sectionId)}`,
+      {
+        params: {
+          name: "listen-now",
+          l: RECOMMENDATION_LOCALE,
+          timezone: getBrowserTimezone(),
+          ...(HOME_CACHE_DISABLED ? { _fresh: Date.now() } : {}),
+        },
+        ...(HOME_CACHE_DISABLED
+          ? {
+              headers: {
+                "Cache-Control": "no-store, no-cache, max-age=0",
+                Pragma: "no-cache",
+              },
+            }
+          : {}),
+      },
+    )
+    .then((response) => response.data)
+    .finally(() => {
+      pendingRecommendationSections.delete(sectionId);
+    });
+
+  pendingRecommendationSections.set(sectionId, request);
+  return request;
 }
 
 export function recordRecommendationInteraction(

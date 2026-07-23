@@ -19,21 +19,18 @@ export default function Loading({
       : "flex items-center justify-center py-4 select-none";
 
   return (
-    <div
-      className={containerClassName}
-      role="status"
-      aria-label="Đang tải"
-    >
+    <div className={containerClassName} role="status" aria-label="Loading">
       <Image
-        alt=""
+        alt="Loading"
         aria-hidden="true"
         height={loaderSize}
         src="/Loading.svg?v=20260715"
+        loading="eager"
         style={{ filter: "invert(1)" }}
         unoptimized
         width={loaderSize}
       />
-      <span className="sr-only">Đang tải…</span>
+      <span className="sr-only">Loading…</span>
     </div>
   );
 }
