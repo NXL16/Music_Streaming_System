@@ -1,0 +1,3 @@
+export const HOME_SHELF_PREVIEW_LIMIT = 12;
+export const MORE_LIKE_SHELF_LIMIT = 12;
+export const RECENTLY_PLAYED_CONTEXT_LIMIT = 30;

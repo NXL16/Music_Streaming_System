@@ -4,7 +4,7 @@
   "private": true,
   "main": "index.js",
   "scripts": {
-    "predev": "pnpm proto:gen",
+    "predev": "pnpm --filter @musical/shared-constants build && pnpm proto:gen",
     "dev": "node tools/scripts/dev.mjs",
     "prebuild": "pnpm proto:gen",
     "build": "turbo run build",
