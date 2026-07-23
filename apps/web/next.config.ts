@@ -1,10 +1,12 @@
+import path from "node:path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@musical/shared-types"],
+  turbopack: {
+    root: path.resolve(process.cwd(), "../.."),
+  },
+  devIndicators: false,
   env: {
-    // The root development launcher supplies DEV_CACHE_MODE. Expose only its
-    // non-sensitive mode to browser code, so development uses one switch.
     NEXT_PUBLIC_DEV_CACHE_MODE: process.env.DEV_CACHE_MODE ?? "on",
   },
   async headers() {
