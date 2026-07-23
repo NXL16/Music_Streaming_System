@@ -20,7 +20,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@grpc/grpc-js": "^1.14.3",
+    "@grpc/grpc-js": "^1.14.4",
     "@musical/shared-constants": "workspace:*",
     "@musical/shared-proto": "workspace:*",
     "@nestjs/common": "^11.1.28",

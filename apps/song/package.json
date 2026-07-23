@@ -23,7 +23,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.888.0",
-    "@grpc/grpc-js": "^1.14.3",
+    "@grpc/grpc-js": "^1.14.4",
     "@musical/shared-proto": "workspace:*",
     "@musical/shared-types": "workspace:*",
     "@nestjs/common": "^11.1.28",

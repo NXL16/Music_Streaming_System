@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.12.0",
-    "@grpc/grpc-js": "^1.14.3",
+    "@grpc/grpc-js": "^1.14.4",
     "@nestjs/microservices": "^11.1.28",
     "protobufjs": "^7.5.8",
     "rxjs": "^7.8.2"
