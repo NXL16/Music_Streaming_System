@@ -18,6 +18,10 @@ import {
   RecordRecommendationInteractionResponse,
   RecommendationInteractionType,
 } from '@musical/shared-proto';
+import {
+  HOME_SHELF_PREVIEW_LIMIT,
+  RECENTLY_PLAYED_CONTEXT_LIMIT,
+} from '@musical/shared-constants';
 import { PrismaService } from '../database/prisma.service';
 import { RpcException } from '@nestjs/microservices';
 import { status } from '@grpc/grpc-js';
@@ -50,7 +54,6 @@ const MAX_TEXT_LENGTH = 100_000;
 const GLOBAL_SCOPE_KEY = 'GLOBAL';
 const GLOBAL_TIMEZONE = '*';
 const DEFAULT_DISPLAY_KIND = 'MusicCoverShelf';
-const HOME_PREVIEW_ITEM_LIMIT = 12;
 const INTERACTION_DEDUPE_WINDOW_MS = 30_000;
 const SYSTEM_DAILY_MIX_ID_PATTERN = /^daily-mix-[a-f0-9]{32}(?:-\d+)?$/;
 const SYSTEM_STATION_ID_PATTERN = /^station-for-you-[a-f0-9]{32}-\d+$/;
@@ -463,6 +466,38 @@ export class RecommendationsService {
     request: GetRecommendationSectionRequest,
   ): Promise<GetHomeRecommendationsResponse> {
     const requestedTimezone = request.timezone || '+07:00';
+
+    if (request.sectionId === 'user-recently-played' && request.userId) {
+      const pageName = request.name || 'listen-now';
+      const resources = this.emptyResources();
+
+      const recentRef = await this.addRuntimeRecentlyPlayedSection(
+        request.userId,
+        pageName,
+        resources,
+        RECENTLY_PLAYED_CONTEXT_LIMIT,
+        true,
+      );
+
+      if (!recentRef) {
+        throw new RpcException({
+          code: status.NOT_FOUND,
+          message: 'Recently Played section is empty',
+        });
+      }
+
+      return {
+        data: [recentRef],
+        resources,
+        meta: {
+          name: pageName,
+          locale: request.locale || 'en-GB',
+          timezone: requestedTimezone,
+          platform: 'web',
+        },
+      };
+    }
+
     const scopeFilters = request.userId
       ? [
           {
@@ -509,9 +544,13 @@ export class RecommendationsService {
       });
     }
 
+    const resources = this.buildResources([section], section.page.name);
+
+    await this.hydrateReferencedArtists(resources, section.items);
+
     return {
       data: [this.sectionRef(section, section.page.name)],
-      resources: this.buildResources([section], section.page.name),
+      resources,
       meta: {
         name: section.page.name,
         locale: section.page.locale,
@@ -1049,6 +1088,48 @@ export class RecommendationsService {
     return resources;
   }
 
+  private async hydrateReferencedArtists(
+    resources: RecommendationResources,
+    records: Array<Pick<RecommendationItemRecord, 'resource'>>,
+  ): Promise<void> {
+    const artistIds = new Set<string>();
+
+    for (const record of records) {
+      const raw = this.jsonObject(record.resource?.raw);
+      const relationships =
+        this.jsonObject(raw?.relationships) ??
+        this.jsonObject(record.resource?.relationships);
+      const artistsRelationship = this.jsonObject(relationships?.artists);
+      const artistRefs = artistsRelationship?.data;
+
+      if (!Array.isArray(artistRefs)) continue;
+
+      for (const artistRef of artistRefs) {
+        const ref = this.jsonObject(artistRef);
+        if (this.stringValue(ref?.type) !== 'artists') continue;
+
+        const artistId = this.stringValue(ref?.id);
+        if (artistId) artistIds.add(artistId);
+      }
+    }
+
+    if (artistIds.size === 0) return;
+
+    const artistSnapshots =
+      await this.prisma.recommendationResourceSnapshot.findMany({
+        where: {
+          resourceType: 'artists',
+          resourceId: { in: [...artistIds] },
+        },
+      });
+
+    for (const snapshot of artistSnapshots) {
+      const artistRecord = this.snapshotRecord(snapshot);
+      resources.artists[artistRecord.resourceId] =
+        this.mapCatalogResource(artistRecord);
+    }
+  }
+
   private emptyResources(): RecommendationResources {
     return {
       personalRecommendation: {},
@@ -1073,6 +1154,7 @@ export class RecommendationsService {
       userId,
       pageName,
       resources,
+      HOME_SHELF_PREVIEW_LIMIT,
     );
 
     return this.deduplicateHomePreviewResources({
@@ -1148,7 +1230,7 @@ export class RecommendationsService {
         if (sectionResources.has(key)) continue;
         sectionResources.add(key);
 
-        if (preview.length < HOME_PREVIEW_ITEM_LIMIT) {
+        if (preview.length < HOME_SHELF_PREVIEW_LIMIT) {
           preview.push(ref);
         }
       }
@@ -1241,157 +1323,60 @@ export class RecommendationsService {
     userId: string,
     pageName: string,
     resources: RecommendationResources,
+    itemLimit = RECENTLY_PLAYED_CONTEXT_LIMIT,
+    includeArtistResources = false,
   ): Promise<RecommendationRef | null> {
-    const recent = await this.listeningService.getRecentlyPlayed(userId, 30);
-    if (recent.length === 0) return null;
+    const recentContexts = await this.prisma.userRecentlyPlayedContext.findMany(
+      {
+        where: { userId },
+        orderBy: [{ lastPlayedAt: 'desc' }, { id: 'desc' }],
+        take: RECENTLY_PLAYED_CONTEXT_LIMIT,
+      },
+    );
 
-    const albumLastPlayed = new Map<
-      string,
-      { albumId: string; albumName: string; lastPlayedAt: Date }
-    >();
-    const playlistLastPlayed = new Map<string, Date>();
-    const stationLastPlayed = new Map<string, Date>();
-    const songLastPlayed = new Map<string, Date>();
+    if (recentContexts.length === 0) return null;
 
-    for (const item of recent) {
-      // Station is the listening context displayed in history. Its individual
-      // tracks still shape the taste profile, but never become separate cards.
-      if (item.stationId) {
-        const existing = stationLastPlayed.get(item.stationId);
-        if (!existing || item.lastPlayedAt > existing) {
-          stationLastPlayed.set(item.stationId, item.lastPlayedAt);
-        }
-        continue;
-      }
+    const snapshots = await this.prisma.recommendationResourceSnapshot.findMany(
+      {
+        where: {
+          OR: recentContexts.map((context) => ({
+            resourceType: context.resourceType,
+            resourceId: context.resourceId,
+          })),
+        },
+      },
+    );
 
-      if (item.playlistId) {
-        const existing = playlistLastPlayed.get(item.playlistId);
-        if (!existing || item.lastPlayedAt > existing) {
-          playlistLastPlayed.set(item.playlistId, item.lastPlayedAt);
-        }
-        continue;
-      }
+    const snapshotByKey = new Map(
+      snapshots.map((snapshot) => [
+        this.resourceKey(snapshot.resourceType, snapshot.resourceId),
+        snapshot,
+      ]),
+    );
 
-      if (item.albumId || item.albumName) {
-        const key = item.albumId
-          ? `id:${item.albumId}`
-          : `name:${item.albumName}`;
-        const existing = albumLastPlayed.get(key);
-        if (!existing || item.lastPlayedAt > existing.lastPlayedAt) {
-          albumLastPlayed.set(key, {
-            albumId: item.albumId,
-            albumName: item.albumName,
-            lastPlayedAt: item.lastPlayedAt,
-          });
-        }
-      } else {
-        songLastPlayed.set(item.songId, item.lastPlayedAt);
-      }
+    const records = recentContexts.flatMap((context) => {
+      const snapshot = snapshotByKey.get(
+        this.resourceKey(context.resourceType, context.resourceId),
+      );
+
+      return snapshot ? [this.snapshotRecord(snapshot)] : [];
+    });
+
+    if (records.length === 0) return null;
+
+    const visibleRecords = records.slice(0, itemLimit);
+
+    if (includeArtistResources) {
+      await this.hydrateReferencedArtists(resources, visibleRecords);
     }
 
-    const albumIds = [
-      ...new Set(
-        [...albumLastPlayed.values()]
-          .map((item) => item.albumId)
-          .filter(Boolean),
-      ),
-    ];
-    const legacyAlbumNames = [
-      ...new Set(
-        [...albumLastPlayed.values()]
-          .filter((item) => !item.albumId)
-          .map((item) => item.albumName)
-          .filter(Boolean),
-      ),
-    ];
-    const playlistIds = [...playlistLastPlayed.keys()];
-    const stationIds = [...stationLastPlayed.keys()];
-    const albumSnapshots =
-      albumIds.length || legacyAlbumNames.length
-        ? await this.prisma.recommendationResourceSnapshot.findMany({
-            where: {
-              resourceType: 'albums',
-              OR: [
-                ...(albumIds.length ? [{ resourceId: { in: albumIds } }] : []),
-                ...(legacyAlbumNames.length
-                  ? [{ name: { in: legacyAlbumNames } }]
-                  : []),
-              ],
-            },
-          })
-        : [];
-    const songSnapshots = songLastPlayed.size
-      ? await this.prisma.recommendationResourceSnapshot.findMany({
-          where: {
-            resourceType: 'songs',
-            resourceId: { in: [...songLastPlayed.keys()] },
-          },
-        })
-      : [];
-    const playlistSnapshots = playlistIds.length
-      ? await this.prisma.recommendationResourceSnapshot.findMany({
-          where: {
-            resourceType: 'playlists',
-            resourceId: { in: playlistIds },
-            playlistType: 'system-personalized',
-          },
-        })
-      : [];
-    const stationSnapshots = stationIds.length
-      ? await this.prisma.recommendationResourceSnapshot.findMany({
-          where: {
-            resourceType: 'stations',
-            resourceId: { in: stationIds },
-            // Both personalised stations and Find Your Mood stations are
-            // first-class station contexts in listening history. Filtering
-            // only personalised stations made mood stations disappear after
-            // a Home reload, despite their play event being recorded.
-            stationKind: { in: ['system-personalized', 'system-mood'] },
-          },
-        })
-      : [];
-
-    const albumSnapshotsById = new Map(
-      albumSnapshots.map((snapshot) => [snapshot.resourceId, snapshot]),
-    );
-    const albumSnapshotsByLegacyName = new Map(
-      albumSnapshots.map((snapshot) => [snapshot.name, snapshot]),
-    );
-    const items = [
-      ...[...albumLastPlayed.values()].flatMap((entry) => {
-        const snapshot = entry.albumId
-          ? albumSnapshotsById.get(entry.albumId)
-          : albumSnapshotsByLegacyName.get(entry.albumName);
-        return snapshot ? [{ snapshot, lastPlayedAt: entry.lastPlayedAt }] : [];
-      }),
-      ...songSnapshots.map((snapshot) => ({
-        snapshot,
-        lastPlayedAt: songLastPlayed.get(snapshot.resourceId) ?? new Date(0),
-      })),
-      ...playlistSnapshots.map((snapshot) => ({
-        snapshot,
-        lastPlayedAt:
-          playlistLastPlayed.get(snapshot.resourceId) ?? new Date(0),
-      })),
-      ...stationSnapshots.map((snapshot) => ({
-        snapshot,
-        lastPlayedAt: stationLastPlayed.get(snapshot.resourceId) ?? new Date(0),
-      })),
-    ]
-      .sort(
-        (left, right) =>
-          right.lastPlayedAt.getTime() - left.lastPlayedAt.getTime(),
-      )
-      .slice(0, 20);
-
-    if (items.length === 0) return null;
-
-    const refs = items.map(({ snapshot }) => {
-      const record = this.snapshotRecord(snapshot);
+    const refs = visibleRecords.map((record) => {
       const bucket = this.getCatalogBucket(resources, record.resourceType);
+
       if (bucket) {
         bucket[record.resourceId] = this.mapCatalogResource(record);
       }
+
       return this.itemRef(record);
     });
 
@@ -1402,7 +1387,7 @@ export class RecommendationsService {
       href: this.sectionHref(sectionId, pageName),
       attributes: {
         display: { kind: 'MusicCoverShelf', decorations: [] },
-        hasSeeAll: false,
+        hasSeeAll: records.length > visibleRecords.length,
         isGroupRecommendation: false,
         kind: 'recently-played',
         nextUpdateDate: '',

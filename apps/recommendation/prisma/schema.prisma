@@ -72,26 +72,26 @@ model RecommendationPageResource {
 }
 
 model RecommendationSection {
-    id                    String    @id @default(uuid())
-    externalId            String    @db.VarChar(128) // Stable public section identifier
+    id                    String                         @id @default(uuid())
+    externalId            String                         @db.VarChar(128) // Stable public section identifier
     pageId                String
-    title                 String    @default("") @db.VarChar(255)
-    titleWithoutName      String    @default("") @db.VarChar(255)
+    title                 String                         @default("") @db.VarChar(255)
+    titleWithoutName      String                         @default("") @db.VarChar(255)
     presentationMode      RecommendationPresentationMode @default(FIXED)
-    displayKind           String    @default("") @db.VarChar(64) // resolved automatically when mode=AUTO
-    displayDecorations    String[]  @default([])
-    sectionKind           String    @default("music-recommendations") @db.VarChar(64)
-    resourceTypes         String[]  @default([])
-    hasSeeAll             Boolean   @default(false)
-    isGroupRecommendation Boolean   @default(false)
-    sortOrder             Int       @default(0)
-    nextUpdateAt          DateTime? @db.Timestamptz
-    version               Int       @default(1)
+    displayKind           String                         @default("") @db.VarChar(64) // resolved automatically when mode=AUTO
+    displayDecorations    String[]                       @default([])
+    sectionKind           String                         @default("music-recommendations") @db.VarChar(64)
+    resourceTypes         String[]                       @default([])
+    hasSeeAll             Boolean                        @default(false)
+    isGroupRecommendation Boolean                        @default(false)
+    sortOrder             Int                            @default(0)
+    nextUpdateAt          DateTime?                      @db.Timestamptz
+    version               Int                            @default(1)
     attributes            Json?
     relationships         Json?
     raw                   Json?
-    createdAt             DateTime  @default(now()) @db.Timestamptz
-    updatedAt             DateTime  @updatedAt @db.Timestamptz
+    createdAt             DateTime                       @default(now()) @db.Timestamptz
+    updatedAt             DateTime                       @updatedAt @db.Timestamptz
 
     page  RecommendationPage          @relation(fields: [pageId], references: [id], onDelete: Cascade)
     items RecommendationSectionItem[]
@@ -155,15 +155,15 @@ model RecommendationResourceSnapshot {
     artistNames String[] @default([])
     curatorName String   @default("") @db.VarChar(255)
 
-    artworkUrl    String @default("") @db.VarChar(1000)
+    artworkUrl     String @default("") @db.VarChar(1000)
     artworkBgColor String @default("") @db.VarChar(16)
-    bgColor       String @default("") @db.VarChar(16)
-    textColor1    String @default("") @db.VarChar(16)
-    textColor2    String @default("") @db.VarChar(16)
-    textColor3    String @default("") @db.VarChar(16)
-    textColor4    String @default("") @db.VarChar(16)
-    artworkWidth  Int    @default(0)
-    artworkHeight Int    @default(0)
+    bgColor        String @default("") @db.VarChar(16)
+    textColor1     String @default("") @db.VarChar(16)
+    textColor2     String @default("") @db.VarChar(16)
+    textColor3     String @default("") @db.VarChar(16)
+    textColor4     String @default("") @db.VarChar(16)
+    artworkWidth   Int    @default(0)
+    artworkHeight  Int    @default(0)
 
     shortDescription    String @default("") @db.Text
     standardDescription String @default("") @db.Text
@@ -175,17 +175,17 @@ model RecommendationResourceSnapshot {
     moodTags    String[] @default([])
     genreNames  String[] @default([])
 
-    contentRating        String  @default("") @db.VarChar(64)
-    copyright            String  @default("") @db.Text
-    recordLabel          String  @default("") @db.VarChar(255)
-    releaseDate          String  @default("") @db.VarChar(32)
-    trackCount           Int     @default(0)
-    upc                  String  @default("") @db.VarChar(64)
-    isCompilation        Boolean @default(false)
-    isComplete           Boolean @default(false)
-    isStudioMastered     Boolean @default(false)
-    isPrerelease         Boolean @default(false)
-    isSingle             Boolean @default(false)
+    contentRating    String  @default("") @db.VarChar(64)
+    copyright        String  @default("") @db.Text
+    recordLabel      String  @default("") @db.VarChar(255)
+    releaseDate      String  @default("") @db.VarChar(32)
+    trackCount       Int     @default(0)
+    upc              String  @default("") @db.VarChar(64)
+    isCompilation    Boolean @default(false)
+    isComplete       Boolean @default(false)
+    isStudioMastered Boolean @default(false)
+    isPrerelease     Boolean @default(false)
+    isSingle         Boolean @default(false)
 
     playlistType          String  @default("") @db.VarChar(64)
     editorialPlaylistKind String  @default("") @db.VarChar(64)
@@ -234,25 +234,25 @@ model SystemStationArtwork {
 }
 
 model ListeningEvent {
-    id          String   @id @default(uuid())
-    userId      String   @db.VarChar(128)
-    songId      String   @db.VarChar(128)
-    eventType   String   @db.VarChar(32)
-    durationSec Int      @default(0)
-    totalSec    Int      @default(0)
-    songTitle   String   @default("") @db.VarChar(255)
-    artistName  String   @default("") @db.VarChar(255)
-    albumName   String   @default("") @db.VarChar(255)
-    albumId     String   @default("") @db.VarChar(128)
-    playlistId  String   @default("") @db.VarChar(128)
-    playlistName String  @default("") @db.VarChar(255)
-    playlistArtworkUrl String @default("") @db.VarChar(1000)
-    playlistArtworkBgColor String @default("") @db.VarChar(16)
-    stationId   String   @default("") @db.VarChar(128)
-    stationName String   @default("") @db.VarChar(255)
-    stationArtworkUrl String @default("") @db.VarChar(1000)
-    stationArtworkBgColor String @default("") @db.VarChar(16)
-    createdAt   DateTime @default(now()) @db.Timestamptz
+    id                     String   @id @default(uuid())
+    userId                 String   @db.VarChar(128)
+    songId                 String   @db.VarChar(128)
+    eventType              String   @db.VarChar(32)
+    durationSec            Int      @default(0)
+    totalSec               Int      @default(0)
+    songTitle              String   @default("") @db.VarChar(255)
+    artistName             String   @default("") @db.VarChar(255)
+    albumName              String   @default("") @db.VarChar(255)
+    albumId                String   @default("") @db.VarChar(128)
+    playlistId             String   @default("") @db.VarChar(128)
+    playlistName           String   @default("") @db.VarChar(255)
+    playlistArtworkUrl     String   @default("") @db.VarChar(1000)
+    playlistArtworkBgColor String   @default("") @db.VarChar(16)
+    stationId              String   @default("") @db.VarChar(128)
+    stationName            String   @default("") @db.VarChar(255)
+    stationArtworkUrl      String   @default("") @db.VarChar(1000)
+    stationArtworkBgColor  String   @default("") @db.VarChar(16)
+    createdAt              DateTime @default(now()) @db.Timestamptz
 
     @@index([userId, createdAt])
     @@index([songId, createdAt])
@@ -264,28 +264,28 @@ model ListeningEvent {
 }
 
 model UserListeningStats {
-    id              String   @id @default(uuid())
-    userId          String   @db.VarChar(128)
-    songId          String   @db.VarChar(128)
-    playCount       Int      @default(0)
-    completionCount Int      @default(0)
-    skipCount       Int      @default(0)
-    totalListenSec  Int      @default(0)
-    lastPlayedAt    DateTime @default(now()) @db.Timestamptz
-    songTitle       String   @default("") @db.VarChar(255)
-    artistName      String   @default("") @db.VarChar(255)
-    albumName       String   @default("") @db.VarChar(255)
-    albumId         String   @default("") @db.VarChar(128)
-    playlistId      String   @default("") @db.VarChar(128)
-    playlistName    String   @default("") @db.VarChar(255)
-    playlistArtworkUrl String @default("") @db.VarChar(1000)
-    playlistArtworkBgColor String @default("") @db.VarChar(16)
-    stationId       String   @default("") @db.VarChar(128)
-    stationName     String   @default("") @db.VarChar(255)
-    stationArtworkUrl String @default("") @db.VarChar(1000)
-    stationArtworkBgColor String @default("") @db.VarChar(16)
-    createdAt       DateTime @default(now()) @db.Timestamptz
-    updatedAt       DateTime @updatedAt @db.Timestamptz
+    id                     String   @id @default(uuid())
+    userId                 String   @db.VarChar(128)
+    songId                 String   @db.VarChar(128)
+    playCount              Int      @default(0)
+    completionCount        Int      @default(0)
+    skipCount              Int      @default(0)
+    totalListenSec         Int      @default(0)
+    lastPlayedAt           DateTime @default(now()) @db.Timestamptz
+    songTitle              String   @default("") @db.VarChar(255)
+    artistName             String   @default("") @db.VarChar(255)
+    albumName              String   @default("") @db.VarChar(255)
+    albumId                String   @default("") @db.VarChar(128)
+    playlistId             String   @default("") @db.VarChar(128)
+    playlistName           String   @default("") @db.VarChar(255)
+    playlistArtworkUrl     String   @default("") @db.VarChar(1000)
+    playlistArtworkBgColor String   @default("") @db.VarChar(16)
+    stationId              String   @default("") @db.VarChar(128)
+    stationName            String   @default("") @db.VarChar(255)
+    stationArtworkUrl      String   @default("") @db.VarChar(1000)
+    stationArtworkBgColor  String   @default("") @db.VarChar(16)
+    createdAt              DateTime @default(now()) @db.Timestamptz
+    updatedAt              DateTime @updatedAt @db.Timestamptz
 
     @@unique([userId, songId])
     @@index([userId, lastPlayedAt])
@@ -296,4 +296,18 @@ model UserListeningStats {
     @@index([playlistId, lastPlayedAt])
     @@index([stationId, lastPlayedAt])
     @@map("user_listening_stats")
+}
+
+model UserRecentlyPlayedContext {
+    id           String   @id @default(uuid())
+    userId       String   @db.VarChar(128)
+    resourceType String   @db.VarChar(32)
+    resourceId   String   @db.VarChar(128)
+    lastPlayedAt DateTime @default(now()) @db.Timestamptz
+    createdAt    DateTime @default(now()) @db.Timestamptz
+    updatedAt    DateTime @updatedAt @db.Timestamptz
+
+    @@unique([userId, resourceType, resourceId])
+    @@index([userId, lastPlayedAt])
+    @@map("user_recently_played_contexts")
 }

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
 import { ListeningService, TasteProfile } from '../listening/listening.service';
 import { RecommendationCatalogService } from '../recommendations/recommendation-catalog.service';
+import { MORE_LIKE_SHELF_LIMIT } from '@musical/shared-constants';
 import {
   PRODUCTION_RECOMMENDATION_MODEL_VERSION,
   PRODUCTION_RECOMMENDATION_POLICY as policy,
@@ -118,7 +119,7 @@ export class RecommendationEngineService {
         'user-more-like-1',
         `More Like ${seeds[0].name}`,
         this.nearSeed(candidates, seeds[0]),
-        perShelfLimit,
+        MORE_LIKE_SHELF_LIMIT,
         seeds[0].id,
         seeds[0].name,
         seeds[0].url,
@@ -141,7 +142,7 @@ export class RecommendationEngineService {
         'user-more-like-2',
         `More Like ${seeds[1].name}`,
         this.nearSeed(candidates, seeds[1]),
-        perShelfLimit,
+        MORE_LIKE_SHELF_LIMIT,
         seeds[1].id,
         seeds[1].name,
         seeds[1].url,
@@ -159,7 +160,7 @@ export class RecommendationEngineService {
         'user-more-like-3',
         `More Like ${seeds[2].name}`,
         this.nearSeed(candidates, seeds[2]),
-        perShelfLimit,
+        MORE_LIKE_SHELF_LIMIT,
         seeds[2].id,
         seeds[2].name,
         seeds[2].url,
@@ -177,7 +178,7 @@ export class RecommendationEngineService {
         `user-more-like-${index + 4}`,
         `More Like ${seed.name}`,
         this.nearSeed(candidates, seed),
-        perShelfLimit,
+        MORE_LIKE_SHELF_LIMIT,
         seed.id,
         seed.name,
         seed.url,

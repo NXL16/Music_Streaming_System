@@ -7,6 +7,7 @@ import {
   RecordListeningEventResponse,
 } from '@musical/shared-proto';
 import { PrismaService } from '../database/prisma.service';
+import { RECENTLY_PLAYED_CONTEXT_LIMIT } from '@musical/shared-constants';
 
 export type TasteProfile = {
   genres: Array<{ name: string; weight: number }>;
@@ -16,6 +17,11 @@ export type TasteProfile = {
   listenedSongIds: Set<string>;
   listenedAlbumIds: Set<string>;
   listenedAlbumNames: Set<string>;
+};
+
+type RecentlyPlayedContext = {
+  resourceType: 'albums' | 'playlists' | 'stations';
+  resourceId: string;
 };
 
 const EVENT_TYPE_MAP: Record<number, string> = {
@@ -29,6 +35,44 @@ export class ListeningService {
   private readonly logger = new Logger(ListeningService.name);
 
   constructor(private readonly prisma: PrismaService) {}
+
+  private resolveRecentlyPlayedContext({
+    stationId,
+    playlistId,
+    albumId,
+  }: {
+    stationId: string;
+    playlistId: string;
+    albumId: string;
+  }): RecentlyPlayedContext | null {
+    if (stationId) return { resourceType: 'stations', resourceId: stationId };
+    if (playlistId)
+      return { resourceType: 'playlists', resourceId: playlistId };
+    if (albumId) return { resourceType: 'albums', resourceId: albumId };
+
+    return null;
+  }
+
+  private async trimRecentlyPlayedContexts(userId: string) {
+    const excessContexts = await this.prisma.userRecentlyPlayedContext.findMany(
+      {
+        where: { userId },
+        orderBy: [{ lastPlayedAt: 'desc' }, { id: 'desc' }],
+        skip: RECENTLY_PLAYED_CONTEXT_LIMIT,
+        select: { id: true },
+      },
+    );
+
+    if (excessContexts.length === 0) return;
+
+    await this.prisma.userRecentlyPlayedContext.deleteMany({
+      where: {
+        id: {
+          in: excessContexts.map((context) => context.id),
+        },
+      },
+    });
+  }
 
   async recordEvent(
     request: RecordListeningEventRequest,
@@ -125,6 +169,37 @@ export class ListeningService {
           stationArtworkBgColor,
         },
       });
+
+      if (isPlayStart) {
+        const context = this.resolveRecentlyPlayedContext({
+          stationId,
+          playlistId,
+          albumId,
+        });
+
+        if (context) {
+          await this.prisma.userRecentlyPlayedContext.upsert({
+            where: {
+              userId_resourceType_resourceId: {
+                userId,
+                resourceType: context.resourceType,
+                resourceId: context.resourceId,
+              },
+            },
+            create: {
+              userId,
+              resourceType: context.resourceType,
+              resourceId: context.resourceId,
+              lastPlayedAt: new Date(),
+            },
+            update: {
+              lastPlayedAt: new Date(),
+            },
+          });
+
+          await this.trimRecentlyPlayedContexts(userId);
+        }
+      }
 
       return { success: true };
     } catch (error) {
