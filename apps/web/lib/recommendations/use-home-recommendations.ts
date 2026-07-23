@@ -12,8 +12,8 @@ import {
   RECENTLY_PLAYED_ITEM_EVENT,
 } from "./listening-events";
 import type { MediaCardProps } from "@/components/media/media-card.types";
+import { RECENTLY_PLAYED_CONTEXT_LIMIT } from "@musical/shared-constants";
 
-const MAX_RECENTLY_PLAYED_OVERLAY_ITEMS = 24;
 export function useHomeRecommendations() {
   // Nếu splash đã prefetch xong, dùng luôn cache → không hiện skeleton lại.
   const cached = getCachedHomeRecommendations();
@@ -25,27 +25,26 @@ export function useHomeRecommendations() {
   const [needsInitialRequest] = useState(cached === null);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = useCallback(async (
-    showLoading = false,
-    signal?: AbortSignal,
-    force = false,
-  ) => {
-    if (signal?.aborted) return;
-    if (force) invalidateHomeRecommendationsCache();
-    if (showLoading) setLoading(true);
+  const refresh = useCallback(
+    async (showLoading = false, signal?: AbortSignal, force = false) => {
+      if (signal?.aborted) return;
+      if (force) invalidateHomeRecommendationsCache();
+      if (showLoading) setLoading(true);
 
-    try {
-      const nextData = await getHomeRecommendations();
-      if (signal?.aborted) return;
-      setData(nextData);
-      setError(null);
-    } catch {
-      if (signal?.aborted) return;
-      setError("Không thể tải nội dung đề xuất.");
-    } finally {
-      if (!signal?.aborted) setLoading(false);
-    }
-  }, []);
+      try {
+        const nextData = await getHomeRecommendations();
+        if (signal?.aborted) return;
+        setData(nextData);
+        setError(null);
+      } catch {
+        if (signal?.aborted) return;
+        setError("Không thể tải nội dung đề xuất.");
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!needsInitialRequest) return;
@@ -87,7 +86,7 @@ export function useHomeRecommendations() {
           ),
         ];
 
-        return nextItems.slice(0, MAX_RECENTLY_PLAYED_OVERLAY_ITEMS);
+        return nextItems.slice(0, RECENTLY_PLAYED_CONTEXT_LIMIT);
       });
     };
 

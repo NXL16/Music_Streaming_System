@@ -82,10 +82,10 @@ export function CatalogDetailPage({
     root?.type === "playlists" ? data?.resources.playlists[root.id] : undefined;
   const resource = albumResource ?? playlistResource;
   const title = resource?.attributes.name ?? "";
-  const albumArtists =
-    albumResource?.relationships.artists?.data.flatMap((artistReference) => {
-      const artist = data?.resources.artists[artistReference.id];
-      if (!artist) return [];
+
+  const albumArtists = Object.values(data?.resources.artists ?? {}).flatMap(
+    (artist) => {
+      if (!artist.attributes.name || !artist.attributes.url) return [];
 
       return [
         {
@@ -94,7 +94,9 @@ export function CatalogDetailPage({
           url: artistRoute(artist.attributes.url, artist.id),
         },
       ];
-    }) ?? [];
+    },
+  );
+
   const albumArtistCredits = useFormattedArtists({
     artists: albumArtists,
     fallbackText: albumResource?.attributes.artistName,

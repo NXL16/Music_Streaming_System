@@ -15,8 +15,8 @@ import {
 import MediaShelfSkeleton from "@/components/loading/loading";
 import Loading from "@/app/loading";
 import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
+import { HOME_SHELF_PREVIEW_LIMIT } from "@musical/shared-constants";
 
-const MAX_HOME_SHELF_ITEMS = 12;
 const RECENTLY_PLAYED_SHELF_ID = "user-recently-played";
 const DAILY_MIX_SHELF_ID = "user-daily-mix";
 const STATIONS_FOR_YOU_SHELF_ID = "user-stations-for-you";
@@ -74,9 +74,7 @@ export default function HomePage() {
       );
       if (!localShelf) return;
 
-      // This shelf is produced from local listening events, not a persisted
-      // recommendation section, so it is already available in memory.
-      if (shelfId === RECENTLY_PLAYED_SHELF_ID || loadedShelves[shelfId]) {
+      if (loadedShelves[shelfId]) {
         setSelectedShelfId(shelfId);
         return;
       }
@@ -113,10 +111,11 @@ export default function HomePage() {
             // The API may have overflow before Home removes duplicates shared
             // with earlier shelves. Only expose the detail chevron when this
             // shelf itself fills its 12-card Home preview.
-            (shelf.hasMore && previewItems.length >= MAX_HOME_SHELF_ITEMS) ||
+            (shelf.hasMore &&
+              previewItems.length >= HOME_SHELF_PREVIEW_LIMIT) ||
             (shelf.id === RECENTLY_PLAYED_SHELF_ID &&
               mergeShelfItems(recentlyPlayedItems, shelf.items).length >
-                MAX_HOME_SHELF_ITEMS),
+                HOME_SHELF_PREVIEW_LIMIT),
         };
       }),
     [recentlyPlayedItems, shelvesWithRecentlyPlayed],
@@ -333,7 +332,7 @@ function previewShelfItems(
       ? mergeShelfItems(recentlyPlayedItems, shelf.items)
       : shelf.items;
 
-  return sourceItems.slice(0, MAX_HOME_SHELF_ITEMS);
+  return sourceItems.slice(0, HOME_SHELF_PREVIEW_LIMIT);
 }
 
 function mergeShelfItems<
