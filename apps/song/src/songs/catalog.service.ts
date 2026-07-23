@@ -76,6 +76,7 @@ const playlistCatalogBrowseInclude = {
 type CatalogSongEntity = Prisma.SongGetPayload<{
   include: typeof songCatalogInclude;
 }>;
+type CatalogArtistEntity = Prisma.ArtistGetPayload<Prisma.ArtistDefaultArgs>;
 type CatalogAlbumEntity = Prisma.AlbumGetPayload<{
   include: typeof albumCatalogInclude;
 }>;
@@ -1131,19 +1132,19 @@ export class CatalogService {
             },
             include: songCatalogInclude,
             orderBy: { catalogTitle: 'asc' },
-            take: limit,
-          })
-        : Promise.resolve([]),
+          take: limit,
+        })
+        : Promise.resolve([] as CatalogSongEntity[]),
       wanted.has('artists')
         ? this.prisma.artist.findMany({
             where: {
               storefront,
               name: { contains: query, mode: 'insensitive' },
             },
-            orderBy: { name: 'asc' },
-            take: limit,
-          })
-        : Promise.resolve([]),
+          orderBy: { name: 'asc' },
+          take: limit,
+        })
+        : Promise.resolve([] as CatalogArtistEntity[]),
       wanted.has('albums')
         ? this.prisma.album.findMany({
             where: {
@@ -1152,9 +1153,9 @@ export class CatalogService {
             },
             include: albumCatalogBrowseInclude,
             orderBy: { name: 'asc' },
-            take: limit,
-          })
-        : Promise.resolve([]),
+          take: limit,
+        })
+        : Promise.resolve([] as CatalogAlbumBrowseEntity[]),
     ]);
 
     return {
