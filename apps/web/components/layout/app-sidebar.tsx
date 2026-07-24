@@ -379,7 +379,7 @@ export default function AppSidebar() {
   ];
 
   return (
-    <div className="max-[648px]:hidden [grid-area:structure-header] h-full w-65 relative z-(--z-web-chrome) min-[484px]:z-[calc(var(--z-web-chrome)-11)] min-[484px]:w-[33.8842975207vw] min-[767.32px]:w-65">
+    <div className="gap-0 [grid-area:structure-header] size-full relative z-(--z-web-chrome) min-[484px]:z-[calc(var(--z-web-chrome)-11)] min-[484px]:w-[33.8842975207vw] min-[767.32px]:w-65">
       <nav className="z-(--z-web-chrome) flex h-[calc(100%-16px)] w-[calc(100%-16px)] mt-2 ms-2 flex-col overflow-hidden border-b-[0.5px] border-(--navigation-border-color,var(--glassMaterialInnerStrokeCombined)) bg-(--mobileNavigationBG,var(--glassMaterialBackground)) shadow-none backdrop-blur-lg backdrop-saturate-220 max-[483px]:shadow-[0_1px_2px_rgba(0,0,0,.1)] min-[484px]:relative min-[484px]:h-[calc(100%-16px)] min-[484px]:w-[calc(100%-16px)] min-[484px]:rounded-[20px] min-[484px]:border-[0.5px] min-[484px]:border-(--navigation-border-color,var(--glassMaterialInnerStrokeCombined)) min-[484px]:bg-(--glassMaterialBackground,var(--navSidebarBG)) min-[484px]:shadow-[0_10px_40px_var(--glassMaterialShadowColor)]">
         <div className="grid h-13 grid-cols-3 items-center py-1 ps-3.5 pe-4 min-[484px]:block min-[484px]:h-auto min-[484px]:p-0">
           <div className="justify-self-start pb-0.75 min-[484px]:flex min-[484px]:min-h-13.75 min-[484px]:justify-between min-[484px]:whitespace-nowrap min-[484px]:px-5 min-[484px]:pt-0 min-[484px]:h-18 min-[484px]:items-center">

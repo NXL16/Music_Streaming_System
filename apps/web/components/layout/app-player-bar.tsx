@@ -36,9 +36,6 @@ function recentlyPlayedCard(song: PlayerSong): MediaCardProps {
       cardType: "station",
       title: station.name,
       subtitle: station.description || "Musical Station",
-      // Station cards render their supporting copy from `description` (not
-      // `subtitle`). Keep the optimistic Recently Played card aligned with
-      // the server-mapped card shown after a reload.
       description: station.description || "Musical Station",
       imageUrl: station.artworkUrl,
       imageSrcSet: station.artworkSrcSet || station.artworkUrl,
@@ -371,7 +368,7 @@ export function AppPlayerBar() {
 
   return (
     <div
-      className="min-[484px]:[grid-area:structure-main-section] sticky self-end mb-5 px-5 top-auto bottom-auto h-13.5 w-[calc(100vw-var(--web-navigation-width))] z-[calc(var(--z-web-chrome)-1)] inset-e-0"
+      className="bottom-0 shrink-0 h-13.5 inset-e-0 fixed w-full z-[calc(var(--z-web-chrome)-1)] min-[484px]:self-end min-[484px]:[grid-area:structure-main-section] min-[484px]:inset-s-[unset] min-[484px]:mb-5 min-[484px]:px-5 min-[484px]:sticky min-[484px]:w-[calc(100vw-var(--web-navigation-width))] min-[484px]:max-[999px]:[--contextMenuPosition:fixed] max-[483px]:h-15.25"
       style={{
         transform: isSidebarOpen
           ? "translate3d(-10rem, 0, 0)"
@@ -389,7 +386,7 @@ export function AppPlayerBar() {
         onTimeUpdate={markQualifiedPlay}
       />
       <div className="block">
-        <div className="mx-auto relative grid grid-cols-[auto_1fr_auto] place-items-center max-w-167 h-14 px-4 rounded-[1000px] before:content-[''] before:absolute before:inset-0 before:z-(--z-default) before:rounded-[1000px] before:backdrop-saturate-220 before:backdrop-blur-lg before:bg-(--glassMaterialBackground) before:shadow-[0_10px_40px_var(--glassMaterialShadowColor)] after:content-[''] after:block after:h-0 after:min-w-full after:min-h-full after:max-w-full after:max-h-full after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)] after:rounded-[1000px] after:shadow-[inset_.5px_.5px_var(--glassMaterialInnerStroke),inset_.5px_-.5px_var(--glassMaterialInnerStroke),inset_-.5px_.5px_var(--glassMaterialInnerStroke),inset_-.5px_-.5px_var(--glassMaterialInnerStroke)] after:opacity-10 dark:after:opacity-25">
+        <div className="rounded-[1000px] grid grid-cols-[auto_1fr_auto] h-14 max-w-167 px-4 place-items-center relative mx-auto before:backdrop-saturate-220 before:backdrop-blur-lg before:bg-(--glassMaterialBackground) before:rounded-[1000px] before:shadow-[0_10px_40px_var(--glassMaterialShadowColor)] before:content-[''] before:inset-0 before:absolute before:z-(--z-default) after:content-[''] after:block after:h-0 after:min-w-full after:min-h-full after:max-w-full after:max-h-full after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)] after:rounded-[1000px] after:shadow-[inset_.5px_.5px_var(--glassMaterialInnerStroke),inset_.5px_-.5px_var(--glassMaterialInnerStroke),inset_-.5px_.5px_var(--glassMaterialInnerStroke),inset_-.5px_-.5px_var(--glassMaterialInnerStroke)] after:opacity-10 dark:after:opacity-25">
           <div className="z-[calc(var(--z-default)+1)]">
             <div className="flex gap-2 [--playback-control-button-width:24px] [--playback-control-button-height:24px] [--playback-control-icon-width:30px] [--playback-controls-play-color:var(--systemPrimary)] [--shuffle-repeat-button-width:24px] [--shuffle-repeat-button-height:24px] [--skip-control-color:var(--systemPrimary)] [--skip-icon-width:28px]">
               <AmpShuffleButton
@@ -604,7 +601,7 @@ export function AppPlayerBar() {
           <div className="z-[calc(var(--z-default)+1)]">
             <div className="flex gap-3.5">
               <div className="flex [--playerPlatterButtonBGFill:transparent] [--playerPlatterButtonIconFill:var(--keyColor)] [--player-action-button-width:24px] text-(--systemPrimary) gap-2.25 -me-1">
-                <div>
+                <div className="max-[999px]:hidden">
                   <button
                     className={`flex justify-center items-center rounded-sm h-7 relative w-(--player-action-button-width,32px) z-(--z-default) ${showLyrics ? "text-(--keyColor)" : ""}`}
                     onClick={toggleLyrics}
@@ -657,7 +654,7 @@ export function AppPlayerBar() {
 
                 <button
                   onClick={toggleQueue}
-                  className={`flex items-center justify-center rounded h-7 relative w-(--player-action-button-width,32px) z-(--z-default) ${showQueue ? "text-(--keyColor)" : ""}`}
+                  className={`max-[999px]:hidden flex items-center justify-center rounded h-7 relative w-(--player-action-button-width,32px) z-(--z-default) ${showQueue ? "text-(--keyColor)" : ""}`}
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"

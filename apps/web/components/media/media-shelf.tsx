@@ -164,7 +164,10 @@ function ShelfTitleButton({
 
   if (href) {
     return (
-      <Link href={href} className="flex items-center gap-x-1 appearance-none no-underline">
+      <Link
+        href={href}
+        className="flex items-center gap-x-1 appearance-none no-underline"
+      >
         {content}
       </Link>
     );
@@ -664,7 +667,7 @@ function MediaShelf({
       }
     >
       <div>
-        <div className="flex items-center justify-end mx-(--bodyGutter) mb-3.25">
+        <div className="flex items-center justify-end m-[0_var(--bodyGutter)_13px]">
           {isMoreLikeShelf ? (
             <>
               <div className="rounded-[5px] mt-0.75 pe-3">
@@ -720,7 +723,7 @@ function MediaShelf({
             <div className="box-content -mx-0.5 overflow-visible px-0.5 w-full">
               <ul
                 ref={listRef}
-                className={`shelf-grid__list svelte-ranejh ${isHeroShelf ? "shelf-grid__list--align-items-end" : ""}`}
+                className={`shelf-grid__list ${isHeroShelf ? "shelf-grid__list--align-items-end" : ""}`}
                 style={undefined}
               >
                 {isNearViewport &&

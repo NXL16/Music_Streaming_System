@@ -11,6 +11,7 @@
   --foreground: #171717;
   --z-web-chrome: 1000;
   --z-default: 1;
+  --web-navigation-width: 164px;
   --bodyGutter: 25px;
 
   --systemPrimary: rgb(29, 29, 31);
@@ -36,7 +37,6 @@
 
   --navigation-border-color: var(--glassMaterialInnerStrokeCombined);
   --navigation-shadow-color: rgba(0, 0, 0, 0.1);
-  --web-navigation-width: 260px;
 
   --navigation-item-height: 36px;
   --navigation-item-icon-size: 24px;
@@ -82,7 +82,6 @@
     --glassMaterialInnerStrokeAlpha: 0.2;
 
     --navigation-shadow-color: rgba(0, 0, 0, 0.2);
-    --web-navigation-width: 260px;
     --z-web-chrome: 9901;
     --z-default: 1;
     --z-gpu: 1001;
@@ -151,7 +150,6 @@
   html {
     -ms-text-size-adjust: 100%;
     -webkit-text-size-adjust: 100%;
-    -ms-overflow-style: -ms-autohiding-scrollbar;
     box-sizing: border-box;
   }
 
@@ -168,30 +166,32 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
-  *::-webkit-scrollbar {
-    width: 12.4px;
-    height: 12.4px;
-  }
+  @media (hover: hover) and (pointer: fine) {
+    *::-webkit-scrollbar {
+      width: 12.6px;
+      height: 12.6px;
+    }
 
-  *::-webkit-scrollbar-track {
-    background: transparent;
-  }
+    *::-webkit-scrollbar-track {
+      background: transparent;
+    }
 
-  *::-webkit-scrollbar-thumb {
-    background: rgb(159, 159, 159);
-    border-radius: 9999px;
-    border: 3px solid transparent;
-    background-clip: content-box;
-  }
+    *::-webkit-scrollbar-thumb {
+      background: rgb(159, 159, 159);
+      border-radius: 9999px;
+      border: 3px solid transparent;
+      background-clip: content-box;
+    }
 
-  *::-webkit-scrollbar-thumb:hover {
-    background: rgb(219, 219, 219);
-    background-clip: content-box;
-  }
+    *::-webkit-scrollbar-thumb:hover {
+      background: rgb(219, 219, 219);
+      background-clip: content-box;
+    }
 
-  *::-webkit-scrollbar-thumb:active {
-    background: rgb(242, 242, 242);
-    background-clip: content-box;
+    *::-webkit-scrollbar-thumb:active {
+      background: rgb(242, 242, 242);
+      background-clip: content-box;
+    }
   }
 
   *,
@@ -294,15 +294,23 @@
   a:disabled {
     opacity: .42
   }
-
-  ul {
-    list-style-type: none;
-  }
 }
 
 @media (min-width: 1000px) {
   :root {
     --bodyGutter: 40px;
+  }
+}
+
+@media (min-width: 484px) {
+  :root {
+    --web-navigation-width: 33.8842975207vw;
+  }
+}
+
+@media (min-width: 767.32px) {
+  :root {
+    --web-navigation-width: 260px;
   }
 }
 
@@ -592,7 +600,7 @@ html[dir=rtl] .chrome-volume__slider.svelte-13xdpwq.svelte-13xdpwq {
 
 
 /* ================================= GRID LIST =================================== */
-.shelf-grid__list.svelte-ranejh {
+.shelf-grid__list {
   box-sizing: border-box;
   display: grid;
   grid-auto-flow: column;
@@ -613,23 +621,31 @@ html[dir=rtl] .chrome-volume__slider.svelte-13xdpwq.svelte-13xdpwq {
   scrollbar-width: none;
 }
 
+.shelf-grid__list {
+  align-items: stretch;
+  -moz-column-gap: var(--grid-column-gap-xsmall);
+  column-gap: var(--grid-column-gap-xsmall);
+  grid-auto-columns: var(--grid-max-content-xsmall, calc((100% - (var(--grid-xsmall) - 1) * var(--grid-column-gap-xsmall)) / var(--grid-xsmall)));
+  grid-template-rows: repeat(var(--grid-rows), max-content);
+  row-gap: var(--grid-row-gap-xsmall);
+}
+
+.shelf-grid__list--align-items-end {
+  --override-shelf-overflow-bleed-bottom: 35px;
+  padding-top: 0;
+}
+
 .shelf-grid__list[data-dragging="true"] {
-  /* The scroll container is already compositor-scrolled by the browser.
-     Avoid forcing a giant texture layer for every visible card while dragging. */
   scroll-snap-type: none;
   will-change: scroll-position;
 }
 
-/* A conventional mouse wheel produces discrete steps. Disable smooth/snap
-   between steps so the rAF-batched handler can move the shelf continuously. */
 .shelf-grid__list[data-wheeling="true"] {
   scroll-behavior: auto;
   scroll-snap-type: none;
   will-change: scroll-position;
 }
 
-/* Hover affordances use blur/opacity transitions. They are not useful while
-   dragging, and skipping them prevents a repaint of every moving card. */
 .shelf-grid__list[data-dragging="true"] .media-card-interaction {
   transition: none !important;
 }
@@ -674,108 +690,20 @@ html[dir=rtl] .chrome-volume__slider.svelte-13xdpwq.svelte-13xdpwq {
   }
 }
 
-@media (max-width:999px) {
-  .shelf-grid__list.svelte-ranejh {
-    margin-inline-end: 0;
-    margin-inline-start: 0;
-    padding-inline-end: var(--shelfGridGutterWidth, 25px);
-    padding-inline-start: var(--shelfGridGutterWidth, 25px);
-    scroll-padding-inline-start: 10px;
-    width: 100%
+@media (min-width: 1000px) {
+  .shelf-grid__list {
+    margin-inline-end: calc(var(--standard-lockup-shadow-offset, 15px) * -1);
+    margin-inline-start: calc(var(--standard-lockup-shadow-offset, 15px) * -1);
+    -webkit-mask: linear-gradient(90deg, transparent 0, #000 var(--standard-lockup-shadow-offset, 15px), #000 calc(100% - var(--standard-lockup-shadow-offset, 15px)), transparent 100%);
+    mask: linear-gradient(90deg, transparent 0, #000 var(--standard-lockup-shadow-offset, 15px), #000 calc(100% - var(--standard-lockup-shadow-offset, 15px)), transparent 100%);
+    padding-inline-end: var(--standard-lockup-shadow-offset, 15px);
+    padding-inline-start: var(--standard-lockup-shadow-offset, 15px);
+    width: calc(100% + 30px);
   }
-
-  @supports (background-image:-webkit-named-image(apple-pay-logo-black)) or (-webkit-appearance:-apple-pay-button) {
-    .shelf-grid__list.svelte-ranejh {
-      padding-inline-end: 10px
-    }
-  }
-}
-
-.shelf-grid__list.svelte-ranejh::-webkit-scrollbar {
-  display: none
-}
-
-@media (prefers-reduced-motion:reduce) {
-  .shelf-grid__list.svelte-ranejh {
-    scroll-behavior: auto
-  }
-}
-
-.shelf-grid__list.svelte-ranejh {
-  align-items: stretch;
-  column-gap: var(--grid-column-gap-xsmall);
-  grid-auto-columns: var(--grid-max-content-xsmall, calc((100% - (var(--grid-xsmall) - 1)*var(--grid-column-gap-xsmall))/var(--grid-xsmall)));
-  grid-template-rows: repeat(var(--grid-rows), max-content);
-  row-gap: var(--grid-row-gap-xsmall)
-}
-
-@media (min-width:1000px) and (max-width:1259px) {
-  .shelf-grid__list.svelte-ranejh {
-    column-gap: var(--grid-column-gap-small);
-    grid-auto-columns: var(--grid-max-content-small, calc((100% - (var(--grid-small) - 1)*var(--grid-column-gap-small))/var(--grid-small)));
-    grid-template-rows: repeat(var(--grid-rows), max-content);
-    row-gap: var(--grid-row-gap-small)
-  }
-}
-
-@media (min-width:1260px) and (max-width:1579px) {
-  .shelf-grid__list.svelte-ranejh {
-    column-gap: var(--grid-column-gap-medium);
-    grid-auto-columns: var(--grid-max-content-medium, calc((100% - (var(--grid-medium) - 1)*var(--grid-column-gap-medium))/var(--grid-medium)));
-    grid-template-rows: repeat(var(--grid-rows), max-content);
-    row-gap: var(--grid-row-gap-medium)
-  }
-}
-
-@media (min-width:1580px) and (max-width:1939px) {
-  .shelf-grid__list.svelte-ranejh {
-    column-gap: var(--grid-column-gap-large);
-    grid-auto-columns: var(--grid-max-content-large, calc((100% - (var(--grid-large) - 1)*var(--grid-column-gap-large))/var(--grid-large)));
-    grid-template-rows: repeat(var(--grid-rows), max-content);
-    row-gap: var(--grid-row-gap-large)
-  }
-}
-
-@media (min-width:1940px) {
-  .shelf-grid__list.svelte-ranejh {
-    column-gap: var(--grid-column-gap-xlarge);
-    grid-auto-columns: var(--grid-max-content-xlarge, calc((100% - (var(--grid-xlarge) - 1)*var(--grid-column-gap-xlarge))/var(--grid-xlarge)));
-    grid-template-rows: repeat(var(--grid-rows), max-content);
-    row-gap: var(--grid-row-gap-xlarge)
-  }
-}
-
-@media (min-width:1000px) {
-  @supports (-webkit-tap-highlight-color: currentcolor) and (not (-webkit-background-composite:clear)) and (not (-ms-accelerator:true)) and (not (overflow:-webkit-marquee)) and (not (-moz-appearance:none)) {
-    .shelf-grid__list.svelte-ranejh .svelte-ranejh:first-child .artwork-component:not(.artwork-component--no-anchor) {
-      anchor-name: --shelf-first-artwork
-    }
-  }
-}
-
-.shelf-grid__list--align-items-end.svelte-ranejh {
-  --override-shelf-overflow-bleed-bottom: 35px;
-  padding-top: 0
-}
-
-[data-player-drawer] {
-  will-change: transform;
-}
-
-/* Preserve card shadows while scrolling; only pause effects that require
-   backdrop compositing or transition work on each frame. */
-[data-app-scroll-container][data-performance-scrolling="true"] .media-card-interaction {
-  transition: none !important;
-}
-
-[data-app-scroll-container][data-performance-scrolling="true"] .media-card-play-button svg,
-[data-app-scroll-container][data-performance-scrolling="true"] .media-card-context-menu button {
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
 }
 
 @media (min-width: 1000px) {
-  .shelf-grid__list.svelte-ranejh.svelte-ranejh {
+  .app-container .shelf-grid__list {
     margin-inline: 0;
     -webkit-mask: unset;
     mask: unset;
@@ -785,14 +713,109 @@ html[dir=rtl] .chrome-volume__slider.svelte-13xdpwq.svelte-13xdpwq {
   }
 }
 
+@media (max-width:999px) {
+  .shelf-grid__list {
+    margin-inline-end: 0;
+    margin-inline-start: 0;
+    padding-inline-end: var(--shelfGridGutterWidth, 25px);
+    padding-inline-start: var(--shelfGridGutterWidth, 25px);
+    scroll-padding-inline-start: 10px;
+    width: 100%
+  }
+
+  @supports (background-image:-webkit-named-image(apple-pay-logo-black)) or (-webkit-appearance:-apple-pay-button) {
+    .shelf-grid__list {
+      padding-inline-end: 10px
+    }
+  }
+}
+
+@media (max-width: 999px) {
+  .app-container .shelf-grid__list {
+    margin-inline-start: calc(var(--shelfGridGutterWidth, 25px) * -1);
+    padding-inline-start: var(--shelfGridGutterWidth, 25px);
+    scroll-padding-inline-start: var(--shelfGridGutterWidth, 25px);
+    width: calc(100% + var(--shelfGridGutterWidth, 25px));
+  }
+}
+
+.shelf-grid__list::-webkit-scrollbar {
+  display: none
+}
+
+@media (prefers-reduced-motion:reduce) {
+  .shelf-grid__list {
+    scroll-behavior: auto
+  }
+}
+
 @media (min-width: 484px) {
-  .shelf-grid__list.svelte-ranejh.svelte-ranejh {
+  .app-container .shelf-grid__list {
     --shelf-inline-offset: calc(var(--web-navigation-width) + var(--bodyGutter));
     margin-inline-start: calc(var(--shelf-inline-offset) * -1);
     padding-inline-start: var(--shelf-inline-offset);
     scroll-padding-inline-start: var(--shelf-inline-offset);
     width: 100dvw;
   }
+}
+
+@media (min-width:1000px) and (max-width:1259px) {
+  .shelf-grid__list {
+    column-gap: var(--grid-column-gap-small);
+    grid-auto-columns: var(--grid-max-content-small, calc((100% - (var(--grid-small) - 1)*var(--grid-column-gap-small))/var(--grid-small)));
+    grid-template-rows: repeat(var(--grid-rows), max-content);
+    row-gap: var(--grid-row-gap-small)
+  }
+}
+
+@media (min-width:1260px) and (max-width:1579px) {
+  .shelf-grid__list {
+    column-gap: var(--grid-column-gap-medium);
+    grid-auto-columns: var(--grid-max-content-medium, calc((100% - (var(--grid-medium) - 1)*var(--grid-column-gap-medium))/var(--grid-medium)));
+    grid-template-rows: repeat(var(--grid-rows), max-content);
+    row-gap: var(--grid-row-gap-medium)
+  }
+}
+
+@media (min-width:1580px) and (max-width:1939px) {
+  .shelf-grid__list {
+    -moz-column-gap: var(--grid-column-gap-large);
+    column-gap: var(--grid-column-gap-large);
+    grid-auto-columns: var(--grid-max-content-large, calc((100% - (var(--grid-large) - 1) * var(--grid-column-gap-large)) / var(--grid-large)));
+    grid-template-rows: repeat(var(--grid-rows), max-content);
+    row-gap: var(--grid-row-gap-large);
+  }
+}
+
+@media (min-width:1940px) {
+  .shelf-grid__list {
+    column-gap: var(--grid-column-gap-xlarge);
+    grid-auto-columns: var(--grid-max-content-xlarge, calc((100% - (var(--grid-xlarge) - 1)*var(--grid-column-gap-xlarge))/var(--grid-xlarge)));
+    grid-template-rows: repeat(var(--grid-rows), max-content);
+    row-gap: var(--grid-row-gap-xlarge)
+  }
+}
+
+@media (min-width:1000px) {
+  @supports (-webkit-tap-highlight-color: currentcolor) and (not (-webkit-background-composite:clear)) and (not (-ms-accelerator:true)) and (not (overflow:-webkit-marquee)) and (not (-moz-appearance:none)) {
+    .shelf-grid__list:first-child .artwork-component:not(.artwork-component--no-anchor) {
+      anchor-name: --shelf-first-artwork
+    }
+  }
+}
+
+[data-player-drawer] {
+  will-change: transform;
+}
+
+[data-app-scroll-container][data-performance-scrolling="true"] .media-card-interaction {
+  transition: none !important;
+}
+
+[data-app-scroll-container][data-performance-scrolling="true"] .media-card-play-button svg,
+[data-app-scroll-container][data-performance-scrolling="true"] .media-card-context-menu button {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
 }
 
 @keyframes addToSpinner {
@@ -819,7 +842,7 @@ html[dir=rtl] .chrome-volume__slider.svelte-13xdpwq.svelte-13xdpwq {
   select,
   textarea,
   summary,
-[tabindex]:not([tabindex="-1"])):focus-visible {
+  [tabindex]:not([tabindex="-1"])):focus-visible {
   outline: none !important;
   box-shadow: none !important;
 }

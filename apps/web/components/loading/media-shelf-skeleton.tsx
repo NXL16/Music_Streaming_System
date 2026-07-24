@@ -184,7 +184,7 @@ export default memo(function MediaShelfSkeleton({
           >
             <div className="box-content -mx-0.5 overflow-visible px-0.5 w-full">
               <ul
-                className={`shelf-grid__list svelte-ranejh ${isHeroShelf ? "shelf-grid__list--align-items-end" : ""}`}
+                className={`shelf-grid__list ${isHeroShelf ? "shelf-grid__list--align-items-end" : ""}`}
               >
                 {skeletonItems.map((_, idx) => (
                   <li
