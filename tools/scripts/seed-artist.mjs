@@ -43,6 +43,13 @@ const __dirname = path.dirname(__filename);
 // ─── Config ────────────────────────────────────────────
 const BASE_URL = process.env.BASE_URL || 'http://localhost:9999/api/v1';
 let ADMIN_TOKEN = '';
+
+function catalogIngestionKey(collectionId) {
+  return crypto
+    .createHash('sha256')
+    .update(`music-streaming-system:catalog-seed:v1:${STOREFRONT}:${collectionId}`)
+    .digest('hex');
+}
 let INTERNAL_TOKEN = '12c80b4f2d2b93660210c2807607d824afc921d0c5fc372f99ea6ad38da6913cacbeac35fda0acb45511999321182f2f33247836c6a3e150fc020b06f4287150';
 const STOREFRONT = 'vn';
 
@@ -1663,11 +1670,12 @@ async function createAndPublishAlbum(album, artistId, songMappings, artworkAsset
   logInfo(`Creating album draft "${albumName}" with ${tracks.length} tracks...`);
 
   const draftRes = await apiCall('POST', '/admin/catalog/albums/draft', {
-    // Source collection IDs are stable across seed runs. This prevents a
-    // reset/lost local state file from creating another Album row for the same
-    // provider collection.
-    resourceId: `itunes:${STOREFRONT}:${album.collectionId}`,
+    // The public catalog ID must always be opaque and internal. The provider
+    // identifier is stored separately and makes repeated seeds an upsert.
+    resourceId: crypto.randomUUID(),
     storefront: STOREFRONT,
+    ingestionSource: 'catalog-seed',
+    ingestionKey: catalogIngestionKey(album.collectionId),
     name: albumName,
     artistName: album.artistName,
     audioTraits: ['lossless'],

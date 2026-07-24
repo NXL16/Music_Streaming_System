@@ -161,6 +161,8 @@ model Album {
   releaseDate             DateTime? @db.Date
   trackCount              Int       @default(0)
   upc                     String    @default("") @db.VarChar(64)
+  ingestionSource         String?   @db.VarChar(32)
+  ingestionKey            String?   @db.VarChar(128)
   canonicalReleaseId      String?   @db.VarChar(128)
   url                     String    @default("") @db.VarChar(1000)
   createdAt               DateTime  @default(now()) @db.Timestamptz
@@ -174,6 +176,7 @@ model Album {
   @@index([artworkAssetId])
   @@index([editorialArtworkAssetId])
   @@index([editorialVideoAssetId])
+  @@unique([ingestionSource, ingestionKey])
   @@index([canonicalReleaseId])
   @@map("albums")
 }

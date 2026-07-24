@@ -461,6 +461,8 @@ message SaveCatalogAlbumDraftRequest {
   string                          editorial_artwork_asset_id = 27;
   string                          editorial_video_asset_id   = 28;
   string                          canonical_release_id       = 29;
+  string                          ingestion_source           = 30;
+  string                          ingestion_key              = 31;
 }
 
 message SaveCatalogPlaylistDraftRequest {

@@ -335,13 +335,15 @@ export class GenerationService {
       });
     }
 
-    // Global is an editorial page, not one personalised queue. It may reuse a
-    // release across genuinely different topics when the local catalog is
-    // small; removing every repeated card was what collapsed Home to 3 shelves.
-    const publishableSections = this.removeDuplicateSections(sections).slice(
+    // Global and personalised Home use the same release-level rule: an album
+    // may occupy only one recommendation shelf. Recently Played is generated
+    // separately for a user and is deliberately outside this global page.
+    const uniqueSections = this.removeDuplicateSections(sections).slice(
       0,
       GLOBAL_SHELF_LIMIT,
     );
+    const publishableSections =
+      await this.deduplicateSemanticAlbumItems(uniqueSections);
 
     // Never replace a usable Home page with a thin, half-populated page while
     // catalog ingestion is still in progress. The user will continue to see
@@ -2778,8 +2780,8 @@ export class GenerationService {
 
   /**
    * Catalog resource IDs are opaque. Historical imports can therefore contain
-   * two album IDs for one release; remove the later card by its stable release
-   * metadata before a global Home page is published. This is intentionally a
+   * two album IDs for one release. Keep the best edition and its first
+   * occurrence across Home; later occurrences are removed. This is a
    * presentation safeguard — catalog authoring remains the primary guard.
    */
   private async deduplicateSemanticAlbumItems(
@@ -2834,18 +2836,26 @@ export class GenerationService {
       }
     }
 
-    return sections.map((section) => {
+    const displayedAlbumKeys = new Set<string>();
+    return sections.flatMap((section) => {
       const contents = section.relationships?.contents;
-      if (!contents) return section;
+      if (!contents) return [section];
 
       const deduped = contents.data.filter((item) => {
         if (item.type !== 'albums') return true;
         const album = albumById.get(item.id);
-        if (!album) return true;
-        return preferredAlbumIdByKey.get(this.albumPresentationKey(album)) === item.id;
+        const key = album ? this.albumPresentationKey(album) : `id:${item.id}`;
+        if (album && preferredAlbumIdByKey.get(key) !== item.id) return false;
+        if (displayedAlbumKeys.has(key)) return false;
+        displayedAlbumKeys.add(key);
+        return true;
       });
 
-      return {
+      // A shelf whose only cards were already used above is not useful and
+      // would otherwise render as an empty section on Home.
+      if (deduped.length === 0) return [];
+
+      return [{
         ...section,
         relationships: {
           primaryContent: section.relationships?.primaryContent ?? {
@@ -2854,7 +2864,7 @@ export class GenerationService {
           },
           contents: { ...contents, data: deduped },
         },
-      };
+      }];
     });
   }
 

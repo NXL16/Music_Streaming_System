@@ -143,6 +143,8 @@ export class CatalogAuthoringService {
   ): Promise<CatalogDraftInfo> {
     const resourceId = request.resourceId || randomUUID();
     const canonicalReleaseId = (request.canonicalReleaseId || '').trim();
+    const ingestionSource = (request.ingestionSource || '').trim();
+    const ingestionKey = (request.ingestionKey || '').trim();
     const artistIds = this.list(request.artistIds);
     const audioTraits = this.list(request.audioTraits);
     const genreNames = this.list(request.genreNames);
@@ -153,6 +155,15 @@ export class CatalogAuthoringService {
     this.requireText(request.name, 'name', 255);
     if (canonicalReleaseId) {
       this.requireText(canonicalReleaseId, 'canonical_release_id', 128);
+    }
+    if (ingestionSource) this.requireText(ingestionSource, 'ingestion_source', 32);
+    if (ingestionKey) {
+      this.requireText(ingestionKey, 'ingestion_key', 128);
+    }
+    if (Boolean(ingestionSource) !== Boolean(ingestionKey)) {
+      this.invalidArgument(
+        'ingestion_source and ingestion_key must be provided together',
+      );
     }
     this.validateAssignments(tracks);
     this.validateStringArray(artistIds, 'artist_ids', 128);
@@ -192,6 +203,8 @@ export class CatalogAuthoringService {
         releaseDate: (request.releaseDate || '').trim() || null,
         upc: (request.upc || '').trim(),
         canonicalReleaseId,
+        ingestionSource,
+        ingestionKey,
         url: (request.url || '').trim(),
         artistIds: this.unique(artistIds),
         tracks,
@@ -561,6 +574,21 @@ export class CatalogAuthoringService {
     );
 
     const canonicalReleaseId = this.string(payload.canonicalReleaseId);
+    const ingestionSource = this.string(payload.ingestionSource);
+    const ingestionKey = this.string(payload.ingestionKey);
+    const existingIngestedAlbum =
+      ingestionSource && ingestionKey
+        ? await tx.album.findUnique({
+            where: {
+              ingestionSource_ingestionKey: {
+                ingestionSource,
+                ingestionKey,
+              },
+            },
+            select: { id: true },
+          })
+        : null;
+    const albumId = existingIngestedAlbum?.id || draft.resourceId;
     const data = {
       storefront: draft.storefront,
       name: this.requiredString(payload.name, 'name'),
@@ -589,30 +617,32 @@ export class CatalogAuthoringService {
       releaseDate: this.date(payload.releaseDate),
       trackCount: tracks.length,
       upc: this.string(payload.upc),
+      ingestionSource: ingestionSource || null,
+      ingestionKey: ingestionKey || null,
       url:
         this.string(payload.url) ||
-        this.href(draft.storefront, RESOURCE_TYPES.ALBUM, draft.resourceId),
+        this.href(draft.storefront, RESOURCE_TYPES.ALBUM, albumId),
     };
 
-    await this.assertNoSemanticAlbumDuplicate(tx, draft, data);
+    await this.assertNoSemanticAlbumDuplicate(tx, draft, data, albumId);
 
     await tx.album.upsert({
-      where: { id: draft.resourceId },
+      where: { id: albumId },
       create: {
-        id: draft.resourceId,
-        canonicalReleaseId: canonicalReleaseId || draft.resourceId,
+        id: albumId,
+        canonicalReleaseId: canonicalReleaseId || albumId,
         ...data,
       },
       update: canonicalReleaseId ? { ...data, canonicalReleaseId } : data,
     });
     await tx.albumArtistCredit.deleteMany({
-      where: { albumId: draft.resourceId },
+      where: { albumId },
     });
-    await tx.albumTrack.deleteMany({ where: { albumId: draft.resourceId } });
+    await tx.albumTrack.deleteMany({ where: { albumId } });
     if (artistIds.length) {
       await tx.albumArtistCredit.createMany({
         data: artistIds.map((artistId, position) => ({
-          albumId: draft.resourceId,
+          albumId,
           artistId,
           position,
         })),
@@ -621,7 +651,7 @@ export class CatalogAuthoringService {
     if (tracks.length) {
       await tx.albumTrack.createMany({
         data: tracks.map((track) => ({
-          albumId: draft.resourceId,
+          albumId,
           songId: track.songId,
           position: track.position,
           discNumber: track.discNumber,
@@ -653,6 +683,7 @@ export class CatalogAuthoringService {
       trackCount: number;
       isSingle: boolean;
     },
+    resourceId: string,
   ): Promise<void> {
     // Missing date or artist metadata is too weak a signal for a hard reject.
     // The importer still catches those cases; the catalog guard remains
@@ -667,7 +698,7 @@ export class CatalogAuthoringService {
     const candidates = await tx.album.findMany({
       where: {
         storefront: draft.storefront,
-        id: { not: draft.resourceId },
+        id: { not: resourceId },
         releaseDate: album.releaseDate,
       },
       select: { id: true, name: true, artistName: true, releaseDate: true },
