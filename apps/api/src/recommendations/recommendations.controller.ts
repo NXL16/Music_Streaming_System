@@ -296,6 +296,17 @@ export class RecommendationAdminController {
     });
   }
 
+  @Get('quality')
+  getRecommendationQualityAnalytics(
+    @Query('days') days?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.recommendationsService.getRecommendationQualityAnalytics({
+      days: Math.min(90, Math.max(1, Number(days) || 28)),
+      limit: Math.min(100, Math.max(1, Number(limit) || 20)),
+    });
+  }
+
   @Get('home')
   getRecommendationPage(
     @Req() req: Request,

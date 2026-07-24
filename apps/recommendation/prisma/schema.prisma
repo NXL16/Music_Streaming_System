@@ -181,6 +181,7 @@ model RecommendationResourceSnapshot {
     releaseDate      String  @default("") @db.VarChar(32)
     trackCount       Int     @default(0)
     upc              String  @default("") @db.VarChar(64)
+    canonicalReleaseId String @default("") @db.VarChar(128)
     isCompilation    Boolean @default(false)
     isComplete       Boolean @default(false)
     isStudioMastered Boolean @default(false)
@@ -218,6 +219,7 @@ model RecommendationResourceSnapshot {
 
     @@unique([resourceType, resourceId])
     @@index([resourceType])
+    @@index([resourceType, canonicalReleaseId])
     @@map("recommendation_resource_snapshots")
 }
 

@@ -61,43 +61,43 @@ service SongService {
 
 enum SongStatus {
   SONG_STATUS_UNSPECIFIED = 0;
-  SONG_STATUS_PENDING = 1;      // Da tao record, cho worker xu ly
-  SONG_STATUS_PROCESSING = 2;   // Worker dang transcode/encrypt
-  SONG_STATUS_READY = 3;        // San sang phat
-  SONG_STATUS_FAILED = 4;       // Xu ly that bai
+  SONG_STATUS_PENDING     = 1;      // Da tao record, cho worker xu ly
+  SONG_STATUS_PROCESSING  = 2;   // Worker dang transcode/encrypt
+  SONG_STATUS_READY       = 3;        // San sang phat
+  SONG_STATUS_FAILED      = 4;       // Xu ly that bai
 }
 
 // Lightweight summary for list/browse use cases
 message SongSummary {
-  string id = 1;
-  string title = 2;
-  string artist = 3;
-  string album = 4;
-  bool is_public = 5;
-  SongStatus status = 6;
-  int32 duration_sec = 7;
-  int64 created_at = 8;
-  string cover_url = 9;
+  string     id           = 1;
+  string     title        = 2;
+  string     artist       = 3;
+  string     album        = 4;
+  bool       is_public    = 5;
+  SongStatus status       = 6;
+  int32      duration_sec = 7;
+  int64      created_at   = 8;
+  string     cover_url    = 9;
 }
 
 // Full detail for playback
 message SongDetail {
-  string id = 1;
-  string title = 2;
-  string artist = 3;
-  string album = 4;
-  string uploader_id = 5;
-  bool is_public = 6;
-  SongStatus status = 7;
+  string     id          = 1;
+  string     title       = 2;
+  string     artist      = 3;
+  string     album       = 4;
+  string     uploader_id = 5;
+  bool       is_public   = 6;
+  SongStatus status      = 7;
 
   // Output path for encrypted fMP4 on R2 Production
   string encrypted_file_path = 8;
 
   // Basic technical metadata (heavy arrays stay in Metadata Service)
-  int32 duration_sec = 9;
-  int32 bitrate_kbps = 10;
-  string codec = 11; // ex: "aac"
-  string format = 12; // ex: "fmp4"
+  int32  duration_sec = 9;
+  int32  bitrate_kbps = 10;
+  string codec        = 11; // ex: "aac"
+  string format       = 12; // ex: "fmp4"
 
   int64 created_at = 13;
   int64 updated_at = 14;
@@ -105,16 +105,16 @@ message SongDetail {
 
 // Internal ingest metadata
 message SongIngestInfo {
-  string id = 1;
-  SongStatus status = 2;
-  string source_object_path = 3;
-  string checksum = 4;
-  int64 file_size_bytes = 5;
-  int64 created_at = 6;
+  string     id                 = 1;
+  SongStatus status             = 2;
+  string     source_object_path = 3;
+  string     checksum           = 4;
+  int64      file_size_bytes    = 5;
+  int64      created_at         = 6;
 }
 
 message GetSongRequest {
-  string song_id = 1;
+  string song_id           = 1;
   string requester_user_id = 2;
 }
 
@@ -123,8 +123,8 @@ message GetSongByChecksumRequest {
 }
 
 message GetSongByChecksumResponse {
-  SongIngestInfo song = 1;
-  bool found = 2;
+  SongIngestInfo song  = 1;
+  bool           found = 2;
 }
 
 message GetSongResponse {
@@ -140,50 +140,50 @@ message GetSongIngestInfoResponse {
 }
 
 message ListSongsRequest {
-  string cursor = 1;
-  int32 limit = 2;
-  string search = 3;
-  string artist = 4;
-  bool only_public = 5;
+  string cursor            = 1;
+  int32  limit             = 2;
+  string search            = 3;
+  string artist            = 4;
+  bool   only_public       = 5;
   string requester_user_id = 6;
 }
 
 message ListSongsResponse {
-  repeated SongSummary songs = 1;
-  string next_cursor = 2;
-  bool has_more = 3;
+  repeated SongSummary songs       = 1;
+  string               next_cursor = 2;
+  bool                 has_more    = 3;
 }
 
 // API Gateway calls this after upload authorization / object registration
 message CreateSongRecordRequest {
-  string title = 1;
-  string artist = 2;
-  string album = 3;
+  string title       = 1;
+  string artist      = 2;
+  string album       = 3;
   string uploader_id = 4;
-  bool is_public = 5;
+  bool   is_public   = 5;
 
   // Quarantine object key/path on R2
   string source_object_path = 6;
-  int64 file_size_bytes = 7;
-  string checksum = 8;
+  int64  file_size_bytes    = 7;
+  string checksum           = 8;
 }
 
 message CreateSongRecordResponse {
-  SongIngestInfo song = 1;
-  string ingest_job_id = 2;
+  SongIngestInfo song          = 1;
+  string         ingest_job_id = 2;
 }
 
 // Worker calls this to finalize processing state
 message UpdateSongProcessingResultRequest {
-  string song_id = 1;
-  SongStatus status = 2;
+  string     song_id = 1;
+  SongStatus status  = 2;
 
   // Present when READY
   string encrypted_file_path = 3;
-  int32 duration_sec = 4;
-  int32 bitrate_kbps = 5;
-  string codec = 6;
-  string format = 7;
+  int32  duration_sec        = 4;
+  int32  bitrate_kbps        = 5;
+  string codec               = 6;
+  string format              = 7;
 
   // Present when FAILED
   string error_message = 8;
@@ -204,36 +204,39 @@ message FavoriteResponse {
 
 message ListFavoriteSongsRequest {
   string user_id = 1;
-  int32 limit = 2;
-  string cursor = 3;
+  int32  limit   = 2;
+  string cursor  = 3;
 }
 
 message ListFavoriteSongsResponse {
-  repeated SongSummary songs = 1;
-  string next_cursor = 2;
-  bool has_more = 3;
+  repeated SongSummary songs       = 1;
+  string               next_cursor = 2;
+  bool                 has_more    = 3;
 }
 
 message LibraryResourceRequest {
-  string user_id = 1;
+  string user_id       = 1;
   string resource_type = 2;
-  string resource_id = 3;
-  string title = 4;
-  string subtitle = 5;
-  string artwork_url = 6;
+  string resource_id   = 3;
+  string title         = 4;
+  string subtitle      = 5;
+  string artwork_url   = 6;
 }
+
 message LibraryResourceResponse { bool success = 1; }
+
 message ListLibraryResourcesRequest { string user_id = 1; }
+
 message LibraryResource {
   string resource_type = 1;
-  string resource_id = 2;
-  string title = 3;
-  string subtitle = 4;
-  string artwork_url = 5;
-  int64 created_at = 6;
+  string resource_id   = 2;
+  string title         = 3;
+  string subtitle      = 4;
+  string artwork_url   = 5;
+  int64  created_at    = 6;
 }
-message ListLibraryResourcesResponse { repeated LibraryResource resources = 1; }
 
+message ListLibraryResourcesResponse { repeated LibraryResource resources = 1; }
 
 message RemoveSongOwnershipRequest {
   string user_id = 1;
@@ -245,16 +248,16 @@ message RemoveSongOwnershipResponse {
 }
 
 message Playlist {
-  string id = 1;
-  string name = 2;
-  string owner_id = 3;
-  repeated SongSummary songs = 4;
-  int64 created_at = 5;
-  int64 updated_at = 6;
+  string               id         = 1;
+  string               name       = 2;
+  string               owner_id   = 3;
+  repeated SongSummary songs      = 4;
+  int64                created_at = 5;
+  int64                updated_at = 6;
 }
 
 message GetPlaylistRequest {
-  string playlist_id = 1;
+  string playlist_id       = 1;
   string requester_user_id = 2;
 }
 
@@ -263,25 +266,25 @@ message GetPlaylistResponse {
 }
 
 message CreateUserPlaylistRequest {
-  string user_id = 1;
-  string name = 2;
+  string user_id     = 1;
+  string name        = 2;
   string description = 3;
-  bool is_public = 4;
+  bool   is_public   = 4;
 }
 
 message UpdateUserPlaylistRequest {
-  string user_id = 1;
-  string playlist_id = 2;
-  string name = 3;
-  string description = 4;
-  bool is_public = 5;
-  bool has_name = 6;
-  bool has_description = 7;
-  bool has_is_public = 8;
+  string user_id         = 1;
+  string playlist_id     = 2;
+  string name            = 3;
+  string description     = 4;
+  bool   is_public       = 5;
+  bool   has_name        = 6;
+  bool   has_description = 7;
+  bool   has_is_public   = 8;
 }
 
 message DeleteUserPlaylistRequest {
-  string user_id = 1;
+  string user_id     = 1;
   string playlist_id = 2;
 }
 
@@ -290,41 +293,41 @@ message DeleteUserPlaylistResponse {
 }
 
 message ListUserPlaylistsRequest {
-  string user_id = 1;
+  string user_id           = 1;
   string requester_user_id = 2;
-  int32 limit = 3;
-  string cursor = 4;
+  int32  limit             = 3;
+  string cursor            = 4;
 }
 
 message UserPlaylistSummary {
-  string id = 1;
-  string name = 2;
+  string id          = 1;
+  string name        = 2;
   string description = 3;
-  bool is_public = 4;
-  int32 track_count = 5;
-  int64 created_at = 6;
-  int64 updated_at = 7;
+  bool   is_public   = 4;
+  int32  track_count = 5;
+  int64  created_at  = 6;
+  int64  updated_at  = 7;
 }
 
 message UserPlaylistInfo {
-  string id = 1;
-  string name = 2;
+  string id          = 1;
+  string name        = 2;
   string description = 3;
-  bool is_public = 4;
-  int64 created_at = 5;
-  int64 updated_at = 6;
+  bool   is_public   = 4;
+  int64  created_at  = 5;
+  int64  updated_at  = 6;
 }
 
 message ListUserPlaylistsResponse {
-  repeated UserPlaylistSummary playlists = 1;
-  string next_cursor = 2;
-  bool has_more = 3;
+  repeated UserPlaylistSummary playlists   = 1;
+  string                       next_cursor = 2;
+  bool                         has_more    = 3;
 }
 
 message PlaylistTrackRequest {
-  string user_id = 1;
+  string user_id     = 1;
   string playlist_id = 2;
-  string song_id = 3;
+  string song_id     = 3;
 }
 
 message PlaylistTrackResponse {
@@ -333,178 +336,179 @@ message PlaylistTrackResponse {
 
 message GetCatalogAlbumRequest {
   string storefront = 1;
-  string album_id = 2;
+  string album_id   = 2;
 }
 
 message GetCatalogPlaylistRequest {
-  string storefront = 1;
+  string storefront  = 1;
   string playlist_id = 2;
 }
 
 message GetCatalogArtistAlbumsRequest {
   string storefront = 1;
-  string artist_id = 2;
+  string artist_id  = 2;
 }
 
 message GetCatalogArtistSongsRequest {
   string storefront = 1;
-  string artist_id = 2;
-  int32 limit = 3;
-  string cursor = 4;
+  string artist_id  = 2;
+  int32  limit      = 3;
+  string cursor     = 4;
 }
 
 message GetCatalogArtistSongsResponse {
-  CatalogResponse catalog = 1;
-  string next_cursor = 2;
+  CatalogResponse catalog     = 1;
+  string          next_cursor = 2;
 }
 
 message CatalogResourceIdentifier {
   string type = 1;
-  string id = 2;
+  string id   = 2;
 }
 
 message GetCatalogResourcesRequest {
-  string storefront = 1;
-  repeated CatalogResourceIdentifier resources = 2;
+  string                             storefront = 1;
+  repeated CatalogResourceIdentifier resources  = 2;
 }
 
 enum CatalogDraftStatus {
   CATALOG_DRAFT_STATUS_UNSPECIFIED = 0;
-  CATALOG_DRAFT_STATUS_DRAFT = 1;
-  CATALOG_DRAFT_STATUS_PUBLISHED = 2;
+  CATALOG_DRAFT_STATUS_DRAFT       = 1;
+  CATALOG_DRAFT_STATUS_PUBLISHED   = 2;
 }
 
 message CatalogTrackAssignment {
-  string song_id = 1;
-  int32 position = 2;
-  int32 disc_number = 3;
-  double popularity = 4;
+  string song_id     = 1;
+  int32  position    = 2;
+  int32  disc_number = 3;
+  double popularity  = 4;
 }
 
 message SaveCatalogArtistDraftRequest {
-  string resource_id = 1;
-  string storefront = 2;
-  string actor_user_id = 3;
-  string name = 4;
-  string url = 5;
-  CatalogArtwork artwork = 6 [deprecated = true];
-  repeated string genre_names = 7;
-  string artwork_asset_id = 8;
-  string editorial_video_asset_id = 9;
-  google.protobuf.Struct editorial_video = 10;
+  string                 resource_id              = 1;
+  string                 storefront               = 2;
+  string                 actor_user_id            = 3;
+  string                 name                     = 4;
+  string                 url                      = 5;
+  CatalogArtwork         artwork                  = 6 [deprecated = true];
+  repeated string        genre_names              = 7;
+  string                 artwork_asset_id         = 8;
+  string                 editorial_video_asset_id = 9;
+  google.protobuf.Struct editorial_video          = 10;
 }
 
 message SaveCatalogSongDraftRequest {
-  string resource_id = 1;
-  string storefront = 2;
-  string actor_user_id = 3;
-  string name = 4;
-  string album_name = 5;
-  string artist_name = 6;
-  CatalogArtwork artwork = 7 [deprecated = true];
-  string audio_locale = 8;
-  repeated string audio_traits = 9;
-  string composer_name = 10;
-  string content_rating = 11;
-  int32 disc_number = 12;
-  repeated string genre_names = 13;
-  bool has_lyrics = 14;
-  bool has_time_synced_lyrics = 15;
-  string isrc = 16;
-  string preview_url = 17;
-  string release_date = 18;
-  int32 track_number = 19;
-  string url = 20;
-  repeated string artist_ids = 21;
-  repeated string composer_ids = 22;
-  google.protobuf.Struct editorial_artwork = 23 [deprecated = true];
-  google.protobuf.Struct extended_asset_urls = 24;
-  repeated google.protobuf.Struct offers = 25;
-  bool is_high_resolution_master = 26;
-  bool is_studio_mastered = 27;
-  bool is_vocal_attenuation_allowed = 28;
-  string artwork_asset_id = 29;
-  string editorial_artwork_asset_id = 30;
-  repeated string mood_tags = 31;
+  string                          resource_id                  = 1;
+  string                          storefront                   = 2;
+  string                          actor_user_id                = 3;
+  string                          name                         = 4;
+  string                          album_name                   = 5;
+  string                          artist_name                  = 6;
+  CatalogArtwork                  artwork                      = 7 [deprecated = true];
+  string                          audio_locale                 = 8;
+  repeated string                 audio_traits                 = 9;
+  string                          composer_name                = 10;
+  string                          content_rating               = 11;
+  int32                           disc_number                  = 12;
+  repeated string                 genre_names                  = 13;
+  bool                            has_lyrics                   = 14;
+  bool                            has_time_synced_lyrics       = 15;
+  string                          isrc                         = 16;
+  string                          preview_url                  = 17;
+  string                          release_date                 = 18;
+  int32                           track_number                 = 19;
+  string                          url                          = 20;
+  repeated string                 artist_ids                   = 21;
+  repeated string                 composer_ids                 = 22;
+  google.protobuf.Struct          editorial_artwork            = 23 [deprecated = true];
+  google.protobuf.Struct          extended_asset_urls          = 24;
+  repeated google.protobuf.Struct offers                       = 25;
+  bool                            is_high_resolution_master    = 26;
+  bool                            is_studio_mastered           = 27;
+  bool                            is_vocal_attenuation_allowed = 28;
+  string                          artwork_asset_id             = 29;
+  string                          editorial_artwork_asset_id   = 30;
+  repeated string                 mood_tags                    = 31;
 }
 
 message SaveCatalogAlbumDraftRequest {
-  string resource_id = 1;
-  string storefront = 2;
-  string actor_user_id = 3;
-  string name = 4;
-  string artist_name = 5;
-  CatalogArtwork artwork = 6 [deprecated = true];
-  google.protobuf.Struct editorial_artwork = 7 [deprecated = true];
-  repeated string audio_traits = 8;
-  string content_rating = 9;
-  string copyright = 10;
-  repeated string genre_names = 11;
-  bool is_compilation = 12;
-  bool is_complete = 13;
-  bool is_prerelease = 14;
-  bool is_single = 15;
-  string record_label = 16;
-  string release_date = 17;
-  string upc = 18;
-  string url = 19;
-  repeated string artist_ids = 20;
-  repeated CatalogTrackAssignment tracks = 21;
-  google.protobuf.Struct editorial_notes = 22;
-  google.protobuf.Struct editorial_video = 23 [deprecated = true];
-  repeated google.protobuf.Struct offers = 24;
-  bool is_studio_mastered = 25;
-  string artwork_asset_id = 26;
-  string editorial_artwork_asset_id = 27;
-  string editorial_video_asset_id = 28;
+  string                          resource_id                = 1;
+  string                          storefront                 = 2;
+  string                          actor_user_id              = 3;
+  string                          name                       = 4;
+  string                          artist_name                = 5;
+  CatalogArtwork                  artwork                    = 6 [deprecated = true];
+  google.protobuf.Struct          editorial_artwork          = 7 [deprecated = true];
+  repeated string                 audio_traits               = 8;
+  string                          content_rating             = 9;
+  string                          copyright                  = 10;
+  repeated string                 genre_names                = 11;
+  bool                            is_compilation             = 12;
+  bool                            is_complete                = 13;
+  bool                            is_prerelease              = 14;
+  bool                            is_single                  = 15;
+  string                          record_label               = 16;
+  string                          release_date               = 17;
+  string                          upc                        = 18;
+  string                          url                        = 19;
+  repeated string                 artist_ids                 = 20;
+  repeated CatalogTrackAssignment tracks                     = 21;
+  google.protobuf.Struct          editorial_notes            = 22;
+  google.protobuf.Struct          editorial_video            = 23 [deprecated = true];
+  repeated google.protobuf.Struct offers                     = 24;
+  bool                            is_studio_mastered         = 25;
+  string                          artwork_asset_id           = 26;
+  string                          editorial_artwork_asset_id = 27;
+  string                          editorial_video_asset_id   = 28;
+  string                          canonical_release_id       = 29;
 }
 
 message SaveCatalogPlaylistDraftRequest {
-  string resource_id = 1;
-  string storefront = 2;
-  string actor_user_id = 3;
-  string name = 4;
-  string curator_name = 5;
-  string description_short = 6;
-  string description_standard = 7;
-  CatalogArtwork artwork = 8 [deprecated = true];
-  google.protobuf.Struct editorial_artwork = 9 [deprecated = true];
-  google.protobuf.Struct editorial_video = 10 [deprecated = true];
-  repeated string audio_traits = 11;
-  string playlist_type = 12;
-  string url = 13;
-  string owner_id = 14;
-  bool is_public = 15;
-  repeated CatalogTrackAssignment tracks = 16;
-  repeated string artist_names = 17;
-  google.protobuf.Struct editorial_notes = 18;
-  google.protobuf.Struct plain_editorial_card = 19;
-  google.protobuf.Struct plain_editorial_notes = 20;
-  string editorial_playlist_kind = 21;
-  bool has_collaboration = 22;
-  bool is_chart = 23;
-  bool supports_sing = 24;
-  string artwork_asset_id = 25;
-  string editorial_artwork_asset_id = 26;
-  string editorial_video_asset_id = 27;
+  string                          resource_id                = 1;
+  string                          storefront                 = 2;
+  string                          actor_user_id              = 3;
+  string                          name                       = 4;
+  string                          curator_name               = 5;
+  string                          description_short          = 6;
+  string                          description_standard       = 7;
+  CatalogArtwork                  artwork                    = 8 [deprecated = true];
+  google.protobuf.Struct          editorial_artwork          = 9 [deprecated = true];
+  google.protobuf.Struct          editorial_video            = 10 [deprecated = true];
+  repeated string                 audio_traits               = 11;
+  string                          playlist_type              = 12;
+  string                          url                        = 13;
+  string                          owner_id                   = 14;
+  bool                            is_public                  = 15;
+  repeated CatalogTrackAssignment tracks                     = 16;
+  repeated string                 artist_names               = 17;
+  google.protobuf.Struct          editorial_notes            = 18;
+  google.protobuf.Struct          plain_editorial_card       = 19;
+  google.protobuf.Struct          plain_editorial_notes      = 20;
+  string                          editorial_playlist_kind    = 21;
+  bool                            has_collaboration          = 22;
+  bool                            is_chart                   = 23;
+  bool                            supports_sing              = 24;
+  string                          artwork_asset_id           = 25;
+  string                          editorial_artwork_asset_id = 26;
+  string                          editorial_video_asset_id   = 27;
 }
 
 message CatalogDraftInfo {
-  string id = 1;
-  string resource_type = 2;
-  string resource_id = 3;
-  string storefront = 4;
-  CatalogDraftStatus status = 5;
-  int32 version = 6;
-  string created_by = 7;
-  string updated_by = 8;
-  string published_at = 9;
-  string created_at = 10;
-  string updated_at = 11;
+  string             id            = 1;
+  string             resource_type = 2;
+  string             resource_id   = 3;
+  string             storefront    = 4;
+  CatalogDraftStatus status        = 5;
+  int32              version       = 6;
+  string             created_by    = 7;
+  string             updated_by    = 8;
+  string             published_at  = 9;
+  string             created_at    = 10;
+  string             updated_at    = 11;
 }
 
 message CatalogDraftDetail {
-  CatalogDraftInfo draft = 1;
+  CatalogDraftInfo       draft   = 1;
   google.protobuf.Struct payload = 2;
 }
 
@@ -513,21 +517,21 @@ message GetCatalogDraftRequest {
 }
 
 message ListCatalogDraftsRequest {
-  string storefront = 1;
-  string resource_type = 2;
-  CatalogDraftStatus status = 3;
-  string cursor = 4;
-  int32 limit = 5;
+  string             storefront    = 1;
+  string             resource_type = 2;
+  CatalogDraftStatus status        = 3;
+  string             cursor        = 4;
+  int32              limit         = 5;
 }
 
 message ListCatalogDraftsResponse {
-  repeated CatalogDraftInfo drafts = 1;
-  string next_cursor = 2;
-  bool has_more = 3;
+  repeated CatalogDraftInfo drafts      = 1;
+  string                    next_cursor = 2;
+  bool                      has_more    = 3;
 }
 
 message PublishCatalogDraftRequest {
-  string draft_id = 1;
+  string draft_id      = 1;
   string actor_user_id = 2;
 }
 
@@ -544,28 +548,28 @@ message CatalogReferenceMeta {
 }
 
 message CatalogReference {
-  string id = 1;
-  string type = 2;
-  string href = 3;
+  string               id   = 1;
+  string               type = 2;
+  string               href = 3;
   CatalogReferenceMeta meta = 4;
 }
 
 message CatalogArtwork {
-  string url = 1;
-  string bg_color = 2;
-  string text_color1 = 3;
-  string text_color2 = 4;
-  string text_color3 = 5;
-  string text_color4 = 6;
-  int32 width = 7;
-  int32 height = 8;
-  bool has_p3 = 9;
-  google.protobuf.Struct variants = 10;
+  string                 url         = 1;
+  string                 bg_color    = 2;
+  string                 text_color1 = 3;
+  string                 text_color2 = 4;
+  string                 text_color3 = 5;
+  string                 text_color4 = 6;
+  int32                  width       = 7;
+  int32                  height      = 8;
+  bool                   has_p3      = 9;
+  google.protobuf.Struct variants    = 10;
 }
 
 message CatalogPlayParams {
-  string id = 1;
-  string kind = 2;
+  string id           = 1;
+  string kind         = 2;
   string version_hash = 3;
 }
 
@@ -574,19 +578,19 @@ message CatalogPreview {
 }
 
 message CatalogRelationship {
-  string href = 1;
+  string                    href = 1;
   repeated CatalogReference data = 2;
 }
 
 message CatalogSongRelationships {
-  CatalogRelationship albums = 1;
-  CatalogRelationship artists = 2;
+  CatalogRelationship albums    = 1;
+  CatalogRelationship artists   = 2;
   CatalogRelationship composers = 3;
 }
 
 message CatalogAlbumRelationships {
   CatalogRelationship artists = 1;
-  CatalogRelationship tracks = 2;
+  CatalogRelationship tracks  = 2;
 }
 
 message CatalogPlaylistRelationships {
@@ -594,161 +598,162 @@ message CatalogPlaylistRelationships {
 }
 
 message CatalogArtistAttributes {
-  string name = 1;
-  string url = 2;
-  CatalogArtwork artwork = 3;
-  repeated string genre_names = 4;
-  string artwork_asset_id = 5;
-  string editorial_video_asset_id = 6;
-  google.protobuf.Struct editorial_video = 7;
+  string                 name                     = 1;
+  string                 url                      = 2;
+  CatalogArtwork         artwork                  = 3;
+  repeated string        genre_names              = 4;
+  string                 artwork_asset_id         = 5;
+  string                 editorial_video_asset_id = 6;
+  google.protobuf.Struct editorial_video          = 7;
 }
 
 message CatalogSongAttributes {
-  string album_name = 1;
-  string artist_name = 2;
-  CatalogArtwork artwork = 3;
-  string audio_locale = 4;
-  repeated string audio_traits = 5;
-  string composer_name = 6;
-  string content_rating = 7;
-  int32 disc_number = 8;
-  int32 duration_in_millis = 9;
-  repeated string genre_names = 10;
-  bool has_lyrics = 11;
-  bool has_time_synced_lyrics = 12;
-  string isrc = 13;
-  string name = 14;
-  CatalogPlayParams play_params = 15;
-  repeated CatalogPreview previews = 16;
-  string release_date = 17;
-  int32 track_number = 18;
-  string url = 19;
-  google.protobuf.Struct editorial_artwork = 20;
-  google.protobuf.Struct extended_asset_urls = 21;
-  repeated google.protobuf.Struct offers = 22;
-  bool is_high_resolution_master = 23;
-  bool is_studio_mastered = 24;
-  bool is_vocal_attenuation_allowed = 25;
-  string artwork_asset_id = 26;
-  string editorial_artwork_asset_id = 27;
-  repeated string mood_tags = 28;
+  string                          album_name                   = 1;
+  string                          artist_name                  = 2;
+  CatalogArtwork                  artwork                      = 3;
+  string                          audio_locale                 = 4;
+  repeated string                 audio_traits                 = 5;
+  string                          composer_name                = 6;
+  string                          content_rating               = 7;
+  int32                           disc_number                  = 8;
+  int32                           duration_in_millis           = 9;
+  repeated string                 genre_names                  = 10;
+  bool                            has_lyrics                   = 11;
+  bool                            has_time_synced_lyrics       = 12;
+  string                          isrc                         = 13;
+  string                          name                         = 14;
+  CatalogPlayParams               play_params                  = 15;
+  repeated CatalogPreview         previews                     = 16;
+  string                          release_date                 = 17;
+  int32                           track_number                 = 18;
+  string                          url                          = 19;
+  google.protobuf.Struct          editorial_artwork            = 20;
+  google.protobuf.Struct          extended_asset_urls          = 21;
+  repeated google.protobuf.Struct offers                       = 22;
+  bool                            is_high_resolution_master    = 23;
+  bool                            is_studio_mastered           = 24;
+  bool                            is_vocal_attenuation_allowed = 25;
+  string                          artwork_asset_id             = 26;
+  string                          editorial_artwork_asset_id   = 27;
+  repeated string                 mood_tags                    = 28;
 }
 
 message CatalogAlbumAttributes {
-  string artist_name = 1;
-  CatalogArtwork artwork = 2;
-  repeated string audio_traits = 3;
-  string content_rating = 4;
-  string copyright = 5;
-  repeated string genre_names = 6;
-  bool is_compilation = 7;
-  bool is_complete = 8;
-  bool is_prerelease = 9;
-  bool is_single = 10;
-  string name = 11;
-  CatalogPlayParams play_params = 12;
-  string record_label = 13;
-  string release_date = 14;
-  int32 track_count = 15;
-  string upc = 16;
-  string url = 17;
-  google.protobuf.Struct editorial_artwork = 18;
-  google.protobuf.Struct editorial_notes = 19;
-  google.protobuf.Struct editorial_video = 20;
-  repeated google.protobuf.Struct offers = 21;
-  bool is_studio_mastered = 22;
-  string artwork_asset_id = 23;
-  string editorial_artwork_asset_id = 24;
-  string editorial_video_asset_id = 25;
+  string                          artist_name                = 1;
+  CatalogArtwork                  artwork                    = 2;
+  repeated string                 audio_traits               = 3;
+  string                          content_rating             = 4;
+  string                          copyright                  = 5;
+  repeated string                 genre_names                = 6;
+  bool                            is_compilation             = 7;
+  bool                            is_complete                = 8;
+  bool                            is_prerelease              = 9;
+  bool                            is_single                  = 10;
+  string                          name                       = 11;
+  CatalogPlayParams               play_params                = 12;
+  string                          record_label               = 13;
+  string                          release_date               = 14;
+  int32                           track_count                = 15;
+  string                          upc                        = 16;
+  string                          url                        = 17;
+  google.protobuf.Struct          editorial_artwork          = 18;
+  google.protobuf.Struct          editorial_notes            = 19;
+  google.protobuf.Struct          editorial_video            = 20;
+  repeated google.protobuf.Struct offers                     = 21;
+  bool                            is_studio_mastered         = 22;
+  string                          artwork_asset_id           = 23;
+  string                          editorial_artwork_asset_id = 24;
+  string                          editorial_video_asset_id   = 25;
+  string                          canonical_release_id       = 26;
 }
 
 message CatalogPlaylistAttributes {
-  CatalogArtwork artwork = 1;
-  repeated string audio_traits = 2;
-  string curator_name = 3;
-  string description_short = 4;
-  string description_standard = 5;
-  string name = 6;
-  CatalogPlayParams play_params = 7;
-  string playlist_type = 8;
-  string last_modified_date = 9;
-  string url = 10;
-  google.protobuf.Struct editorial_artwork = 11;
-  google.protobuf.Struct editorial_video = 12;
-  repeated string artist_names = 13;
-  google.protobuf.Struct editorial_notes = 14;
-  google.protobuf.Struct plain_editorial_card = 15;
-  google.protobuf.Struct plain_editorial_notes = 16;
-  string editorial_playlist_kind = 17;
-  bool has_collaboration = 18;
-  bool is_chart = 19;
-  bool supports_sing = 20;
-  string artwork_asset_id = 21;
-  string editorial_artwork_asset_id = 22;
-  string editorial_video_asset_id = 23;
+  CatalogArtwork         artwork                    = 1;
+  repeated string        audio_traits               = 2;
+  string                 curator_name               = 3;
+  string                 description_short          = 4;
+  string                 description_standard       = 5;
+  string                 name                       = 6;
+  CatalogPlayParams      play_params                = 7;
+  string                 playlist_type              = 8;
+  string                 last_modified_date         = 9;
+  string                 url                        = 10;
+  google.protobuf.Struct editorial_artwork          = 11;
+  google.protobuf.Struct editorial_video            = 12;
+  repeated string        artist_names               = 13;
+  google.protobuf.Struct editorial_notes            = 14;
+  google.protobuf.Struct plain_editorial_card       = 15;
+  google.protobuf.Struct plain_editorial_notes      = 16;
+  string                 editorial_playlist_kind    = 17;
+  bool                   has_collaboration          = 18;
+  bool                   is_chart                   = 19;
+  bool                   supports_sing              = 20;
+  string                 artwork_asset_id           = 21;
+  string                 editorial_artwork_asset_id = 22;
+  string                 editorial_video_asset_id   = 23;
 }
 
 message CatalogArtistResource {
-  string id = 1;
-  string type = 2;
-  string href = 3;
+  string                  id         = 1;
+  string                  type       = 2;
+  string                  href       = 3;
   CatalogArtistAttributes attributes = 4;
 }
 
 message CatalogSongResource {
-  string id = 1;
-  string type = 2;
-  string href = 3;
-  CatalogSongAttributes attributes = 4;
+  string                   id            = 1;
+  string                   type          = 2;
+  string                   href          = 3;
+  CatalogSongAttributes    attributes    = 4;
   CatalogSongRelationships relationships = 5;
 }
 
 message CatalogAlbumResource {
-  string id = 1;
-  string type = 2;
-  string href = 3;
-  CatalogAlbumAttributes attributes = 4;
+  string                    id            = 1;
+  string                    type          = 2;
+  string                    href          = 3;
+  CatalogAlbumAttributes    attributes    = 4;
   CatalogAlbumRelationships relationships = 5;
 }
 
 message CatalogPlaylistResource {
-  string id = 1;
-  string type = 2;
-  string href = 3;
-  CatalogPlaylistAttributes attributes = 4;
+  string                       id            = 1;
+  string                       type          = 2;
+  string                       href          = 3;
+  CatalogPlaylistAttributes    attributes    = 4;
   CatalogPlaylistRelationships relationships = 5;
 }
 
 message CatalogResources {
-  map<string, CatalogAlbumResource> albums = 1;
+  map<string, CatalogAlbumResource>    albums    = 1;
   map<string, CatalogPlaylistResource> playlists = 2;
-  map<string, CatalogSongResource> songs = 3;
-  map<string, CatalogArtistResource> artists = 4;
+  map<string, CatalogSongResource>     songs     = 3;
+  map<string, CatalogArtistResource>   artists   = 4;
 }
 
 message CatalogResponse {
-  repeated CatalogReference data = 1;
-  CatalogResources resources = 2;
+  repeated CatalogReference data      = 1;
+  CatalogResources          resources = 2;
 }
 
 message BrowseCatalogResponse {
-  repeated CatalogReference data = 1;
-  CatalogResources resources = 2;
-  string next_cursor = 3;
-  bool has_more = 4;
+  repeated CatalogReference data        = 1;
+  CatalogResources          resources   = 2;
+  string                    next_cursor = 3;
+  bool                      has_more    = 4;
 }
 
 message BrowseCatalogRequest {
-  string storefront = 1;
+  string storefront    = 1;
   string resource_type = 2;
-  int32 limit = 3;
-  string sort = 4;
-  string cursor = 5;
+  int32  limit         = 3;
+  string sort          = 4;
+  string cursor        = 5;
 }
 
 message SearchCatalogRequest {
   string storefront = 1;
-  string query = 2;
+  string query      = 2;
   // Per-group result cap. Applied independently to songs, artists and albums.
   int32 limit = 3;
   // Optional whitelist of resource types to search. Empty means search the
@@ -758,6 +763,6 @@ message SearchCatalogRequest {
 
 message SearchCatalogResponse {
   // References grouped by relevance, ordered songs → artists → albums.
-  repeated CatalogReference data = 1;
-  CatalogResources resources = 2;
+  repeated CatalogReference data      = 1;
+  CatalogResources          resources = 2;
 }

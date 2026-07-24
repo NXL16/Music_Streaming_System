@@ -2811,15 +2811,28 @@ export class GenerationService {
         trackCount: true,
         isSingle: true,
         upc: true,
+        canonicalReleaseId: true,
       },
     });
-    const albumKeyById = new Map(
-      albums.map((album) => [
-        album.resourceId,
-        this.albumPresentationKey(album),
-      ]),
-    );
-    const usedAlbumKeys = new Set<string>();
+    const albumById = new Map(albums.map((album) => [album.resourceId, album]));
+    const preferredAlbumIdByKey = new Map<string, string>();
+
+    for (const album of albums) {
+      const key = this.albumPresentationKey(album);
+      const preferredAlbumId = preferredAlbumIdByKey.get(key);
+      const preferredAlbum = preferredAlbumId
+        ? albumById.get(preferredAlbumId)
+        : undefined;
+
+      if (
+        !preferredAlbum ||
+        album.trackCount > preferredAlbum.trackCount ||
+        (album.trackCount === preferredAlbum.trackCount &&
+          album.resourceId.localeCompare(preferredAlbum.resourceId) < 0)
+      ) {
+        preferredAlbumIdByKey.set(key, album.resourceId);
+      }
+    }
 
     return sections.map((section) => {
       const contents = section.relationships?.contents;
@@ -2827,11 +2840,9 @@ export class GenerationService {
 
       const deduped = contents.data.filter((item) => {
         if (item.type !== 'albums') return true;
-        const semanticKey = albumKeyById.get(item.id);
-        if (!semanticKey) return true;
-        if (usedAlbumKeys.has(semanticKey)) return false;
-        usedAlbumKeys.add(semanticKey);
-        return true;
+        const album = albumById.get(item.id);
+        if (!album) return true;
+        return preferredAlbumIdByKey.get(this.albumPresentationKey(album)) === item.id;
       });
 
       return {
@@ -2857,7 +2868,13 @@ export class GenerationService {
     trackCount: number;
     isSingle: boolean;
     upc: string;
+    canonicalReleaseId: string;
   }): string {
+    const canonicalReleaseId = this.normalizedRecommendationText(
+      album.canonicalReleaseId,
+    );
+    if (canonicalReleaseId) return `canonical:${canonicalReleaseId}`;
+
     const upc = this.normalizedRecommendationText(album.upc);
     if (upc) return `upc:${upc}`;
 

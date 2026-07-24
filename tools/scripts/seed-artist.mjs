@@ -171,27 +171,91 @@ function recordingKey(title, artist) {
   return `${canonicalTrackTitle(title)}::${primaryArtistName(artist)}`;
 }
 
+// Những biến thể này là release khác, dù có thể dùng gần như cùng tracklist.
+// Chúng không được tự động gộp chỉ dựa vào metadata từ iTunes.
+const AUTO_GROUP_BLOCKED_EDITION_RE =
+  /\b(?:live|remaster(?:ed)?|re[- ]?recorded|acoustic|instrumental|karaoke|remix|soundtrack|greatest hits|compilation)\b/i;
+const EXPANDED_EDITION_SUFFIX_RE =
+  /\s*(?:[\[(]\s*)?(?:deluxe|expanded|extended|complete|anniversary)(?:\s+(?:edition|version))?(?:\s*[\])])?(?:\s*-\s*(?:deluxe|expanded|extended|complete|anniversary)(?:\s+(?:edition|version))?)?\s*$/i;
+
 /**
- * Khoá phát hành để phân biệt một album/single thực sự với hai collection ID
- * khác nhau nhưng là cùng một release từ nguồn ngoài. Collection ID chỉ được
- * dùng để khử trùng lặp kỹ thuật; khoá này dùng metadata + tracklist đã chuẩn
- * hoá, nên không gộp nhầm bản remix/live có track khác.
+ * A release-family key is intentionally conservative. A Single is not an
+ * edition of an album merely because its only song also appears in that album.
+ * A same-name provider variant is also allowed, but only after strict track
+ * containment proves that it is the richer edition.
  */
-function albumReleaseKey(album, tracks) {
-  const title = normalizeMusicText(album.collectionName || album.name);
+function albumEditionFamilyKey(album) {
+  const rawTitle = String(album.collectionName || album.name || '').trim();
+  if (!rawTitle || AUTO_GROUP_BLOCKED_EDITION_RE.test(rawTitle)) return '';
+
+  const baseTitle = rawTitle.replace(EXPANDED_EDITION_SUFFIX_RE, '').trim();
+  if (!baseTitle) return '';
+
   const artist = primaryArtistName(
     album.artistName || album.collectionArtistName || '',
   );
-  const releaseDate = String(album.releaseDate || '').slice(0, 10);
+  const title = normalizeMusicText(baseTitle);
+  return title && artist ? `${title}::${artist}` : '';
+}
 
-  // Danh sách track (và số lượng) CỐ TÌNH không đưa vào khoá: một release được
-  // nhà cung cấp lộ ra qua nhiều collectionId thường lệch nhau một bài bonus
-  // hoặc thứ tự (deluxe/standard, bản explicit/clean), nhưng với người nghe vẫn
-  // là MỘT release. Khoá này khớp với lá chắn catalog (assertNoSemanticAlbumDuplicate)
-  // và khoá hiển thị (albumPresentationKey) để cùng một release không lọt thành
-  // hai thẻ giống hệt. `tracks` giữ lại trong chữ ký hàm cho tương thích lời gọi.
-  void tracks;
-  return `${title}::${artist}::${releaseDate}`;
+function albumTrackKeys(tracks) {
+  return new Set(
+    tracks
+      .map(track => recordingKey(
+        track.trackName || track.title,
+        track.artistName || track.collectionArtistName || '',
+      ))
+      .filter(Boolean),
+  );
+}
+
+function isStrictTrackSubset(smaller, larger) {
+  return (
+    smaller.size > 0 &&
+    smaller.size < larger.size &&
+    [...smaller].every(trackKey => larger.has(trackKey))
+  );
+}
+
+/**
+ * Returns the richer edition only when we can prove a Standard/Deluxe relation:
+ * same conservative family key and every Standard recording exists in Deluxe.
+ * Otherwise returns null and both releases remain eligible for import.
+ */
+function preferredAlbumEdition(first, second) {
+  const firstFamily = albumEditionFamilyKey(first.album);
+  const secondFamily = albumEditionFamilyKey(second.album);
+  if (!firstFamily || firstFamily !== secondFamily) return null;
+
+  const firstTracks = albumTrackKeys(first.tracks);
+  const secondTracks = albumTrackKeys(second.tracks);
+  if (isStrictTrackSubset(firstTracks, secondTracks)) return second;
+  if (isStrictTrackSubset(secondTracks, firstTracks)) return first;
+  return null;
+}
+
+function selectPreferredAlbumEditions(candidates) {
+  const selected = [];
+
+  for (const candidate of candidates) {
+    let handled = false;
+    for (let index = 0; index < selected.length; index += 1) {
+      const current = selected[index];
+      const preferred = preferredAlbumEdition(current, candidate);
+      if (!preferred) continue;
+
+      const skipped = preferred === current ? candidate : current;
+      logWarn(
+        `Keeping richer edition "${preferred.album.collectionName}" (${preferred.tracks.length} tracks); skipping Standard/Deluxe variant "${skipped.album.collectionName}" (${skipped.tracks.length} tracks)`,
+      );
+      if (preferred === candidate) selected[index] = candidate;
+      handled = true;
+      break;
+    }
+    if (!handled) selected.push(candidate);
+  }
+
+  return selected;
 }
 
 function uniqueAlbumsByCollectionId(albums) {
@@ -1599,6 +1663,10 @@ async function createAndPublishAlbum(album, artistId, songMappings, artworkAsset
   logInfo(`Creating album draft "${albumName}" with ${tracks.length} tracks...`);
 
   const draftRes = await apiCall('POST', '/admin/catalog/albums/draft', {
+    // Source collection IDs are stable across seed runs. This prevents a
+    // reset/lost local state file from creating another Album row for the same
+    // provider collection.
+    resourceId: `itunes:${STOREFRONT}:${album.collectionId}`,
     storefront: STOREFRONT,
     name: albumName,
     artistName: album.artistName,
@@ -1740,23 +1808,23 @@ async function main() {
 
   logOk(`Selected ${selectedAlbums.length} album(s)`);
 
-  const albumsWithTracks = [];
-  const seenAlbumReleaseKeys = new Map();
+  const albumCandidates = [];
   for (const album of selectedAlbums) {
     logInfo(`Loading tracks for "${album.collectionName}"...`);
     const tracks = await lookupTracksITunes(album.collectionId);
-    const releaseKey = albumReleaseKey(album, tracks);
-    const duplicateOf = seenAlbumReleaseKeys.get(releaseKey);
-    if (duplicateOf) {
-      logWarn(
-        `Skipping duplicate release "${album.collectionName}" (same metadata + tracklist as collection ${duplicateOf})`,
-      );
-      continue;
-    }
-    seenAlbumReleaseKeys.set(releaseKey, album.collectionId);
-    albumsWithTracks.push({ album, tracks, releaseKey });
+    albumCandidates.push({
+      album,
+      tracks,
+    });
     logOk(`${album.collectionName}: ${tracks.length} tracks`);
     await sleep(300);
+  }
+
+  const albumsWithTracks = selectPreferredAlbumEditions(albumCandidates);
+  if (albumsWithTracks.length !== albumCandidates.length) {
+    logOk(
+      `Selected ${albumsWithTracks.length} release(s) after Standard/Deluxe resolution`,
+    );
   }
 
   // ── PHASE 2: Download ───────────────────────────────
@@ -1920,7 +1988,6 @@ async function main() {
 
   const songIdMap = state.get('songIdMap') || {};
   const checksumMap = state.get('checksumMap') || {};
-  const albumReleaseMap = state.get('albumReleaseMap') || {};
   // Chống lặp bài ở tầng catalog: mỗi bản thu (tựa-gốc + nghệ sĩ chính) chỉ ánh xạ
   // tới ĐÚNG MỘT songId, dù xuất hiện ở nhiều album. Đây là lớp chống lặp chính —
   // không phụ thuộc checksum (bản re-encode từ mỗi nguồn cho checksum khác nhau).
@@ -2003,7 +2070,7 @@ async function main() {
   // nhiều album do đã dedup theo bản thu — tránh tạo bản ghi bài trùng.
   const publishedSongIds = state.get('publishedSongIds') || {};
 
-  for (const { album, tracks, releaseKey } of albumsWithTracks) {
+  for (const { album, tracks } of albumsWithTracks) {
     const albumArtworkAssetId = albumArtworkAssetIds[album.collectionId] || artistArtworkAssetId;
     const releaseDate = album.releaseDate ? album.releaseDate.split('T')[0] : '';
     const albumName = album.collectionName;
@@ -2055,20 +2122,9 @@ async function main() {
       continue;
     }
 
-    const duplicateRelease = albumReleaseMap[releaseKey];
-    if (duplicateRelease && duplicateRelease !== album.collectionId) {
-      logWarn(
-        `Skipping duplicate release "${albumName}" — already published from collection ${duplicateRelease}`,
-      );
-      state.set(`albumPublished:${album.collectionId}`, true);
-      continue;
-    }
-
     try {
       await createAndPublishAlbum(album, artistId, songMappings, albumArtworkAssetId);
       state.set(`albumPublished:${album.collectionId}`, true);
-      albumReleaseMap[releaseKey] = album.collectionId;
-      state.set('albumReleaseMap', albumReleaseMap);
     } catch (err) {
       logErr(`Failed to publish album "${albumName}": ${err.message}`);
     }

@@ -29,7 +29,12 @@ export default function CollectionCard(props: CollectionCardProps) {
               <Link
                 className="text-transparent block size-full absolute inset-0 z-(--z-default) wrap-break-word"
                 href={props.slug}
-                onClick={props.onOpen}
+                onPointerDown={(event) => {
+                  if (event.button === 0) props.onOpen?.();
+                }}
+                onClick={(event) => {
+                  if (event.detail === 0) props.onOpen?.();
+                }}
               >
                 {props.title}
               </Link>
@@ -41,7 +46,10 @@ export default function CollectionCard(props: CollectionCardProps) {
                 variant="cover"
                 onPlay={() => {
                   props.onPlay?.();
-                  void playCatalogResource(props.resourceType, props.resourceId);
+                  void playCatalogResource(
+                    props.resourceType,
+                    props.resourceId,
+                  );
                 }}
               />
             )}

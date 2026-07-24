@@ -17,6 +17,8 @@ import {
   GenerateRecommendationsRequest,
   GetListeningAnalyticsRequest,
   ListeningAnalyticsResponse,
+  GetRecommendationQualityAnalyticsRequest,
+  RecommendationQualityAnalyticsResponse,
   SystemStationArtworkResponse,
   UpsertSystemStationArtworkRequest,
 } from '@musical/shared-proto';
@@ -166,6 +168,17 @@ export class RecommendationsService implements OnModuleInit {
   ): Promise<ListeningAnalyticsResponse> {
     return grpcFirstValueFrom(
       this.recommendationClient.getListeningAnalytics(request, this.metadata()),
+    );
+  }
+
+  async getRecommendationQualityAnalytics(
+    request: GetRecommendationQualityAnalyticsRequest,
+  ): Promise<RecommendationQualityAnalyticsResponse> {
+    return grpcFirstValueFrom(
+      this.recommendationClient.getRecommendationQualityAnalytics(
+        request,
+        this.metadata(),
+      ),
     );
   }
 

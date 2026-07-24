@@ -49,7 +49,7 @@ export class CatalogAuthoringService {
     private readonly prisma: PrismaService,
     private readonly catalogService: CatalogService,
     private readonly catalogAssetsService: CatalogAssetsService,
-  ) { }
+  ) {}
 
   saveArtistDraft(
     request: SaveCatalogArtistDraftRequest,
@@ -98,10 +98,7 @@ export class CatalogAuthoringService {
     this.validateDate(request.releaseDate, 'release_date');
     this.rejectDirectAssetMetadata(request.artwork, 'artwork');
     this.validateRichMetadata(request.editorialArtwork, 'editorial_artwork');
-    this.validateRichMetadata(
-      request.extendedAssetUrls,
-      'extended_asset_urls',
-    );
+    this.validateRichMetadata(request.extendedAssetUrls, 'extended_asset_urls');
     this.validateOffers(offers);
 
     return this.saveDraft(
@@ -114,8 +111,7 @@ export class CatalogAuthoringService {
         albumName: (request.albumName || '').trim(),
         artistName: (request.artistName || '').trim(),
         artworkAssetId: (request.artworkAssetId || '').trim(),
-        editorialArtworkAssetId:
-          (request.editorialArtworkAssetId || '').trim(),
+        editorialArtworkAssetId: (request.editorialArtworkAssetId || '').trim(),
         editorialArtwork: this.unwrapStruct(request.editorialArtwork),
         extendedAssetUrls: this.unwrapStruct(request.extendedAssetUrls),
         offers: offers.map((offer) => this.unwrapStruct(offer) ?? {}),
@@ -145,6 +141,8 @@ export class CatalogAuthoringService {
   saveAlbumDraft(
     request: SaveCatalogAlbumDraftRequest,
   ): Promise<CatalogDraftInfo> {
+    const resourceId = request.resourceId || randomUUID();
+    const canonicalReleaseId = (request.canonicalReleaseId || '').trim();
     const artistIds = this.list(request.artistIds);
     const audioTraits = this.list(request.audioTraits);
     const genreNames = this.list(request.genreNames);
@@ -153,6 +151,9 @@ export class CatalogAuthoringService {
 
     this.validateCommon(request.storefront, request.actorUserId);
     this.requireText(request.name, 'name', 255);
+    if (canonicalReleaseId) {
+      this.requireText(canonicalReleaseId, 'canonical_release_id', 128);
+    }
     this.validateAssignments(tracks);
     this.validateStringArray(artistIds, 'artist_ids', 128);
     this.validateStringArray(audioTraits, 'audio_traits', 64);
@@ -161,23 +162,19 @@ export class CatalogAuthoringService {
     this.rejectDirectAssetMetadata(request.artwork, 'artwork');
     this.validateRichMetadata(request.editorialArtwork, 'editorial_artwork');
     this.validateRichMetadata(request.editorialNotes, 'editorial_notes');
-    this.rejectDirectAssetMetadata(
-      request.editorialVideo,
-      'editorial_video',
-    );
+    this.rejectDirectAssetMetadata(request.editorialVideo, 'editorial_video');
     this.validateOffers(offers);
 
     return this.saveDraft(
       RESOURCE_TYPES.ALBUM,
-      request.resourceId || randomUUID(),
+      resourceId,
       request.storefront,
       request.actorUserId,
       this.json({
         name: request.name.trim(),
         artistName: (request.artistName || '').trim(),
         artworkAssetId: (request.artworkAssetId || '').trim(),
-        editorialArtworkAssetId:
-          (request.editorialArtworkAssetId || '').trim(),
+        editorialArtworkAssetId: (request.editorialArtworkAssetId || '').trim(),
         editorialVideoAssetId: (request.editorialVideoAssetId || '').trim(),
         editorialArtwork: this.unwrapStruct(request.editorialArtwork),
         editorialNotes: this.unwrapStruct(request.editorialNotes),
@@ -194,6 +191,7 @@ export class CatalogAuthoringService {
         recordLabel: (request.recordLabel || '').trim(),
         releaseDate: (request.releaseDate || '').trim() || null,
         upc: (request.upc || '').trim(),
+        canonicalReleaseId,
         url: (request.url || '').trim(),
         artistIds: this.unique(artistIds),
         tracks,
@@ -216,10 +214,7 @@ export class CatalogAuthoringService {
     this.rejectDirectAssetMetadata(request.artwork, 'artwork');
     this.validateRichMetadata(request.editorialArtwork, 'editorial_artwork');
     this.validateRichMetadata(request.editorialNotes, 'editorial_notes');
-    this.rejectDirectAssetMetadata(
-      request.editorialVideo,
-      'editorial_video',
-    );
+    this.rejectDirectAssetMetadata(request.editorialVideo, 'editorial_video');
     this.validateRichMetadata(
       request.plainEditorialCard,
       'plain_editorial_card',
@@ -240,8 +235,7 @@ export class CatalogAuthoringService {
         descriptionShort: (request.descriptionShort || '').trim(),
         descriptionStandard: (request.descriptionStandard || '').trim(),
         artworkAssetId: (request.artworkAssetId || '').trim(),
-        editorialArtworkAssetId:
-          (request.editorialArtworkAssetId || '').trim(),
+        editorialArtworkAssetId: (request.editorialArtworkAssetId || '').trim(),
         editorialVideoAssetId: (request.editorialVideoAssetId || '').trim(),
         editorialArtwork: this.unwrapStruct(request.editorialArtwork),
         editorialNotes: this.unwrapStruct(request.editorialNotes),
@@ -262,9 +256,7 @@ export class CatalogAuthoringService {
     );
   }
 
-  async getDraft(
-    request: GetCatalogDraftRequest,
-  ): Promise<CatalogDraftDetail> {
+  async getDraft(request: GetCatalogDraftRequest): Promise<CatalogDraftDetail> {
     const draft = await this.findDraft(request.draftId);
     return {
       draft: this.draftInfo(draft),
@@ -287,16 +279,14 @@ export class CatalogAuthoringService {
       },
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
-      ...(request.cursor
-        ? { cursor: { id: request.cursor }, skip: 1 }
-        : {}),
+      ...(request.cursor ? { cursor: { id: request.cursor }, skip: 1 } : {}),
     });
     const hasMore = drafts.length > limit;
     const page = hasMore ? drafts.slice(0, limit) : drafts;
 
     return {
       drafts: page.map((draft) => this.draftInfo(draft)),
-      nextCursor: hasMore ? page.at(-1)?.id ?? '' : '',
+      nextCursor: hasMore ? (page.at(-1)?.id ?? '') : '',
       hasMore,
     };
   }
@@ -307,12 +297,11 @@ export class CatalogAuthoringService {
     this.requireText(request.actorUserId, 'actor_user_id', 128);
     const draft = await this.findDraft(request.draftId);
     const lockKey = `${draft.resourceType}\u001f${draft.storefront}\u001f${draft.resourceId}`;
-    const resolvedAssets =
-      await this.catalogAssetsService.resolveForPublish(
-        draft.resourceType,
-        draft.resourceId,
-        this.object(draft.payload),
-      );
+    const resolvedAssets = await this.catalogAssetsService.resolveForPublish(
+      draft.resourceType,
+      draft.resourceId,
+      this.object(draft.payload),
+    );
 
     await this.prisma.$transaction(
       async (tx) => {
@@ -384,9 +373,7 @@ export class CatalogAuthoringService {
 
     return this.catalogService.getResources({
       storefront: draft.storefront,
-      resources: [
-        { type: draft.resourceType, id: draft.resourceId },
-      ],
+      resources: [{ type: draft.resourceType, id: draft.resourceId }],
     });
   }
 
@@ -497,9 +484,7 @@ export class CatalogAuthoringService {
           payload.artworkAssetId,
           'artwork_asset_id',
         ),
-        editorialArtworkAssetId: this.string(
-          payload.editorialArtworkAssetId,
-        ),
+        editorialArtworkAssetId: this.string(payload.editorialArtworkAssetId),
         artwork: this.jsonNullable(payload.artwork),
         editorialArtwork: this.jsonNullable(payload.editorialArtwork),
         extendedAssetUrls: this.jsonNullable(payload.extendedAssetUrls),
@@ -519,9 +504,7 @@ export class CatalogAuthoringService {
         genreNames: this.strings(payload.genreNames),
         hasLyrics: this.boolean(payload.hasLyrics),
         hasTimeSyncedLyrics: this.boolean(payload.hasTimeSyncedLyrics),
-        isHighResolutionMaster: this.boolean(
-          payload.isHighResolutionMaster,
-        ),
+        isHighResolutionMaster: this.boolean(payload.isHighResolutionMaster),
         isStudioMastered: this.boolean(payload.isStudioMastered),
         isVocalAttenuationAllowed: this.boolean(
           payload.isVocalAttenuationAllowed,
@@ -571,8 +554,13 @@ export class CatalogAuthoringService {
       this.strings(payload.artistIds),
     );
     const tracks = this.assignments(payload.tracks);
-    await this.assertSongs(tx, tracks.map((track) => track.songId), draft.storefront);
+    await this.assertSongs(
+      tx,
+      tracks.map((track) => track.songId),
+      draft.storefront,
+    );
 
+    const canonicalReleaseId = this.string(payload.canonicalReleaseId);
     const data = {
       storefront: draft.storefront,
       name: this.requiredString(payload.name, 'name'),
@@ -581,12 +569,8 @@ export class CatalogAuthoringService {
         payload.artworkAssetId,
         'artwork_asset_id',
       ),
-      editorialArtworkAssetId: this.string(
-        payload.editorialArtworkAssetId,
-      ),
-      editorialVideoAssetId: this.string(
-        payload.editorialVideoAssetId,
-      ),
+      editorialArtworkAssetId: this.string(payload.editorialArtworkAssetId),
+      editorialVideoAssetId: this.string(payload.editorialVideoAssetId),
       artwork: this.jsonNullable(payload.artwork),
       editorialArtwork: this.jsonNullable(payload.editorialArtwork),
       editorialNotes: this.jsonNullable(payload.editorialNotes),
@@ -614,8 +598,12 @@ export class CatalogAuthoringService {
 
     await tx.album.upsert({
       where: { id: draft.resourceId },
-      create: { id: draft.resourceId, ...data },
-      update: data,
+      create: {
+        id: draft.resourceId,
+        canonicalReleaseId: canonicalReleaseId || draft.resourceId,
+        ...data,
+      },
+      update: canonicalReleaseId ? { ...data, canonicalReleaseId } : data,
     });
     await tx.albumArtistCredit.deleteMany({
       where: { albumId: draft.resourceId },
@@ -802,7 +790,11 @@ export class CatalogAuthoringService {
     payload: JsonObject,
   ): Promise<void> {
     const tracks = this.assignments(payload.tracks);
-    await this.assertSongs(tx, tracks.map((track) => track.songId), draft.storefront);
+    await this.assertSongs(
+      tx,
+      tracks.map((track) => track.songId),
+      draft.storefront,
+    );
 
     const data = {
       storefront: draft.storefront,
@@ -814,12 +806,8 @@ export class CatalogAuthoringService {
         payload.artworkAssetId,
         'artwork_asset_id',
       ),
-      editorialArtworkAssetId: this.string(
-        payload.editorialArtworkAssetId,
-      ),
-      editorialVideoAssetId: this.string(
-        payload.editorialVideoAssetId,
-      ),
+      editorialArtworkAssetId: this.string(payload.editorialArtworkAssetId),
+      editorialVideoAssetId: this.string(payload.editorialVideoAssetId),
       artwork: this.jsonNullable(payload.artwork),
       editorialArtwork: this.jsonNullable(payload.editorialArtwork),
       editorialNotes: this.jsonNullable(payload.editorialNotes),

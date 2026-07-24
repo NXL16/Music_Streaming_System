@@ -4,10 +4,9 @@
  * Dedupe Albums — dọn album trùng lặp trong DB của song service.
  *
  * Cách gộp (an toàn, không mất liên kết bài hát):
- *   1. Nhóm album theo ĐÚNG khoá mà trang home dùng để dedup
- *      (albumPresentationKey): ưu tiên UPC, nếu không có thì
- *      `name::artist::releaseDate` đã normalize. → script chỉ xoá đúng những gì
- *      home đang ẩn, không gộp quá tay.
+ *   1. Chỉ nhóm các record clone: cùng tên, nghệ sĩ, artwork, single flag và
+ *      cùng tập bản thu (ưu tiên ISRC). UPC/ngày phát hành không được dùng vì
+ *      hai record clone từ nguồn khác vẫn có thể khác metadata kỹ thuật.
  *   2. Mỗi nhóm chọn 1 "survivor": nhiều track nhất → có artwork → tạo sớm nhất.
  *   3. Chuyển các track / artist-credit CHỈ có ở loser sang survivor (đổi position
  *      để tránh đụng unique constraint). Bài hát (bảng songs) KHÔNG bị xoá — chỉ
@@ -15,15 +14,16 @@
  *   4. Bù các field rỗng của survivor (artwork, upc, url...) từ loser nếu có.
  *   5. Cập nhật trackCount, xoá loser album (cascade dọn track/credit còn lại).
  *   6. Xoá CatalogDraft trỏ tới loser (nếu có) để guard không kẹt.
+ *   7. Xoá Recommendation snapshot của loser để Home không giữ card mồ côi.
  *
- * DB khác (recommendation snapshots) KHÔNG cần đụng: Fix 2 đã dedup ở render và
- * snapshot sẽ tự tái tạo.
+ * Standard/Deluxe không bị gộp ở đây: tracklist của chúng khác nhau. Chúng là
+ * edition hợp lệ và được xử lý bằng canonicalReleaseId ở Recommendation.
  *
  * Usage (chạy từ gốc repo):
  *   node tools/scripts/dedupe-albums.mjs            # DRY-RUN: chỉ in ra sẽ làm gì
  *   node tools/scripts/dedupe-albums.mjs --apply    # thực thi (trong 1 transaction)
  *
- * Đọc DATABASE_URL từ apps/song/.env.
+ * Đọc DATABASE_URL tương ứng từ apps/song/.env và apps/recommendation/.env.
  */
 
 import fs from 'node:fs';
@@ -48,10 +48,10 @@ const info = (m) => log(`${c.blue}ℹ${c.reset} ${m}`);
 const ok = (m) => log(`${c.green}✓${c.reset} ${m}`);
 const warn = (m) => log(`${c.yellow}⚠${c.reset} ${m}`);
 
-// ─── DATABASE_URL từ apps/song/.env ────────────────────
-function loadDatabaseUrl() {
-  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
-  const envPath = path.resolve(__dirname, '../../apps/song/.env');
+// ─── DATABASE_URL từ .env của service ───────────────────
+function loadDatabaseUrl(service, { allowProcessEnv = false } = {}) {
+  if (allowProcessEnv && process.env.DATABASE_URL) return process.env.DATABASE_URL;
+  const envPath = path.resolve(__dirname, `../../apps/${service}/.env`);
   if (!fs.existsSync(envPath)) {
     throw new Error(`Không tìm thấy ${envPath} và cũng không có env DATABASE_URL`);
   }
@@ -69,6 +69,31 @@ function loadDatabaseUrl() {
   throw new Error(`Không tìm thấy DATABASE_URL trong ${envPath}`);
 }
 
+async function invalidateRecommendationSnapshots(albumIds) {
+  if (albumIds.length === 0) return 0;
+
+  const client = new Client({ connectionString: loadDatabaseUrl('recommendation') });
+  await client.connect();
+  try {
+    // RecommendationSectionItem uses RESTRICT because resource is optional while
+    // a page is being assembled. Remove card links first; page links cascade when
+    // the snapshot is removed.
+    await client.query(
+      `DELETE FROM recommendation_section_items
+       WHERE "resourceType" = 'albums' AND "resourceId" = ANY($1::text[])`,
+      [albumIds],
+    );
+    const result = await client.query(
+      `DELETE FROM recommendation_resource_snapshots
+       WHERE "resourceType" = 'albums' AND "resourceId" = ANY($1::text[])`,
+      [albumIds],
+    );
+    return result.rowCount ?? 0;
+  } finally {
+    await client.end();
+  }
+}
+
 // ─── Normalize: PHẢI khớp normalizedCatalogText/normalizedRecommendationText ──
 function normalizeText(value) {
   return String(value || '')
@@ -81,15 +106,20 @@ function normalizeText(value) {
     .replace(/\s+/g, ' ');
 }
 
-// ─── presentationKey: PHẢI khớp albumPresentationKey (generation.service.ts) ──
-function presentationKey(album) {
-  const upc = normalizeText(album.upc);
-  if (upc) return `upc:${upc}`;
+function recordingKey(track) {
+  const isrc = normalizeText(track.isrc);
+  if (isrc) return `isrc:${isrc}`;
+  const name = normalizeText(track.catalogTitle);
+  const artist = normalizeText(track.artistName);
+  return name && artist ? `metadata:${name}::${artist}` : '';
+}
+
+function exactCloneKey(album, trackSignature) {
   const name = normalizeText(album.name);
   const artist = normalizeText(album.artistName);
-  const date = album.releaseDate ? album.releaseDate.toISOString().slice(0, 10) : '';
-  if (!name || !artist || !date) return `id:${album.id}`;
-  return [name, artist, date].join('::');
+  const artwork = String(album.artworkAssetId || '').trim();
+  if (!name || !artist || !artwork || !trackSignature) return `id:${album.id}`;
+  return [name, artist, artwork, album.isSingle ? 'single' : 'album', trackSignature].join('::');
 }
 
 // survivor: nhiều track nhất → có artwork → tạo sớm nhất → id nhỏ nhất
@@ -105,7 +135,7 @@ function pickSurvivor(group) {
 }
 
 async function main() {
-  const connectionString = loadDatabaseUrl();
+  const connectionString = loadDatabaseUrl('song', { allowProcessEnv: true });
   const client = new Client({ connectionString });
   await client.connect();
   log('');
@@ -118,12 +148,27 @@ async function main() {
               "isSingle", "createdAt"
          FROM albums`,
     );
+    const { rows: albumTracks } = await client.query(
+      `SELECT at."albumId", s.isrc, s."catalogTitle", s."artistName"
+         FROM album_tracks at
+         JOIN songs s ON s.id = at."songId"`,
+    );
     info(`Tổng số album: ${albums.length}`);
 
-    // Nhóm theo storefront + presentationKey (id:/... key = không nhóm được → bỏ qua)
+    const trackKeysByAlbum = new Map();
+    for (const track of albumTracks) {
+      const key = recordingKey(track);
+      if (!key) continue;
+      const keys = trackKeysByAlbum.get(track.albumId) || new Set();
+      keys.add(key);
+      trackKeysByAlbum.set(track.albumId, keys);
+    }
+
+    // Chỉ nhóm record clone thật sự. id:/... nghĩa là thiếu metadata để kết luận.
     const groups = new Map();
     for (const a of albums) {
-      const key = presentationKey(a);
+      const trackSignature = [...(trackKeysByAlbum.get(a.id) || [])].sort().join('|');
+      const key = exactCloneKey(a, trackSignature);
       if (key.startsWith('id:')) continue;
       const full = `${a.storefront}||${key}`;
       if (!groups.has(full)) groups.set(full, []);
@@ -142,6 +187,8 @@ async function main() {
     if (APPLY) await client.query('BEGIN');
 
     let deleted = 0, tracksMoved = 0, creditsMoved = 0, draftsRemoved = 0;
+    let invalidatedSnapshots = 0;
+    const deletedAlbumIds = [];
 
     for (const [full, group] of dupGroups) {
       const survivor = pickSurvivor(group);
@@ -235,6 +282,7 @@ async function main() {
         await client.query(`UPDATE albums SET "trackCount" = $2 WHERE id = $1`, [survivor.id, newTrackCount]);
         for (const loser of losers) {
           await client.query(`DELETE FROM albums WHERE id = $1`, [loser.id]);
+          deletedAlbumIds.push(loser.id);
         }
       }
       deleted += losers.length;
@@ -243,8 +291,9 @@ async function main() {
     }
 
     if (APPLY) {
+      invalidatedSnapshots = await invalidateRecommendationSnapshots(deletedAlbumIds);
       await client.query('COMMIT');
-      ok(`ĐÃ GHI. Xoá ${deleted} album, chuyển ${tracksMoved} track + ${creditsMoved} credit, dọn ${draftsRemoved} draft.`);
+      ok(`ĐÃ GHI. Xoá ${deleted} album, chuyển ${tracksMoved} track + ${creditsMoved} credit, dọn ${draftsRemoved} draft, vô hiệu ${invalidatedSnapshots} snapshot Recommendation.`);
     } else {
       warn(`DRY-RUN — chưa ghi gì. Sẽ xoá ${deleted} album, chuyển ${tracksMoved} track + ${creditsMoved} credit.`);
       info(`Chạy lại với ${c.bold}--apply${c.reset} để thực thi.`);

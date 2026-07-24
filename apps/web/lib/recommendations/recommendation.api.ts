@@ -21,6 +21,8 @@ let navigationHandoff: RecommendationResponse | null = null;
 let navigationHandoffExpiresAt = 0;
 const IMPRESSION_BATCH_DELAY_MS = 250;
 const MAX_IMPRESSIONS_PER_BATCH = 48;
+const RECOMMENDATION_OPEN_CONTEXT_KEY = "recommendation-open-context";
+const RECOMMENDATION_OPEN_CONTEXT_TTL_MS = 15 * 60 * 1000;
 
 type RecommendationInteractionInput = {
   sectionId: string;
@@ -29,6 +31,13 @@ type RecommendationInteractionInput = {
   position: number;
   modelVersion: number;
   eventType: "impression" | "open" | "play";
+};
+
+type RecommendationOpenContext = Omit<
+  RecommendationInteractionInput,
+  "eventType"
+> & {
+  expiresAt: number;
 };
 
 const pendingImpressions = new Map<string, RecommendationInteractionInput>();
@@ -114,9 +123,7 @@ export function getCachedHomeRecommendations(): RecommendationResponse | null {
 // This is intentionally not a general cache. It lets Home reuse the exact
 // response fetched by the Welcome screen during the immediately following
 // navigation, even while development caching is disabled.
-export function handoffHomeRecommendations(
-  response: RecommendationResponse,
-) {
+export function handoffHomeRecommendations(response: RecommendationResponse) {
   navigationHandoff = response;
   navigationHandoffExpiresAt = Date.now() + NAVIGATION_HANDOFF_TTL_MS;
 }
@@ -133,11 +140,7 @@ export function invalidateHomeRecommendationsCache() {
 }
 
 export async function getHomeRecommendations() {
-  if (
-    !HOME_CACHE_DISABLED &&
-    cachedResponse &&
-    Date.now() < cacheExpiresAt
-  ) {
+  if (!HOME_CACHE_DISABLED && cachedResponse && Date.now() < cacheExpiresAt) {
     return cachedResponse;
   }
   // Concurrent consumers (for example splash prefetch and Home mounting) can
@@ -222,7 +225,70 @@ export function recordRecommendationInteraction(
     return;
   }
 
+  if (input.eventType === "open") {
+    rememberRecommendationOpen(input);
+  }
+
   return http.post("/me/recommendations/interactions", input).catch(() => {
     // Feedback must never block navigation or playback.
   });
+}
+
+function rememberRecommendationOpen(input: RecommendationInteractionInput) {
+  if (typeof window === "undefined") return;
+  const context: RecommendationOpenContext = {
+    sectionId: input.sectionId,
+    resourceType: input.resourceType,
+    resourceId: input.resourceId,
+    position: input.position,
+    modelVersion: input.modelVersion,
+    expiresAt: Date.now() + RECOMMENDATION_OPEN_CONTEXT_TTL_MS,
+  };
+  try {
+    window.sessionStorage.setItem(
+      RECOMMENDATION_OPEN_CONTEXT_KEY,
+      JSON.stringify(context),
+    );
+  } catch {
+    // Storage may be unavailable in a restricted browser context. Telemetry
+    // remains best-effort and must not interrupt navigation.
+  }
+}
+
+/**
+ * Attributes a play from an album/playlist detail page to the recommendation
+ * card that opened it. The context is single-use and expires quickly so an
+ * unrelated later playback is never counted as a recommendation conversion.
+ */
+export function recordPlayFromRecommendationOpen(
+  resourceType: string,
+  resourceId: string,
+) {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = window.sessionStorage.getItem(RECOMMENDATION_OPEN_CONTEXT_KEY);
+    if (!raw) return;
+    const context = JSON.parse(raw) as RecommendationOpenContext;
+    if (
+      context.expiresAt < Date.now() ||
+      context.resourceType !== resourceType ||
+      context.resourceId !== resourceId
+    ) {
+      if (context.expiresAt < Date.now()) {
+        window.sessionStorage.removeItem(RECOMMENDATION_OPEN_CONTEXT_KEY);
+      }
+      return;
+    }
+    window.sessionStorage.removeItem(RECOMMENDATION_OPEN_CONTEXT_KEY);
+    void recordRecommendationInteraction({
+      sectionId: context.sectionId,
+      resourceType: context.resourceType,
+      resourceId: context.resourceId,
+      position: context.position,
+      modelVersion: context.modelVersion,
+      eventType: "play",
+    });
+  } catch {
+    // Invalid or unavailable session storage must not affect playback.
+  }
 }

@@ -119,3 +119,30 @@ export async function getAdminListeningAnalytics(days = 28) {
     }>;
   };
 }
+
+export async function getAdminRecommendationQuality(days = 28, limit = 20) {
+  return (
+    await http.get("/admin/recommendations/quality", {
+      params: { days, limit },
+    })
+  ).data as {
+    summary: RecommendationQualityMetric;
+    sections: RecommendationQualityMetric[];
+    activeModelVersion: number;
+    windowStartAt: string;
+    baselineApplied: boolean;
+  };
+}
+
+type RecommendationQualityMetric = {
+  sectionId: string;
+  modelVersion: number;
+  impressions: number;
+  opens: number;
+  plays: number;
+  dismisses: number;
+  users: number;
+  openRate: number;
+  playRate: number;
+  dismissRate: number;
+};

@@ -29,13 +29,21 @@ export default function CircleCard(props: CircleCardProps) {
               <Link
                 className="text-transparent block size-full absolute inset-0 z-(--z-default) wrap-break-word"
                 href={props.slug}
-                onClick={props.onOpen}
+                onPointerDown={(event) => {
+                  if (event.button === 0) props.onOpen?.();
+                }}
+                onClick={(event) => {
+                  if (event.detail === 0) props.onOpen?.();
+                }}
               >
                 {props.title}
               </Link>
             )}
 
-            <CardPlayButton ariaLabel={`Play ${props.title}`} variant="station" />
+            <CardPlayButton
+              ariaLabel={`Play ${props.title}`}
+              variant="station"
+            />
           </div>
         </div>
 

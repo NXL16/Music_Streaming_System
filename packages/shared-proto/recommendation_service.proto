@@ -16,6 +16,7 @@ service RecommendationService {
   rpc RecordListeningEvent(RecordListeningEventRequest) returns (RecordListeningEventResponse);
   rpc GenerateRecommendations(GenerateRecommendationsRequest) returns (GetHomeRecommendationsResponse);
   rpc GetListeningAnalytics(GetListeningAnalyticsRequest) returns (ListeningAnalyticsResponse);
+  rpc GetRecommendationQualityAnalytics(GetRecommendationQualityAnalyticsRequest) returns (RecommendationQualityAnalyticsResponse);
   rpc RecordRecommendationInteraction(RecordRecommendationInteractionRequest) returns (RecordRecommendationInteractionResponse);
   rpc UpsertSystemStationArtwork(UpsertSystemStationArtworkRequest) returns (SystemStationArtworkResponse);
 }
@@ -283,4 +284,33 @@ message ListeningAnalyticsResponse {
   int64                                 listeners   = 4;
   repeated ListeningAnalyticsTrendPoint trend       = 5;
   repeated ListeningAnalyticsTopSong    top_songs   = 6;
+}
+
+// Quality funnel for recommendation cards that were actually served. Completion
+// is intentionally excluded: listening events currently do not carry a
+// recommendation attribution token and must not be guessed from timing alone.
+message GetRecommendationQualityAnalyticsRequest {
+  int32 days  = 1;
+  int32 limit = 2;
+}
+
+message RecommendationQualityMetric {
+  string section_id    = 1;
+  int32  model_version = 2;
+  int64  impressions   = 3;
+  int64  opens         = 4;
+  int64  plays         = 5;
+  int64  dismisses     = 6;
+  int64  users         = 7;
+  double open_rate     = 8;
+  double play_rate     = 9;
+  double dismiss_rate  = 10;
+}
+
+message RecommendationQualityAnalyticsResponse {
+  RecommendationQualityMetric          summary              = 1;
+  repeated RecommendationQualityMetric sections             = 2;
+  int32                                active_model_version = 3;
+  string                               window_start_at      = 4;
+  bool                                 baseline_applied     = 5;
 }

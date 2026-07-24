@@ -1,10 +1,8 @@
-import {
-  getCatalogAlbum,
-  getCatalogPlaylistTracks,
-} from "./catalog.api";
+import { getCatalogAlbum, getCatalogPlaylistTracks } from "./catalog.api";
 import { mapCatalogTracks } from "./catalog.mapper";
 import { usePlayerStore } from "@/lib/player/use-player-store";
 import { isDailyMixId, loadDailyMix } from "@/lib/recommendations/daily-mix";
+import { recordPlayFromRecommendationOpen } from "@/lib/recommendations/recommendation.api";
 
 const pendingRequests = new Map<string, Promise<boolean>>();
 
@@ -29,6 +27,7 @@ export function playCatalogResource(
         if (!mix?.tracks.length) return false;
 
         usePlayerStore.getState().setQueue(mix.tracks);
+        recordPlayFromRecommendationOpen(resourceType, normalizedId);
         return true;
       })
       .catch(() => false)
@@ -50,6 +49,7 @@ export function playCatalogResource(
       if (!tracks.some((track) => track.playbackUrl)) return false;
 
       usePlayerStore.getState().setQueue(tracks);
+      recordPlayFromRecommendationOpen(resourceType, normalizedId);
       return true;
     })
     .catch(() => false)

@@ -45,7 +45,12 @@ export default function HeroCard(props: HeroCardProps) {
               <Link
                 href={props.slug}
                 aria-label={props.title}
-                onClick={props.onOpen}
+                onPointerDown={(event) => {
+                  if (event.button === 0) props.onOpen?.();
+                }}
+                onClick={(event) => {
+                  if (event.detail === 0) props.onOpen?.();
+                }}
                 className="block h-full w-full rounded-none"
               />
             )}

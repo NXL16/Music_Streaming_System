@@ -38,6 +38,7 @@ const LIMITED_STRING_FIELDS = new Set([
   'contentRating',
   'releaseDate',
   'upc',
+  'canonicalReleaseId',
   'playlistType',
   'editorialPlaylistKind',
   'lastModifiedDate',
@@ -62,8 +63,7 @@ export class RecommendationCatalogService implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
-    this.client =
-      this.grpcClient.getService<SongServiceClient>('SongService');
+    this.client = this.grpcClient.getService<SongServiceClient>('SongService');
   }
 
   supports(resourceType: string): boolean {
@@ -100,9 +100,8 @@ export class RecommendationCatalogService implements OnModuleInit {
     sort = 'latest',
     storefront = 'vn',
   ): Promise<CatalogResource[]> {
-    return (
-      await this.browsePage(resourceType, limit, sort, storefront)
-    ).resources;
+    return (await this.browsePage(resourceType, limit, sort, storefront))
+      .resources;
   }
 
   async browsePage(
@@ -212,8 +211,7 @@ export class RecommendationCatalogService implements OnModuleInit {
       const { editorialNotes, ...albumAttributes } = normalized;
       return {
         ...albumAttributes,
-        plainEditorialNotes:
-          normalized.plainEditorialNotes ?? editorialNotes,
+        plainEditorialNotes: normalized.plainEditorialNotes ?? editorialNotes,
       };
     }
 
@@ -232,8 +230,7 @@ export class RecommendationCatalogService implements OnModuleInit {
         short: descriptionShort ?? '',
         standard: descriptionStandard ?? '',
       },
-      plainEditorialNotes:
-        normalized.plainEditorialNotes ?? editorialNotes,
+      plainEditorialNotes: normalized.plainEditorialNotes ?? editorialNotes,
     };
   }
 
@@ -383,8 +380,7 @@ export class RecommendationCatalogService implements OnModuleInit {
       if (resource.relationships) {
         const rels = this.plainObject(resource.relationships);
         const albumsRel = rels.albums as
-          | { data?: Array<{ id?: string }> }
-          | undefined;
+          { data?: Array<{ id?: string }> } | undefined;
         const firstAlbum = albumsRel?.data?.[0];
         if (firstAlbum?.id && typeof firstAlbum.id === 'string') {
           albumId = firstAlbum.id;

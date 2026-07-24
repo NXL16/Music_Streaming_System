@@ -114,7 +114,7 @@ const BATCH_RESOURCE_TYPES = new Set([
 
 @Injectable()
 export class CatalogService {
-  constructor(private readonly prisma: PrismaService) { }
+  constructor(private readonly prisma: PrismaService) {}
 
   async getAlbum(request: GetCatalogAlbumRequest): Promise<CatalogResponse> {
     const storefront = this.storefront(request.storefront);
@@ -198,10 +198,7 @@ export class CatalogService {
     });
 
     const albumResources = Object.fromEntries(
-      albums.map((album) => [
-        album.id,
-        this.albumResource(album, storefront),
-      ]),
+      albums.map((album) => [album.id, this.albumResource(album, storefront)]),
     );
     const artistResources = this.collectAlbumArtists(albums, storefront);
 
@@ -269,16 +266,11 @@ export class CatalogService {
     const songs = hasMore ? page.slice(0, limit) : page;
 
     const songResources = Object.fromEntries(
-      songs.map((song) => [
-        song.id,
-        this.songResource(song, storefront),
-      ]),
+      songs.map((song) => [song.id, this.songResource(song, storefront)]),
     );
     const albumIds = [
       ...new Set(
-        songs.flatMap((song) =>
-          song.albumTracks.map(({ album }) => album.id),
-        ),
+        songs.flatMap((song) => song.albumTracks.map(({ album }) => album.id)),
       ),
     ];
     const albums = albumIds.length
@@ -288,10 +280,7 @@ export class CatalogService {
         })
       : [];
     const albumResources = Object.fromEntries(
-      albums.map((album) => [
-        album.id,
-        this.albumResource(album, storefront),
-      ]),
+      albums.map((album) => [album.id, this.albumResource(album, storefront)]),
     );
     const artistResources = {
       ...this.collectArtists(songs, [artistExists], storefront),
@@ -300,9 +289,7 @@ export class CatalogService {
 
     return {
       catalog: {
-        data: songs.map((song) =>
-          this.reference(song.id, 'songs', storefront),
-        ),
+        data: songs.map((song) => this.reference(song.id, 'songs', storefront)),
         resources: {
           albums: albumResources,
           playlists: {},
@@ -323,7 +310,10 @@ export class CatalogService {
     }
 
     const identifiers = request.resources.map((resource) => {
-      const type = this.required(resource.type, 'CATALOG_RESOURCE_TYPE_REQUIRED');
+      const type = this.required(
+        resource.type,
+        'CATALOG_RESOURCE_TYPE_REQUIRED',
+      );
       const id = this.required(resource.id, 'CATALOG_RESOURCE_ID_REQUIRED');
       if (!BATCH_RESOURCE_TYPES.has(type)) {
         this.throwInvalidArgument('CATALOG_RESOURCE_TYPE_UNSUPPORTED');
@@ -438,10 +428,7 @@ export class CatalogService {
       ]),
     );
     const songResources = Object.fromEntries(
-      uniqueSongs.map((song) => [
-        song.id,
-        this.songResource(song, storefront),
-      ]),
+      uniqueSongs.map((song) => [song.id, this.songResource(song, storefront)]),
     );
     const artistResources = {
       ...this.collectArtists(uniqueSongs, artists, storefront),
@@ -525,12 +512,12 @@ export class CatalogService {
         albums: {},
         playlists: includePlaylist
           ? {
-            [playlist.id]: this.playlistResource(
-              playlist,
-              storefront,
-              trackData,
-            ),
-          }
+              [playlist.id]: this.playlistResource(
+                playlist,
+                storefront,
+                trackData,
+              ),
+            }
           : {},
         songs,
         artists,
@@ -552,8 +539,8 @@ export class CatalogService {
         popularity === null
           ? undefined
           : {
-            popularity,
-          },
+              popularity,
+            },
     }));
 
     return {
@@ -581,6 +568,7 @@ export class CatalogService {
         releaseDate: this.dateOnly(album.releaseDate),
         trackCount: album.trackCount || tracks.length,
         upc: album.upc,
+        canonicalReleaseId: album.canonicalReleaseId || album.id,
         url: album.url,
         editorialArtwork: this.optionalObject(album.editorialArtwork),
         editorialNotes: this.optionalObject(album.editorialNotes),
@@ -775,9 +763,7 @@ export class CatalogService {
     });
   }
 
-  private protobufValue(
-    value: unknown,
-  ): Record<string, unknown> {
+  private protobufValue(value: unknown): Record<string, unknown> {
     if (value === null || value === undefined) {
       return {
         nullValue: 0,
@@ -957,7 +943,9 @@ export class CatalogService {
     const offset = syncById ? 0 : this.browseOffset(request.cursor);
 
     const orderBy =
-      sort === 'name' ? { name: 'asc' as const } : { createdAt: 'desc' as const };
+      sort === 'name'
+        ? { name: 'asc' as const }
+        : { createdAt: 'desc' as const };
     const songOrderBy =
       sort === 'name'
         ? { catalogTitle: 'asc' as const }
@@ -986,7 +974,7 @@ export class CatalogService {
         },
         nextCursor: hasMore
           ? syncById
-            ? page[page.length - 1]?.id ?? ''
+            ? (page[page.length - 1]?.id ?? '')
             : String(offset + page.length)
           : '',
         hasMore,
@@ -1022,7 +1010,7 @@ export class CatalogService {
         },
         nextCursor: hasMore
           ? syncById
-            ? page[page.length - 1]?.id ?? ''
+            ? (page[page.length - 1]?.id ?? '')
             : String(offset + page.length)
           : '',
         hasMore,
@@ -1042,9 +1030,7 @@ export class CatalogService {
       const page = playlists.slice(0, limit);
 
       return {
-        data: page.map((p) =>
-          this.reference(p.id, 'playlists', storefront),
-        ),
+        data: page.map((p) => this.reference(p.id, 'playlists', storefront)),
         resources: {
           albums: {},
           playlists: Object.fromEntries(
@@ -1064,7 +1050,7 @@ export class CatalogService {
         },
         nextCursor: hasMore
           ? syncById
-            ? page[page.length - 1]?.id ?? ''
+            ? (page[page.length - 1]?.id ?? '')
             : String(offset + page.length)
           : '',
         hasMore,
@@ -1094,7 +1080,7 @@ export class CatalogService {
       },
       nextCursor: hasMore
         ? syncById
-          ? page[page.length - 1]?.id ?? ''
+          ? (page[page.length - 1]?.id ?? '')
           : String(offset + page.length)
         : '',
       hasMore,
@@ -1132,8 +1118,8 @@ export class CatalogService {
             },
             include: songCatalogInclude,
             orderBy: { catalogTitle: 'asc' },
-          take: limit,
-        })
+            take: limit,
+          })
         : Promise.resolve([] as CatalogSongEntity[]),
       wanted.has('artists')
         ? this.prisma.artist.findMany({
@@ -1141,9 +1127,9 @@ export class CatalogService {
               storefront,
               name: { contains: query, mode: 'insensitive' },
             },
-          orderBy: { name: 'asc' },
-          take: limit,
-        })
+            orderBy: { name: 'asc' },
+            take: limit,
+          })
         : Promise.resolve([] as CatalogArtistEntity[]),
       wanted.has('albums')
         ? this.prisma.album.findMany({
@@ -1153,8 +1139,8 @@ export class CatalogService {
             },
             include: albumCatalogBrowseInclude,
             orderBy: { name: 'asc' },
-          take: limit,
-        })
+            take: limit,
+          })
         : Promise.resolve([] as CatalogAlbumBrowseEntity[]),
     ]);
 

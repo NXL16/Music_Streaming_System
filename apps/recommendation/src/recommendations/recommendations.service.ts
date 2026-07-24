@@ -17,6 +17,8 @@ import {
   RecordRecommendationInteractionRequest,
   RecordRecommendationInteractionResponse,
   RecommendationInteractionType,
+  GetRecommendationQualityAnalyticsRequest,
+  RecommendationQualityAnalyticsResponse,
 } from '@musical/shared-proto';
 import {
   HOME_SHELF_PREVIEW_LIMIT,
@@ -35,6 +37,7 @@ import {
 import { RecommendationCatalogService } from './recommendation-catalog.service';
 import { ListeningService, TasteProfile } from '../listening/listening.service';
 import { randomUUID } from 'node:crypto';
+import { PRODUCTION_RECOMMENDATION_MODEL_VERSION } from '../generation/production-recommendation-policy';
 
 const SUPPORTED_RESOURCE_TYPES = new Set([
   'albums',
@@ -205,7 +208,7 @@ export class RecommendationsService {
     // caller's currently published Home (personal or global cold-start page).
     // Besides preventing forged popularity signals, this keeps metrics tied to
     // a concrete recommendation section and model version.
-    const servedItem = await this.prisma.recommendationSection.findFirst({
+    const servedItems = await this.prisma.recommendationSection.findMany({
       where: {
         externalId: request.sectionId,
         items: {
@@ -225,12 +228,25 @@ export class RecommendationsService {
           ],
         },
       },
-      select: { pageId: true },
+      select: { pageId: true, page: { select: { scope: true, userId: true } } },
+      take: 2,
     });
+    const servedItem =
+      servedItems.find(
+        (item) =>
+          item.page.scope === PrismaPageScope.USER &&
+          item.page.userId === request.userId,
+      ) ??
+      servedItems.find((item) => item.page.scope === PrismaPageScope.GLOBAL);
     if (!servedItem) return { success: false };
 
     const occurredAt = new Date();
-    const dedupeKey = this.interactionDedupeKey(request, eventType, occurredAt);
+    const dedupeKey = this.interactionDedupeKey(
+      request,
+      eventType,
+      servedItem.pageId,
+      occurredAt,
+    );
     try {
       await this.prisma.recommendationInteraction.create({
         data: {
@@ -278,22 +294,162 @@ export class RecommendationsService {
     return { success: true };
   }
 
+  async getRecommendationQualityAnalytics(
+    request: GetRecommendationQualityAnalyticsRequest,
+  ): Promise<RecommendationQualityAnalyticsResponse> {
+    const days = Math.min(90, Math.max(1, request.days || 28));
+    const limit = Math.min(100, Math.max(1, request.limit || 20));
+    const rollingWindowStart = new Date(Date.now() - days * 86_400_000);
+    const configuredBaseline = this.getRecommendationQualityBaseline();
+    const since =
+      configuredBaseline && configuredBaseline > rollingWindowStart
+        ? configuredBaseline
+        : rollingWindowStart;
+    // Recently Played reflects explicit listener history, not a ranked model
+    // decision. Including it would dilute quality metrics for model versions.
+    const where = {
+      occurredAt: { gte: since },
+      sectionId: { not: 'user-recently-played' },
+    };
+
+    const [eventCounts, sectionUsers, summaryUsers] = await Promise.all([
+      this.prisma.recommendationInteraction.groupBy({
+        by: ['sectionId', 'modelVersion', 'eventType'],
+        where,
+        _count: { _all: true },
+      }),
+      this.prisma.recommendationInteraction.groupBy({
+        by: ['sectionId', 'modelVersion', 'userId'],
+        where,
+      }),
+      this.prisma.recommendationInteraction.findMany({
+        where,
+        distinct: ['userId'],
+        select: { userId: true },
+      }),
+    ]);
+
+    type Bucket = {
+      sectionId: string;
+      modelVersion: number;
+      impressions: number;
+      opens: number;
+      plays: number;
+      dismisses: number;
+      users: number;
+    };
+    const buckets = new Map<string, Bucket>();
+    const keyFor = (sectionId: string, modelVersion: number) =>
+      `${sectionId}:${modelVersion}`;
+
+    for (const row of eventCounts) {
+      const key = keyFor(row.sectionId, row.modelVersion);
+      const bucket = buckets.get(key) ?? {
+        sectionId: row.sectionId,
+        modelVersion: row.modelVersion,
+        impressions: 0,
+        opens: 0,
+        plays: 0,
+        dismisses: 0,
+        users: 0,
+      };
+      if (row.eventType === PrismaInteractionType.IMPRESSION) {
+        bucket.impressions += row._count._all;
+      } else if (row.eventType === PrismaInteractionType.OPEN) {
+        bucket.opens += row._count._all;
+      } else if (row.eventType === PrismaInteractionType.PLAY) {
+        bucket.plays += row._count._all;
+      } else if (row.eventType === PrismaInteractionType.DISMISS) {
+        bucket.dismisses += row._count._all;
+      }
+      buckets.set(key, bucket);
+    }
+
+    for (const row of sectionUsers) {
+      const bucket = buckets.get(keyFor(row.sectionId, row.modelVersion));
+      if (bucket) bucket.users += 1;
+    }
+
+    const toMetric = (bucket: Bucket) => ({
+      ...bucket,
+      openRate: bucket.impressions ? bucket.opens / bucket.impressions : 0,
+      playRate: bucket.impressions ? bucket.plays / bucket.impressions : 0,
+      dismissRate: bucket.impressions
+        ? bucket.dismisses / bucket.impressions
+        : 0,
+    });
+    const sections = [...buckets.values()]
+      .sort(
+        (left, right) =>
+          right.impressions - left.impressions ||
+          left.sectionId.localeCompare(right.sectionId),
+      )
+      .slice(0, limit)
+      .map(toMetric);
+    const total = [...buckets.values()].reduce<Bucket>(
+      (current, bucket) => ({
+        ...current,
+        impressions: current.impressions + bucket.impressions,
+        opens: current.opens + bucket.opens,
+        plays: current.plays + bucket.plays,
+        dismisses: current.dismisses + bucket.dismisses,
+      }),
+      {
+        sectionId: 'all',
+        modelVersion: 0,
+        impressions: 0,
+        opens: 0,
+        plays: 0,
+        dismisses: 0,
+        users: summaryUsers.length,
+      },
+    );
+
+    return {
+      summary: toMetric(total),
+      sections,
+      activeModelVersion: PRODUCTION_RECOMMENDATION_MODEL_VERSION,
+      windowStartAt: since.toISOString(),
+      baselineApplied: Boolean(
+        configuredBaseline && configuredBaseline > rollingWindowStart,
+      ),
+    };
+  }
+
+  private getRecommendationQualityBaseline(): Date | null {
+    const value = process.env.RECOMMENDATION_QUALITY_BASELINE_AT?.trim();
+    if (!value) return null;
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) || parsed > new Date()
+      ? null
+      : parsed;
+  }
+
   private interactionDedupeKey(
     request: RecordRecommendationInteractionRequest,
     eventType: PrismaInteractionType,
+    pageId: string,
     occurredAt: Date,
   ): string {
-    const bucket = Math.floor(
-      occurredAt.getTime() / INTERACTION_DEDUPE_WINDOW_MS,
-    );
-    return [
+    const base = [
       request.userId,
+      pageId,
       request.sectionId,
       request.resourceType,
       request.resourceId,
       eventType,
-      bucket,
-    ].join(':');
+    ];
+
+    // An impression means that this user saw this card in this published Home
+    // snapshot. It is deliberately counted once, not once every 30 seconds.
+    if (eventType === PrismaInteractionType.IMPRESSION) {
+      return base.join(':');
+    }
+
+    const bucket = Math.floor(
+      occurredAt.getTime() / INTERACTION_DEDUPE_WINDOW_MS,
+    );
+    return [...base, bucket].join(':');
   }
 
   async upsertCatalogResources(resources: CatalogResource[]): Promise<number> {
@@ -1154,16 +1310,17 @@ export class RecommendationsService {
     const data: RecommendationRef[] = [];
 
     for (const sectionRef of response.data) {
+      if (sectionRef.id === 'user-recently-played') continue;
+
       const section = personalRecommendation[sectionRef.id];
       const contents = section?.relationships?.contents;
       const primaryContent = section?.relationships?.primaryContent;
       const refs = [...(contents?.data ?? []), ...(primaryContent?.data ?? [])];
+
       if (!section || refs.length === 0) {
         data.push(sectionRef);
         continue;
       }
-
-      if (sectionRef.id === 'user-recently-played') continue;
 
       const preview: RecommendationRef[] = [];
       const sectionResources = new Set<string>();
@@ -2375,6 +2532,7 @@ export class RecommendationsService {
       releaseDate: this.stringValue(attributes.releaseDate),
       trackCount: this.numberValue(attributes.trackCount),
       upc: this.stringValue(attributes.upc),
+      canonicalReleaseId: this.stringValue(attributes.canonicalReleaseId),
       isCompilation: this.booleanValue(attributes.isCompilation),
       isComplete: this.booleanValue(attributes.isComplete),
       isStudioMastered: this.booleanValue(attributes.isStudioMastered),

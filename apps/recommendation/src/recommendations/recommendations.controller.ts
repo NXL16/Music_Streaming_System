@@ -16,6 +16,8 @@ import {
   GenerateRecommendationsRequest,
   GetListeningAnalyticsRequest,
   ListeningAnalyticsResponse,
+  GetRecommendationQualityAnalyticsRequest,
+  RecommendationQualityAnalyticsResponse,
   UpsertSystemStationArtworkRequest,
   SystemStationArtworkResponse,
 } from '@musical/shared-proto';
@@ -171,6 +173,14 @@ export class RecommendationsController implements RecommendationServiceControlle
     request: GetListeningAnalyticsRequest,
   ): Promise<ListeningAnalyticsResponse> {
     return this.listeningService.getListeningAnalytics(request);
+  }
+
+  getRecommendationQualityAnalytics(
+    request: GetRecommendationQualityAnalyticsRequest,
+  ): Promise<RecommendationQualityAnalyticsResponse> {
+    return this.recommendationsService.getRecommendationQualityAnalytics(
+      request,
+    );
   }
 
   async upsertSystemStationArtwork(
