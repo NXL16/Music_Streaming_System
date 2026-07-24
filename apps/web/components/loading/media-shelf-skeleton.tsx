@@ -8,6 +8,7 @@ type MediaShelfDisplayKind =
 
 interface MediaShelfSkeletonProps {
   displayKind: MediaShelfDisplayKind;
+  isMoreLike?: boolean;
 }
 
 const mediaShelfPresets = {
@@ -30,7 +31,6 @@ const mediaShelfPresets = {
     "--grid-type": "C",
     "--grid-rows": "1",
     "--standard-lockup-shadow-offset": "15px",
-    "--shelf-aspect-ratio": "1.00",
   },
   MusicCoverShelf: {
     "--grid-max-content-xsmall": "144px",
@@ -115,6 +115,7 @@ const mediaShelfVisibility = {
 
 export default memo(function MediaShelfSkeleton({
   displayKind,
+  isMoreLike = false,
 }: MediaShelfSkeletonProps) {
   const isHeroShelf = displayKind === "MusicNotesHeroShelf";
   const isCircleShelf = displayKind === "MusicCircleCoverShelf";
@@ -157,16 +158,28 @@ export default memo(function MediaShelfSkeleton({
 
       <div>
         <div className="flex items-center justify-end mx-(--bodyGutter) mb-3.25">
-          <div className="flex-1">
-            <h2 className="inline-block leading-none">
-              <div className="h-7 w-48 rounded-md perfect-sync-shimmer" />
-            </h2>
-          </div>
+          {isMoreLike ? (
+            <>
+              <div className="mt-0.75 pe-3">
+                <div className="size-10 rounded-[5px] perfect-sync-shimmer" />
+              </div>
+              <div className="flex-1">
+                <div className="h-4 w-20 mt-0.75 rounded perfect-sync-shimmer" />
+                <div className="h-6 w-44 mt-1 rounded-md perfect-sync-shimmer" />
+              </div>
+            </>
+          ) : (
+            <div className="flex-1">
+              <h2 className="inline-block leading-none">
+                <div className="h-7 w-48 rounded-md perfect-sync-shimmer" />
+              </h2>
+            </div>
+          )}
         </div>
 
         <div className="pb-8">
           <section
-            className="box-border px-(--shelfGridPaddingInline,var(--bodyGutter)) relative w-full z-(--z-default)"
+            className="box-border px-(--shelfGridPaddingInline,var(--bodyGutter)) relative w-full z-(--z-default) max-[999px]:ps-(--shelfGridPaddingInline,var(--bodyGutter)) max-[999px]:pe-0"
             style={mediaShelfPresets[displayKind] as CSSProperties}
           >
             <div className="box-content -mx-0.5 overflow-visible px-0.5 w-full">

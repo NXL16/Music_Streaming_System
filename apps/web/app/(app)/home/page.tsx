@@ -12,7 +12,7 @@ import {
   getRecommendationSection,
   recordRecommendationInteraction,
 } from "@/lib/recommendations/recommendation.api";
-import MediaShelfSkeleton from "@/components/loading/loading";
+import MediaShelfSkeleton from "@/components/loading/media-shelf-skeleton";
 import Loading from "@/app/loading";
 import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
 import { useRecentlyPlayedSection } from "@/lib/recommendations/use-recently-played-section";
@@ -40,8 +40,11 @@ const PERSONALIZED_HOME_ORDER = [
 
 export default function HomePage() {
   const { data, loading, error, retry } = useHomeRecommendations();
-  const { shelf: recentlyPlayedShelf } = useRecentlyPlayedSection();
-  const showHomeLoading = useMinimumLoadingDuration(loading);
+  const { shelf: recentlyPlayedShelf, loading: recentlyPlayedLoading } =
+    useRecentlyPlayedSection();
+  const showHomeLoading = useMinimumLoadingDuration(
+    loading || recentlyPlayedLoading,
+  );
   const [selectedShelfId, setSelectedShelfId] = useState<string | null>(null);
   const [loadedShelves, setLoadedShelves] = useState<Record<string, HomeShelf>>(
     {},
@@ -172,7 +175,7 @@ export default function HomePage() {
         <>
           <MediaShelfSkeleton displayKind="MusicNotesHeroShelf" />
           <MediaShelfSkeleton displayKind="MusicCoverShelf" />
-          <MediaShelfSkeleton displayKind="MusicCoverShelf" />
+          <MediaShelfSkeleton displayKind="MusicCoverShelf" isMoreLike />
         </>
       )}
 
