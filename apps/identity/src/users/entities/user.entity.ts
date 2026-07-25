@@ -16,7 +16,8 @@ export class UserEntity {
   updatedAt!: Date;
 
   // Dữ liệu từ MongoDB
-  avatar?: string | null;
+  avatarAssetId?: string | null;
+  avatarUrl?: string | null;
   bio?: string;
   permissions?: string[];
   stats?: {

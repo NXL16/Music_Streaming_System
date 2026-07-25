@@ -166,7 +166,8 @@ export function normalizeAndValidateUpdateProfileRequest(
   request: UpdateProfileRequest,
 ): UpdateProfileRequest {
   const displayName = request.displayName?.trim();
-  const avatar = request.avatar?.trim();
+  const avatarAssetId = request.avatarAssetId?.trim();
+  const avatarUrl = request.avatarUrl?.trim();
   const bio = request.bio?.trim();
 
   if (!request.userId) {
@@ -190,10 +191,25 @@ export function normalizeAndValidateUpdateProfileRequest(
     });
   }
 
+  if (avatarAssetId && avatarAssetId.length > 128) {
+    throw new RpcException({
+      code: status.INVALID_ARGUMENT,
+      message: 'avatarAssetId tối đa 128 ký tự',
+    });
+  }
+
+  if (avatarUrl && avatarUrl.length > 2000) {
+    throw new RpcException({
+      code: status.INVALID_ARGUMENT,
+      message: 'avatarUrl tối đa 2000 ký tự',
+    });
+  }
+
   return {
     ...request,
     displayName,
-    avatar: avatar || undefined,
+    avatarAssetId: avatarAssetId || undefined,
+    avatarUrl: avatarUrl || undefined,
     bio: bio || undefined,
   };
 }

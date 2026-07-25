@@ -16,7 +16,10 @@ export class UserMetadata {
   userId!: string; // ID từ Postgres truyền sang
 
   @Prop({ default: null })
-  avatar?: string;
+  avatarAssetId?: string;
+
+  @Prop({ default: null })
+  avatarUrl?: string;
 
   @Prop({ maxlength: 500, default: '' })
   bio?: string;

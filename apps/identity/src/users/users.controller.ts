@@ -50,7 +50,8 @@ export class UsersController {
 
     const user = await this.usersService.update(normalizedRequest.userId, {
       displayName: normalizedRequest.displayName,
-      avatar: normalizedRequest.avatar,
+      avatarAssetId: normalizedRequest.avatarAssetId,
+      avatarUrl: normalizedRequest.avatarUrl,
       bio: normalizedRequest.bio,
     });
 

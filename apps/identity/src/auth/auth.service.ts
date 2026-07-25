@@ -1412,7 +1412,7 @@ export class AuthService {
         });
       }
 
-      const user = await this.usersService.findById(payload.sub, false);
+      const user = await this.usersService.findById(payload.sub, true);
       if (!user || !user.isActive) {
         throw new RpcException({
           code: status.PERMISSION_DENIED,

@@ -12,7 +12,8 @@ import { PrismaService } from '../common/database/prisma.service';
 
 type MetadataLean = {
   userId?: string;
-  avatar?: string | null;
+  avatarAssetId?: string | null;
+  avatarUrl?: string | null;
   bio?: string;
   permissions?: string[];
   stats?: {
@@ -32,7 +33,8 @@ type CreateUserInput = {
 
 type UpdateUserInput = {
   displayName?: string;
-  avatar?: string;
+  avatarAssetId?: string;
+  avatarUrl?: string;
   bio?: string;
 };
 
@@ -414,8 +416,11 @@ export class UsersService {
         { userId: id },
         {
           $set: {
-            avatar: data.avatar,
-            bio: data.bio,
+            ...(data.avatarAssetId !== undefined && {
+              avatarAssetId: data.avatarAssetId,
+            }),
+            ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl }),
+            ...(data.bio !== undefined && { bio: data.bio }),
           },
         },
         { new: true, upsert: true }, // đảm bảo luôn có metadata
@@ -591,7 +596,8 @@ export class UsersService {
       updatedAt: user.updatedAt,
 
       // Mongo (safe access)
-      avatar: metadata?.avatar ?? null,
+      avatarAssetId: metadata?.avatarAssetId ?? null,
+      avatarUrl: metadata?.avatarUrl ?? null,
       bio: metadata?.bio ?? '',
       permissions: metadata?.permissions ?? [],
       stats: metadata?.stats ?? {
