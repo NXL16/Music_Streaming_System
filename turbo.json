@@ -1,6 +1,13 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
-  "globalPassThroughEnv": ["LOCALAPPDATA", "GOCACHE", "DEV_CACHE_MODE", "NEXT_PUBLIC_DEV_CACHE_MODE"],
+  "globalPassThroughEnv": [
+    "LOCALAPPDATA",
+    "GOCACHE",
+    "DEV_CACHE_MODE",
+    "NEXT_PUBLIC_DEV_CACHE_MODE",
+    "APP_ENV",
+    "NEXT_PUBLIC_API_URL"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

@@ -34,7 +34,7 @@ const nextConfig: NextConfig = {
   experimental: {
     optimizePackageImports: ["lucide-react", "motion"],
   },
-  allowedDevOrigins: ["192.168.1.100"],
+  allowedDevOrigins: ["music.404hz.me"],
 };
 
 export default nextConfig;

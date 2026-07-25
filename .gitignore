@@ -32,6 +32,8 @@ Cargo.lock
 .env.local
 .env.*.local
 .env.development
+.env.*
+!.env.example
 .dev.vars
 
 # Local source files consumed by the controlled Asset-service import tool.
