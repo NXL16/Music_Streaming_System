@@ -11,9 +11,11 @@ import {
 import { JwtStrategy } from '../common/strategies/jwt.strategy';
 import { StrictJwtAuthGuard } from '../common/guards/strict-jwt-auth.guard';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
+import { AssetsModule } from '../assets/assets.module';
 
 @Module({
   imports: [
+    AssetsModule,
     ClientsModule.registerAsync([
       {
         name: 'IDENTITY_PACKAGE',

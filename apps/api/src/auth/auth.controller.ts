@@ -44,6 +44,7 @@ import {
 } from './dto/two-factor.dto';
 import { GoogleLoginDto } from './dto/google-login.dto';
 import { SetUserRoleDto } from './dto/set-user-role.dto';
+import { AvatarUploadDto } from './dto/avatar-upload.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -185,7 +186,6 @@ export class AuthController {
     const data = await this.authService.updateProfile({
       userId: user.userId,
       displayName: updateProfileDto.displayName,
-      avatar: updateProfileDto.avatar,
       bio: updateProfileDto.bio,
     });
 
@@ -193,6 +193,38 @@ export class AuthController {
       data,
       'AUTH_UPDATE_PROFILE_SUCCESS',
       'Cập nhật thông tin tài khoản thành công',
+    );
+  }
+
+  @Post('me/avatar/uploads')
+  @UseGuards(StrictJwtAuthGuard)
+  async requestAvatarUpload(
+    @Req() req: Request,
+    @Body() dto: AvatarUploadDto,
+  ) {
+    const user = req.user as JwtUser;
+    const data = await this.authService.requestAvatarUpload(user.userId, dto);
+    return this.formatResponse(
+      data,
+      'AUTH_AVATAR_UPLOAD_REQUESTED',
+      'Đã tạo URL tải ảnh đại diện',
+    );
+  }
+
+  @Post('me/avatar/:assetId/finalize')
+  @UseGuards(StrictJwtAuthGuard)
+  async finalizeAvatarUpload(
+    @Req() req: Request,
+    @Param('assetId') assetId: string,
+  ) {
+    const user = req.user as JwtUser;
+    const data = await this.authService.finalizeAvatarUpload(user.userId, assetId);
+    return this.formatResponse(
+      data,
+      'AUTH_AVATAR_UPLOAD_FINALIZED',
+      data.user
+        ? 'Cập nhật ảnh đại diện thành công'
+        : 'Ảnh đại diện đang được xử lý',
     );
   }
 

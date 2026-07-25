@@ -35,10 +35,18 @@ import type {
   UserProfile,
   EmptyResponse,
   IdentityServiceClient,
+  RequestAssetUploadResponse,
+  AssetResponse,
+} from '@musical/shared-proto';
+import {
+  AssetKind,
+  AssetPurpose,
+  AssetStatus,
 } from '@musical/shared-proto';
 import { grpcFirstValueFrom } from '../common/utils/grpc-timeout';
 import { ConfigService } from '@nestjs/config';
 import { Metadata } from '@grpc/grpc-js';
+import { AssetsService } from '../assets/assets.service';
 
 @Injectable()
 export class AuthService implements OnModuleInit {
@@ -47,6 +55,7 @@ export class AuthService implements OnModuleInit {
   constructor(
     @Inject('IDENTITY_PACKAGE') private readonly client: ClientGrpc,
     private readonly configService: ConfigService,
+    private readonly assetsService: AssetsService,
   ) {}
 
   private metadata(): Metadata {
@@ -133,6 +142,63 @@ export class AuthService implements OnModuleInit {
     return await grpcFirstValueFrom(
       this.identityService.updateProfile(request, this.metadata()),
     );
+  }
+
+  async requestAvatarUpload(
+    userId: string,
+    input: {
+      filename: string;
+      contentType: string;
+      checksum: string;
+      sizeBytes: number;
+    },
+  ): Promise<RequestAssetUploadResponse> {
+    return this.assetsService.requestUpload({
+      actorUserId: userId,
+      kind: AssetKind.ASSET_KIND_IMAGE,
+      purpose: AssetPurpose.ASSET_PURPOSE_PROFILE_AVATAR,
+      ...input,
+    });
+  }
+
+  async finalizeAvatarUpload(
+    userId: string,
+    assetId: string,
+  ): Promise<{ asset: AssetResponse['asset']; user?: UserProfile }> {
+    const response = await this.assetsService.finalizeUpload({
+      assetId,
+      actorUserId: userId,
+    });
+    const asset = response.asset;
+    if (!asset) {
+      throw new Error('ASSET_FINALIZE_RESPONSE_INVALID');
+    }
+    if (asset.status !== AssetStatus.ASSET_STATUS_READY) {
+      return { asset };
+    }
+
+    await this.assetsService.reconcileUsages({
+      ownerService: 'identity',
+      ownerType: 'user',
+      ownerId: userId,
+      usages: [
+        {
+          slot: 'avatar',
+          assetId: asset.id,
+          expectedKind: AssetKind.ASSET_KIND_IMAGE,
+          expectedPurpose: AssetPurpose.ASSET_PURPOSE_PROFILE_AVATAR,
+        },
+      ],
+    });
+    const current = await this.getProfile({ userId });
+    const user = await this.updateProfile({
+      userId,
+      displayName: current.displayName,
+      bio: current.bio || undefined,
+      avatarAssetId: asset.id,
+      avatarUrl: asset.publicUrl,
+    });
+    return { asset, user };
   }
 
   async changePassword(request: ChangePasswordRequest): Promise<EmptyResponse> {

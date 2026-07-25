@@ -33,5 +33,6 @@ import { AssetsService } from './assets.service';
   ],
   controllers: [AssetsController, ArtistStudioAssetsController],
   providers: [AssetsService],
+  exports: [AssetsService],
 })
 export class AssetsModule {}

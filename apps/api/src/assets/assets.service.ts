@@ -12,6 +12,8 @@ import {
   ListAssetUsagesResponse,
   RequestAssetUploadRequest,
   RequestAssetUploadResponse,
+  SyncAssetUsagesRequest,
+  SyncAssetUsagesResponse,
 } from '@musical/shared-proto';
 import { ConfigService } from '@nestjs/config';
 import { Metadata } from '@grpc/grpc-js';
@@ -73,5 +75,13 @@ export class AssetsService implements OnModuleInit {
 
   deleteAsset(request: DeleteAssetRequest): Promise<DeleteAssetResponse> {
     return grpcFirstValueFrom(this.client.deleteAsset(request, this.metadata()));
+  }
+
+  reconcileUsages(
+    request: SyncAssetUsagesRequest,
+  ): Promise<SyncAssetUsagesResponse> {
+    return grpcFirstValueFrom(
+      this.client.reconcileAssetUsages(request, this.metadata()),
+    );
   }
 }
