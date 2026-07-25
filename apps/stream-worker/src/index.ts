@@ -1,6 +1,6 @@
 interface Env {
   MUSIC_BUCKET: R2Bucket;
-  ALLOWED_ORIGIN: string;
+  ALLOWED_ORIGINS: string;
 }
 
 const EDGE_TTL = 86400;
@@ -42,14 +42,22 @@ export default {
     env: Env,
     ctx: ExecutionContext,
   ): Promise<Response> {
+    const origin = request.headers.get("Origin") ?? "";
+    const isAllowedOrigin = env.ALLOWED_ORIGINS.split(",")
+      .map((d) => d.trim())
+      .includes(origin);
     const cors: Record<string, string> = {
-      "Access-Control-Allow-Origin": env.ALLOWED_ORIGIN,
       "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
       "Access-Control-Allow-Headers": "Range, If-None-Match",
       "Access-Control-Expose-Headers":
         "Content-Range, Content-Length, Accept-Ranges, ETag, Server-Timing, X-Stream-Cache",
-      "Timing-Allow-Origin": env.ALLOWED_ORIGIN,
+      Vary: "Origin",
     };
+
+    if (isAllowedOrigin) {
+      cors["Access-Control-Allow-Origin"] = origin;
+      cors["Timing-Allow-Origin"] = origin;
+    }
 
     if (request.method === "OPTIONS") {
       return new Response(null, {
