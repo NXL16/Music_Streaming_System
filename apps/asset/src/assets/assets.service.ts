@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { status } from '@grpc/grpc-js';
 import { RpcException } from '@nestjs/microservices';
 import {
@@ -33,6 +34,7 @@ import { StorageService } from '../storage/storage.service';
 
 const MAX_LIST_LIMIT = 100;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
 const IMAGE_TYPES = new Set([
   'image/jpeg',
@@ -67,7 +69,14 @@ export class AssetsService {
     this.validateUpload(kind, purpose, contentType, checksum, sizeBytes);
 
     const existing = await this.prisma.asset.findUnique({
-      where: { kind_purpose_checksum: { kind, purpose, checksum } },
+      where: {
+        kind_purpose_checksum_createdBy: {
+          kind,
+          purpose,
+          checksum,
+          createdBy: request.actorUserId,
+        },
+      },
     });
 
     if (
@@ -89,7 +98,13 @@ export class AssetsService {
       };
     }
 
-    const objectKey = this.objectKey(kind, checksum, filename);
+    const objectKey = this.objectKey(
+      kind,
+      purpose,
+      request.actorUserId,
+      checksum,
+      filename,
+    );
     const asset = existing
       ? await this.prisma.asset.update({
           where: { id: existing.id },
@@ -133,6 +148,9 @@ export class AssetsService {
   ): Promise<AssetResponse> {
     this.requireText(request.actorUserId, 'actor_user_id', 128);
     const asset = await this.findAsset(request.assetId, true);
+    if (asset.createdBy !== request.actorUserId) {
+      this.forbidden('ASSET_ACCESS_DENIED');
+    }
     if (asset.status === PrismaAssetStatus.READY) {
       return { asset: this.assetMessage(asset) };
     }
@@ -412,15 +430,24 @@ export class AssetsService {
     }
     if (
       (kind === PrismaAssetKind.IMAGE &&
-        purpose !== PrismaAssetPurpose.ARTWORK) ||
+        purpose !== PrismaAssetPurpose.ARTWORK &&
+        purpose !== PrismaAssetPurpose.PROFILE_AVATAR) ||
       (kind === PrismaAssetKind.VIDEO &&
         purpose !== PrismaAssetPurpose.EDITORIAL_VIDEO)
     ) {
       this.invalidArgument('asset kind and purpose are incompatible');
     }
     const maxBytes =
-      kind === PrismaAssetKind.IMAGE ? MAX_IMAGE_BYTES : MAX_VIDEO_BYTES;
-    if (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0 || sizeBytes > maxBytes) {
+      purpose === PrismaAssetPurpose.PROFILE_AVATAR
+        ? MAX_AVATAR_BYTES
+        : kind === PrismaAssetKind.IMAGE
+          ? MAX_IMAGE_BYTES
+          : MAX_VIDEO_BYTES;
+    if (
+      !Number.isSafeInteger(sizeBytes) ||
+      sizeBytes <= 0 ||
+      sizeBytes > maxBytes
+    ) {
       this.invalidArgument(`size_bytes must be between 1 and ${maxBytes}`);
     }
   }
@@ -526,7 +553,9 @@ export class AssetsService {
       purpose:
         asset.purpose === PrismaAssetPurpose.ARTWORK
           ? AssetPurpose.ASSET_PURPOSE_ARTWORK
-          : AssetPurpose.ASSET_PURPOSE_EDITORIAL_VIDEO,
+          : asset.purpose === PrismaAssetPurpose.PROFILE_AVATAR
+            ? AssetPurpose.ASSET_PURPOSE_PROFILE_AVATAR
+            : AssetPurpose.ASSET_PURPOSE_EDITORIAL_VIDEO,
       status: this.status(asset.status),
       filename: asset.filename,
       contentType: asset.contentType,
@@ -572,6 +601,9 @@ export class AssetsService {
     if (value === AssetPurpose.ASSET_PURPOSE_EDITORIAL_VIDEO) {
       return PrismaAssetPurpose.EDITORIAL_VIDEO;
     }
+    if (value === AssetPurpose.ASSET_PURPOSE_PROFILE_AVATAR) {
+      return PrismaAssetPurpose.PROFILE_AVATAR;
+    }
     return undefined;
   }
 
@@ -606,10 +638,13 @@ export class AssetsService {
 
   private objectKey(
     kind: PrismaAssetKind,
+    purpose: PrismaAssetPurpose,
+    createdBy: string,
     checksum: string,
     filename: string,
   ): string {
-    return `assets/${kind.toLowerCase()}/${checksum.slice(0, 2)}/${checksum}/${filename}`;
+    const ownerKey = createHash('sha256').update(createdBy).digest('hex').slice(0, 16);
+    return `assets/${kind.toLowerCase()}/${purpose.toLowerCase()}/${ownerKey}/${checksum.slice(0, 2)}/${checksum}/${filename}`;
   }
 
   private jsonNullable(
@@ -655,6 +690,10 @@ export class AssetsService {
 
   private failedPrecondition(message: string): never {
     throw new RpcException({ code: status.FAILED_PRECONDITION, message });
+  }
+
+  private forbidden(message: string): never {
+    throw new RpcException({ code: status.PERMISSION_DENIED, message });
   }
 
   private notFound(message: string): never {

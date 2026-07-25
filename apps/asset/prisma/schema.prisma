@@ -16,6 +16,7 @@ enum AssetKind {
 enum AssetPurpose {
   ARTWORK
   EDITORIAL_VIDEO
+  PROFILE_AVATAR
 }
 
 enum AssetStatus {
@@ -49,7 +50,7 @@ model Asset {
   processingJob AssetProcessingJob?
   usages        AssetUsage[]
 
-  @@unique([kind, purpose, checksum])
+  @@unique([kind, purpose, checksum, createdBy])
   @@index([status, kind, purpose, createdAt])
   @@index([createdBy, createdAt])
   @@map("assets")

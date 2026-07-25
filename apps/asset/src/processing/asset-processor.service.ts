@@ -8,11 +8,13 @@ import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import sharp from "sharp";
-import { Asset, AssetKind, Prisma } from "../generated/prisma/client";
+import { Asset, AssetKind, AssetPurpose, Prisma } from "../generated/prisma/client";
 import { StorageService } from "../storage/storage.service";
 import { AssetProcessingResult, MediaRendition } from "./asset-processor.types";
 
 const NORMAL_ARTWORK_WIDTHS = [40, 80, 296, 316, 592, 632];
+const AVATAR_SIZES = [40, 80, 256];
+const AVATAR_MAX_INPUT_PIXELS = 25_000_000;
 const HERO_ARTWORK_WIDTHS = [450, 600, 900, 1200];
 const HERO_ASPECT_RATIO = 3 / 4;
 const HERO_EXTENSION_STRIP = 48;
@@ -76,9 +78,66 @@ export class AssetProcessorService implements OnModuleDestroy {
   }
 
   process(asset: Asset): Promise<AssetProcessingResult> {
-    return asset.kind === AssetKind.IMAGE
-      ? this.processArtwork(asset)
-      : this.processVideo(asset);
+    if (asset.kind === AssetKind.IMAGE) {
+      return asset.purpose === AssetPurpose.PROFILE_AVATAR
+        ? this.processAvatar(asset)
+        : this.processArtwork(asset);
+    }
+    return this.processVideo(asset);
+  }
+
+  private async processAvatar(asset: Asset): Promise<AssetProcessingResult> {
+    const source = await this.storage.getBuffer(asset.sourceObjectKey);
+    this.verifyChecksum(asset, this.bufferChecksum(source));
+    const normalizedSource = await sharp(source, {
+      limitInputPixels: AVATAR_MAX_INPUT_PIXELS,
+    })
+      .rotate()
+      .toBuffer();
+    const metadata = await sharp(normalizedSource).metadata();
+    const width = metadata.width ?? 0;
+    const height = metadata.height ?? 0;
+    if (width <= 0 || height <= 0) {
+      throw new Error("AVATAR_DIMENSIONS_INVALID");
+    }
+
+    const renditions = await Promise.all(
+      AVATAR_SIZES.map(async (size) => {
+        const { data, info } = await sharp(normalizedSource)
+          .resize({
+            width: size,
+            height: size,
+            fit: "cover",
+            position: "centre",
+            withoutEnlargement: true,
+          })
+          .webp({ quality: 84, effort: 5 })
+          .toBuffer({ resolveWithObject: true });
+        const objectKey = `processed/${asset.id}/avatar/${info.width}w.webp`;
+        await this.storage.uploadBuffer(objectKey, data, "image/webp");
+        return {
+          objectKey,
+          url: this.storage.publicUrl(objectKey),
+          contentType: "image/webp" as const,
+          width: info.width,
+          height: info.height,
+          sizeBytes: data.length,
+        };
+      }),
+    );
+    const primary = renditions.at(-1);
+    if (!primary) throw new Error("AVATAR_RENDITION_MISSING");
+
+    return {
+      publicUrl: primary.url,
+      width,
+      height,
+      durationMillis: 0,
+      variants: this.json({
+        original: { width, height, contentType: asset.contentType },
+        renditions,
+      }),
+    };
   }
 
   private async processArtwork(asset: Asset): Promise<AssetProcessingResult> {
