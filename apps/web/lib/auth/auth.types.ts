@@ -13,7 +13,8 @@ export type UserProfile = {
   displayName: string;
   role: string;
   createdAt: number;
-  avatar?: string;
+  avatarAssetId?: string;
+  avatarUrl?: string;
   bio: string;
   isActive: boolean;
   emailVerified: boolean;
@@ -119,8 +120,32 @@ export type ResetPasswordPayload = {
 
 export type UpdateProfilePayload = {
   displayName: string;
-  avatar?: string;
   bio?: string;
+};
+
+export type AvatarUploadPayload = {
+  filename: string;
+  contentType: string;
+  checksum: string;
+  sizeBytes: number;
+};
+
+export type AvatarAsset = {
+  id: string;
+  status: number;
+  publicUrl: string;
+  errorMessage: string;
+};
+
+export type AvatarUploadResponse = {
+  asset: AvatarAsset;
+  uploadUrl: string;
+  instant: boolean;
+};
+
+export type AvatarFinalizeResponse = {
+  asset: AvatarAsset;
+  user?: UserProfile;
 };
 
 export type ChangePasswordPayload = {

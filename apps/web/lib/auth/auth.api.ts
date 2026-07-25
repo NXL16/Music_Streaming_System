@@ -10,6 +10,9 @@ import type {
   ForgotPasswordPayload,
   ResetPasswordPayload,
   UpdateProfilePayload,
+  AvatarUploadPayload,
+  AvatarUploadResponse,
+  AvatarFinalizeResponse,
   ChangePasswordPayload,
   ListSessionsResponse,
   LogoutDevicePayload,
@@ -112,6 +115,21 @@ export async function updateProfile(payload: UpdateProfilePayload) {
     payload,
   );
 
+  return response.data;
+}
+
+export async function requestAvatarUpload(payload: AvatarUploadPayload) {
+  const response = await http.post<ApiResponse<AvatarUploadResponse>>(
+    "/auth/me/avatar/uploads",
+    payload,
+  );
+  return response.data;
+}
+
+export async function finalizeAvatarUpload(assetId: string) {
+  const response = await http.post<ApiResponse<AvatarFinalizeResponse>>(
+    `/auth/me/avatar/${encodeURIComponent(assetId)}/finalize`,
+  );
   return response.data;
 }
 

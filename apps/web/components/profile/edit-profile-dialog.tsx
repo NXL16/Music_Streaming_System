@@ -8,7 +8,7 @@ type EditProfileDialogProps = {
 };
 
 export function EditProfileDialog({ open, onClose }: EditProfileDialogProps) {
-  const { form, error, loading, updateField, handleSubmit } =
+  const { form, error, loading, avatarFile, updateField, selectAvatar, handleSubmit } =
     useEditProfileForm(onClose);
 
   if (!open) {
@@ -53,14 +53,16 @@ export function EditProfileDialog({ open, onClose }: EditProfileDialogProps) {
           </div>
 
           <div>
-            <label className="block text-sm font-bold">Avatar URL</label>
+            <label className="block text-sm font-bold">Avatar</label>
             <input
               className="mt-2 w-full rounded-2xl border border-[#e5e5ea] px-4 py-3 outline-none focus:border-[#fa233b]"
-              value={form.avatar}
-              onChange={(event) => updateField("avatar", event.target.value)}
-              maxLength={500}
-              placeholder="https://..."
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/avif"
+              onChange={(event) => selectAvatar(event.target.files?.[0] ?? null)}
             />
+            <p className="mt-2 text-sm font-semibold text-[#6e6e73]">
+              {avatarFile ? avatarFile.name : "JPEG, PNG, WebP hoặc AVIF — tối đa 5 MB"}
+            </p>
           </div>
 
           <div>

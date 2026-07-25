@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { http } from "@/lib/api/http";
 import { useWalletBalance } from "@/lib/wallet/use-wallet-balance";
 import { Coins, Plus, ShieldCheck } from "lucide-react";
+import Image from "next/image";
 
 type SidebarItem = {
   key: string;
@@ -213,10 +214,10 @@ function AppleMusicLogo() {
       viewBox="0 0 83 20"
       width="83"
       xmlns="http://www.w3.org/2000/svg"
-      className="h-3.5 w-14.75 fill-(--systemPrimary) min-[484px]:h-5 min-[484px]:w-20.75 max-[483px]:h-3.75 max-[483px]:w-auto max-[483px]:translate-y-px"
+      className="h-3.75 fill-(--systemPrimary) w-auto min-[484px]:h-5 min-[484px]:w-20.75"
       aria-hidden="true"
     >
-      <path d="M34.752 19.746V6.243h-.088l-5.433 13.503h-2.074L21.711 6.243h-.087v13.503h-2.548V1.399h3.235l5.833 14.621h.1l5.82-14.62h3.248v18.347h-2.56zm16.649 0h-2.586v-2.263h-.062c-.725 1.602-2.061 2.504-4.072 2.504-2.86 0-4.61-1.894-4.61-4.958V6.37h2.698v8.125c0 2.034.95 3.127 2.81 3.127 1.95 0 3.124-1.373 3.124-3.458V6.37H51.4v13.376zm7.394-13.618c3.06 0 5.046 1.73 5.134 4.196h-2.536c-.15-1.296-1.087-2.11-2.598-2.11-1.462 0-2.436.724-2.436 1.793 0 .839.6 1.41 2.023 1.741l2.136.496c2.686.636 3.71 1.704 3.71 3.636 0 2.442-2.236 4.12-5.333 4.12-3.285 0-5.26-1.64-5.509-4.183h2.673c.25 1.398 1.187 2.085 2.836 2.085 1.623 0 2.623-.687 2.623-1.78 0-.865-.487-1.373-1.924-1.704l-2.136-.508c-2.498-.585-3.735-1.806-3.735-3.75 0-2.391 2.049-4.032 5.072-4.032zM66.1 2.836c0-.878.7-1.577 1.561-1.577.862 0 1.55.7 1.55 1.577 0 .864-.688 1.576-1.55 1.576a1.573 1.573 0 0 1-1.56-1.576zm.212 3.534h2.698v13.376h-2.698zm14.089 4.603c-.275-1.424-1.324-2.556-3.085-2.556-2.086 0-3.46 1.767-3.46 4.64 0 2.938 1.386 4.642 3.485 4.642 1.66 0 2.748-.928 3.06-2.48H83C82.713 18.067 80.477 20 77.317 20c-3.76 0-6.208-2.62-6.208-6.942 0-4.247 2.448-6.93 6.183-6.93 3.385 0 5.446 2.213 5.683 4.845h-2.573zM10.824 3.189c-.698.834-1.805 1.496-2.913 1.398-.145-1.128.41-2.33 1.036-3.065C9.644.662 10.848.05 11.835 0c.121 1.178-.336 2.33-1.01 3.19zm.999 1.619c.624.049 2.425.244 3.578 1.98-.096.074-2.137 1.272-2.113 3.79.024 3.01 2.593 4.012 2.617 4.037-.024.074-.407 1.419-1.344 2.812-.817 1.224-1.657 2.422-3.002 2.447-1.297.024-1.73-.783-3.218-.783-1.489 0-1.97.758-3.194.807-1.297.048-2.28-1.297-3.097-2.52C.368 14.908-.904 10.408.825 7.375c.84-1.516 2.377-2.47 4.034-2.495 1.273-.023 2.45.857 3.218.857.769 0 2.137-1.027 3.746-.93z" />
+      <path d="M34.752 19.746V6.243h-.088l-5.433 13.503h-2.074L21.711 6.243h-.087v13.503h-2.548V1.399h3.235l5.833 14.621h.1l5.82-14.62h3.248v18.347h-2.56zm16.649 0h-2.586v-2.263h-.062c-.725 1.602-2.061 2.504-4.072 2.504-2.86 0-4.61-1.894-4.61-4.958V6.37h2.698v8.125c0 2.034.95 3.127 2.81 3.127 1.95 0 3.124-1.373 3.124-3.458V6.37H51.4v13.376zm7.394-13.618c3.06 0 5.046 1.73 5.134 4.196h-2.536c-.15-1.296-1.087-2.11-2.598-2.11-1.462 0-2.436.724-2.436 1.793 0 .839.6 1.41 2.023 1.741l2.136.496c2.686.636 3.71 1.704 3.71 3.636 0 2.442-2.236 4.12-5.333 4.12-3.285 0-5.26-1.64-5.509-4.183h2.673c.25 1.398 1.187 2.085 2.836 2.085 1.623 0 2.623-.687 2.623-1.78 0-.865-.487-1.373-1.924-1.704l-2.136-.508c-2.498-.585-3.735-1.806-3.735-3.75 0-2.391 2.049-4.032 5.072-4.032zM66.1 2.836c0-.878.7-1.577 1.561-1.577.862 0 1.55.7 1.55 1.577 0 .864-.688 1.576-1.55 1.576a1.573 1.573 0 0 1-1.56-1.576zm.212 3.534h2.698v13.376h-2.698zm14.089 4.603c-.275-1.424-1.324-2.556-3.085-2.556-2.086 0-3.46 1.767-3.46 4.64 0 2.938 1.386 4.642 3.485 4.642 1.66 0 2.748-.928 3.06-2.48H83C82.713 18.067 80.477 20 77.317 20c-3.76 0-6.208-2.62-6.208-6.942 0-4.247 2.448-6.93 6.183-6.93 3.385 0 5.446 2.213 5.683 4.845h-2.573zM10.824 3.189c-.698.834-1.805 1.496-2.913 1.398-.145-1.128.41-2.33 1.036-3.065C9.644.662 10.848.05 11.835 0c.121 1.178-.336 2.33-1.01 3.19zm.999 1.619c.624.049 2.425.244 3.578 1.98-.096.074-2.137 1.272-2.113 3.79.024 3.01 2.593 4.012 2.617 4.037-.024.074-.407 1.419-1.344 2.812-.817 1.224-1.657 2.422-3.002 2.447-1.297.024-1.73-.783-3.218-.783-1.489 0-1.97.758-3.194.807-1.297.048-2.28-1.297-3.097-2.52C.368 14.908-.904 10.408.825 7.375c.84-1.516 2.377-2.47 4.034-2.495 1.273-.023 2.45.857 3.218.857.769 0 2.137-1.027 3.746-.93z"></path>
     </svg>
   );
 }
@@ -268,14 +269,14 @@ function SidebarSection({
   pathname: string;
 }) {
   return (
-    <div>
+    <div className="pt-0 in-[.app-container]:[--navigation-item-height:44px] min-[484px]:in-[.app-container]:[--navigation-item-height:36px]">
       {title && (
         <div className="flex items-end justify-between text-white/64 h-9 mt-0 mx-0 mb-1 py-1 px-2 text-[12px] font-semibold leading-[1.24]">
           <span>{title}</span>
         </div>
       )}
 
-      <ul className="m-0 list-none p-0 [font:var(--title-navigation)]">
+      <ul className="p-0 [font:var(--title-navigation)]">
         {items.map((item) => {
           const isSelected = isActiveRoute(pathname, item.href);
 
@@ -283,20 +284,18 @@ function SidebarSection({
             <li
               key={item.key}
               className={[
-                "relative mb-1 h-(--navigation-item-height,44px) rounded-lg p-1 [--linkHoverTextDecoration:none] min-[484px]:h-(--navigation-item-height,36px)",
+                "[--linkHoverTextDecoration:none] rounded-md mb-0.5 p-1 relative in-[.app-container]:rounded-lg in-[.app-container]:h-(--navigation-item-height) in-[.app-container]:mb-1 min-[484px]:in-[.app-container]:list-item ",
                 isSelected ? "bg-(--navSidebarSelectedState)" : "",
               ].join(" ")}
             >
               <Link
                 href={item.href}
-                className="box-content block h-full rounded-[inherit]"
-                role="button"
+                className="rounded-[inherit] box-content block h-full -m-0.75 p-0.75"
                 aria-current={isSelected ? "page" : undefined}
-                aria-pressed={isSelected}
               >
                 <div
                   className={[
-                    "flex size-full items-center gap-1.5 rounded-[inherit] min-[484px]:gap-0.5",
+                    "items-center rounded-[inherit] flex gap-2 size-full in-[.app-container]:gap-1.5 min-[484px]:in-[.app-container]:gap-0.5",
                     isSelected
                       ? "text-(--keyColor)"
                       : "text-(--navigation-item-text-color,var(--systemPrimary))",
@@ -304,7 +303,7 @@ function SidebarSection({
                 >
                   <span
                     className={[
-                      "mx-0.5 shrink-0 basis-(--navigation-item-icon-size,28px) leading-none min-[484px]:basis-(--navigation-item-icon-size,24px) [&>svg]:h-full [&>svg]:w-full",
+                      "flex-[0_0] basis-(--navigation-item-icon-size,32px) leading-0 in-[.app-container]:mx-0.5 min-[484px]:basis-(--navigation-item-icon-size,24px) [&>svg]:h-full [&>svg]:w-full",
                       isSelected
                         ? "[&>svg]:fill-(--keyColor)"
                         : "[&>svg]:fill-(--navigation-item-icon-color,var(--systemPrimary))",
@@ -312,7 +311,8 @@ function SidebarSection({
                   >
                     {item.icon}
                   </span>
-                  <span className="-my-1 min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap pe-1 text-left">
+
+                  <span className="flex-1 -m-1 overflow-hidden p-1 text-ellipsis whitespace-nowrap text-left">
                     {item.label}
                   </span>
                 </div>
@@ -325,6 +325,22 @@ function SidebarSection({
   );
 }
 
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 483px)");
+    const update = () => setIsMobile(mediaQuery.matches);
+
+    update();
+    mediaQuery.addEventListener("change", update);
+
+    return () => mediaQuery.removeEventListener("change", update);
+  }, []);
+
+  return isMobile;
+}
+
 export default function AppSidebar() {
   const pathname = usePathname();
   const user = useAuthStore((state) => state.user);
@@ -335,9 +351,6 @@ export default function AppSidebar() {
     "ADMIN_SECURITY_OPS",
   ].includes(user?.role ?? "");
   const { balance } = useWalletBalance();
-  const avatarLetter = (user?.displayName || user?.username || "U")
-    .charAt(0)
-    .toUpperCase();
 
   useEffect(() => {
     if (!user?.userId) {
@@ -378,51 +391,119 @@ export default function AppSidebar() {
     })),
   ];
 
+  const [expandedPathname, setExpandedPathname] = useState<string | null>(null);
+  const [isAnimating, setIsAnimating] = useState(false);
+  const isTransitioningRef = useRef(false);
+  const isExpanded = expandedPathname === pathname;
+  const isMobile = useIsMobile();
+
+  const toggleNavigation = () => {
+    if (isTransitioningRef.current) {
+      return;
+    }
+
+    isTransitioningRef.current = true;
+    setIsAnimating(true);
+    setExpandedPathname((currentPathname) =>
+      currentPathname === pathname ? null : pathname,
+    );
+  };
+
   return (
     <div className="gap-0 [grid-area:structure-header] size-full relative z-(--z-web-chrome) min-[484px]:z-[calc(var(--z-web-chrome)-11)] min-[484px]:w-[33.8842975207vw] min-[767.32px]:w-65">
-      <nav className="z-(--z-web-chrome) flex h-[calc(100%-16px)] w-[calc(100%-16px)] mt-2 ms-2 flex-col overflow-hidden border-b-[0.5px] border-(--navigation-border-color,var(--glassMaterialInnerStrokeCombined)) bg-(--mobileNavigationBG,var(--glassMaterialBackground)) shadow-none backdrop-blur-lg backdrop-saturate-220 max-[483px]:shadow-[0_1px_2px_rgba(0,0,0,.1)] min-[484px]:relative min-[484px]:h-[calc(100%-16px)] min-[484px]:w-[calc(100%-16px)] min-[484px]:rounded-[20px] min-[484px]:border-[0.5px] min-[484px]:border-(--navigation-border-color,var(--glassMaterialInnerStrokeCombined)) min-[484px]:bg-(--glassMaterialBackground,var(--navSidebarBG)) min-[484px]:shadow-[0_10px_40px_var(--glassMaterialShadowColor)]">
-        <div className="grid h-13 grid-cols-3 items-center py-1 ps-3.5 pe-4 min-[484px]:block min-[484px]:h-auto min-[484px]:p-0">
-          <div className="justify-self-start pb-0.75 min-[484px]:flex min-[484px]:min-h-13.75 min-[484px]:justify-between min-[484px]:whitespace-nowrap min-[484px]:px-5 min-[484px]:pt-0 min-[484px]:h-18 min-[484px]:items-center">
+      <nav
+        onTransitionEnd={(event) => {
+          if (
+            event.target === event.currentTarget &&
+            event.propertyName === "clip-path"
+          ) {
+            isTransitioningRef.current = false;
+            setIsAnimating(false);
+          }
+        }}
+        className={`${isExpanded ? "is-expanded" : ""} flex flex-col w-full transform-gpu backface-hidden z-(--z-web-chrome) min-[484px]:[border-inline-end:1px_solid_var(--labelDivider)] min-[484px]:relative dark:[--navigation-shadow-color:rgba(0,0,0,.2)] in-[.app-container]:[--navigation-border-color:var(--glassMaterialInnerStrokeCombined)] in-[.app-container]:[--navigation-shadow-color:rgba(0,0,0,0.1)] in-[.app-container]:[backdrop-filter:saturate(220%)_blur(16px)] in-[.app-container]:bg-(--glassMaterialBackground) in-[.app-container]:[box-shadow:0_10px_40px_var(--glassMaterialShadowColor)] min-[484px]:in-[.app-container]:[border:.5px_solid_var(--navigation-border-color)] min-[484px]:in-[.app-container]:rounded-[20px] min-[484px]:in-[.app-container]:[box-shadow:0_10px_40px_var(--navigation-shadow-color)] min-[484px]:in-[.app-container]:h-[calc(100%-16px)] min-[484px]:in-[.app-container]:mbs-2 min-[484px]:in-[.app-container]:ms-2 min-[484px]:in-[.app-container]:w-[calc(100%-16px)] max-[483px]:h-full max-[483px]:overflow-hidden max-[483px]:fixed max-[483px]:inset-x-0 max-[483px]:top-0 max-[483px]:in-[.app-container]:shadow-none max-[483px]:[clip-path:inset(0_0_calc(100%-52px)_0)] max-[483px]:[.is-expanded]:[clip-path:inset(0)] ${isAnimating ? "will-change-[clip-path] [transition:clip-path_.56s_cubic-bezier(.52,.16,.24,1)]" : ""}`}
+      >
+        <div className="grid max-[483px]:items-center max-[483px]:grid-cols-[repeat(3,1fr)] max-[483px]:me-2.75 max-[483px]:ms-3 max-[483px]:in-[.app-container]:h-13 max-[483px]:in-[.app-container]:me-4 max-[483px]:in-[.app-container]:ms-3.5 max-[483px]:in-[.app-container]:py-1">
+          <button
+            type="button"
+            onClick={toggleNavigation}
+            disabled={isAnimating}
+            aria-label={
+              isExpanded ? "Close navigation menu" : "Open navigation menu"
+            }
+            aria-expanded={isExpanded}
+            aria-controls="navigation"
+            className="min-[484px]:hidden h-11 relative w-11 z-(--z-default) max-[483px]:[justify-self:start]"
+          >
+            <span className="h-5 left-3.25 pointer-events-none absolute top-3 [transition:transform_.1806s_cubic-bezier(.04,.04,.12,.96)] w-5 z-(--z-default) in-[.app-container]:left-2.5 in-[.app-container]:w-6 in-[.is-expanded]:h-6 in-[.is-expanded]:left-2.5 in-[.is-expanded]:[transition:transform_.3192s_cubic-bezier(.04,.04,.12,.96)_.1008s] in-[.is-expanded]:w-6 in-[.is-expanded]:transform-[rotate(-45deg)]">
+              <span className="bg-(--keyColor) rounded-[1px] block h-0.5 absolute [transition:transform_.1596s_cubic-bezier(.52,.16,.52,.84)_.1008s] w-5 z-(--z-default) top-2.25 transform-[translateY(-4px)] pointer-events-none in-[.app-container]:bg-(--systemPrimary) in-[.app-container]:w-6 in-[.is-expanded]:transform-[translateY(0)] in-[.is-expanded]:[transition:transform_.1806s_cubic-bezier(.04,.04,.12,.96)] in-[.is-expanded]:w-6 in-[.is-expanded]:top-2.75"></span>
+            </span>
+
+            <span className="h-5 left-3.25 pointer-events-none absolute top-3 [transition:transform_.1806s_cubic-bezier(.04,.04,.12,.96)] w-5 z-(--z-default) in-[.app-container]:left-2.5 in-[.app-container]:w-6 in-[.is-expanded]:h-6 in-[.is-expanded]:left-2.5 in-[.is-expanded]:[transition:transform_.3192s_cubic-bezier(.04,.04,.12,.96)_.1008s] in-[.is-expanded]:w-6 in-[.is-expanded]:transform-[rotate(45deg)]">
+              <span className="bg-(--keyColor) rounded-[1px] block h-0.5 absolute [transition:transform_.1596s_cubic-bezier(.52,.16,.52,.84)_.1008s] w-5 z-(--z-default) bottom-2.25 transform-[translateY(4px)] pointer-events-none in-[.app-container]:bg-(--systemPrimary) in-[.app-container]:w-6 in-[.is-expanded]:transform-[translateY(0)] in-[.is-expanded]:[transition:transform_.1806s_cubic-bezier(.04,.04,.12,.96)] in-[.is-expanded]:w-6 in-[.is-expanded]:bottom-2.75"></span>
+            </span>
+          </button>
+
+          <div className="min-[484px]:items-center min-[484px]:flex min-[484px]:h-18 min-[484px]:justify-between min-[484px]:min-h-13.75 min-[484px]:pt-0 min-[484px]:px-5 min-[484px]:whitespace-nowrap max-[483px]:justify-self-center">
             <Link
               aria-label="Apple Music"
               role="img"
               href="/home"
-              className="[--linkHoverTextDecoration:none] relative before:content-[''] before:absolute before:-inset-x-3.75 before:-inset-y-3 before:px-3.75 before:py-3 before:z-1"
+              className="[--linkHoverTextDecoration:none] inline-block relative z-(--z-default) before:content-[''] before:inset-[-12px_-15px] before:p-[12px_15px] before:absolute"
             >
               <AppleMusicLogo />
             </Link>
           </div>
+
+          {isMobile && (
+            <div className="items-center max-[483px]:[justify-self:end]">
+              <div className="max-[483px]:in-[.app-container]:me-0">
+                <Link
+                  href="/profile"
+                  aria-label="My Profile"
+                  className="m-0 p-0 block [border:0] outline-none appearance-none [font:inherit] [font-size:inherit] leading-[inherit] rounded-(--ctxmenu-trigger-border-radius,50%) bg-(--ctxmenu-trigger-background-color,transparent) [transition:opacity_0.1s_ease-in] opacity-(--ctxmenu-trigger-opacity,1) cursor-pointer [backdrop-filter:blur(var(--ctxmenu-trigger-backdrop-blur,0))] no-underline"
+                >
+                  <span className="flex rounded-[50%]">
+                    <Image
+                      src={user?.avatarUrl || "/assets/avatar.webp"}
+                      alt="avatar"
+                      height={24}
+                      width={24}
+                      className="max-[999px]:h-7 max-[999px]:w-7 rounded-[inherit] object-cover"
+                    />
+                  </span>
+                </Link>
+              </div>
+            </div>
+          )}
         </div>
 
         <div
           id="navigation"
-          aria-hidden="false"
-          className="flex flex-col overflow-hidden min-[484px]:flex-1 min-[484px]:[--navigation-mask-height:36px] min-[484px]:[--navigation-scroll-container-offset:36px] min-[484px]:[--navigation-scrollbar-width:12px] min-[484px]:[-webkit-mask-image:linear-gradient(transparent,#000_var(--navigation-mask-height)),linear-gradient(to_left,#000_var(--navigation-scrollbar-width),transparent_var(--navigation-scrollbar-width))] min-[484px]:mask-[linear-gradient(transparent,#000_var(--navigation-mask-height)),linear-gradient(to_left,#000_var(--navigation-scrollbar-width),transparent_var(--navigation-scrollbar-width))] min-[484px]:-mt-(--navigation-scroll-container-offset)"
+          className="flex flex-col overflow-hidden min-[484px]:flex-1 min-[484px]:w-(--web-navigation-width) min-[484px]:in-[.app-container]:[--navigation-scroll-container-offset:36px] min-[484px]:in-[.app-container]:[--navigation-mask-height:36px] min-[484px]:in-[.app-container]:[--navigation-scrollbar-width:12px] min-[484px]:in-[.app-container]:-mt-(--navigation-scroll-container-offset) min-[484px]:in-[.app-container]:mask-[linear-gradient(transparent,#000_var(--navigation-mask-height)),linear-gradient(var(--navigation-scroll-mask-direction,to_left),#000_var(--navigation-scrollbar-width),transparent_var(--navigation-scrollbar-width))] min-[484px]:in-[.app-container]:w-[unset] max-[483px]:in-[.app-container]:[border-top:.5px_solid_var(--navigation-border-color)]"
         >
-          <div className="overflow-y-auto scroll-smooth max-[483px]:p-4 min-[484px]:flex-1 min-[484px]:px-3 min-[484px]:pt-(--navigation-scroll-container-offset) min-[484px]:scrollbar-thin">
-            <div className="pt-0 [grid-area:navigation-items]">
+          <div className="overflow-y-auto scroll-smooth min-[484px]:flex-1 min-[484px]:in-[.app-container]:px-3 min-[484px]:in-[.app-container]:pt-(--navigation-scroll-container-offset) min-[484px]:in-[.app-container]:scrollbar-thin max-[483px]:pt-5.75 max-[483px]:in-[.app-container]:p-4">
+            <SidebarSection
+              items={primaryNavigationItems}
+              pathname={pathname}
+            />
+            <SidebarSection
+              title="Library"
+              items={libraryItems}
+              pathname={pathname}
+            />
+            <SidebarSection
+              title="Playlists"
+              items={visiblePlaylistItems}
+              pathname={pathname}
+            />
+            {canManageIdentity && (
               <SidebarSection
-                items={primaryNavigationItems}
+                title="Administration"
+                items={identityAdminItems}
                 pathname={pathname}
               />
-              <SidebarSection
-                title="Library"
-                items={libraryItems}
-                pathname={pathname}
-              />
-              <SidebarSection
-                title="Playlists"
-                items={visiblePlaylistItems}
-                pathname={pathname}
-              />
-              {canManageIdentity && (
-                <SidebarSection
-                  title="Administration"
-                  items={identityAdminItems}
-                  pathname={pathname}
-                />
-              )}
-            </div>
+            )}
           </div>
 
           <div className="navigation__native-cta">
@@ -448,42 +529,51 @@ export default function AppSidebar() {
                 </button>
               </div>
 
-              <div className="mx-3 mb-5">
-                <div className="self-center">
-                  <div className="top-1.25 w-full">
-                    <div className="p-1.5 rounded-full bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 flex items-center justify-between gap-2 shadow-sm">
-                      <Link
-                        href="/profile"
-                        className="flex items-center gap-2.5 min-w-0 flex-1 hover:opacity-80 transition"
-                        aria-label="My Profile"
-                      >
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-sm font-black text-white shadow-sm border border-neutral-800">
-                          {avatarLetter}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-xs font-bold text-(--systemPrimary)">
-                            {user?.displayName || user?.username || "Account"}
-                          </p>
-                          <p className="truncate text-[10px] font-semibold text-amber-500 flex items-center gap-1 mt-0.5">
-                            <Coins className="h-3.5 w-3.5 shrink-0" />
-                            <span>
-                              {(balance?.coinBalance ?? 0).toLocaleString()}{" "}
-                              Coin
-                            </span>
-                          </p>
-                        </div>
-                      </Link>
-                      <Link
-                        href="/deposit"
-                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-(--keyColor) hover:bg-(--keyColor)/90 text-white shadow transition-all cursor-pointer"
-                        title="Nạp Coin"
-                      >
-                        <Plus className="h-4 w-4" />
-                      </Link>
+              {isMobile === false && (
+                <div className="mx-3 mb-5">
+                  <div className="self-center">
+                    <div className="top-1.25 w-full">
+                      <div className="p-1.5 rounded-full bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 flex items-center justify-between gap-2 shadow-sm">
+                        <Link
+                          href="/profile"
+                          className="flex items-center gap-2.5 min-w-0 flex-1 hover:opacity-80 transition"
+                          aria-label="My Profile"
+                        >
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-sm font-black text-white shadow-sm border border-neutral-800">
+                            <Image
+                              src={user?.avatarUrl || "/assets/avatar.webp"}
+                              alt="avatar"
+                              height={36}
+                              width={36}
+                              className="size-full rounded-full object-cover"
+                            />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-xs font-bold text-(--systemPrimary)">
+                              {user?.displayName || user?.username || "Account"}
+                            </p>
+                            <p className="truncate text-[10px] font-semibold text-amber-500 flex items-center gap-1 mt-0.5">
+                              <Coins className="h-3.5 w-3.5 shrink-0" />
+                              <span>
+                                {(balance?.coinBalance ?? 0).toLocaleString()}{" "}
+                                Coin
+                              </span>
+                            </p>
+                          </div>
+                        </Link>
+
+                        <Link
+                          href="/deposit"
+                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-(--keyColor) hover:bg-(--keyColor)/90 text-white shadow transition-all cursor-pointer"
+                          title="Nạp Coin"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </Link>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         </div>

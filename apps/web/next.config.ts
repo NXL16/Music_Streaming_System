@@ -6,6 +6,15 @@ const nextConfig: NextConfig = {
     root: path.resolve(process.cwd(), "../.."),
   },
   devIndicators: false,
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "r2.404hz.me",
+        pathname: "/**",
+      },
+    ],
+  },
   env: {
     NEXT_PUBLIC_DEV_CACHE_MODE: process.env.DEV_CACHE_MODE ?? "on",
   },
@@ -25,7 +34,7 @@ const nextConfig: NextConfig = {
   experimental: {
     optimizePackageImports: ["lucide-react", "motion"],
   },
-  allowedDevOrigins: ["192.168.1.102"],
+  allowedDevOrigins: ["192.168.1.100"],
 };
 
 export default nextConfig;
