@@ -20,6 +20,7 @@ import { RequestLoggerMiddleware } from './common/middleware/request-logger.midd
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: [`.env.${process.env.APP_ENV ?? 'development'}`, '.env'],
       validate: validateEnv,
     }),
     AuthModule,

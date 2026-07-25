@@ -12,6 +12,7 @@ import { TokenCleanupService } from './common/maintenance/token-cleanup.service'
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: [`.env.${process.env.APP_ENV ?? 'development'}`, '.env'],
       validate: validateEnv,
     }),
     DatabaseModule,
