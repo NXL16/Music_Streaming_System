@@ -9,6 +9,14 @@ import { saveTwoFactorChallengeId } from "@/lib/auth/two-factor-challenge-store"
 import type { GoogleCodeResponse } from "./google-identity.types";
 
 const GOOGLE_SCRIPT_SRC = "https://accounts.google.com/gsi/client";
+const IN_APP_BROWSER_PATTERN = /zalo|fban|fbav|instagram|line|micromessenger|tiktok/i;
+
+const EMBEDDED_BROWSER_GOOGLE_LOGIN_MESSAGE =
+  "Google sign-in is unavailable in this in-app browser. Open this page in Safari or Chrome, then try again.";
+
+function isInAppBrowser() {
+  return IN_APP_BROWSER_PATTERN.test(navigator.userAgent);
+}
 
 function loadGoogleIdentityScript() {
   return new Promise<void>((resolve, reject) => {
@@ -22,8 +30,17 @@ function loadGoogleIdentityScript() {
     );
 
     if (existingScript) {
+      if (existingScript.dataset.googleIdentityStatus === "failed") {
+        reject(new Error("Google Identity is unavailable"));
+        return;
+      }
+
       existingScript.addEventListener("load", () => resolve(), { once: true });
-      existingScript.addEventListener("error", () => reject(), { once: true });
+      existingScript.addEventListener(
+        "error",
+        () => reject(new Error("Google Identity is unavailable")),
+        { once: true },
+      );
       return;
     }
 
@@ -31,8 +48,14 @@ function loadGoogleIdentityScript() {
     script.src = GOOGLE_SCRIPT_SRC;
     script.async = true;
     script.defer = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Cannot load Google script"));
+    script.onload = () => {
+      script.dataset.googleIdentityStatus = "loaded";
+      resolve();
+    };
+    script.onerror = () => {
+      script.dataset.googleIdentityStatus = "failed";
+      reject(new Error("Google Identity is unavailable"));
+    };
 
     document.head.appendChild(script);
   });
@@ -43,14 +66,23 @@ export function useGoogleLogin() {
   const setSession = useAuthStore((state) => state.setSession);
 
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [googleError, setGoogleError] = useState<string | null>(null);
 
   async function startGoogleLogin() {
+    setGoogleError(null);
+
+    if (isInAppBrowser()) {
+      setGoogleError(EMBEDDED_BROWSER_GOOGLE_LOGIN_MESSAGE);
+      return;
+    }
+
     setGoogleLoading(true);
 
     try {
       const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 
       if (!clientId) {
+        setGoogleError("Google sign-in is not configured.");
         setGoogleLoading(false);
         return;
       }
@@ -64,6 +96,9 @@ export function useGoogleLogin() {
         callback: async (response: GoogleCodeResponse) => {
           try {
             if (!response.code) {
+              setGoogleError(
+                response.error_description ?? "Google sign-in was not completed.",
+              );
               setGoogleLoading(false);
               return;
             }
@@ -88,25 +123,27 @@ export function useGoogleLogin() {
               result.data.expiresIn,
             );
             router.push("/home");
-          } catch (error) {
-            console.error("Google login callback failed", error);
+          } catch {
+            setGoogleError("Google sign-in failed. Please try again.");
           } finally {
             setGoogleLoading(false);
           }
         },
         error_callback: () => {
+          setGoogleError("Google sign-in was cancelled or is unavailable in this browser.");
           setGoogleLoading(false);
         },
       });
 
       codeClient?.requestCode();
-    } catch (error) {
-      console.error("Cannot start Google login", error);
+    } catch {
+      setGoogleError(EMBEDDED_BROWSER_GOOGLE_LOGIN_MESSAGE);
       setGoogleLoading(false);
     }
   }
 
   return {
+    googleError,
     googleLoading,
     startGoogleLogin,
   };

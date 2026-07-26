@@ -8,7 +8,7 @@ import { useLoginForm } from "@/lib/auth/use-login-form";
 
 export default function LoginPage() {
   const { form, error, loading, updateField, handleSubmit } = useLoginForm();
-  const { googleLoading, startGoogleLogin } = useGoogleLogin();
+  const { googleError, googleLoading, startGoogleLogin } = useGoogleLogin();
 
   return (
     <GuestOnly>
@@ -79,6 +79,12 @@ export default function LoginPage() {
           >
             {googleLoading ? "Opening Google..." : "Continue with Google"}
           </button>
+
+          {googleError && (
+            <p className="mt-3 rounded-2xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 ring-1 ring-amber-500/20 dark:bg-amber-950/20 dark:text-amber-200">
+              {googleError}
+            </p>
+          )}
 
           <p className="mt-5 text-center text-sm text-[#6e6e73] dark:text-neutral-400">
             New here?{" "}
