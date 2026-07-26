@@ -291,7 +291,7 @@ export function AppPlayerBar() {
               : [],
           })
         : null;
-      mediaSession.playbackState = audioRef.current?.paused
+      mediaSession.playbackState = audioRef.current?.paused || audioRef.current?.ended
         ? "paused"
         : "playing";
     };
@@ -310,8 +310,25 @@ export function AppPlayerBar() {
     };
 
     setAction("play", () => {
-      if (!usePlayerStore.getState().playing) {
-        usePlayerStore.getState().togglePlayback();
+      const audio = audioRef.current;
+      const playerState = usePlayerStore.getState();
+      if (!audio) return;
+
+      const hasReachedEnd =
+        audio.ended ||
+        (Number.isFinite(audio.duration) && audio.currentTime >= audio.duration);
+      if (hasReachedEnd) {
+        audio.currentTime = 0;
+      }
+
+      if (!playerState.playing) {
+        playerState.togglePlayback();
+      }
+
+      // Invoke play from the Media Session action itself. Safari can defer the
+      // React effect that normally calls play while the device is locked.
+      if (audio.paused || hasReachedEnd) {
+        void audio.play().catch(() => usePlayerStore.getState().pause());
       }
     });
     setAction("pause", () => usePlayerStore.getState().pause());
@@ -343,11 +360,13 @@ export function AppPlayerBar() {
     audio?.addEventListener("loadedmetadata", syncMediaSession);
     audio?.addEventListener("playing", syncMediaSession);
     audio?.addEventListener("pause", syncMediaSession);
+    audio?.addEventListener("ended", syncMediaSession);
 
     return () => {
       audio?.removeEventListener("loadedmetadata", syncMediaSession);
       audio?.removeEventListener("playing", syncMediaSession);
       audio?.removeEventListener("pause", syncMediaSession);
+      audio?.removeEventListener("ended", syncMediaSession);
       for (const action of [
         "play",
         "pause",
