@@ -242,16 +242,16 @@ model ListeningEvent {
     eventType              String   @db.VarChar(32)
     durationSec            Int      @default(0)
     totalSec               Int      @default(0)
-    songTitle              String   @default("") @db.VarChar(255)
-    artistName             String   @default("") @db.VarChar(255)
-    albumName              String   @default("") @db.VarChar(255)
+    songTitle              String   @default("") @db.Text
+    artistName             String   @default("") @db.Text
+    albumName              String   @default("") @db.Text
     albumId                String   @default("") @db.VarChar(128)
     playlistId             String   @default("") @db.VarChar(128)
-    playlistName           String   @default("") @db.VarChar(255)
+    playlistName           String   @default("") @db.Text
     playlistArtworkUrl     String   @default("") @db.VarChar(1000)
     playlistArtworkBgColor String   @default("") @db.VarChar(16)
     stationId              String   @default("") @db.VarChar(128)
-    stationName            String   @default("") @db.VarChar(255)
+    stationName            String   @default("") @db.Text
     stationArtworkUrl      String   @default("") @db.VarChar(1000)
     stationArtworkBgColor  String   @default("") @db.VarChar(16)
     createdAt              DateTime @default(now()) @db.Timestamptz
@@ -274,16 +274,16 @@ model UserListeningStats {
     skipCount              Int      @default(0)
     totalListenSec         Int      @default(0)
     lastPlayedAt           DateTime @default(now()) @db.Timestamptz
-    songTitle              String   @default("") @db.VarChar(255)
-    artistName             String   @default("") @db.VarChar(255)
-    albumName              String   @default("") @db.VarChar(255)
+    songTitle              String   @default("") @db.Text
+    artistName             String   @default("") @db.Text
+    albumName              String   @default("") @db.Text
     albumId                String   @default("") @db.VarChar(128)
     playlistId             String   @default("") @db.VarChar(128)
-    playlistName           String   @default("") @db.VarChar(255)
+    playlistName           String   @default("") @db.Text
     playlistArtworkUrl     String   @default("") @db.VarChar(1000)
     playlistArtworkBgColor String   @default("") @db.VarChar(16)
     stationId              String   @default("") @db.VarChar(128)
-    stationName            String   @default("") @db.VarChar(255)
+    stationName            String   @default("") @db.Text
     stationArtworkUrl      String   @default("") @db.VarChar(1000)
     stationArtworkBgColor  String   @default("") @db.VarChar(16)
     createdAt              DateTime @default(now()) @db.Timestamptz

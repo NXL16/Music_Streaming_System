@@ -30,6 +30,23 @@ const EVENT_TYPE_MAP: Record<number, string> = {
   [ListeningEventType.LISTENING_EVENT_TYPE_SKIP]: 'SKIP',
 };
 
+const MAX_ID_LENGTH = 128;
+const MAX_ARTWORK_URL_LENGTH = 1000;
+const MAX_ARTWORK_COLOR_LENGTH = 16;
+const MAX_METADATA_TEXT_LENGTH = 4096;
+
+function normalizeText(value: string | undefined, maxLength: number): string {
+  return value?.trim().slice(0, maxLength) ?? '';
+}
+
+function normalizeOptionalValue(
+  value: string | undefined,
+  maxLength: number,
+): string {
+  const normalized = value?.trim() ?? '';
+  return normalized.length <= maxLength ? normalized : '';
+}
+
 @Injectable()
 export class ListeningService {
   private readonly logger = new Logger(ListeningService.name);
@@ -77,22 +94,52 @@ export class ListeningService {
   async recordEvent(
     request: RecordListeningEventRequest,
   ): Promise<RecordListeningEventResponse> {
-    const userId = request.userId;
-    const songId = request.songId;
-    if (!userId || !songId) {
+    const userId = request.userId?.trim() ?? '';
+    const songId = request.songId?.trim() ?? '';
+    if (
+      !userId ||
+      !songId ||
+      userId.length > MAX_ID_LENGTH ||
+      songId.length > MAX_ID_LENGTH
+    ) {
+      this.logger.warn('Ignoring listening event with an invalid user or song ID');
       return { success: false };
     }
 
     const eventType = EVENT_TYPE_MAP[request.eventType] ?? 'PLAY_START';
-    const albumId = request.albumId?.trim() ?? '';
-    const playlistId = request.playlistId?.trim() ?? '';
-    const playlistName = request.playlistName?.trim() ?? '';
-    const playlistArtworkUrl = request.playlistArtworkUrl?.trim() ?? '';
-    const playlistArtworkBgColor = request.playlistArtworkBgColor?.trim() ?? '';
-    const stationId = request.stationId?.trim() ?? '';
-    const stationName = request.stationName?.trim() ?? '';
-    const stationArtworkUrl = request.stationArtworkUrl?.trim() ?? '';
-    const stationArtworkBgColor = request.stationArtworkBgColor?.trim() ?? '';
+    const songTitle = normalizeText(request.songTitle, MAX_METADATA_TEXT_LENGTH);
+    const artistName = normalizeText(
+      request.artistName,
+      MAX_METADATA_TEXT_LENGTH,
+    );
+    const albumName = normalizeText(request.albumName, MAX_METADATA_TEXT_LENGTH);
+    const albumId = normalizeOptionalValue(request.albumId, MAX_ID_LENGTH);
+    const playlistId = normalizeOptionalValue(request.playlistId, MAX_ID_LENGTH);
+    const playlistName = normalizeText(
+      request.playlistName,
+      MAX_METADATA_TEXT_LENGTH,
+    );
+    const playlistArtworkUrl = normalizeOptionalValue(
+      request.playlistArtworkUrl,
+      MAX_ARTWORK_URL_LENGTH,
+    );
+    const playlistArtworkBgColor = normalizeOptionalValue(
+      request.playlistArtworkBgColor,
+      MAX_ARTWORK_COLOR_LENGTH,
+    );
+    const stationId = normalizeOptionalValue(request.stationId, MAX_ID_LENGTH);
+    const stationName = normalizeText(
+      request.stationName,
+      MAX_METADATA_TEXT_LENGTH,
+    );
+    const stationArtworkUrl = normalizeOptionalValue(
+      request.stationArtworkUrl,
+      MAX_ARTWORK_URL_LENGTH,
+    );
+    const stationArtworkBgColor = normalizeOptionalValue(
+      request.stationArtworkBgColor,
+      MAX_ARTWORK_COLOR_LENGTH,
+    );
 
     try {
       await this.prisma.listeningEvent.create({
@@ -102,9 +149,9 @@ export class ListeningService {
           eventType,
           durationSec: request.durationSec || 0,
           totalSec: request.totalSec || 0,
-          songTitle: request.songTitle || '',
-          artistName: request.artistName || '',
-          albumName: request.albumName || '',
+          songTitle,
+          artistName,
+          albumName,
           albumId,
           playlistId,
           playlistName,
@@ -136,9 +183,9 @@ export class ListeningService {
           skipCount: isSkip ? 1 : 0,
           totalListenSec: request.durationSec || 0,
           lastPlayedAt: new Date(),
-          songTitle: request.songTitle || '',
-          artistName: request.artistName || '',
-          albumName: request.albumName || '',
+          songTitle,
+          artistName,
+          albumName,
           albumId,
           playlistId,
           playlistName,
@@ -155,9 +202,9 @@ export class ListeningService {
           ...(isSkip && { skipCount: { increment: 1 } }),
           totalListenSec: { increment: request.durationSec || 0 },
           lastPlayedAt: new Date(),
-          songTitle: request.songTitle || '',
-          artistName: request.artistName || '',
-          albumName: request.albumName || '',
+          songTitle,
+          artistName,
+          albumName,
           ...(albumId && { albumId }),
           playlistId,
           playlistName,
