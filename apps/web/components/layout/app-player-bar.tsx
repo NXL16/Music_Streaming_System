@@ -25,6 +25,15 @@ import ResponsiveArtwork from "@/components/media/common/responsive-artwork";
 import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
 
 const LISTENING_QUALIFY_SECONDS = 3;
+const LOCK_SCREEN_SEEK_SECONDS = 10;
+
+function getAbsoluteArtworkUrl(artworkUrl: string): string {
+  try {
+    return new URL(artworkUrl, window.location.origin).href;
+  } catch {
+    return artworkUrl;
+  }
+}
 
 function recentlyPlayedCard(song: PlayerSong): MediaCardProps {
   if (song.sourceStation) {
@@ -232,7 +241,7 @@ export function AppPlayerBar() {
     next(true);
   };
 
-  const handleNext = () => {
+  const handleNext = useCallback(() => {
     if (!currentSong) return;
 
     const didChangeTrack = next();
@@ -243,9 +252,9 @@ export function AppPlayerBar() {
     }
 
     trackedSongRef.current = null;
-  };
+  }, [currentSong, emitEvent, next]);
 
-  const handlePrevious = () => {
+  const handlePrevious = useCallback(() => {
     if (!currentSong) return;
 
     const didChangeTrack = previous();
@@ -256,7 +265,102 @@ export function AppPlayerBar() {
     }
 
     trackedSongRef.current = null;
-  };
+  }, [currentSong, emitEvent, previous]);
+
+  useEffect(() => {
+    if (
+      !("mediaSession" in navigator) ||
+      typeof MediaMetadata === "undefined"
+    ) {
+      return;
+    }
+
+    const mediaSession = navigator.mediaSession;
+    const syncMediaSession = () => {
+      mediaSession.metadata = currentSong
+        ? new MediaMetadata({
+            title: currentSong.title,
+            artist: currentSong.artist,
+            album: currentSong.album,
+            artwork: currentSong.artworkUrl
+              ? [
+                  {
+                    src: getAbsoluteArtworkUrl(currentSong.artworkUrl),
+                  },
+                ]
+              : [],
+          })
+        : null;
+      mediaSession.playbackState = audioRef.current?.paused
+        ? "paused"
+        : "playing";
+    };
+
+    syncMediaSession();
+
+    const setAction = (
+      action: MediaSessionAction,
+      handler: MediaSessionActionHandler | null,
+    ) => {
+      try {
+        mediaSession.setActionHandler(action, handler);
+      } catch {
+        // Safari may not implement every Media Session action.
+      }
+    };
+
+    setAction("play", () => {
+      if (!usePlayerStore.getState().playing) {
+        usePlayerStore.getState().togglePlayback();
+      }
+    });
+    setAction("pause", () => usePlayerStore.getState().pause());
+    setAction("nexttrack", handleNext);
+    setAction("previoustrack", handlePrevious);
+    setAction("seekbackward", () => {
+      const audio = audioRef.current;
+      if (audio) audio.currentTime = Math.max(0, audio.currentTime - LOCK_SCREEN_SEEK_SECONDS);
+    });
+    setAction("seekforward", () => {
+      const audio = audioRef.current;
+      if (audio) {
+        audio.currentTime = Math.min(
+          audio.duration || Infinity,
+          audio.currentTime + LOCK_SCREEN_SEEK_SECONDS,
+        );
+      }
+    });
+    setAction("seekto", (details) => {
+      const audio = audioRef.current;
+      if (audio && typeof details.seekTime === "number") {
+        audio.currentTime = details.seekTime;
+      }
+    });
+
+    const audio = audioRef.current;
+    // iOS can replace the lock-screen metadata while a MediaSource URL is
+    // attached. Reapply it when the media element is actually ready or starts.
+    audio?.addEventListener("loadedmetadata", syncMediaSession);
+    audio?.addEventListener("playing", syncMediaSession);
+    audio?.addEventListener("pause", syncMediaSession);
+
+    return () => {
+      audio?.removeEventListener("loadedmetadata", syncMediaSession);
+      audio?.removeEventListener("playing", syncMediaSession);
+      audio?.removeEventListener("pause", syncMediaSession);
+      for (const action of [
+        "play",
+        "pause",
+        "nexttrack",
+        "previoustrack",
+        "seekbackward",
+        "seekforward",
+        "seekto",
+      ] as const) {
+        setAction(action, null);
+      }
+    };
+  }, [currentSong, handleNext, handlePrevious, playing]);
 
   const toggleMute = () => {
     if (!isExpanded) {
