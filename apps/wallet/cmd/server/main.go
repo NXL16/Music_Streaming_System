@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"Music_Streaming_System/apps/wallet/internal/config"
+	"Music_Streaming_System/apps/wallet/internal/database"
 	deliveryGRPC "Music_Streaming_System/apps/wallet/internal/delivery/grpc"
 	deliveryHTTP "Music_Streaming_System/apps/wallet/internal/delivery/http"
 	"Music_Streaming_System/apps/wallet/internal/repository"
@@ -38,13 +39,20 @@ func main() {
 	if err := db.Ping(); err != nil {
 		log.Fatalf("Database không phản hồi (Ping failed): %v", err)
 	}
+	defer db.Close()
+
+	migrationCtx, migrationCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer migrationCancel()
+	if err := database.ApplyMigrations(migrationCtx, db); err != nil {
+		log.Fatalf("Không thể áp dụng Wallet migrations: %v", err)
+	}
+	log.Println("Wallet database migrations are up to date")
 
 	repo := repository.NewPostgresRepository(db)
 	walletService := service.NewWalletService(repo, db, cfg)
 
 	grpcHandler := deliveryGRPC.NewWalletGRPCHandler(walletService)
 
-	// Khởi tạo các HTTP Handler cho MoMo và NF Bank
 	momoHandler := deliveryHTTP.NewMomoHTTPHandler(walletService)
 	nfbankHandler := deliveryHTTP.NewNFBankHandler(walletService, cfg)
 
@@ -68,9 +76,8 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
 
-	// Đăng ký các Route endpoint nhận webhook từ các đối tác cổng thanh toán
 	router.POST("/v1/wallet/webhook/momo", momoHandler.HandleWebhook)
-	router.POST("/v1/wallet/webhook/nfbank", nfbankHandler.HandleWebhook) // <-- Tuyến đường mới cho NF Bank
+	router.POST("/v1/wallet/webhook/nfbank", nfbankHandler.HandleWebhook)
 
 	httpServer := &http.Server{
 		Addr:    cfg.HTTPPort,
@@ -95,6 +102,5 @@ func main() {
 		log.Printf("Lỗi khi tắt HTTP Server: %v", err)
 	}
 
-	db.Close()
 	fmt.Println("Wallet Service đã tắt")
 }

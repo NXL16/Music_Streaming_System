@@ -12,12 +12,10 @@ type PostgresRepository struct {
 	db *sql.DB
 }
 
-// NewPostgresRepository khởi tạo một thực thể Repository mới
 func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
-// CreateWalletTx: Tạo ví mới, trả về UUID được sinh ra bởi Postgres
 func (r *PostgresRepository) CreateWalletTx(ctx context.Context, tx *sql.Tx, w *domain.Wallet) (string, error) {
 	query := `
 		INSERT INTO wallets (user_id, coin_balance, frozen_balance, currency_type, status, version, signature, created_at, updated_at)
@@ -35,14 +33,13 @@ func (r *PostgresRepository) CreateWalletTx(ctx context.Context, tx *sql.Tx, w *
 
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", nil // Wallet đã tồn tại do ON CONFLICT DO NOTHING
+			return "", nil
 		}
 		return "", err
 	}
 	return insertedID, nil
 }
 
-// GetByUserIdTx: Lấy thông tin ví của User (hỗ trợ bọc trong Transaction)
 func (r *PostgresRepository) GetByUserIdTx(ctx context.Context, tx *sql.Tx, userID string) (*domain.Wallet, error) {
 	query := `
 		SELECT id, user_id, coin_balance, frozen_balance, currency_type, status, version, signature, created_at, updated_at 
@@ -115,7 +112,6 @@ func (r *PostgresRepository) UpdateBalanceTx(ctx context.Context, tx *sql.Tx, id
 	return nil
 }
 
-// CreateTransactionTx: Ghi sổ cái lịch sử biến động số dư (Ledger)
 func (r *PostgresRepository) CreateTransactionTx(ctx context.Context, tx *sql.Tx, log *domain.TransactionLog) error {
 	query := `
 		INSERT INTO wallet_transactions (
@@ -138,7 +134,6 @@ func (r *PostgresRepository) CreateTransactionTx(ctx context.Context, tx *sql.Tx
 	return nil
 }
 
-// CreateDepositOrderTx: Tạo đơn nạp tiền (khi bắt đầu gọi sang MoMo đòi link QR)
 func (r *PostgresRepository) CreateDepositOrderTx(ctx context.Context, tx *sql.Tx, order *domain.BankPaymentOrder) error {
 	query := `
 		INSERT INTO bank_payment_orders (
@@ -161,7 +156,6 @@ func (r *PostgresRepository) CreateDepositOrderTx(ctx context.Context, tx *sql.T
 	return nil
 }
 
-// GetDepositOrderByCodeTx: Lấy đơn nạp tiền theo mã order_code
 func (r *PostgresRepository) GetDepositOrderByCodeTx(ctx context.Context, tx *sql.Tx, orderCode string) (*domain.BankPaymentOrder, error) {
 	query := `
 		SELECT id, user_id, wallet_id, order_code, amount_vnd, coin_amount, bank_account_number, bank_tx_reference, status, callback_logs, created_at, updated_at
@@ -188,7 +182,6 @@ func (r *PostgresRepository) GetDepositOrderByCodeTx(ctx context.Context, tx *sq
 	return &order, nil
 }
 
-// UpdateDepositOrderStatusByCodeTx: Cập nhật trạng thái đơn nạp theo mã order_code
 func (r *PostgresRepository) UpdateDepositOrderStatusByCodeTx(ctx context.Context, tx *sql.Tx, orderCode string, status string) error {
 	query := `
 		UPDATE bank_payment_orders 

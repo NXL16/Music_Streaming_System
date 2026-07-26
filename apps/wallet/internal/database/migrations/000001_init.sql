@@ -1,8 +1,5 @@
--- Legacy manual bootstrap. The Wallet service applies the canonical versioned
--- migration from internal/database/migrations at startup.
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
--- Table: wallets
 CREATE TABLE IF NOT EXISTS wallets (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID UNIQUE NOT NULL,
@@ -16,7 +13,6 @@ CREATE TABLE IF NOT EXISTS wallets (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Table: bank_payment_orders
 CREATE TABLE IF NOT EXISTS bank_payment_orders (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL,
@@ -32,7 +28,6 @@ CREATE TABLE IF NOT EXISTS bank_payment_orders (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Table: wallet_transactions (Ledger)
 CREATE TABLE IF NOT EXISTS wallet_transactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     wallet_id UUID NOT NULL REFERENCES wallets(id) ON DELETE CASCADE,
@@ -40,7 +35,7 @@ CREATE TABLE IF NOT EXISTS wallet_transactions (
     amount BIGINT NOT NULL,
     balance_before BIGINT NOT NULL,
     balance_after BIGINT NOT NULL,
-    transaction_type VARCHAR(50) NOT NULL, -- DEBIT, CREDIT
+    transaction_type VARCHAR(50) NOT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'SUCCESS',
     reference_type VARCHAR(100),
     reference_id UUID,
@@ -48,7 +43,6 @@ CREATE TABLE IF NOT EXISTS wallet_transactions (
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Table: coin_rates
 CREATE TABLE IF NOT EXISTS coin_rates (
     id SERIAL PRIMARY KEY,
     amount_vnd BIGINT NOT NULL,
@@ -58,7 +52,6 @@ CREATE TABLE IF NOT EXISTS coin_rates (
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_wallets_user_id ON wallets(user_id);
 CREATE INDEX IF NOT EXISTS idx_bank_payment_orders_user_id ON bank_payment_orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_bank_payment_orders_wallet_id ON bank_payment_orders(wallet_id);
