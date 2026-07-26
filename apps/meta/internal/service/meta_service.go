@@ -14,21 +14,16 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// MetadataServer kế thừa từ UnimplementedMetadataServiceServer được tạo ra bởi Buf
 type MetadataServer struct {
 	pb.UnimplementedMetadataServiceServer
 	repo *repository.MetadataRepository
 }
 
-// NewMetadataServer khởi tạo server mới với repository truyền vào
 func NewMetadataServer(repo *repository.MetadataRepository) *MetadataServer {
 	return &MetadataServer{repo: repo}
 }
 
-// UpdateTechnicalMeta: Worker (Rust) sẽ gọi hàm này để lưu thông tin bài hát
 func (s *MetadataServer) UpdateTechnicalMeta(ctx context.Context, req *pb.UpdateMetaRequest) (*pb.EmptyResponse, error) {
-	log.Printf("Received UpdateTechnicalMeta for Song ID: %s", req.SongId)
-
 	if err := validateUpdateRequest(req); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -59,7 +54,6 @@ func (s *MetadataServer) UpdateTechnicalMeta(ctx context.Context, req *pb.Update
 		Version:  time.Now().UTC().UnixMilli(),
 	}
 
-	// Gọi repository để lưu (Upsert - nếu có rồi thì cập nhật, chưa có thì tạo mới)
 	err := s.repo.Upsert(ctx, meta)
 	if err != nil {
 		log.Printf("Error upserting metadata: %v", err)
@@ -72,11 +66,7 @@ func (s *MetadataServer) UpdateTechnicalMeta(ctx context.Context, req *pb.Update
 	return &pb.EmptyResponse{}, nil
 }
 
-// GetStreamData: API Gateway/Edge sẽ gọi hàm này để lấy dữ liệu phát nhạc
 func (s *MetadataServer) GetStreamData(ctx context.Context, req *pb.GetStreamDataRequest) (*pb.StreamDataResponse, error) {
-	log.Printf("Received GetStreamData for Song ID: %s", req.SongId)
-
-	// Lấy dữ liệu từ MongoDB thông qua repository
 	meta, err := s.repo.GetBySongID(ctx, req.SongId)
 	if err != nil {
 		log.Printf("Error retrieving metadata for ID %s: %v", req.SongId, err)
@@ -86,7 +76,6 @@ func (s *MetadataServer) GetStreamData(ctx context.Context, req *pb.GetStreamDat
 		return nil, status.Errorf(codes.Unavailable, "metadata storage unavailable")
 	}
 	if meta == nil {
-		log.Printf("Metadata not found for ID %s", req.SongId)
 		return nil, status.Errorf(codes.NotFound, "Metadata not found for song ID: %s", req.SongId)
 	}
 

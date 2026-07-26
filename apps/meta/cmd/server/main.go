@@ -34,7 +34,13 @@ func main() {
 	db := client.Database(cfg.MongoDBName)
 	log.Printf("Connected to MongoDB: %s", cfg.MongoDBName)
 
-	repo := repository.NewMetadataRepository(db)
+	indexCtx, indexCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer indexCancel()
+	repo, err := repository.NewMetadataRepository(indexCtx, db)
+	if err != nil {
+		log.Fatalf("Failed to ensure MongoDB metadata indexes: %v", err)
+	}
+	log.Println("MongoDB metadata indexes are ready")
 	metaServer := service.NewMetadataServer(repo)
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", cfg.GRPCPort))

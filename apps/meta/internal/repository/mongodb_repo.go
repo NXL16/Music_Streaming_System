@@ -14,12 +14,14 @@ type MetadataRepository struct {
 	collection *mongo.Collection
 }
 
-func NewMetadataRepository(db *mongo.Database) *MetadataRepository {
+func NewMetadataRepository(ctx context.Context, db *mongo.Database) (*MetadataRepository, error) {
 	repo := &MetadataRepository{
 		collection: db.Collection("song_metadata"),
 	}
-	_ = repo.ensureIndexes(context.Background())
-	return repo
+	if err := repo.ensureIndexes(ctx); err != nil {
+		return nil, err
+	}
+	return repo, nil
 }
 
 func (r *MetadataRepository) Upsert(ctx context.Context, meta domain.SongMetadata) error {
