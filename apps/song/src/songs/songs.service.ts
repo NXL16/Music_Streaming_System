@@ -529,7 +529,6 @@ export class SongsService {
       throw new RpcException({ code: status.INTERNAL, message: 'DB_ERROR' });
     }
 
-    this.logger.log(`User ${request.userId} liked song ${request.songId}`);
     return { success: true };
   }
 
@@ -544,7 +543,6 @@ export class SongsService {
       },
     });
 
-    this.logger.log(`User ${request.userId} unliked song ${request.songId}`);
     return { success: true };
   }
 
