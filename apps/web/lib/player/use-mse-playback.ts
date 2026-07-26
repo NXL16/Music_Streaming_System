@@ -2,8 +2,8 @@
 
 import { useEffect, useRef } from "react";
 import { usePlayerStore } from "./use-player-store";
-import { MsePlayer } from "./mse/mse-player";
 import { preloadCache } from "./mse/preload-cache";
+import { createMediaPlayer, type MediaPlayer } from "./media-player-factory";
 
 const MSE_PREFIX = "mse:";
 
@@ -23,8 +23,9 @@ export function useMsePlayback(
   const queue = usePlayerStore((s) => s.queue);
   const currentIndex = usePlayerStore((s) => s.currentIndex);
   const pause = usePlayerStore((s) => s.pause);
-  const playerRef = useRef<MsePlayer | null>(null);
+  const playerRef = useRef<MediaPlayer | null>(null);
   const activeSongIdRef = useRef<string | null>(null);
+  const playerReadyRef = useRef(false);
 
   const isMseActive = isMseSong(currentSong?.playbackUrl);
 
@@ -37,6 +38,7 @@ export function useMsePlayback(
         playerRef.current.detach();
         playerRef.current = null;
         activeSongIdRef.current = null;
+        playerReadyRef.current = false;
       }
       return;
     }
@@ -48,9 +50,10 @@ export function useMsePlayback(
       playerRef.current.detach();
     }
 
-    const player = new MsePlayer();
+    const player = createMediaPlayer();
     playerRef.current = player;
     activeSongIdRef.current = songId;
+    playerReadyRef.current = false;
 
     const preloaded = preloadCache.get(songId);
 
@@ -58,13 +61,20 @@ export function useMsePlayback(
       .attach(audio, songId, preloaded)
       .then(() => {
         if (playerRef.current !== player) return;
+        playerReadyRef.current = true;
         if (preloaded) preloadCache.evict(songId);
         if (usePlayerStore.getState().playing) {
           audio.play().catch(() => pause());
         }
       })
       .catch(() => {
-        if (playerRef.current === player) pause();
+        if (playerRef.current === player) {
+          player.detach();
+          playerRef.current = null;
+          activeSongIdRef.current = null;
+          playerReadyRef.current = false;
+          pause();
+        }
       });
 
     return () => {
@@ -72,6 +82,7 @@ export function useMsePlayback(
         player.detach();
         playerRef.current = null;
         activeSongIdRef.current = null;
+        playerReadyRef.current = false;
       }
     };
   }, [playbackUrl, audioRef, pause]);
@@ -81,6 +92,11 @@ export function useMsePlayback(
     if (!audio || !isMseActive) return;
 
     if (playing) {
+      // On the first tap, `playing` becomes true before MMS finishes replacing
+      // the media element source. Safari aborts a play request made during that
+      // replacement (AbortError), so only play after attach has completed.
+      if (!playerReadyRef.current) return;
+
       audio.play().catch(() => pause());
     } else {
       audio.pause();
