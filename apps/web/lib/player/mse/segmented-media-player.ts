@@ -5,8 +5,8 @@ import type { PreloadedSong, SegmentInfo, StreamMetadata } from "./types";
 
 const MIME = 'audio/mp4; codecs="mp4a.40.2"';
 const INITIAL_BATCH = 2;
-const SEEK_BATCH = 2;
-const BATCH_SIZE = 10;
+const SEEK_BATCH = 1;
+const BUFFER_BATCH_BYTES = 256 * 1024;
 const BUFFER_GOAL_SEC = 30;
 const BUFFER_LOW_SEC = 15;
 
@@ -21,6 +21,26 @@ function findSegmentIndex(segments: SegmentInfo[], timeSec: number): number {
   }
 
   return lo;
+}
+
+function getBatchSegmentCount(
+  segments: SegmentInfo[],
+  startIndex: number,
+  byteBudget: number,
+): number {
+  let totalBytes = 0;
+  let count = 0;
+
+  while (startIndex + count < segments.length) {
+    const segmentSize = segments[startIndex + count].size;
+    if (count > 0 && totalBytes + segmentSize > byteBudget) break;
+
+    totalBytes += segmentSize;
+    count += 1;
+    if (totalBytes >= byteBudget) break;
+  }
+
+  return count;
 }
 
 function waitForUpdateEnd(sourceBuffer: SourceBuffer): Promise<void> {
@@ -393,11 +413,13 @@ export abstract class SegmentedMediaPlayer {
         }
         if (cursor > targetIndex) break;
 
-        const batchSize = this.needsUrgentFill ? SEEK_BATCH : BATCH_SIZE;
+        const batchSize = this.needsUrgentFill
+          ? SEEK_BATCH
+          : getBatchSegmentCount(segments, cursor, BUFFER_BATCH_BYTES);
         this.needsUrgentFill = false;
         await this.fetchAndAppendBatch(
           cursor,
-          Math.min(batchSize, segments.length - cursor),
+          batchSize,
           signal,
         );
       }
