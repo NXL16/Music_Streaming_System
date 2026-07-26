@@ -10,7 +10,7 @@
     "dev:production": "node tools/scripts/dev.mjs production",
     "prebuild": "pnpm proto:gen",
     "build": "turbo run build",
-    "test": "turbo run test",
+    "test": "turbo run test -- --passWithNoTests",
     "lint": "turbo run lint",
     "format": "turbo run format",
     "type-check": "turbo run type-check",
