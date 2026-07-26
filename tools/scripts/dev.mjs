@@ -1,10 +1,15 @@
 import fs from 'node:fs';
+import net from 'node:net';
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const FORCE_STOP_DELAY_MS = 10_000;
+const FORCE_STOP_DELAY_MS = 16_000;
 const TURBO_SHUTDOWN_MESSAGE = 'Shutting down Turborepo tasks...';
+const API_ORIGIN_HOST = 'localhost';
+const API_ORIGIN_PORT = 9999;
+const API_READY_TIMEOUT_MS = 90_000;
+const API_READY_RETRY_MS = 500;
 
 function readEnvFile(file) {
   const parsed = {};
@@ -26,9 +31,7 @@ const webEnv = readEnvFile(`apps/web/.env.${appEnv}`);
 const mode = (values.DEV_CACHE_MODE || 'on').trim().toLowerCase();
 const turboBin = require.resolve('turbo/bin/turbo');
 const cloudflaredBin = process.env.CLOUDFLARED_BIN || values.CLOUDFLARED_BIN || 'cloudflared';
-const tunnel = appEnv === 'production'
-  ? spawn(cloudflaredBin, ['tunnel', 'run'], { stdio: 'inherit' })
-  : undefined;
+let tunnel;
 const child = spawn(process.execPath, [turboBin, 'run', 'dev', '--concurrency=32'], {
   stdio: ['inherit', 'pipe', 'pipe'],
   env: {
@@ -42,6 +45,68 @@ const child = spawn(process.execPath, [turboBin, 'run', 'dev', '--concurrency=32
 
 let shuttingDown = false;
 let forceStopTimer;
+
+function waitForApiOrigin() {
+  const deadline = Date.now() + API_READY_TIMEOUT_MS;
+
+  return new Promise((resolve) => {
+    const tryConnect = () => {
+      if (shuttingDown || child.exitCode !== null || child.signalCode !== null) {
+        resolve(false);
+        return;
+      }
+
+      const socket = net.createConnection({
+        host: API_ORIGIN_HOST,
+        port: API_ORIGIN_PORT,
+      });
+
+      socket.once('connect', () => {
+        socket.destroy();
+        resolve(true);
+      });
+
+      socket.once('error', () => {
+        socket.destroy();
+
+        if (Date.now() >= deadline) {
+          resolve(false);
+          return;
+        }
+
+        setTimeout(tryConnect, API_READY_RETRY_MS);
+      });
+    };
+
+    tryConnect();
+  });
+}
+
+async function startTunnelWhenApiIsReady() {
+  if (appEnv !== 'production') return;
+
+  const isApiReady = await waitForApiOrigin();
+  if (!isApiReady) {
+    if (!shuttingDown) {
+      console.error(
+        `API did not become ready at http://${API_ORIGIN_HOST}:${API_ORIGIN_PORT}; Cloudflare Tunnel was not started.`,
+      );
+    }
+    return;
+  }
+
+  if (shuttingDown || child.exitCode !== null || child.signalCode !== null) return;
+
+  tunnel = spawn(cloudflaredBin, ['tunnel', 'run'], { stdio: 'inherit' });
+  tunnel.once('error', (error) => {
+    console.error('Không thể khởi động Cloudflare Tunnel:', error);
+  });
+  tunnel.once('exit', () => {
+    if (forceStopTimer && (child.exitCode !== null || child.signalCode !== null)) {
+      clearTimeout(forceStopTimer);
+    }
+  });
+}
 
 function scheduleForceStop() {
   if (forceStopTimer) return;
@@ -106,10 +171,6 @@ child.once('error', (error) => {
   process.exitCode = 1;
 });
 
-tunnel?.once('error', (error) => {
-  console.error('Không thể khởi động Cloudflare Tunnel:', error);
-});
-
 child.once('exit', (code, signal) => {
   tunnel?.kill('SIGTERM');
   if (
@@ -121,8 +182,4 @@ child.once('exit', (code, signal) => {
   process.exitCode = shuttingDown ? 0 : (code ?? (signal ? 130 : 1));
 });
 
-tunnel?.once('exit', () => {
-  if (forceStopTimer && (child.exitCode !== null || child.signalCode !== null)) {
-    clearTimeout(forceStopTimer);
-  }
-});
+void startTunnelWhenApiIsReady();
