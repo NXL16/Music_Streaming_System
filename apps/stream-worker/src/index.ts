@@ -4,6 +4,8 @@ interface Env {
 }
 
 const EDGE_TTL = 86400;
+const BLOCK_SIZE = 256 * 1024;
+const MAX_BLOCKS_PER_REQUEST = 6;
 
 const CACHE_HEADERS: Record<string, string> = {
   "Content-Type": "audio/mp4",
@@ -11,16 +13,115 @@ const CACHE_HEADERS: Record<string, string> = {
   "Cache-Control": `public, s-maxage=${EDGE_TTL}, max-age=${EDGE_TTL}, stale-while-revalidate=${EDGE_TTL}, immutable`,
 };
 
-function isCacheableRange(range: string): boolean {
-  // MSE makes single byte-range requests. Do not cache multi-ranges, which
-  // create high-cardinality cache keys without helping normal playback.
-  return range.length <= 128 && /^bytes=(?:\d+-\d*|-\d+)$/.test(range);
+type ByteRange = {
+  start: number;
+  end: number;
+};
+
+type StreamBlock = {
+  data: ArrayBuffer;
+  etag: string;
+  totalSize: number;
+  cacheHit: boolean;
+  r2DurationMs: number;
+};
+
+function parseClosedRange(range: string): ByteRange | null {
+  const match = /^bytes=(\d+)-(\d+)$/.exec(range);
+  if (!match) return null;
+
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end < start) {
+    return null;
+  }
+
+  return { start, end };
 }
 
-function rangeCacheKey(cacheUrl: string, range: string): Request {
+function blockCacheKey(cacheUrl: string, blockIndex: number): Request {
   const keyUrl = new URL(cacheUrl);
-  keyUrl.searchParams.set("__stream_range", range);
+  keyUrl.searchParams.set("__stream_block", String(blockIndex));
   return new Request(keyUrl.toString());
+}
+
+async function readStreamBlock(
+  env: Env,
+  ctx: ExecutionContext,
+  cache: Cache,
+  cacheUrl: string,
+  objectKey: string,
+  blockIndex: number,
+): Promise<StreamBlock | null> {
+  const cacheKey = blockCacheKey(cacheUrl, blockIndex);
+  const cached = await cache.match(cacheKey);
+  if (cached) {
+    const totalSize = Number(cached.headers.get("X-Stream-Object-Size"));
+    if (Number.isSafeInteger(totalSize) && totalSize >= 0) {
+      return {
+        data: await cached.arrayBuffer(),
+        etag: cached.headers.get("ETag") || "",
+        totalSize,
+        cacheHit: true,
+        r2DurationMs: 0,
+      };
+    }
+  }
+
+  const blockStart = blockIndex * BLOCK_SIZE;
+  const r2StartedAt = performance.now();
+  const object = await env.MUSIC_BUCKET.get(objectKey, {
+    range: { offset: blockStart, length: BLOCK_SIZE },
+  });
+  const r2DurationMs = performance.now() - r2StartedAt;
+  if (!object || blockStart >= object.size) return null;
+
+  const data = await object.arrayBuffer();
+  const headers = {
+    ...CACHE_HEADERS,
+    "Content-Length": String(data.byteLength),
+    ETag: object.etag,
+    "X-Stream-Object-Size": String(object.size),
+  };
+  ctx.waitUntil(
+    cache
+      .put(cacheKey, new Response(data.slice(0), { headers }))
+      .catch(() => undefined),
+  );
+
+  return {
+    data,
+    etag: object.etag,
+    totalSize: object.size,
+    cacheHit: false,
+    r2DurationMs,
+  };
+}
+
+function createRangeBody(
+  blocks: StreamBlock[],
+  firstBlockIndex: number,
+  range: ByteRange,
+): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      for (let index = 0; index < blocks.length; index += 1) {
+        const blockStart = (firstBlockIndex + index) * BLOCK_SIZE;
+        const start = Math.max(range.start, blockStart) - blockStart;
+        const end =
+          Math.min(
+            range.end,
+            blockStart + blocks[index].data.byteLength - 1,
+          ) - blockStart;
+        if (end < start) continue;
+
+        controller.enqueue(
+          new Uint8Array(blocks[index].data, start, end - start + 1),
+        );
+      }
+      controller.close();
+    },
+  });
 }
 
 function serverTiming(
@@ -202,40 +303,96 @@ export default {
       return response;
     }
 
-    // Range GET — cache encrypted byte ranges independently. A hit avoids the
-    // R2 read entirely for repeated seeks and MSE preloads.
-    const cacheKey = isCacheableRange(rangeHeader)
-      ? rangeCacheKey(cacheUrl, rangeHeader)
-      : undefined;
-    const cachedRange = cacheKey ? await cache.match(cacheKey) : undefined;
+    const requestedRange = parseClosedRange(rangeHeader);
+    if (requestedRange) {
+      const firstBlockIndex = Math.floor(requestedRange.start / BLOCK_SIZE);
+      const requestedLastBlockIndex = Math.floor(requestedRange.end / BLOCK_SIZE);
+      const requestedBlockCount = requestedLastBlockIndex - firstBlockIndex + 1;
 
-    if (cachedRange) {
-      const etag = cachedRange.headers.get("ETag") || "";
-      if (ifNoneMatch && etag && ifNoneMatch === etag) {
-        return new Response(null, {
-          status: 304,
-          headers: {
-            ...cors,
-            ETag: etag,
-            "Cache-Control": CACHE_HEADERS["Cache-Control"],
-            "Server-Timing": serverTiming(startedAt, "HIT"),
-            "X-Stream-Cache": "HIT",
-          },
-        });
+      if (requestedBlockCount <= MAX_BLOCKS_PER_REQUEST) {
+        const firstBlock = await readStreamBlock(
+          env,
+          ctx,
+          cache,
+          cacheUrl,
+          objectKey,
+          firstBlockIndex,
+        );
+
+        if (!firstBlock) {
+          return new Response("Range Not Satisfiable", {
+            status: 416,
+            headers: { ...cors, "Content-Range": "bytes */*" },
+          });
+        }
+
+        if (requestedRange.start >= firstBlock.totalSize) {
+          return new Response("Range Not Satisfiable", {
+            status: 416,
+            headers: {
+              ...cors,
+              "Content-Range": `bytes */${firstBlock.totalSize}`,
+            },
+          });
+        }
+
+        const range = {
+          start: requestedRange.start,
+          end: Math.min(requestedRange.end, firstBlock.totalSize - 1),
+        };
+        const lastBlockIndex = Math.floor(range.end / BLOCK_SIZE);
+        const blockCount = lastBlockIndex - firstBlockIndex + 1;
+        const remainingBlocks = await Promise.all(
+          Array.from({ length: blockCount - 1 }, (_, index) =>
+            readStreamBlock(
+              env,
+              ctx,
+              cache,
+              cacheUrl,
+              objectKey,
+              firstBlockIndex + index + 1,
+            ),
+          ),
+        );
+        const blocks = [firstBlock, ...remainingBlocks];
+
+        if (blocks.every((block): block is StreamBlock => block !== null)) {
+          const cacheStatus = blocks.every((block) => block.cacheHit)
+            ? "HIT"
+            : "MISS";
+          const r2DurationMs = Math.max(
+            ...blocks.map((block) => block.r2DurationMs),
+          );
+          const etag = firstBlock.etag;
+
+          if (ifNoneMatch && etag && ifNoneMatch === etag) {
+            return new Response(null, {
+              status: 304,
+              headers: {
+                ...cors,
+                ETag: etag,
+                "Cache-Control": CACHE_HEADERS["Cache-Control"],
+                "Server-Timing": serverTiming(startedAt, cacheStatus, r2DurationMs),
+                "X-Stream-Cache": cacheStatus,
+              },
+            });
+          }
+
+          const body = createRangeBody(blocks, firstBlockIndex, range);
+          return new Response(body, {
+            status: 206,
+            headers: {
+              ...cors,
+              ...CACHE_HEADERS,
+              "Content-Length": String(range.end - range.start + 1),
+              "Content-Range": `bytes ${range.start}-${range.end}/${firstBlock.totalSize}`,
+              ETag: etag,
+              "Server-Timing": serverTiming(startedAt, cacheStatus, r2DurationMs),
+              "X-Stream-Cache": cacheStatus,
+            },
+          });
+        }
       }
-
-      return new Response(cachedRange.body, {
-        status: 206,
-        headers: {
-          ...cors,
-          ...CACHE_HEADERS,
-          "Content-Length": cachedRange.headers.get("Content-Length") || "0",
-          "Content-Range": cachedRange.headers.get("Content-Range") || "",
-          ETag: etag,
-          "Server-Timing": serverTiming(startedAt, "HIT"),
-          "X-Stream-Cache": "HIT",
-        },
-      });
     }
 
     const r2StartedAt = performance.now();
@@ -278,28 +435,12 @@ export default {
         ETag: object.etag,
         "Server-Timing": serverTiming(
           startedAt,
-          cacheKey ? "MISS" : "BYPASS",
+          "BYPASS",
           r2DurationMs,
         ),
-        "X-Stream-Cache": cacheKey ? "MISS" : "BYPASS",
+        "X-Stream-Cache": "BYPASS",
       },
     });
-
-    if (cacheKey) {
-      // Store as 200 internally: Cache API handling for partial (206) responses
-      // varies, while the response returned to the media client remains 206.
-      const cachedResponse = response.clone();
-      ctx.waitUntil(
-        cache
-          .put(
-            cacheKey,
-            new Response(cachedResponse.body, {
-              headers: cachedResponse.headers,
-            }),
-          )
-          .catch(() => undefined),
-      );
-    }
 
     return response;
   },
