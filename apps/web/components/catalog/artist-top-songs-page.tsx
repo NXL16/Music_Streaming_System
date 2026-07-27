@@ -462,7 +462,7 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
           />
         </div>
 
-        {showLoadingMore && <Loading fullScreen={false} size={46} />}
+        {showLoadingMore && <Loading fullScreen={false} size={29} />}
 
         {hasMore && (
           <div

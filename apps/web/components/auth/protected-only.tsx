@@ -26,7 +26,7 @@ export function ProtectedOnly({ children }: { children: React.ReactNode }) {
         role="status"
         aria-label="Đang tải"
       >
-        <Loading fullScreen={false} inline size={56} />
+        <Loading fullScreen={false} inline size={35} />
         <span className="sr-only">Đang tải…</span>
       </main>
     );

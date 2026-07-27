@@ -1,4 +1,5 @@
-import Image from "next/image";
+import { Spinner } from "@/components/loading/spinner";
+import type { CSSProperties } from "react";
 
 type LoadingProps = {
   fullScreen?: boolean;
@@ -11,7 +12,6 @@ export default function Loading({
   inline = false,
   size,
 }: LoadingProps) {
-  const loaderSize = size ?? 56;
   const containerClassName = fullScreen
     ? "h-screen w-screen flex items-center justify-center select-none"
     : inline
@@ -19,17 +19,17 @@ export default function Loading({
       : "flex items-center justify-center py-4 select-none";
 
   return (
-    <div className={containerClassName} role="status" aria-label="Loading">
-      <Image
-        alt="Loading"
-        aria-hidden="true"
-        height={loaderSize}
-        src="/Loading.svg?v=20260715"
-        loading="eager"
-        style={{ filter: "invert(1)" }}
-        unoptimized
-        width={loaderSize}
-      />
+    <div
+      className={containerClassName}
+      role="status"
+      aria-label="Loading"
+      style={
+        size === undefined
+          ? undefined
+          : ({ "--loading-spinner-size": `${size}px` } as CSSProperties)
+      }
+    >
+      <Spinner className="app-loading-spinner" />
       <span className="sr-only">Loading…</span>
     </div>
   );

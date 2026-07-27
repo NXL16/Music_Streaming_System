@@ -222,39 +222,6 @@ function AppleMusicLogo() {
   );
 }
 
-function NativeAppIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 114.927 120"
-      aria-hidden="true"
-    >
-      <path
-        d="M39.031 104.974h36.871c8.557 0 15.243-2.491 19.635-6.883 4.547-4.444 6.935-11.141 6.935-19.688V41.595c0-8.546-2.377-15.233-6.935-19.687-4.454-4.454-11.078-6.883-19.635-6.883H39.031c-8.556 0-15.295 2.491-19.687 6.883-4.495 4.444-6.883 11.141-6.883 19.687v36.808c0 8.547 2.377 15.234 6.883 19.688 4.413 4.413 11.131 6.883 19.687 6.883zm0-7.854c-6.09 0-10.808-1.724-13.906-4.759-3.138-3.149-4.811-7.815-4.811-13.958V41.595c0-6.142 1.673-10.808 4.811-13.957 3.046-2.983 7.816-4.759 13.906-4.759h36.871c6.039 0 10.798 1.724 13.895 4.759 3.149 3.149 4.822 7.815 4.822 13.957v36.808c0 6.143-1.673 10.809-4.822 13.958-3.045 2.983-7.856 4.759-13.895 4.759z"
-        fill="currentColor"
-      />
-      <path
-        d="M41.091 86.083c3.593 0 9.188-2.71 9.188-9.874V53.468c0-1.05.146-1.206 1.071-1.404l19.664-4.018c1.05-.197 1.384-.031 1.384.791l.124 15.265c0 1.039-.53 1.766-1.528 1.964l-3.613.81c-5.005 1.111-7.507 3.446-7.507 7.257 0 3.861 3.052 6.623 7.299 6.623 3.592 0 9.063-2.575 9.063-9.801V37.124c0-2.543-1.193-3.322-4.058-2.709l-23.215 4.766c-1.713.363-2.72 1.328-2.72 2.885l.125 27.414c0 1.039-.406 1.59-1.268 1.788l-3.801.747c-4.932.987-7.392 3.551-7.392 7.496 0 3.862 3 6.572 7.184 6.572z"
-        fill="currentColor"
-      />
-    </svg>
-  );
-}
-
-function ArrowIcon() {
-  return (
-    <svg
-      height="16"
-      width="16"
-      viewBox="0 0 16 16"
-      className="native-cta-action"
-      aria-hidden="true"
-    >
-      <path d="M1.559 16 13.795 3.764v8.962H16V0H3.274v2.205h8.962L0 14.441 1.559 16z" />
-    </svg>
-  );
-}
-
 function isActiveRoute(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
@@ -271,7 +238,7 @@ function SidebarSection({
   return (
     <div className="pt-0 in-[.app-container]:[--navigation-item-height:44px] min-[484px]:in-[.app-container]:[--navigation-item-height:36px]">
       {title && (
-        <div className="flex items-end justify-between text-white/64 h-9 mt-0 mx-0 mb-1 py-1 px-2 text-[12px] font-semibold leading-[1.24]">
+        <div className="text-(--systemSecondary) flex [font:var(--body-emphasized)] justify-between p-[15px_26px_3px] in-[.app-container]:items-end h-(--navigation-item-height) px-1.5 py-2 min-[484px]:[font:var(--callout-emphasized)] min-[484px]:m-[0_0_4px] min-[484px]:p-[4px_8px] min-[484px]:rounded-md">
           <span>{title}</span>
         </div>
       )}
@@ -416,9 +383,9 @@ export default function AppSidebar() {
             setIsAnimating(false);
           }
         }}
-        className={`${isExpanded ? "is-expanded" : ""} flex flex-col w-full transform-gpu backface-hidden z-(--z-web-chrome) min-[484px]:[border-inline-end:1px_solid_var(--labelDivider)] min-[484px]:relative dark:[--navigation-shadow-color:rgba(0,0,0,.2)] in-[.app-container]:[--navigation-border-color:var(--glassMaterialInnerStrokeCombined)] in-[.app-container]:[--navigation-shadow-color:rgba(0,0,0,0.1)] in-[.app-container]:[backdrop-filter:saturate(220%)_blur(16px)] in-[.app-container]:bg-(--glassMaterialBackground) in-[.app-container]:[box-shadow:0_10px_40px_var(--glassMaterialShadowColor)] min-[484px]:in-[.app-container]:[border:.5px_solid_var(--navigation-border-color)] min-[484px]:in-[.app-container]:rounded-[20px] min-[484px]:in-[.app-container]:[box-shadow:0_10px_40px_var(--navigation-shadow-color)] min-[484px]:in-[.app-container]:h-[calc(100%-16px)] min-[484px]:in-[.app-container]:mbs-2 min-[484px]:in-[.app-container]:ms-2 min-[484px]:in-[.app-container]:w-[calc(100%-16px)] max-[483px]:h-13 max-[483px]:overflow-hidden max-[483px]:fixed max-[483px]:inset-x-0 max-[483px]:top-0 max-[483px]:in-[.app-container]:shadow-none max-[483px]:[.is-expanded]:h-dvh ${isAnimating ? "will-change-[height] [transition:height_.56s_cubic-bezier(.52,.16,.24,1)]" : ""} max-[483px]:in-[.app-container]:[border-bottom:0.5px_solid_var(--navigation-border-color)]`}
+        className={`${isExpanded ? "is-expanded" : ""} flex flex-col w-full transform-gpu backface-hidden z-(--z-web-chrome) min-[484px]:[border-inline-end:1px_solid_var(--labelDivider)] min-[484px]:relative dark:[--navigation-shadow-color:rgba(0,0,0,.2)] in-[.app-container]:[--navigation-border-color:var(--glassMaterialInnerStrokeCombined)] in-[.app-container]:[--navigation-shadow-color:rgba(0,0,0,0.1)] in-[.app-container]:[backdrop-filter:saturate(220%)_blur(16px)] in-[.app-container]:bg-(--glassMaterialBackground) in-[.app-container]:[box-shadow:0_10px_40px_var(--glassMaterialShadowColor)] min-[484px]:in-[.app-container]:[border:.5px_solid_var(--navigation-border-color)] min-[484px]:in-[.app-container]:rounded-[20px] min-[484px]:in-[.app-container]:[box-shadow:0_10px_40px_var(--navigation-shadow-color)] min-[484px]:in-[.app-container]:h-[calc(100%-16px)] min-[484px]:in-[.app-container]:mbs-2 min-[484px]:in-[.app-container]:ms-2 min-[484px]:in-[.app-container]:w-[calc(100%-16px)] max-[483px]:h-13 max-[483px]:overflow-hidden max-[483px]:fixed max-[483px]:inset-x-0 max-[483px]:top-0 max-[483px]:in-[.app-container]:shadow-none max-[483px]:[.is-expanded]:h-dvh ${isAnimating ? "will-change-[height] [transition:height_.56s_cubic-bezier(.52,.16,.24,1)]" : ""} max-[483px]:in-[.app-container]:[border-bottom:0.5px_solid_var(--navigation-border-color)] dark:[--navigation-border-color:var(--glassMaterialInnerStrokeCombined-onDark)] dark:[--glassMaterialBackground:var(--glassMaterialBackground-onDark)]`}
       >
-        <div className="grid max-[483px]:items-center max-[483px]:grid-cols-[repeat(3,1fr)] max-[483px]:me-2.75 max-[483px]:ms-3 max-[483px]:in-[.app-container]:h-13 max-[483px]:in-[.app-container]:me-4 max-[483px]:in-[.app-container]:ms-3.5 max-[483px]:in-[.app-container]:py-1">
+        <div className="grid max-[483px]:items-center max-[483px]:grid-cols-[repeat(3,1fr)] max-[483px]:h-13 max-[483px]:me-4 max-[483px]:ms-3.5 max-[483px]:py-1">
           <button
             type="button"
             onClick={toggleNavigation}
@@ -428,7 +395,7 @@ export default function AppSidebar() {
             }
             aria-expanded={isExpanded}
             aria-controls="navigation"
-            className="min-[484px]:hidden h-11 relative w-11 z-(--z-default) max-[483px]:[justify-self:start]"
+            className="h-11 relative w-11 z-(--z-default) max-[483px]:[justify-self:start] min-[484px]:hidden"
           >
             <span className="h-5 left-3.25 pointer-events-none absolute top-3 [transition:transform_.1806s_cubic-bezier(.04,.04,.12,.96)] w-5 z-(--z-default) in-[.app-container]:left-2.5 in-[.app-container]:w-6 in-[.is-expanded]:h-6 in-[.is-expanded]:left-2.5 in-[.is-expanded]:[transition:transform_.3192s_cubic-bezier(.04,.04,.12,.96)_.1008s] in-[.is-expanded]:w-6 in-[.is-expanded]:transform-[rotate(-45deg)]">
               <span className="bg-(--keyColor) rounded-[1px] block h-0.5 absolute [transition:transform_.1596s_cubic-bezier(.52,.16,.52,.84)_.1008s] w-5 z-(--z-default) top-2.25 transform-[translateY(-4px)] pointer-events-none in-[.app-container]:bg-(--systemPrimary) in-[.app-container]:w-6 in-[.is-expanded]:transform-[translateY(0)] in-[.is-expanded]:[transition:transform_.1806s_cubic-bezier(.04,.04,.12,.96)] in-[.is-expanded]:w-6 in-[.is-expanded]:top-2.75"></span>
@@ -503,23 +470,40 @@ export default function AppSidebar() {
 
           <div className="navigation__native-cta">
             <div slot="native-cta">
-              <div className="mx-3 border-t-[0.5px] border-black/10 py-3 text-(--systemPrimary) min-[484px]:mx-0 min-[484px]:px-3 min-[484px]:py-4">
-                <button className="flex w-full items-center justify-start">
-                  <span className="leading-none">
-                    <div
-                      slot="app-icon"
-                      className="me-1.5 ms-1.5 h-5.5 w-5.5 shrink-0 fill-(--systemSecondary) text-[#eee] min-[484px]:h-5.5 min-[484px]:w-5.5"
-                    >
-                      <NativeAppIcon />
+              <div className="[border-top:.5px_solid_rgba(0,0,0,.1)] [font:var(--body)] mx-6.25 py-3 text-(--systemPrimary) max-[483px]:mx-3 in-[.is-expanded]:h-14.25 min-[484px]:mx-0 min-[484px]:px-3 min-[484px]:py-4">
+                <button className="flex items-center justify-start w-full">
+                  <span className="leading-0">
+                    <div className="fill-(--systemSecondary) shrink-0 h-8 me-1.5 ms-1.5 w-8 min-[484px]:h-5.5 min-[484px]:w-5.5">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 114.927 120"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M39.031 104.974h36.871c8.557 0 15.243-2.491 19.635-6.883 4.547-4.444 6.935-11.141 6.935-19.688V41.595c0-8.546-2.377-15.233-6.935-19.687-4.454-4.454-11.078-6.883-19.635-6.883H39.031c-8.556 0-15.295 2.491-19.687 6.883-4.495 4.444-6.883 11.141-6.883 19.687v36.808c0 8.547 2.377 15.234 6.883 19.688 4.413 4.413 11.131 6.883 19.687 6.883zm0-7.854c-6.09 0-10.808-1.724-13.906-4.759-3.138-3.149-4.811-7.815-4.811-13.958V41.595c0-6.142 1.673-10.808 4.811-13.957 3.046-2.983 7.816-4.759 13.906-4.759h36.871c6.039 0 10.798 1.724 13.895 4.759 3.149 3.149 4.822 7.815 4.822 13.957v36.808c0 6.143-1.673 10.809-4.822 13.958-3.045 2.983-7.856 4.759-13.895 4.759z"
+                          fill="currentColor"
+                        ></path>
+                        <path
+                          d="M41.091 86.083c3.593 0 9.188-2.71 9.188-9.874V53.468c0-1.05.146-1.206 1.071-1.404l19.664-4.018c1.05-.197 1.384-.031 1.384.791l.124 15.265c0 1.039-.53 1.766-1.528 1.964l-3.613.81c-5.005 1.111-7.507 3.446-7.507 7.257 0 3.861 3.052 6.623 7.299 6.623 3.592 0 9.063-2.575 9.063-9.801V37.124c0-2.543-1.193-3.322-4.058-2.709l-23.215 4.766c-1.713.363-2.72 1.328-2.72 2.885l.125 27.414c0 1.039-.406 1.59-1.268 1.788l-3.801.747c-4.932.987-7.392 3.551-7.392 7.496 0 3.862 3 6.572 7.184 6.572z"
+                          fill="currentColor"
+                        ></path>
+                      </svg>
                     </div>
                   </span>
                   <span className="overflow-hidden text-ellipsis whitespace-nowrap text-(--systemPrimary) [font:var(--title-navigation)]">
                     Open in Music
                   </span>
+
                   <span>
-                    <span className="mx-1 block h-2.25 w-2.25 shrink-0 fill-(--systemPrimary) text-(--systemPrimary) [&>svg]:h-2.25 [&>svg]:w-2.25">
-                      <ArrowIcon />
-                    </span>
+                    <svg
+                      height="16"
+                      width="16"
+                      viewBox="0 0 16 16"
+                      className="fill-(--systemPrimary) shrink-0 h-2.25 w-2.25 m-[0_4px]"
+                      aria-hidden="true"
+                    >
+                      <path d="M1.559 16 13.795 3.764v8.962H16V0H3.274v2.205h8.962L0 14.441 1.559 16z"></path>
+                    </svg>
                   </span>
                 </button>
               </div>

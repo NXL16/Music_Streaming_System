@@ -240,15 +240,15 @@ export function CatalogDetailPage({
 
       {!showInitialLoading && resource && (
         <>
-          <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width)">
+          <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) in-[.has-theme-override]:[--header-title-chevron-color:var(--systemSecondary)]">
             <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
               <div className="[view-timeline-name:--header-view] [view-timeline-axis:block] after:content-[''] after:bg-(--joe-color) after:block after:inset-0 after:absolute after:z-[calc(var(--z-default)-2)] min-[484px]:after:-inset-s-(--web-navigation-width)">
                 <div
-                  className={`grid [grid-template-areas:var(--containerDetailHeaderGridAreas,'secondary-actions'_'artwork'_'headings'_'primary-actions'_'description')] [justify-items:var(--containerDetailHeaderAlign,center)] mx-(--bodyGutter) mb-(--containerDetailHeaderSpacer,32px) pt-5 min-[1000px]:grid-cols-[auto_1fr_auto] min-[1000px]:justify-items-start min-[1000px]:mb-(--containerDetailHeaderSpacer,40px) min-[1000px]:pt-2 ${description ? "min-[1000px]:[grid-template-areas:'secondary-actions_secondary-actions_secondary-actions'_'artwork_headings_headings'_'artwork_description_description'_'artwork_primary-actions_primary-actions'] min-[1000px]:grid-rows-[auto_1fr_auto_auto]" : "min-[1000px]:[grid-template-areas:'secondary-actions_secondary-actions_secondary-actions'_'artwork_headings_headings'_'artwork_headings_headings'_'artwork_primary-actions_primary-actions'] min-[1000px]:grid-rows-[auto_1fr_1fr_36px]"}`}
+                  className={`grid [grid-template-areas:var(--containerDetailHeaderGridAreas,'secondary-actions'_'artwork'_'headings'_'primary-actions'_'description')] [justify-items:var(--containerDetailHeaderAlign,center)] mx-(--bodyGutter) mb-(--containerDetailHeaderSpacer,32px) pt-3.75 min-[1000px]:grid-cols-[auto_1fr_auto] min-[1000px]:justify-items-start min-[1000px]:mb-(--containerDetailHeaderSpacer,40px) min-[1000px]:pt-2 ${description ? "min-[1000px]:[grid-template-areas:'secondary-actions_secondary-actions_secondary-actions'_'artwork_headings_headings'_'artwork_description_description'_'artwork_primary-actions_primary-actions'] min-[1000px]:grid-rows-[auto_1fr_auto_auto]" : "min-[1000px]:[grid-template-areas:'secondary-actions_secondary-actions_secondary-actions'_'artwork_headings_headings'_'artwork_headings_headings'_'artwork_primary-actions_primary-actions'] min-[1000px]:grid-rows-[auto_1fr_1fr_36px]"}`}
                 >
                   <div
                     slot="artwork"
-                    className="[--radiosity-effect-shadow-z:var(--z-gpu)] [align-self:start] rounded-(--global-border-radius-large,10px) [box-shadow:0_10px_20px_0_var(--radiosityShadowColor)] [grid-area:artwork] relative w-(--artworkSize,270px) z-(--radiosity-effect-shadow-z,var(--z-default)) min-[1000px]:mt-0 min-[1000px]:me-8.5"
+                    className="[--radiosity-effect-shadow-z:var(--z-gpu)] [align-self:start] rounded-(--global-border-radius-large,10px) [box-shadow:0_10px_20px_0_var(--radiosityShadowColor)] [grid-area:artwork] relative w-(--artworkSize,270px) z-(--radiosity-effect-shadow-z,var(--z-default)) min-[1000px]:mt-0 min-[1000px]:me-8.5 max-[999px]:m-[15px_auto_0] [@supports(animation-timeline:scroll())]:max-[483px]:motion-safe:animate-[artwork-scroll-effects_linear] [@supports(animation-timeline:scroll())]:max-[483px]:motion-safe:will-change-[transform,opacity,filter] [@supports(animation-timeline:scroll())]:max-[483px]:motion-safe:[animation-timeline:--header-view] [@supports(animation-timeline:scroll())]:max-[483px]:motion-safe:[animation-range:exit]"
                     style={
                       {
                         "--contrast-gradient-opacity": "0",
@@ -289,10 +289,10 @@ export function CatalogDetailPage({
                     className={`[align-items:var(--containerDetailHeaderAlign,center)] flex flex-col [grid-area:headings] mt-4.5 min-w-0 relative w-full self-center min-[1000px]:items-start min-[1000px]:self-center min-[1000px]:-mb-1.25 min-[1000px]:-mt-1.25 min-[1000px]:pb-1.25 min-[1000px]:pt-1.25}`}
                   >
                     <div className="empty:hidden text-(--systemSecondary) [font:var(--subhead-emphasized)] mt-2.25"></div>
-                    <h1 className="text-(--systemPrimary) cursor-text [font:var(--large-title-emphasized-short)] mb-[0.5px] wrap-break-word [text-align:var(--containerDetailHeaderAlign,center)] text-balance select-text line-clamp-2 min-[1000px]:[text-align:unset]">
+                    <h1 className="text-(--systemPrimary) cursor-text [font:var(--large-title-emphasized-short)] mb-[0.5px] wrap-break-word [text-align:var(--containerDetailHeaderAlign,center)] text-balance select-text line-clamp-2 min-[1000px]:[text-align:unset] max-[999px]:[font:var(--title-1-emphasized)] max-[999px]:mb-1">
                       <span dir="auto">{title}</span>
                       {headerIsExplicit && (
-                        <span className="inline-flex items-center gap-1 ms-1 [--explicitBadgeSize:19px] [--favoriteBadgeSize:14px] [--favoriteBadgeMarginInlineStart:1px] has-[.explicit-wrapper]:ms-[6.5px]">
+                        <span className="inline-flex items-center gap-1 ms-1 [--explicitBadgeSize:19px] [--favoriteBadgeSize:14px] [--favoriteBadgeMarginInlineStart:1px] has-[.explicit-wrapper]:ms-[6.5px] max-[999px]:[--explicitBadgeSize:16px]">
                           <span className="explicit-wrapper">
                             <span>
                               <svg
@@ -311,16 +311,11 @@ export function CatalogDetailPage({
                     </h1>
 
                     {albumArtistCredits.length > 0 ? (
-                      <div className="[--linkColor:var(--keyColor)] text-(--keyColor) [font:var(--large-title-short)] -m-1.25 overflow-hidden p-1.25 [text-align:var(--containerDetailHeaderAlign,center)] text-ellipsis whitespace-nowrap w-full min-[1000px]:[text-align:unset]">
+                      <div className="[--linkColor:var(--keyColor)] text-(--keyColor) [font:var(--large-title-short)] -m-1.25 overflow-hidden p-1.25 [text-align:var(--containerDetailHeaderAlign,center)] text-ellipsis whitespace-nowrap w-full min-[1000px]:[text-align:unset] max-[999px]:[font:var(--title-1)] max-[999px]:text-[20px]!">
                         {albumArtistCredits.map((credit, index) => (
                           <span key={`${credit.id}-${index}`}>
                             {credit.url ? (
-                              <Link
-                                href={credit.url}
-                                className="hover:underline"
-                              >
-                                {credit.name}
-                              </Link>
+                              <Link href={credit.url}>{credit.name}</Link>
                             ) : (
                               credit.name
                             )}
@@ -349,18 +344,18 @@ export function CatalogDetailPage({
                     </div>
                   )}
 
-                  <div className="[--addToLibraryMarginEnd:0] grid [grid-template-areas:'primary-start_primary-center_primary-end'] grid-cols-[1fr_auto_1fr] mt-3.5 gap-3 [grid-area:primary-actions] min-[1000px]:self-end min-[1000px]:justify-start min-[1000px]:mt-0">
+                  <div className="[--addToLibraryMarginEnd:0] grid [grid-template-areas:'primary-start_primary-center_primary-end'] grid-cols-[1fr_auto_1fr] mt-3.5 gap-3 [grid-area:primary-actions] pointer-coarse:gap-3.5 min-[1000px]:self-end min-[1000px]:justify-start min-[1000px]:mt-0">
                     <div className="order-2 relative">
                       <div className="w-full">
                         <button
                           type="button"
                           disabled={!hasPlayableTrack}
                           onClick={() => setQueue(tracks)}
-                          className="[--button-action-min-width:130px] [--button-action-height:36px] bg-(--button-pill-background-color,#000) rounded-(--button-action-border-radius,24px) text-(--button-pill-color,#fff) [font:var(--title-3-semibold)] px-3 items-center flex h-(--button-action-height,36px) justify-center min-w-(--button-action-min-width-override,var(--button-action-min-width,none)) w-(--button-action-width,100%) disabled:opacity-50"
+                          className="[--button-action-min-width:130px] [--button-action-height:36px] bg-(--button-pill-background-color,#000) rounded-(--button-action-border-radius,24px) text-(--button-pill-color,#fff) [font:var(--title-3-semibold)] px-3 items-center flex h-(--button-action-height,36px) justify-center min-w-(--button-action-min-width-override,var(--button-action-min-width,none)) w-(--button-action-width,100%) disabled:opacity-50 pointer-coarse:[--button-action-height:48px] pointer-coarse:[--button-action-min-width:160px] pointer-coarse:[font:var(--title-2-semibold)]"
                         >
                           <span className="block">
                             <svg
-                              className="[--button-action-icon-height:15px] [--button-action-icon-top-offset:0] w-[inherit] block text-current pointer-events-none shrink-0 h-(--button-action-icon-height,12px) relative top-(--button-action-icon-top-offset,1px) right-(--button-action-icon-inline-end,5px)"
+                              className="pointer-coarse:[--button-action-icon-height:17px] [--button-action-icon-height:15px] [--button-action-icon-top-offset:0] w-[inherit] block text-current pointer-events-none shrink-0 h-(--button-action-icon-height,12px) relative top-(--button-action-icon-top-offset,1px) right-(--button-action-icon-inline-end,5px)"
                               height="16"
                               width="16"
                               viewBox="0 0 16 16"
@@ -376,12 +371,12 @@ export function CatalogDetailPage({
                     <div className="order-1">
                       <div className="w-full">
                         <button
-                          className="[--button-action-width:36px] [--button-action-height:36px] [--button-action-min-width:none] aspect-square bg-(--button-circle-background-color,rgba(0,0,0,0.06)) [border:.75px_solid_var(--button-circle-border-color,rgba(0,0,0,0.04))] rounded-full items-center flex font-(--body-emphasized) h-(--button-action-height,36px) justify-center min-w-(--button-action-min-width-override,var(--button-action-min-width,none)) w-(--button-action-width,100%) text-(--linkColor,inherit) [text-align:inherit]"
+                          className="[--button-action-width:36px] [--button-action-height:36px] [--button-action-min-width:none] aspect-square bg-(--button-circle-background-color,rgba(0,0,0,0.06)) [border:.75px_solid_var(--button-circle-border-color,rgba(0,0,0,0.04))] rounded-full items-center flex font-(--body-emphasized) h-(--button-action-height,36px) justify-center min-w-(--button-action-min-width-override,var(--button-action-min-width,none)) w-(--button-action-width,100%) text-(--linkColor,inherit) [text-align:inherit] pointer-coarse:[--button-action-width:48px] pointer-coarse:[--button-action-height:48px]"
                           aria-label="Shuffle"
                         >
                           <span className="block">
                             <svg
-                              className="w-[inherit] block pointer-events-none shrink-0 h-(--button-action-icon-height,12px) relative top-(--button-action-icon-top-offset,1px) [--button-action-icon-height:14px] [--button-action-icon-top-offset:0] fill-(--button-action-fill-overrride,var(--systemPrimary)) text-(--button-action-fill-overrride,var(--systemPrimary))"
+                              className="w-[inherit] block pointer-events-none shrink-0 h-(--button-action-icon-height,12px) relative top-(--button-action-icon-top-offset,1px) [--button-action-icon-height:14px] [--button-action-icon-top-offset:0] fill-(--button-action-fill-overrride,var(--systemPrimary)) text-(--button-action-fill-overrride,var(--systemPrimary)) pointer-coarse:[--button-action-icon-height:18px]"
                               viewBox="0 0 18 14"
                               xmlns="http://www.w3.org/2000/svg"
                             >
@@ -393,7 +388,7 @@ export function CatalogDetailPage({
                     </div>
 
                     <div className="order-3">
-                      <div className="[--add-to-library-button-width:36px] [--add-to-library-icon-width:12px]">
+                      <div className="[--add-to-library-button-width:36px] [--add-to-library-icon-width:12px] pointer-coarse:[--add-to-library-button-width:48px] pointer-coarse:[--add-to-library-icon-width:16px]">
                         <AddToLibraryButton
                           resourceType={resourceType}
                           resourceId={resourceId}
@@ -457,7 +452,7 @@ export function CatalogDetailPage({
                       Song
                     </div>
                   </div>
-                  <div className="w-35.25 align-middle table-cell text-end overflow-visible relative z-(--z-default) rounded-none [font:var(--callout-emphasized)] rounded-ee-(--songs-list-row-border-radius,6px) rounded-es-none rounded-se-(--songs-list-row-border-radius,6px) rounded-ss-none pe-4.5 text-[0px]! h-0 leading-0! p-0">
+                  <div className="w-35.25 align-middle table-cell text-end overflow-visible relative z-(--z-default) rounded-none [font:var(--callout-emphasized)] rounded-ee-(--songs-list-row-border-radius,6px) rounded-es-none rounded-se-(--songs-list-row-border-radius,6px) rounded-ss-none pe-4.5 text-[0px]! h-0 leading-0! p-0 max-[578px]:w-12!">
                     <div className="relative z-(--z-default) overflow-hidden text-ellipsis whitespace-nowrap pe-8.75 ps-3.75 inline-block text-[0px] h-0 leading-0 p-0">
                       Time
                     </div>
@@ -580,10 +575,30 @@ export function CatalogDetailPage({
 
                       <div className="table-cell [font:var(--body)] py-0 align-middle overflow-visible relative text-end z-(--z-default) rounded-ee-(--songs-list-row-border-radius,6px) rounded-es-none rounded-se-(--songs-list-row-border-radius,6px) rounded-ss-none pe-4.5 after:[border-top:0.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0 group-[.selected]:after:opacity-0">
                         <div className="items-center inline-grid [grid-template-areas:'song-controls-add_song-controls-length_song-controls-context'] relative">
-                          <div className="[grid-area:song-controls-add] opacity-(--addToLibraryOpacity,0) me-1.75"></div>
+                          <div className="pointer-coarse:hidden max-[578px]:hidden [grid-area:song-controls-add] opacity-(--addToLibraryOpacity,0) me-1.75">
+                            <button className="items-center text-(--keyColor) cursor-pointer inline-flex justify-center [transition:var(--global-transition)] h-(--add-to-library-button-width,25px) leading-0 w-(--add-to-library-button-width,25px) me-(--addToLibraryMarginEnd,4px)">
+                              <svg
+                                width="10"
+                                height="10"
+                                viewBox="0 0 10 10"
+                                xmlns="http://www.w3.org/2000/svg"
+                                fillRule="evenodd"
+                                clipRule="evenodd"
+                                strokeLinejoin="round"
+                                strokeMiterlimit="2"
+                                className="h-(--add-to-library-icon-width,12px) w-(--add-to-library-icon-width,12px) fill-(--keyColor)"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  d="M.784 5.784h3.432v3.432c0 .43.354.784.784.784.43 0 .784-.354.784-.784V5.784h3.432a.784.784 0 1 0 0-1.568H5.784V.784A.788.788 0 0 0 5 0a.788.788 0 0 0-.784.784v3.432H.784a.784.784 0 1 0 0 1.568z"
+                                  fillRule="nonzero"
+                                ></path>
+                              </svg>
+                            </button>
+                          </div>
                           <time
                             dateTime="PT1M27S"
-                            className="[grid-area:song-controls-length] cursor-default inline-block leading-9.5 font-features-['tnum'] [font-variant-numeric:tabular-nums]"
+                            className="[grid-area:song-controls-length] cursor-default inline-block leading-9.5 font-features-['tnum'] [font-variant-numeric:tabular-nums] max-[578px]:hidden"
                           >
                             {formatDuration(track.durationSec)}
                           </time>

@@ -180,11 +180,22 @@ export default function HomePage() {
       )}
 
       {error && (
-        <div role="alert">
-          <p className="mx-(--bodyGutter) text-red-500">{error}</p>
-          <button onClick={() => void retry()} type="button">
-            Thử lại
-          </button>
+        <div className="mx-auto min-h-full relative w-full z-(--z-default)">
+          <div
+            role="alert"
+            className="[--buttonTextColor:var(--systemSecondary)] [--buttonBorderColor:var(--systemSecondary)] items-center text-(--systemSecondary) flex flex-col gap-3 left-1/2 m-auto max-w-110 px-6.25 absolute text-center top-1/2 -translate-x-1/2 -translate-y-1/2 z-(--z-default)"
+          >
+            <h2 className="[font:var(--title-2)] mb-1.25">An error occurred.</h2>
+            <div className="w-auto">
+              <button
+                type="button"
+                onClick={() => void retry()}
+                className="items-center bg-(--buttonBackgroundColor,var(--keyColorBG,var(--systemBlue))) rounded-(--buttonRadius,3px) [display:var(--buttonDisplay,flex)] [justify-content:var(--buttonJustifyContent,center)] [--buttonBackgroundColor:transparent] border border-solid border-(--buttonBorderColor,var(--keyColor,var(--systemBlue))) text-(--buttonTextColor,var(--keyColor)) [font:var(--body-tall)] min-w-(--buttonMinWidth,108px) pe-4 ps-4 min-[1260px]:h-(--buttonHeight,28px) min-[1260px]:w-(--buttonWidth,auto)"
+              >
+                Try Again
+              </button>
+            </div>
+          </div>
         </div>
       )}
       {shelfLoadError && (
@@ -326,7 +337,7 @@ function ShelfDetailLoading() {
   return (
     <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-8">
       <div className="flex min-h-[calc(100vh-16rem)] items-center justify-center">
-        <Loading fullScreen={false} size={56} />
+        <Loading fullScreen={false} size={35} />
       </div>
     </div>
   );

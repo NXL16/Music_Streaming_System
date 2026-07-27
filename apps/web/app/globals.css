@@ -7,39 +7,73 @@
 }
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-  --z-web-chrome: 1000;
-  --z-default: 1;
+  --background: hsl(0, 0%, 100%);
+  --foreground: #1f1f1f;
+  --footerBg: #fbfbfb;
   --web-navigation-width: 164px;
   --bodyGutter: 25px;
+  --z-web-chrome: 9901;
+  --z-default: 1;
+  --z-gpu: 1001;
 
-  --systemPrimary: rgb(29, 29, 31);
-  --systemSecondary: rgba(60, 60, 67, 0.6);
-  --keyColor: #f12c43;
+  --systemPrimary: hsla(0, 0%, 0%, 0.88);
+  --systemSecondary: hsla(240, 6%, 25%, 0.6);
+  --systemQuaternary: hsla(0, 0%, 0%, 0.1);
+  --systemPrimary-onLight: rgba(0, 0, 0, .88);
+  --systemSecondary-onLight: rgba(0, 0, 0, .56);
+  --systemTertiary-onLight: rgba(0, 0, 0, .48);
+  --systemQuaternary-onLight: rgba(0, 0, 0, .1);
+  --systemQuinary-onLight: rgba(0, 0, 0, .05);
+  --keyColor: #e24154;
   --keyColorText: #ffffff;
   --statusPositive: #248a3d;
   --statusPositiveBackground: rgba(36, 138, 61, 0.12);
   --statusNegativeBackground: rgba(241, 44, 67, 0.12);
+  --genericJoeColor: #ebebeb;
 
   --mobileNavigationBG: rgba(255, 255, 255, 0.8);
   --navSidebarBG: rgba(242, 242, 247, 0.82);
-  --navSidebarSelectedState: rgba(0, 0, 0, 0.08);
-  --labelDivider: rgba(0, 0, 0, 0.12);
+  --labelDivider: rgba(0, 0, 0, .15);
+  --keyline-border-style: .5px solid var(--labelDivider);
   --containerInnerStroke: #000;
 
-  --glassMaterialBackground: rgba(255, 255, 255, 0.72);
-  --glassMaterialInnerStrokeCombined: rgba(0, 0, 0, 0.12);
+  --glassMaterialBackground: rgba(245, 245, 247, .55);
+  --glassMaterialInnerStrokeCombined: rgba(0, 0, 0, .05);
   --glassMaterialShadowColor: rgba(0, 0, 0, 0.1);
-
-  --glassMaterialInnerStroke: rgba(0, 0, 0, 0.05);
-  --glassMaterialInnerStrokeAlpha: 0.05;
+  --glassMaterialInnerStroke: #000;
 
   --navigation-border-color: var(--glassMaterialInnerStrokeCombined);
-  --navigation-shadow-color: rgba(0, 0, 0, 0.1);
-
   --navigation-item-height: 36px;
-  --title-navigation: 400 14px / 20px var(--apple-music-font);
+  --navigation-shadow-color: rgba(0, 0, 0, .1);
+  --navSidebarSelectedState: rgba(0, 0, 0, 0.08);
+  --artworkShadowInset: inset 0 0 0 1px var(--containerInnerStroke);
+
+  --global-transition-property: opacity;
+  --global-transition-duration: .1s;
+  --global-transition-timing-function: ease-in;
+  --global-transition: var(--global-transition-property, opacity) var(--global-transition-duration, .1s) var(--global-transition-timing-function, ease-in);
+
+  --body: 400 13px/ 1.2307692308 var(--apple-music-font);
+  --body-tall: 400 13px/ 1.3846153846 var(--apple-music-font);
+  --title-navigation: 400 16px/ 1.375 var(--apple-music-font);
+  --header-emphasized: 700 34px/ 1.1764905882 var(--apple-music-font);
+  --title-1: 400 22px/ 1.1818181818 var(--apple-music-font);
+  --title-1-emphasized: 700 22px/ 1.1818181818 var(--apple-music-font);
+  --title-2: 400 17px/ 1.2941176471 var(--apple-music-font);
+  --title-2-semibold: 600 17px/ 1.2941176471 var(--apple-music-font);
+  --title-2-emphasized: 700 17px/ 1.2941176471 var(--apple-music-font);
+  --title-3-semibold: 600 15px/ 1.3333833333 var(--apple-music-font);
+  --title-3-tall: 400 15px/ 1.4666666667 var(--apple-music-font);
+  --title-3: 400 15px/ 1.3333833333 var(--apple-music-font);
+  --callout: 400 12px/ 1.25 var(--apple-music-font);
+  --callout-emphasized: 600 12px/ 1.25 var(--apple-music-font);
+  --callout-medium: 500 12px/ 1.25 var(--apple-music-font);
+  --body-emphasized: 600 13px/ 1.2307692308 var(--apple-music-font);
+  --subhead-emphasized: 600 11px/ 1.2727272727 var(--apple-music-font);
+  --subhead: 400 11px/ 1.2727272727 var(--apple-music-font);
+  --large-title-short: 400 26px/ 1.1538461538 var(--apple-music-font);
+  --large-title-semibold: 600 26px/ 1.2307692308 var(--apple-music-font);
+  --large-title-emphasized-short: 700 26px/ 1.1538461538 var(--apple-music-font);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -55,6 +89,12 @@
     --systemStandardThinMaterialSover: rgba(40, 40, 40, .5);
     --systemStandardMediumMaterialSover: rgba(40, 40, 40, .6);
     --systemQuaternary: hsla(0, 0%, 100%, .1);
+    --systemPrimary-onDark: hsla(0, 0%, 100%, .92);
+    --systemSecondary-onDark: hsla(0, 0%, 100%, .64);
+    --systemTertiary-onDark: hsla(0, 0%, 100%, .4);
+    --systemQuaternary-onDark: hsla(0, 0%, 100%, .1);
+    --systemQuinary-onDark: hsla(0, 0%, 100%, .05);
+
     --keyColor: #e24154;
     --keyColorText: #ffffff;
     --statusPositive: #30d158;
@@ -74,39 +114,14 @@
     --labelDivider: rgba(255, 255, 255, 0.12);
 
     --glassMaterialBackground: rgba(38, 38, 40, 0.6);
-    --glassMaterialInnerStrokeCombined: hsla(0, 0%, 100%, 0.2);
+    --glassMaterialInnerStrokeCombined: hsla(0, 0%, 100%, .2);
     --glassMaterialShadowColor: rgba(0, 0, 0, 0.2);
-
     --glassMaterialInnerStroke: #fff;
     --glassMaterialInnerStrokeAlpha: 0.2;
+    --glassMaterialBackground-onDark: rgba(38, 38, 40, .6);
+    --glassMaterialInnerStrokeCombined-onDark: hsla(0, 0%, 100%, .2);
 
-    --navigation-shadow-color: rgba(0, 0, 0, 0.2);
-    --z-web-chrome: 9901;
-    --z-default: 1;
-    --z-gpu: 1001;
-
-    --global-transition-property: opacity;
-    --global-transition-duration: .1s;
-    --global-transition-timing-function: ease-in;
-    --global-transition: var(--global-transition-property, opacity) var(--global-transition-duration, .1s) var(--global-transition-timing-function, ease-in);
-
-    --body: 400 13px/ 1.2307692308 var(--apple-music-font);
-    --body-tall: 400 13px/ 1.3846153846 var(--apple-music-font);
-    --header-emphasized: 700 34px/ 1.1764905882 var(--apple-music-font);
-    --title-2-emphasized: 700 17px/ 1.2941176471 var(--apple-music-font);
-    --title-3-semibold: 600 15px/ 1.3333833333 var(--apple-music-font);
-    --title-3-tall: 400 15px/ 1.4666666667 var(--apple-music-font);
-    --title-3: 400 15px/ 1.3333833333 var(--apple-music-font);
-    --callout: 400 12px/ 1.25 var(--apple-music-font);
-    --callout-emphasized: 600 12px/ 1.25 var(--apple-music-font);
-    --callout-medium: 500 12px/ 1.25 var(--apple-music-font);
-    --body-emphasized: 600 13px/ 1.2307692308 var(--apple-music-font);
-    --subhead-emphasized: 600 11px/ 1.2727272727 var(--apple-music-font);
-    --subhead: 400 11px/ 1.2727272727 var(--apple-music-font);
-    --large-title-short: 400 26px/ 1.1538461538 var(--apple-music-font);
-    --large-title-semibold: 600 26px/ 1.2307692308 var(--apple-music-font);
-    --large-title-emphasized-short: 700 26px/ 1.1538461538 var(--apple-music-font);
-
+    --navigation-shadow-color: rgba(0, 0, 0, .2);
     --radiosityShadowColor: rgba(0, 0, 0, .3);
 
     --button-pill-background-color: #fff;
@@ -313,6 +328,12 @@
   }
 }
 
+@media (min-width: 484px) {
+  :root {
+    --title-navigation: 400 14px/ 1.4285914286 var(--apple-music-font);
+  }
+}
+
 amp-playback-controls-shuffle,
 amp-playback-controls-progress,
 amp-ambient-video,
@@ -322,6 +343,87 @@ amp-contextual-menu-button {
 
 [hydrated] {
   visibility: inherit;
+}
+
+.ispinner {
+  --ispinner-size: 20px;
+  display: inline-block;
+  height: var(--ispinner-size);
+  position: relative;
+  width: var(--ispinner-size);
+}
+
+.ispinner-blade {
+  animation: iSpinnerBlade 1s linear infinite;
+  background-color: var(--spinner-color, var(--systemPrimary));
+  border-radius: calc(var(--ispinner-size) * .0625);
+  height: calc(var(--ispinner-size) * .325);
+  left: calc(var(--ispinner-size) * .425);
+  position: absolute;
+  top: calc(var(--ispinner-size) * .325);
+  will-change: opacity;
+  width: calc(var(--ispinner-size) * .125);
+}
+
+.ispinner-blade:nth-child(1) {
+  transform: rotate(45deg) translateY(calc(var(--ispinner-size) * -.325));
+  animation-delay: -1.625s;
+}
+
+.ispinner-blade:nth-child(2) {
+  transform: rotate(90deg) translateY(calc(var(--ispinner-size) * -.325));
+  animation-delay: -1.5s;
+}
+
+.ispinner-blade:nth-child(3) {
+  transform: rotate(135deg) translateY(calc(var(--ispinner-size) * -.325));
+  animation-delay: -1.375s;
+}
+
+.ispinner-blade:nth-child(4) {
+  transform: rotate(180deg) translateY(calc(var(--ispinner-size) * -.325));
+  animation-delay: -1.25s;
+}
+
+.ispinner-blade:nth-child(5) {
+  transform: rotate(225deg) translateY(calc(var(--ispinner-size) * -.325));
+  animation-delay: -1.125s;
+}
+
+.ispinner-blade:nth-child(6) {
+  transform: rotate(270deg) translateY(calc(var(--ispinner-size) * -.325));
+  animation-delay: -1s;
+}
+
+.ispinner-blade:nth-child(7) {
+  transform: rotate(315deg) translateY(calc(var(--ispinner-size) * -.325));
+  animation-delay: -.875s;
+}
+
+.ispinner-blade:nth-child(8) {
+  transform: rotate(360deg) translateY(calc(var(--ispinner-size) * -.325));
+  animation-delay: -.75s;
+}
+
+@keyframes iSpinnerBlade {
+  0% {
+    opacity: .92;
+  }
+
+  50%,
+  100% {
+    opacity: .18;
+  }
+}
+
+.app-loading-spinner {
+  --ispinner-size: var(--loading-spinner-size, 35px) !important;
+}
+
+@media (max-width: 483px) {
+  .app-loading-spinner {
+    --ispinner-size: 24px !important;
+  }
 }
 
 
@@ -339,9 +441,6 @@ amp-contextual-menu-button {
   --progress-track-color-elapsed: var(--systemPrimary);
   --progress-track-color-elapsed-active: var(--systemPrimary);
   --progress: 0%;
-  /* The thumb is hidden, so it must not reserve horizontal space in the
-     native range control. This keeps its value mapping aligned with the
-     full-width CSS progress fill. */
   --progress-thumb-width: 0px;
   -webkit-appearance: none;
   -moz-appearance: none;
@@ -820,6 +919,43 @@ html[dir=rtl] .chrome-volume__slider.svelte-13xdpwq.svelte-13xdpwq {
 @keyframes addToSpinner {
   100% {
     transform: rotate(1turn);
+  }
+}
+
+@keyframes artwork-scroll-effects {
+  0% {
+    -webkit-filter: blur(0);
+    filter: blur(0);
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+
+  20% {
+    -webkit-filter: blur(0);
+    filter: blur(0);
+    opacity: 1;
+    transform: scale(1) translateY(5%);
+  }
+
+  70% {
+    -webkit-filter: blur(25px);
+    filter: blur(25px);
+    opacity: .2857142857;
+    transform: scale(1.0625) translateY(17.5%);
+  }
+
+  90% {
+    -webkit-filter: blur(25px);
+    filter: blur(25px);
+    opacity: 0;
+    transform: scale(1.0875) translateY(22.5%);
+  }
+
+  100% {
+    -webkit-filter: blur(25px);
+    filter: blur(25px);
+    opacity: 0;
+    transform: scale(1.1) translateY(25%);
   }
 }
 
