@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuthStore } from "@/lib/auth/auth-store";
@@ -230,10 +230,12 @@ function SidebarSection({
   title,
   items,
   pathname,
+  onNavigate,
 }: {
   title?: string;
   items: SidebarItem[];
   pathname: string;
+  onNavigate: () => void;
 }) {
   return (
     <div className="pt-0 in-[.app-container]:[--navigation-item-height:44px] min-[484px]:in-[.app-container]:[--navigation-item-height:36px]">
@@ -257,6 +259,7 @@ function SidebarSection({
             >
               <Link
                 href={item.href}
+                onClick={onNavigate}
                 className="rounded-[inherit] box-content block h-full -m-0.75 p-0.75"
                 aria-current={isSelected ? "page" : undefined}
               >
@@ -353,22 +356,26 @@ export default function AppSidebar() {
     })),
   ];
 
-  const [expandedPathname, setExpandedPathname] = useState<string | null>(null);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
-  const isTransitioningRef = useRef(false);
-  const isExpanded = expandedPathname === pathname;
   const isMobile = useIsMobile();
 
   const toggleNavigation = () => {
-    if (isTransitioningRef.current) {
+    if (isAnimating) {
       return;
     }
 
-    isTransitioningRef.current = true;
     setIsAnimating(true);
-    setExpandedPathname((currentPathname) =>
-      currentPathname === pathname ? null : pathname,
-    );
+    setIsExpanded((expanded) => !expanded);
+  };
+
+  const closeNavigation = () => {
+    if (!isExpanded) return;
+
+    // Navigation should be immediate on mobile. The hamburger icon still
+    // animates from the `is-expanded` state, while the drawer closes at once.
+    setIsAnimating(false);
+    setIsExpanded(false);
   };
 
   return (
@@ -379,7 +386,6 @@ export default function AppSidebar() {
             event.target === event.currentTarget &&
             event.propertyName === "height"
           ) {
-            isTransitioningRef.current = false;
             setIsAnimating(false);
           }
         }}
@@ -411,6 +417,7 @@ export default function AppSidebar() {
               aria-label="Apple Music"
               role="img"
               href="/home"
+              onClick={closeNavigation}
               className="[--linkHoverTextDecoration:none] inline-block relative z-(--z-default) before:content-[''] before:inset-[-12px_-15px] before:p-[12px_15px] before:absolute"
             >
               <AppleMusicLogo />
@@ -423,6 +430,7 @@ export default function AppSidebar() {
                 <Link
                   href="/profile"
                   aria-label="My Profile"
+                  onClick={closeNavigation}
                   className="m-0 p-0 block [border:0] outline-none appearance-none [font:inherit] [font-size:inherit] leading-[inherit] rounded-(--ctxmenu-trigger-border-radius,50%) bg-(--ctxmenu-trigger-background-color,transparent) [transition:opacity_0.1s_ease-in] opacity-(--ctxmenu-trigger-opacity,1) cursor-pointer [backdrop-filter:blur(var(--ctxmenu-trigger-backdrop-blur,0))] no-underline"
                 >
                   <span className="flex rounded-[50%]">
@@ -448,22 +456,26 @@ export default function AppSidebar() {
             <SidebarSection
               items={primaryNavigationItems}
               pathname={pathname}
+              onNavigate={closeNavigation}
             />
             <SidebarSection
               title="Library"
               items={libraryItems}
               pathname={pathname}
+              onNavigate={closeNavigation}
             />
             <SidebarSection
               title="Playlists"
               items={visiblePlaylistItems}
               pathname={pathname}
+              onNavigate={closeNavigation}
             />
             {canManageIdentity && (
               <SidebarSection
                 title="Administration"
                 items={identityAdminItems}
                 pathname={pathname}
+                onNavigate={closeNavigation}
               />
             )}
           </div>
