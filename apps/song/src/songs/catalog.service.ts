@@ -17,6 +17,8 @@ import {
   GetCatalogArtistAlbumsRequest,
   GetCatalogArtistSongsRequest,
   GetCatalogArtistSongsResponse,
+  GetCatalogAlbumRelatedRequest,
+  GetCatalogAlbumRelatedResponse,
   ProtobufStruct,
   SearchCatalogRequest,
   SearchCatalogResponse,
@@ -99,8 +101,15 @@ type JsonObject = Record<string, unknown>;
 
 const DEFAULT_STOREFRONT = 'vn';
 const MAX_BATCH_RESOURCES = 2_000;
+const ARTWORK_SIMILARITY_COOLDOWN_MIN = 7;
+const ARTWORK_SIMILARITY_COOLDOWN_VARIANCE = 4;
+const ARTIST_DIVERSITY_COOLDOWN = 3;
 const ARTIST_SONG_PAGE_DEFAULT = 20;
 const ARTIST_SONG_PAGE_MAX = 50;
+const RELATED_SHELF_PREVIEW_LIMIT = 12;
+const RELATED_SHELF_DETAIL_PAGE_SIZE = 30;
+const RELATED_SHELF_DETAIL_MAX_ITEMS = 60;
+const RELATED_SHELF_CANDIDATE_LIMIT = RELATED_SHELF_DETAIL_MAX_ITEMS;
 // Ceiling for offset-based browse pagination. Offset degrades linearly at
 // depth; keyset would require encoding the sort column into the cursor
 // (a cursor-format/proto change), so deep offsets are rejected instead.
@@ -128,7 +137,9 @@ export class CatalogService {
       this.throwNotFound('ALBUM_NOT_FOUND');
     }
 
-    return this.albumResponse(album, storefront);
+    const relatedShelfHints = await this.albumRelatedShelfHints(album, storefront);
+
+    return this.albumResponse(album, storefront, relatedShelfHints);
   }
 
   async getPlaylist(
@@ -301,6 +312,475 @@ export class CatalogService {
     };
   }
 
+  async getAlbumRelated(
+    request: GetCatalogAlbumRelatedRequest,
+  ): Promise<GetCatalogAlbumRelatedResponse> {
+    const storefront = this.storefront(request.storefront);
+    const albumId = this.required(request.albumId, 'ALBUM_ID_REQUIRED');
+    const album = await this.prisma.album.findFirst({
+      where: { id: albumId, storefront },
+      include: albumCatalogInclude,
+    });
+    if (!album) this.throwNotFound('ALBUM_NOT_FOUND');
+
+    // Credit order may put a featured artist first. The album-level artist
+    // string is the authoritative owner shown in the album header. Never
+    // guess from a different credit: an absent owner means no "More by" shelf.
+    const normalizedAlbumArtistName = album.artistName.trim().toLocaleLowerCase();
+    const primaryArtist =
+      album.artistCredits.find(
+        ({ artist }) =>
+          artist.name.trim().toLocaleLowerCase() === normalizedAlbumArtistName,
+      )?.artist;
+    const albumSongIds = album.tracks.map(({ songId }) => songId);
+    const excludedAlbumIds = [album.id];
+    const detailSection = request.section;
+    const isDetailRequest =
+      ['more-by', 'featured-on', 'you-might-also-like'].includes(detailSection) &&
+      request.limit > 0;
+
+    if (isDetailRequest) {
+      return this.getAlbumRelatedDetailPage({
+        storefront,
+        album,
+        primaryArtist,
+        albumSongIds,
+        excludedAlbumIds,
+        section: detailSection,
+        cursor: request.cursor,
+        limit: request.limit,
+        recommendedAlbumIds: request.recommendedAlbumIds,
+      });
+    }
+
+    const personalizedYouMightAlsoLike = request.recommendedAlbumIds.length
+      ? this.recommendedAlbumBrowse(
+          request.recommendedAlbumIds,
+          excludedAlbumIds,
+          storefront,
+        )
+      : null;
+
+    const [moreBy, exactFeaturedOn, rawYouMightAlsoLike] = await Promise.all([
+      primaryArtist
+        ? this.prisma.album.findMany({
+            where: {
+              storefront,
+              id: { notIn: excludedAlbumIds },
+              artistCredits: { some: { artistId: primaryArtist.id } },
+            },
+            include: albumCatalogBrowseInclude,
+            orderBy: [{ releaseDate: 'desc' }, { id: 'desc' }],
+            take: RELATED_SHELF_CANDIDATE_LIMIT,
+          })
+        : Promise.resolve([] as CatalogAlbumBrowseEntity[]),
+      albumSongIds.length
+        ? this.prisma.playlist.findMany({
+            where: {
+              storefront,
+              isPublic: true,
+              tracks: { some: { songId: { in: albumSongIds } } },
+            },
+            include: playlistCatalogBrowseInclude,
+            orderBy: [{ lastModifiedAt: 'desc' }, { id: 'desc' }],
+            take: RELATED_SHELF_PREVIEW_LIMIT + 1,
+          })
+        : Promise.resolve([] as CatalogPlaylistBrowseEntity[]),
+      personalizedYouMightAlsoLike ??
+        this.prisma.album.findMany({
+          where: {
+            storefront,
+            id: { notIn: excludedAlbumIds },
+            ...(album.genreNames.length
+              ? { genreNames: { hasSome: album.genreNames } }
+              : {}),
+            ...(primaryArtist
+              ? { artistCredits: { none: { artistId: primaryArtist.id } } }
+              : {}),
+          },
+          include: albumCatalogBrowseInclude,
+          orderBy: [{ releaseDate: 'desc' }, { id: 'desc' }],
+          take: RELATED_SHELF_CANDIDATE_LIMIT,
+        }),
+    ]);
+
+    // Catalog imports do not always include playlist-track membership. When
+    // that relation is unavailable, an editorial playlist that explicitly
+    // credits the primary artist is still a truthful "Featured On" result.
+    const featuredOn =
+      exactFeaturedOn.length > 0 || !primaryArtist
+        ? exactFeaturedOn
+        : await this.prisma.playlist.findMany({
+            where: {
+              storefront,
+              isPublic: true,
+              playlistType: 'editorial',
+              artistNames: { has: primaryArtist.name },
+            },
+            include: playlistCatalogBrowseInclude,
+            orderBy: [{ lastModifiedAt: 'desc' }, { id: 'desc' }],
+            take: RELATED_SHELF_PREVIEW_LIMIT + 1,
+          });
+
+    const preview = <T>(items: T[]) => {
+      return {
+        items: items.slice(0, RELATED_SHELF_PREVIEW_LIMIT),
+        hasMore: items.length > RELATED_SHELF_PREVIEW_LIMIT,
+      };
+    };
+    const moreByPreview = preview(this.sequenceMoreByAlbums(moreBy));
+    const featuredOnPreview = preview(featuredOn);
+    const youMightAlsoLikePreview = preview(
+      request.recommendedAlbumIds.length
+        ? rawYouMightAlsoLike
+        : this.sequenceRelatedAlbums(rawYouMightAlsoLike, album.id),
+    );
+
+    return {
+      primaryArtistName: primaryArtist?.name ?? '',
+      moreBy: this.albumBrowseResponse(moreByPreview.items, storefront),
+      featuredOn: this.playlistBrowseResponse(featuredOnPreview.items, storefront),
+      youMightAlsoLike: this.albumBrowseResponse(
+        youMightAlsoLikePreview.items,
+        storefront,
+      ),
+      moreByHasMore: moreByPreview.hasMore,
+      featuredOnHasMore: featuredOnPreview.hasMore,
+      youMightAlsoLikeHasMore: youMightAlsoLikePreview.hasMore,
+      nextCursor: '',
+    };
+  }
+
+  private async getAlbumRelatedDetailPage({
+    storefront,
+    album,
+    primaryArtist,
+    albumSongIds,
+    excludedAlbumIds,
+    section,
+    cursor,
+    limit,
+    recommendedAlbumIds,
+  }: {
+    storefront: string;
+    album: CatalogAlbumEntity;
+    primaryArtist: CatalogArtistEntity | undefined;
+    albumSongIds: string[];
+    excludedAlbumIds: string[];
+    section: string;
+    cursor: string;
+    limit: number;
+    recommendedAlbumIds: string[];
+  }): Promise<GetCatalogAlbumRelatedResponse> {
+    const cursorState = this.relatedShelfCursor(cursor);
+    const offset = cursorState.offset;
+    const pageSize = Math.min(
+      Math.max(1, limit),
+      RELATED_SHELF_DETAIL_PAGE_SIZE,
+      RELATED_SHELF_DETAIL_MAX_ITEMS - offset,
+    );
+
+    if (pageSize <= 0) {
+      return this.albumRelatedDetailResponse(section, [], storefront, '');
+    }
+
+    const pageOptions = { skip: offset, take: pageSize + 1 };
+    let items: CatalogAlbumBrowseEntity[] | CatalogPlaylistBrowseEntity[] = [];
+    let usedFeaturedOnFallback = false;
+
+    if (section === 'more-by') {
+      items = primaryArtist
+        ? this.sequenceMoreByAlbums(await this.prisma.album.findMany({
+            where: {
+              storefront,
+              id: { notIn: excludedAlbumIds },
+              artistCredits: { some: { artistId: primaryArtist.id } },
+            },
+            include: albumCatalogBrowseInclude,
+            orderBy: [{ releaseDate: 'desc' }, { id: 'desc' }],
+            take: RELATED_SHELF_CANDIDATE_LIMIT,
+          })).slice(offset, offset + pageSize + 1)
+        : [];
+    } else if (section === 'featured-on') {
+      const editorialWhere = primaryArtist
+        ? {
+            storefront,
+            isPublic: true,
+            playlistType: 'editorial' as const,
+            artistNames: { has: primaryArtist.name },
+          }
+        : undefined;
+      if (cursorState.featuredOnFallback && editorialWhere) {
+        usedFeaturedOnFallback = true;
+        items = await this.prisma.playlist.findMany({
+          where: editorialWhere,
+          include: playlistCatalogBrowseInclude,
+          orderBy: [{ lastModifiedAt: 'desc' }, { id: 'desc' }],
+          ...pageOptions,
+        });
+      } else {
+        const exact = albumSongIds.length
+          ? await this.prisma.playlist.findMany({
+              where: {
+                storefront,
+                isPublic: true,
+                tracks: { some: { songId: { in: albumSongIds } } },
+              },
+              include: playlistCatalogBrowseInclude,
+              orderBy: [{ lastModifiedAt: 'desc' }, { id: 'desc' }],
+              ...pageOptions,
+            })
+          : [];
+        items =
+          exact.length > 0 || !editorialWhere
+            ? exact
+            : [];
+        if (exact.length === 0 && editorialWhere) {
+          usedFeaturedOnFallback = true;
+          items = await this.prisma.playlist.findMany({
+            where: editorialWhere,
+            include: playlistCatalogBrowseInclude,
+            orderBy: [{ lastModifiedAt: 'desc' }, { id: 'desc' }],
+            ...pageOptions,
+          });
+        }
+      }
+    } else if (recommendedAlbumIds.length) {
+      items = (await this.recommendedAlbumBrowse(
+        recommendedAlbumIds,
+        excludedAlbumIds,
+        storefront,
+      )).slice(offset, offset + pageSize + 1);
+    } else {
+      items = this.sequenceRelatedAlbums(
+        await this.prisma.album.findMany({
+          where: {
+            storefront,
+            id: { notIn: excludedAlbumIds },
+            ...(album.genreNames.length
+              ? { genreNames: { hasSome: album.genreNames } }
+              : {}),
+            ...(primaryArtist
+              ? { artistCredits: { none: { artistId: primaryArtist.id } } }
+              : {}),
+          },
+          include: albumCatalogBrowseInclude,
+          orderBy: [{ releaseDate: 'desc' }, { id: 'desc' }],
+          take: RELATED_SHELF_CANDIDATE_LIMIT,
+        }),
+        album.id,
+      ).slice(offset, offset + pageSize + 1);
+    }
+
+    const hasMore = items.length > pageSize;
+    const page = items.slice(0, pageSize);
+    const nextCursor =
+      hasMore && offset + page.length < RELATED_SHELF_DETAIL_MAX_ITEMS
+        ? `${usedFeaturedOnFallback ? 'editorial:' : ''}${offset + page.length}`
+        : '';
+    return this.albumRelatedDetailResponse(section, page, storefront, nextCursor);
+  }
+
+  private albumRelatedDetailResponse(
+    section: string,
+    items: CatalogAlbumBrowseEntity[] | CatalogPlaylistBrowseEntity[],
+    storefront: string,
+    nextCursor: string,
+  ): GetCatalogAlbumRelatedResponse {
+    const albums = section === 'featured-on' ? [] : (items as CatalogAlbumBrowseEntity[]);
+    const playlists =
+      section === 'featured-on' ? (items as CatalogPlaylistBrowseEntity[]) : [];
+    return {
+      primaryArtistName: '',
+      moreBy: this.albumBrowseResponse(section === 'more-by' ? albums : [], storefront),
+      featuredOn: this.playlistBrowseResponse(playlists, storefront),
+      youMightAlsoLike: this.albumBrowseResponse(
+        section === 'you-might-also-like' ? albums : [],
+        storefront,
+      ),
+      moreByHasMore: false,
+      featuredOnHasMore: false,
+      youMightAlsoLikeHasMore: false,
+      nextCursor,
+    };
+  }
+
+  private relatedShelfCursor(cursor: string): {
+    offset: number;
+    featuredOnFallback: boolean;
+  } {
+    if (!cursor) return { offset: 0, featuredOnFallback: false };
+    const featuredOnFallback = cursor.startsWith('editorial:');
+    const offset = Number(featuredOnFallback ? cursor.slice('editorial:'.length) : cursor);
+    if (
+      !Number.isSafeInteger(offset) ||
+      offset < 0 ||
+      offset >= RELATED_SHELF_DETAIL_MAX_ITEMS
+    ) {
+      this.throwInvalidArgument('CATALOG_RELATED_SHELF_CURSOR_INVALID');
+    }
+    return { offset, featuredOnFallback };
+  }
+
+  private async recommendedAlbumBrowse(
+    rankedAlbumIds: string[],
+    excludedAlbumIds: string[],
+    storefront: string,
+  ): Promise<CatalogAlbumBrowseEntity[]> {
+    const albumIds = [...new Set(rankedAlbumIds)].filter(
+      (id) => !excludedAlbumIds.includes(id),
+    );
+    if (!albumIds.length) return [];
+
+    const albums = await this.prisma.album.findMany({
+      where: { storefront, id: { in: albumIds } },
+      include: albumCatalogBrowseInclude,
+    });
+    const rank = new Map(albumIds.map((id, index) => [id, index]));
+    const ranked = albums.sort(
+      (left, right) =>
+        (rank.get(left.id) ?? Infinity) - (rank.get(right.id) ?? Infinity),
+    );
+    return this.sequenceRelatedAlbums(ranked);
+  }
+
+  private sequenceRelatedAlbums(
+    albums: CatalogAlbumBrowseEntity[],
+    seed = '',
+  ) {
+    const remaining = seed
+      ? albums
+          .map((album, index) => ({
+            album,
+            // Keep newer candidates favoured, but let each source album
+            // explore a different part of the same relevant candidate pool.
+            score: -index / 24 + this.stableNoise(`${seed}:${album.id}`) * 0.7,
+          }))
+          .sort((left, right) => right.score - left.score)
+          .map(({ album }) => album)
+      : [...albums];
+    const ordered: CatalogAlbumBrowseEntity[] = [];
+
+    while (remaining.length > 0) {
+      const recentArtists = new Set(
+        ordered
+          .slice(-ARTIST_DIVERSITY_COOLDOWN)
+          .map((album) => this.albumArtistName(album)),
+      );
+      const nextIndex = remaining.findIndex(
+        (album) => !recentArtists.has(this.albumArtistName(album)),
+      );
+      const [next] = remaining.splice(nextIndex >= 0 ? nextIndex : 0, 1);
+      ordered.push(next);
+    }
+
+    return this.sequenceMoreByAlbums(ordered);
+  }
+
+  private albumArtistName(album: CatalogAlbumBrowseEntity): string {
+    return album.artistCredits[0]?.artist.name ?? album.artistName;
+  }
+
+  private stableNoise(value: string) {
+    let hash = 2_166_136_261;
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 16_777_619);
+    }
+    return (hash >>> 0) / 4_294_967_295;
+  }
+
+  private sequenceMoreByAlbums(albums: CatalogAlbumBrowseEntity[]) {
+    const remaining = [...albums];
+    const ordered: CatalogAlbumBrowseEntity[] = [];
+    const artworkCooldowns: Array<{
+      album: CatalogAlbumBrowseEntity;
+      untilIndex: number;
+    }> = [];
+
+    while (remaining.length > 0) {
+      const position = ordered.length;
+      for (let index = artworkCooldowns.length - 1; index >= 0; index -= 1) {
+        if (position > artworkCooldowns[index].untilIndex) {
+          artworkCooldowns.splice(index, 1);
+        }
+      }
+      const nextIndex = remaining.findIndex(
+        (album) =>
+          artworkCooldowns.every(
+            ({ album: recentAlbum, untilIndex }) =>
+              position > untilIndex ||
+              !this.artworksVisuallySimilar(album, recentAlbum),
+          ),
+      );
+      const [next] = remaining.splice(nextIndex >= 0 ? nextIndex : 0, 1);
+      ordered.push(next);
+      artworkCooldowns.push({
+        album: next,
+        untilIndex: position + this.artworkSimilarityCooldown(next, position),
+      });
+    }
+
+    return ordered;
+  }
+
+  private artworkSimilarityCooldown(
+    album: CatalogAlbumBrowseEntity,
+    position: number,
+  ) {
+    return (
+      ARTWORK_SIMILARITY_COOLDOWN_MIN +
+      Math.floor(
+        this.stableNoise(`${album.id}:${position}:artwork-cooldown`) *
+          ARTWORK_SIMILARITY_COOLDOWN_VARIANCE,
+      )
+    );
+  }
+
+  private albumArtworkKey(album: CatalogAlbumBrowseEntity) {
+    const artwork = this.optionalObject(album.artwork);
+    const checksum = this.string(artwork?.checksum);
+    if (checksum) return `checksum:${checksum}`;
+
+    const urlChecksum = this.artworkChecksumFromUrl(this.string(artwork?.url));
+    if (urlChecksum) return `checksum:${urlChecksum}`;
+
+    return album.artworkAssetId || `album:${album.id}`;
+  }
+
+  private artworksVisuallySimilar(
+    left: CatalogAlbumBrowseEntity,
+    right: CatalogAlbumBrowseEntity,
+  ) {
+    const leftArtwork = this.optionalObject(left.artwork);
+    const rightArtwork = this.optionalObject(right.artwork);
+    const leftHash = this.string(leftArtwork?.perceptualHash);
+    const rightHash = this.string(rightArtwork?.perceptualHash);
+    if (leftHash && rightHash) {
+      return this.perceptualHashDistance(leftHash, rightHash) <= 8;
+    }
+    return this.albumArtworkKey(left) === this.albumArtworkKey(right);
+  }
+
+  private perceptualHashDistance(left: string, right: string) {
+    if (!/^[a-f0-9]{16}$/i.test(left) || !/^[a-f0-9]{16}$/i.test(right)) {
+      return Number.POSITIVE_INFINITY;
+    }
+    let distance = 0;
+    for (let index = 0; index < left.length; index += 1) {
+      let difference = Number.parseInt(left[index], 16) ^ Number.parseInt(right[index], 16);
+      while (difference > 0) {
+        distance += difference & 1;
+        difference >>>= 1;
+      }
+    }
+    return distance;
+  }
+
+  private artworkChecksumFromUrl(url: string) {
+    return url.match(/(?:^|\/)([a-f0-9]{64})(?:\/|$)/i)?.[1]?.toLowerCase() ?? '';
+  }
+
   async getResources(
     request: GetCatalogResourcesRequest,
   ): Promise<CatalogResponse> {
@@ -459,6 +939,11 @@ export class CatalogService {
   private albumResponse(
     album: CatalogAlbumEntity,
     storefront: string,
+    relatedShelfHints?: {
+      moreBy: boolean;
+      featuredOn: boolean;
+      youMightAlsoLike: boolean;
+    },
   ): CatalogResponse {
     const songs = Object.fromEntries(
       album.tracks.map(({ song }) => [
@@ -471,7 +956,7 @@ export class CatalogService {
       album.artistCredits.map(({ artist }) => artist),
       storefront,
     );
-    const albumResource = this.albumResource(album, storefront);
+    const albumResource = this.albumResource(album, storefront, relatedShelfHints);
 
     return {
       data: [this.reference(album.id, 'albums', storefront)],
@@ -480,6 +965,56 @@ export class CatalogService {
         playlists: {},
         songs,
         artists,
+      },
+    };
+  }
+
+  private albumBrowseResponse(
+    albums: CatalogAlbumBrowseEntity[],
+    storefront: string,
+  ): CatalogResponse {
+    return {
+      data: albums.map((album) =>
+        this.reference(album.id, 'albums', storefront),
+      ),
+      resources: {
+        albums: Object.fromEntries(
+          albums.map((album) => [
+            album.id,
+            this.albumResource(album, storefront),
+          ]),
+        ),
+        playlists: {},
+        songs: {},
+        artists: this.collectAlbumArtists(albums, storefront),
+      },
+    };
+  }
+
+  private playlistBrowseResponse(
+    playlists: CatalogPlaylistBrowseEntity[],
+    storefront: string,
+  ): CatalogResponse {
+    return {
+      data: playlists.map((playlist) =>
+        this.reference(playlist.id, 'playlists', storefront),
+      ),
+      resources: {
+        albums: {},
+        playlists: Object.fromEntries(
+          playlists.map((playlist) => [
+            playlist.id,
+            this.playlistResource(
+              playlist,
+              storefront,
+              playlist.tracks.map(({ songId }) =>
+                this.reference(songId, 'songs', storefront),
+              ),
+            ),
+          ]),
+        ),
+        songs: {},
+        artists: {},
       },
     };
   }
@@ -528,6 +1063,11 @@ export class CatalogService {
   private albumResource(
     album: AlbumResourceInput,
     storefront: string,
+    relatedShelfHints?: {
+      moreBy: boolean;
+      featuredOn: boolean;
+      youMightAlsoLike: boolean;
+    },
   ): CatalogAlbumResource {
     const tracks = album.tracks ?? [];
     const artistData = album.artistCredits.map(({ artist }) =>
@@ -569,6 +1109,7 @@ export class CatalogService {
         trackCount: album.trackCount || tracks.length,
         upc: album.upc,
         canonicalReleaseId: album.canonicalReleaseId || album.id,
+        relatedShelfHints,
         url: album.url,
         editorialArtwork: this.optionalObject(album.editorialArtwork),
         editorialNotes: this.optionalObject(album.editorialNotes),
@@ -585,6 +1126,74 @@ export class CatalogService {
           data: trackData,
         },
       },
+    };
+  }
+
+  private async albumRelatedShelfHints(
+    album: CatalogAlbumEntity,
+    storefront: string,
+  ) {
+    const normalizedAlbumArtistName = album.artistName.trim().toLocaleLowerCase();
+    const primaryArtist = album.artistCredits.find(
+      ({ artist }) =>
+        artist.name.trim().toLocaleLowerCase() === normalizedAlbumArtistName,
+    )?.artist;
+    const albumSongIds = album.tracks.map(({ songId }) => songId);
+    const excludedAlbumIds = [album.id];
+
+    const [moreBy, exactFeaturedOn, youMightAlsoLike] = await Promise.all([
+      primaryArtist
+        ? this.prisma.album.findFirst({
+            where: {
+              storefront,
+              id: { notIn: excludedAlbumIds },
+              artistCredits: { some: { artistId: primaryArtist.id } },
+            },
+            select: { id: true },
+          })
+        : null,
+      albumSongIds.length
+        ? this.prisma.playlist.findFirst({
+            where: {
+              storefront,
+              isPublic: true,
+              tracks: { some: { songId: { in: albumSongIds } } },
+            },
+            select: { id: true },
+          })
+        : null,
+      this.prisma.album.findFirst({
+        where: {
+          storefront,
+          id: { notIn: excludedAlbumIds },
+          ...(album.genreNames.length
+            ? { genreNames: { hasSome: album.genreNames } }
+            : {}),
+          ...(primaryArtist
+            ? { artistCredits: { none: { artistId: primaryArtist.id } } }
+            : {}),
+        },
+        select: { id: true },
+      }),
+    ]);
+    const featuredOn =
+      exactFeaturedOn ??
+      (primaryArtist
+        ? await this.prisma.playlist.findFirst({
+            where: {
+              storefront,
+              isPublic: true,
+              playlistType: 'editorial',
+              artistNames: { has: primaryArtist.name },
+            },
+            select: { id: true },
+          })
+        : null);
+
+    return {
+      moreBy: Boolean(moreBy),
+      featuredOn: Boolean(featuredOn),
+      youMightAlsoLike: Boolean(youMightAlsoLike),
     };
   }
 
@@ -853,6 +1462,7 @@ export class CatalogService {
       height: this.integer(artwork.height),
       hasP3: this.boolean(artwork.hasP3 ?? artwork.has_p3),
       variants: this.optionalObject(artwork.variants),
+      perceptualHash: this.string(artwork.perceptualHash),
     };
   }
 

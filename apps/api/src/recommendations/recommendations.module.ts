@@ -38,5 +38,6 @@ const RECOMMENDATION_GRPC_MAX_MESSAGE_LENGTH = 16 * 1024 * 1024;
   ],
   controllers: [RecommendationsController, RecommendationAdminController],
   providers: [RecommendationsService],
+  exports: [RecommendationsService],
 })
 export class RecommendationsModule {}

@@ -204,6 +204,8 @@ export class CatalogAssetsService implements OnModuleInit {
     const palette = this.object(variants.palette);
     return {
       assetId: asset.id,
+      checksum: asset.checksum,
+      perceptualHash: this.string(variants.perceptualHash),
       url: primary.url,
       width: primary.width,
       height: primary.height,

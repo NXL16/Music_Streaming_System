@@ -24,10 +24,43 @@ import { AdminGuard } from '../common/guards/admin.guard';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { ArtistOrAdminGuard } from '../common/guards/artist-or-admin.guard';
+import { RecommendationsService } from '../recommendations/recommendations.service';
 
 @Controller('catalog/:storefront')
 export class CatalogController {
-  constructor(private readonly songsService: SongsService) {}
+  constructor(
+    private readonly songsService: SongsService,
+    private readonly recommendationsService: RecommendationsService,
+  ) {}
+
+  @Get('albums/:albumId/related')
+  @UseGuards(StrictJwtAuthGuard)
+  async getAlbumRelated(
+    @Req() req: Request,
+    @Param('storefront') storefront: string,
+    @Param('albumId') albumId: string,
+    @Query('section') section?: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const user = req.user as JwtUser;
+    const recommendedAlbumIds = (
+      await this.recommendationsService.getAlbumRelatedRecommendations({
+        userId: user.userId,
+        albumId,
+        limit: 60,
+      })
+    ).albumIds;
+    return this.songsService.getCatalogAlbumRelated({
+      storefront,
+      albumId,
+      section: section?.trim() ?? '',
+      full: false,
+      cursor: cursor?.trim() ?? '',
+      limit: Number.parseInt(limit ?? '', 10) || 0,
+      recommendedAlbumIds,
+    });
+  }
 
   @Get('albums/:albumId')
   getAlbum(

@@ -33,6 +33,8 @@ import {
   GetCatalogArtistAlbumsRequest,
   GetCatalogArtistSongsRequest,
   GetCatalogArtistSongsResponse,
+  GetCatalogAlbumRelatedRequest,
+  GetCatalogAlbumRelatedResponse,
   CatalogResponse,
   SaveCatalogArtistDraftRequest,
   SaveCatalogSongDraftRequest,
@@ -241,6 +243,12 @@ export class SongsController implements SongServiceController {
     request: GetCatalogArtistSongsRequest,
   ): Promise<GetCatalogArtistSongsResponse> {
     return this.catalogService.getArtistSongs(request);
+  }
+
+  async getCatalogAlbumRelated(
+    request: GetCatalogAlbumRelatedRequest,
+  ): Promise<GetCatalogAlbumRelatedResponse> {
+    return this.catalogService.getAlbumRelated(request);
   }
 
   saveCatalogArtistDraft(

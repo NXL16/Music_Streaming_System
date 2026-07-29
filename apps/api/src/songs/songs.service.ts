@@ -43,6 +43,8 @@ import {
   GetCatalogResourcesRequest,
   GetCatalogArtistAlbumsRequest,
   GetCatalogArtistSongsRequest,
+  GetCatalogAlbumRelatedRequest,
+  GetCatalogAlbumRelatedResponse,
   CatalogResponse,
   SearchCatalogRequest,
   SaveCatalogArtistDraftRequest,
@@ -283,6 +285,33 @@ export class SongsService implements OnModuleInit {
       this.songServiceClient.getCatalogArtistAlbums(data),
     );
     return this.unwrapCatalogResponse(response);
+  }
+
+  async getCatalogAlbumRelated(
+    data: GetCatalogAlbumRelatedRequest,
+  ): Promise<GetCatalogAlbumRelatedResponse> {
+    const response = await grpcFirstValueFrom(
+      this.songServiceClient.getCatalogAlbumRelated(data),
+    );
+    if (
+      !response.moreBy ||
+      !response.featuredOn ||
+      !response.youMightAlsoLike
+    ) {
+      throw new InternalServerErrorException(
+        'Song service returned an incomplete album related response.',
+      );
+    }
+    return {
+      primaryArtistName: response.primaryArtistName,
+      moreBy: this.unwrapCatalogResponse(response.moreBy),
+      featuredOn: this.unwrapCatalogResponse(response.featuredOn),
+      youMightAlsoLike: this.unwrapCatalogResponse(response.youMightAlsoLike),
+      moreByHasMore: response.moreByHasMore,
+      featuredOnHasMore: response.featuredOnHasMore,
+      youMightAlsoLikeHasMore: response.youMightAlsoLikeHasMore,
+      nextCursor: response.nextCursor,
+    };
   }
 
   async getCatalogArtistSongs(

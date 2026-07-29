@@ -3,6 +3,7 @@ import type {
   CatalogAlbumResource,
   CatalogArtistResource,
   CatalogArtwork,
+  CatalogPlaylistResource,
   CatalogResponse,
   CatalogSongResource,
 } from "./catalog.types";
@@ -80,6 +81,35 @@ function mapAlbum(album: CatalogAlbumResource): MediaCardProps {
     slug: url ? albumRoute(url, album.id) : undefined,
     altText: album.attributes.name,
   };
+}
+
+function mapPlaylist(playlist: CatalogPlaylistResource): MediaCardProps {
+  return {
+    ...baseCard(playlist.id, "playlists", playlist.attributes.artwork),
+    cardType: "collection",
+    title: playlist.attributes.name,
+    subtitle: playlist.attributes.curatorName || "Playlist",
+    slug: `/playlist/${encodeURIComponent(playlist.id)}`,
+    altText: playlist.attributes.name,
+  };
+}
+
+export function mapCatalogAlbums(response: CatalogResponse): MediaCardProps[] {
+  return response.data.flatMap((reference) => {
+    if (reference.type !== "albums") return [];
+    const album = response.resources.albums[reference.id];
+    return album ? [mapAlbum(album)] : [];
+  });
+}
+
+export function mapCatalogPlaylists(
+  response: CatalogResponse,
+): MediaCardProps[] {
+  return response.data.flatMap((reference) => {
+    if (reference.type !== "playlists") return [];
+    const playlist = response.resources.playlists[reference.id];
+    return playlist ? [mapPlaylist(playlist)] : [];
+  });
 }
 
 // The search response groups references in `data` (songs → artists → albums).

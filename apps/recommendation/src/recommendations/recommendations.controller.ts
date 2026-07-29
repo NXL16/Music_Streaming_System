@@ -3,6 +3,8 @@ import {
   GetHomeRecommendationsRequest,
   GetHomeRecommendationsResponse,
   GetRecommendationSectionRequest,
+  GetAlbumRelatedRecommendationsRequest,
+  GetAlbumRelatedRecommendationsResponse,
   GetRecommendationPageForAdminRequest,
   PublishRecommendationPageRequest,
   RecommendationServiceController,
@@ -28,6 +30,7 @@ import { InternalGrpcGuard } from '../common/guards/internal-grpc.guard';
 import { RecommendationRpcMetricsInterceptor } from '../common/observability/recommendation-rpc-metrics.interceptor';
 import { SystemStationArtworkService } from './system-station-artwork.service';
 import { developmentCacheDisabled } from '../common/configs/development-cache';
+import { RecommendationEngineService } from '../generation/recommendation-engine.service';
 
 @Controller()
 @UseGuards(InternalGrpcGuard)
@@ -41,7 +44,20 @@ export class RecommendationsController implements RecommendationServiceControlle
     private readonly listeningService: ListeningService,
     private readonly generationService: GenerationService,
     private readonly systemStationArtworkService: SystemStationArtworkService,
+    private readonly recommendationEngine: RecommendationEngineService,
   ) {}
+
+  async getAlbumRelatedRecommendations(
+    request: GetAlbumRelatedRecommendationsRequest,
+  ): Promise<GetAlbumRelatedRecommendationsResponse> {
+    return {
+      albumIds: await this.recommendationEngine.getAlbumRelatedRecommendations(
+        request.userId,
+        request.albumId,
+        request.limit,
+      ),
+    };
+  }
 
   async getHomeRecommendations(
     request: GetHomeRecommendationsRequest,

@@ -79,6 +79,7 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #1f1f1f;
+    --opaqueShelfBG: #2b2b2b;
     --foreground: #ffffff;
 
     --systemPrimary: hsla(0, 0%, 100%, .92);
@@ -422,7 +423,7 @@ amp-contextual-menu-button {
 
 @media (max-width: 483px) {
   .app-loading-spinner {
-    --ispinner-size: 24px !important;
+    --ispinner-size: 22px !important;
   }
 }
 

@@ -1,6 +1,7 @@
 import { http } from "@/lib/api/http";
 import type {
   CatalogArtistSongsPage,
+  CatalogAlbumRelatedResponse,
   CatalogReference,
   CatalogResponse,
 } from "./catalog.types";
@@ -14,6 +15,18 @@ export async function getCatalogAlbum(
   const response = await http.get<CatalogResponse>(
     `/catalog/${STOREFRONT}/albums/${encodeURIComponent(albumId)}`,
     { signal },
+  );
+  return response.data;
+}
+
+export async function getCatalogAlbumRelated(
+  albumId: string,
+  options: { section?: string; cursor?: string; limit?: number } = {},
+  signal?: AbortSignal,
+) {
+  const response = await http.get<CatalogAlbumRelatedResponse>(
+    `/catalog/${STOREFRONT}/albums/${encodeURIComponent(albumId)}/related`,
+    { params: options, signal },
   );
   return response.data;
 }

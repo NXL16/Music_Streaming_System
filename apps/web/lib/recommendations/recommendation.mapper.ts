@@ -209,6 +209,36 @@ function getSectionRefs(
   });
 }
 
+/**
+ * Keeps each shelf's editorial/recommendation order as intact as possible,
+ * while avoiding adjacent cards that render the same artwork.
+ */
+function sequenceShelfArtwork<
+  T extends Pick<MediaCardProps, "id" | "imageUrl">,
+>(
+  items: T[],
+) {
+  const remaining = [...items];
+  const ordered: T[] = [];
+  let previousArtwork = "";
+
+  while (remaining.length > 0) {
+    const nextIndex = remaining.findIndex(
+      (item) => shelfArtworkKey(item) !== previousArtwork,
+    );
+    const [next] = remaining.splice(nextIndex >= 0 ? nextIndex : 0, 1);
+    ordered.push(next);
+    previousArtwork = shelfArtworkKey(next);
+  }
+
+  return ordered;
+}
+
+function shelfArtworkKey(item: Pick<MediaCardProps, "id" | "imageUrl">) {
+  const checksum = item.imageUrl?.match(/(?:^|\/)([a-f0-9]{64})(?:\/|$)/i)?.[1];
+  return checksum ? `checksum:${checksum.toLowerCase()}` : item.imageUrl || item.id;
+}
+
 function closestArtwork(
   artworks: Record<string, Artwork | undefined> | undefined,
   targetRatio: number,
@@ -473,7 +503,7 @@ export function mapHomeRecommendations(
         sourceDisplayKind,
         modelVersion: section.attributes?.version ?? 1,
         hasMore: Boolean(section.attributes?.hasSeeAll),
-        items,
+        items: sequenceShelfArtwork(items),
       },
     ];
   });

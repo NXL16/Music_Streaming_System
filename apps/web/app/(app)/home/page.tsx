@@ -2,7 +2,10 @@
 
 import { useCallback, useLayoutEffect, useMemo, useState } from "react";
 import MediaShelf from "@/components/media/media-shelf";
-import MediaCardRenderer from "@/components/media/media-card-renderer";
+import {
+  ShelfDetailLoading,
+  ShelfDetailView,
+} from "@/components/media/shelf-detail-view";
 import { useHomeRecommendations } from "@/lib/recommendations/use-home-recommendations";
 import {
   mapHomeRecommendations,
@@ -13,7 +16,6 @@ import {
   recordRecommendationInteraction,
 } from "@/lib/recommendations/recommendation.api";
 import MediaShelfSkeleton from "@/components/loading/media-shelf-skeleton";
-import Loading from "@/app/loading";
 import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
 import { useRecentlyPlayedSection } from "@/lib/recommendations/use-recently-played-section";
 import { HOME_SHELF_PREVIEW_LIMIT } from "@musical/shared-constants";
@@ -185,7 +187,9 @@ export default function HomePage() {
             role="alert"
             className="[--buttonTextColor:var(--systemSecondary)] [--buttonBorderColor:var(--systemSecondary)] items-center text-(--systemSecondary) flex flex-col gap-3 left-1/2 m-auto max-w-110 px-6.25 absolute text-center top-1/2 -translate-x-1/2 -translate-y-1/2 z-(--z-default)"
           >
-            <h2 className="[font:var(--title-2)] mb-1.25">An error occurred.</h2>
+            <h2 className="[font:var(--title-2)] mb-1.25">
+              An error occurred.
+            </h2>
             <div className="w-auto">
               <button
                 type="button"
@@ -326,54 +330,4 @@ function previewShelfItems(
   shelf: ReturnType<typeof mapHomeRecommendations>[number],
 ) {
   return shelf.items.slice(0, HOME_SHELF_PREVIEW_LIMIT);
-}
-
-type ShelfDetailViewProps = {
-  shelf: ReturnType<typeof mapHomeRecommendations>[number];
-  onBack: () => void;
-};
-
-function ShelfDetailLoading() {
-  return (
-    <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-8">
-      <div className="flex min-h-[calc(100vh-16rem)] items-center justify-center">
-        <Loading fullScreen={false} size={35} />
-      </div>
-    </div>
-  );
-}
-
-function ShelfDetailView({ shelf, onBack }: ShelfDetailViewProps) {
-  return (
-    <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-8">
-      <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
-        <div className="flex items-center justify-end mx-(--bodyGutter) mb-3.25">
-          <div className="flex-1">
-            <h2 className="inline-block text-(--header-title-color,var(--systemPrimary,#000)) [font:var(--header-title-font,var(--title-2-emphasized))]">
-              <button
-                onClick={() => onBack()}
-                className="flex items-center gap-x-2 appearance-none"
-              >
-                <svg
-                  className="h-(--header-title-chevron-size,12px) fill-(--header-title-chevron-color,var(--dropdownLightGrayIcon)) rotate-180"
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 64 64"
-                  aria-hidden="true"
-                >
-                  <path d="M19.817 61.863c1.48 0 2.672-.515 3.702-1.546l24.243-23.63c1.352-1.385 1.996-2.737 2.028-4.443 0-1.674-.644-3.09-2.028-4.443L23.519 4.138c-1.03-.998-2.253-1.513-3.702-1.513-2.994 0-5.409 2.382-5.409 5.344 0 1.481.612 2.833 1.739 3.96l20.99 20.347-20.99 20.283c-1.127 1.126-1.739 2.478-1.739 3.96 0 2.93 2.415 5.344 5.409 5.344Z"></path>
-                </svg>
-                <span dir="auto">{shelf.title}</span>
-              </button>
-            </h2>
-          </div>
-        </div>
-
-        <ul className="mb-8 mx-(--bodyGutter) ps-0 pe-0 grid gap-(--roomGridGap) grid-cols-[repeat(var(--roomGridColumns),minmax(0,1fr))] [--roomGridColumns:2] [--roomGridGap:10px] min-[415px]:[--roomGridColumns:3] min-[1000px]:[--roomGridGap:20px] min-[1000px]:[--roomGridColumns:4] min-[1260px]:[--roomGridColumns:5] min-[1580px]:[--roomGridColumns:6]">
-          {shelf.items.map((card) => (
-            <MediaCardRenderer key={card.id} {...card} />
-          ))}
-        </ul>
-      </div>
-    </div>
-  );
 }

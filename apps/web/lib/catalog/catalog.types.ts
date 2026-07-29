@@ -96,6 +96,11 @@ export type CatalogAlbumResource = {
     trackCount: number;
     upc: string;
     url: string;
+    relatedShelfHints?: {
+      moreBy: boolean;
+      featuredOn: boolean;
+      youMightAlsoLike: boolean;
+    };
     editorialNotes?: CatalogEditorialNotes;
   };
   relationships: {
@@ -185,4 +190,15 @@ export type CatalogResponse = {
     songs: Record<string, CatalogSongResource>;
     artists: Record<string, CatalogArtistResource>;
   };
+};
+
+export type CatalogAlbumRelatedResponse = {
+  primaryArtistName: string;
+  moreBy: CatalogResponse;
+  featuredOn: CatalogResponse;
+  youMightAlsoLike: CatalogResponse;
+  moreByHasMore: boolean;
+  featuredOnHasMore: boolean;
+  youMightAlsoLikeHasMore: boolean;
+  nextCursor: string;
 };

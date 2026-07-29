@@ -16,6 +16,7 @@ export type MediaShelfProps = {
   title: string;
   displayKind: MediaShelfDisplayKind;
   items: MediaCardProps[];
+  containerClassName?: string;
   shelfId?: string;
   prioritizeFirstCard?: boolean;
   /** Reset the horizontal viewport when a newly-prepended item becomes first. */
@@ -222,6 +223,7 @@ function MediaShelf({
   title,
   displayKind,
   items,
+  containerClassName,
   shelfId,
   prioritizeFirstCard = false,
   scrollToStartKey,
@@ -657,7 +659,7 @@ function MediaShelf({
   return (
     <div
       ref={shelfContainerRef}
-      className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-3"
+      className={`min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-3 ${containerClassName ?? ""}`}
       style={
         !isNearViewport
           ? {

@@ -5,6 +5,8 @@ import {
   GetHomeRecommendationsRequest,
   GetHomeRecommendationsResponse,
   GetRecommendationSectionRequest,
+  GetAlbumRelatedRecommendationsRequest,
+  GetAlbumRelatedRecommendationsResponse,
   GetRecommendationPageForAdminRequest,
   PublishRecommendationPageRequest,
   RecommendationServiceClient,
@@ -75,6 +77,17 @@ export class RecommendationsService implements OnModuleInit {
           request,
           this.metadata(),
         ),
+      ),
+    );
+  }
+
+  async getAlbumRelatedRecommendations(
+    request: GetAlbumRelatedRecommendationsRequest,
+  ): Promise<GetAlbumRelatedRecommendationsResponse> {
+    return grpcFirstValueFrom(
+      this.recommendationClient.getAlbumRelatedRecommendations(
+        request,
+        this.metadata(),
       ),
     );
   }

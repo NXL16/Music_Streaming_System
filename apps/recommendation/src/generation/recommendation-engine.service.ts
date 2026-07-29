@@ -16,6 +16,7 @@ type CandidateSource =
 type AlbumCandidate = {
   id: string;
   artistName: string;
+  artworkPerceptualHash?: string;
   genreNames: string[];
   audioTraits: string[];
   releaseDate: string;
@@ -88,7 +89,11 @@ export class RecommendationEngineService {
       sourceAlbumArtworkUrl?: string,
       sourceAlbumArtworkBgColor?: string,
     ) => {
-      const items = this.allocate(ranked, allocated, limit);
+      const items = this.allocate(
+        this.diversifyArtwork(ranked),
+        allocated,
+        limit,
+      );
       if (items.length < policy.minimumShelfSize) return;
       items.forEach((item) => allocated.add(item.id));
       result.push({
@@ -234,6 +239,64 @@ export class RecommendationEngineService {
     return result;
   }
 
+  /**
+   * Keeps personalized relevance from the ranking model while sequencing the
+   * resulting album cards for discovery. This is intentionally separate from
+   * Home shelf allocation: a catalog detail page has one contextual seed and
+   * must not inherit Home's page-wide exclusion set.
+   */
+  async getAlbumRelatedRecommendations(
+    userId: string,
+    albumId: string,
+    limit: number,
+  ): Promise<string[]> {
+    if (!userId || !albumId) return [];
+
+    const source = await this.prisma.recommendationResourceSnapshot.findFirst({
+      where: { resourceType: 'albums', resourceId: albumId },
+      select: {
+        resourceId: true,
+        artistName: true,
+        attributes: true,
+        genreNames: true,
+        audioTraits: true,
+      },
+    });
+    if (!source) return [];
+
+    const profile = await this.listeningService.getUserTasteProfile(userId);
+    const candidates = await this.collectAlbumCandidates(userId, profile);
+    const sourceGenres = new Set(
+      source.genreNames.map((genre) => genre.trim().toLowerCase()).filter(Boolean),
+    );
+    const rotationKey = new Date().toISOString().slice(0, 10);
+    const ranked = candidates
+      .filter((candidate) => candidate.id !== albumId)
+      .map((candidate) => {
+        const genreMatch = candidate.genreNames.some((genre) =>
+          sourceGenres.has(genre.trim().toLowerCase()),
+        )
+          ? 1
+          : 0;
+        const contextualScore =
+          candidate.score * 0.38 +
+          this.contentSimilarity(candidate, source) * 0.25 +
+          genreMatch * 0.22 +
+          candidate.freshness * 0.08 +
+          this.stableNoise(`${userId}:${albumId}:${rotationKey}:${candidate.id}`) *
+            0.16;
+        return { candidate, contextualScore };
+      })
+      .sort(
+        (left, right) =>
+          right.contextualScore - left.contextualScore ||
+          left.candidate.id.localeCompare(right.candidate.id),
+      )
+      .map(({ candidate }) => candidate);
+
+    return this.sequenceRelatedAlbums(ranked, Math.min(Math.max(limit, 1), 60));
+  }
+
   /** Global Home is editorial-style: no user-history signals, only freshness,
    * audience quality and controlled catalog diversity. */
   async generateGlobalShelves(): Promise<GeneratedShelf[]> {
@@ -242,6 +305,7 @@ export class RecommendationEngineService {
       select: {
         resourceId: true,
         artistName: true,
+        attributes: true,
         genreNames: true,
         audioTraits: true,
         releaseDate: true,
@@ -265,6 +329,7 @@ export class RecommendationEngineService {
         return {
           id: album.resourceId,
           artistName: album.artistName,
+          artworkPerceptualHash: this.artworkPerceptualHash(album.attributes),
           genreNames: album.genreNames,
           audioTraits: album.audioTraits,
           releaseDate: album.releaseDate,
@@ -457,6 +522,7 @@ export class RecommendationEngineService {
       select: {
         resourceId: true,
         artistName: true,
+        attributes: true,
         genreNames: true,
         audioTraits: true,
         releaseDate: true,
@@ -505,6 +571,7 @@ export class RecommendationEngineService {
         return {
           id: album.resourceId,
           artistName: album.artistName,
+          artworkPerceptualHash: this.artworkPerceptualHash(album.attributes),
           genreNames: album.genreNames,
           audioTraits: album.audioTraits,
           releaseDate: album.releaseDate,
@@ -733,6 +800,112 @@ export class RecommendationEngineService {
       selected.push({ id: candidate.id, type: 'albums' });
     }
     return selected;
+  }
+
+  private sequenceRelatedAlbums(candidates: AlbumCandidate[], limit: number) {
+    const remaining = [...candidates];
+    const artistCounts = new Map<string, number>();
+    const selected: AlbumCandidate[] = [];
+    let previousArtist = '';
+
+    while (remaining.length > 0 && selected.length < limit) {
+      const nextIndex = remaining.findIndex(
+        (candidate) =>
+          candidate.artistName !== previousArtist &&
+          (artistCounts.get(candidate.artistName) ?? 0) < policy.maxPerArtist,
+      );
+      const fallbackIndex = remaining.findIndex(
+        (candidate) =>
+          (artistCounts.get(candidate.artistName) ?? 0) < policy.maxPerArtist,
+      );
+      const index = nextIndex >= 0 ? nextIndex : fallbackIndex;
+      if (index < 0) break;
+
+      const [next] = remaining.splice(index, 1);
+      selected.push(next);
+      previousArtist = next.artistName;
+      artistCounts.set(next.artistName, (artistCounts.get(next.artistName) ?? 0) + 1);
+    }
+
+    return this.diversifyArtwork(selected).map((candidate) => candidate.id);
+  }
+
+  private diversifyArtwork(candidates: AlbumCandidate[]): AlbumCandidate[] {
+    const remaining = [...candidates];
+    const ordered: AlbumCandidate[] = [];
+    const cooldowns: Array<{ candidate: AlbumCandidate; until: number }> = [];
+
+    while (remaining.length > 0) {
+      const position = ordered.length;
+      this.removeExpiredArtworkCooldowns(cooldowns, position);
+      const nextIndex = remaining.findIndex((candidate) =>
+        cooldowns.every(
+          ({ candidate: recent, until }) =>
+            position > until || !this.artworksVisuallySimilar(candidate, recent),
+        ),
+      );
+      const [next] = remaining.splice(nextIndex >= 0 ? nextIndex : 0, 1);
+      ordered.push(next);
+      cooldowns.push({
+        candidate: next,
+        until: position + this.artworkCooldown(next, position),
+      });
+    }
+    return ordered;
+  }
+
+  private removeExpiredArtworkCooldowns(
+    cooldowns: Array<{ candidate: AlbumCandidate; until: number }>,
+    position: number,
+  ): void {
+    for (let index = cooldowns.length - 1; index >= 0; index -= 1) {
+      if (position > cooldowns[index].until) cooldowns.splice(index, 1);
+    }
+  }
+
+  private artworkCooldown(candidate: AlbumCandidate, position: number): number {
+    return 7 + Math.floor(this.stableNoise(`${candidate.id}:${position}:artwork`) * 4);
+  }
+
+  private artworksVisuallySimilar(
+    left: AlbumCandidate,
+    right: AlbumCandidate,
+  ): boolean {
+    const leftHash = left.artworkPerceptualHash ?? '';
+    const rightHash = right.artworkPerceptualHash ?? '';
+    return Boolean(leftHash && rightHash && this.perceptualHashDistance(leftHash, rightHash) <= 8);
+  }
+
+  private perceptualHashDistance(left: string, right: string): number {
+    if (!/^[a-f0-9]{16}$/i.test(left) || !/^[a-f0-9]{16}$/i.test(right)) {
+      return Number.POSITIVE_INFINITY;
+    }
+    let distance = 0;
+    for (let index = 0; index < left.length; index += 1) {
+      let difference = Number.parseInt(left[index], 16) ^ Number.parseInt(right[index], 16);
+      while (difference > 0) {
+        distance += difference & 1;
+        difference >>>= 1;
+      }
+    }
+    return distance;
+  }
+
+  private artworkPerceptualHash(attributes: unknown): string {
+    if (!attributes || typeof attributes !== 'object' || Array.isArray(attributes)) return '';
+    const artwork = (attributes as Record<string, unknown>).artwork;
+    if (!artwork || typeof artwork !== 'object' || Array.isArray(artwork)) return '';
+    const hash = (artwork as Record<string, unknown>).perceptualHash;
+    return typeof hash === 'string' ? hash.trim() : '';
+  }
+
+  private stableNoise(value: string) {
+    let hash = 2_166_136_261;
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 16_777_619);
+    }
+    return (hash >>> 0) / 4_294_967_295;
   }
 
   /**

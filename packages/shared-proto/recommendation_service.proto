@@ -9,6 +9,7 @@ option go_package = "Music_Streaming_System/packages/shared-proto/recommendation
 service RecommendationService {
   rpc GetHomeRecommendations(GetHomeRecommendationsRequest) returns (GetHomeRecommendationsResponse);
   rpc GetRecommendationSection(GetRecommendationSectionRequest) returns (GetHomeRecommendationsResponse);
+  rpc GetAlbumRelatedRecommendations(GetAlbumRelatedRecommendationsRequest) returns (GetAlbumRelatedRecommendationsResponse);
   rpc RefreshRecommendationSection(RefreshRecommendationSectionRequest) returns (GetHomeRecommendationsResponse);
   rpc ReplaceHomeRecommendations(ReplaceHomeRecommendationsRequest) returns (GetHomeRecommendationsResponse);
   rpc PublishRecommendationPage(PublishRecommendationPageRequest) returns (GetHomeRecommendationsResponse);
@@ -65,6 +66,16 @@ message GetRecommendationSectionRequest {
   string name       = 3;
   string locale     = 4;
   string timezone   = 5;
+}
+
+message GetAlbumRelatedRecommendationsRequest {
+  string user_id  = 1;
+  string album_id = 2;
+  int32  limit    = 3;
+}
+
+message GetAlbumRelatedRecommendationsResponse {
+  repeated string album_ids = 1;
 }
 
 message RefreshRecommendationSectionRequest {

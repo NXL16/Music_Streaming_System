@@ -4,6 +4,7 @@ import { SongsController } from './songs.controller';
 import { SongsService } from './songs.service';
 import { R2Module } from '../common/r2/r2.module';
 import { ArtistOrAdminGuard } from '../common/guards/artist-or-admin.guard';
+import { RecommendationsModule } from '../recommendations/recommendations.module';
 import { PlaylistsController } from './playlists.controller';
 import {
   CatalogAdminController,
@@ -19,6 +20,7 @@ import {
 @Module({
   imports: [
     R2Module,
+    RecommendationsModule,
     ClientsModule.register([
       {
         name: 'SONG_SERVICE',

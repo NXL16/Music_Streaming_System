@@ -9,6 +9,7 @@ type MediaShelfDisplayKind =
 interface MediaShelfSkeletonProps {
   displayKind: MediaShelfDisplayKind;
   isMoreLike?: boolean;
+  containerClassName?: string;
 }
 
 const mediaShelfPresets = {
@@ -116,6 +117,7 @@ const mediaShelfVisibility = {
 export default memo(function MediaShelfSkeleton({
   displayKind,
   isMoreLike = false,
+  containerClassName,
 }: MediaShelfSkeletonProps) {
   const isHeroShelf = displayKind === "MusicNotesHeroShelf";
   const isCircleShelf = displayKind === "MusicCircleCoverShelf";
@@ -126,7 +128,7 @@ export default memo(function MediaShelfSkeleton({
 
   return (
     <div
-      className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-3"
+      className={`min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-3 ${containerClassName ?? ""}`}
       style={mediaShelfVisibility[displayKind]}
     >
       <style>{`

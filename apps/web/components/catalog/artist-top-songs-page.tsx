@@ -32,19 +32,18 @@ function SongTableSpacer({ height }: { height: number }) {
 
   return (
     <div aria-hidden="true" className="table-row">
-      {Array.from({ length: 5 }, (_, index) => (
-        <div key={index} className="table-cell p-0">
-          {index === 0 && <div style={{ height }} />}
-        </div>
-      ))}
+      <div className="table-cell p-0">
+        <div style={{ height }} />
+      </div>
+      <div className="table-cell p-0" />
+      <div className="hidden min-[1000px]:table-cell p-0" />
+      <div className="hidden min-[1260px]:table-cell p-0" />
+      <div className="table-cell p-0" />
     </div>
   );
 }
 
-function useVisibleSongRange(
-  songCount: number,
-  table: HTMLDivElement | null,
-) {
+function useVisibleSongRange(songCount: number, table: HTMLDivElement | null) {
   const [range, setRange] = useState({ start: 0, end: SONG_ROW_OVERSCAN * 2 });
   const rangeRef = useRef(range);
 
@@ -70,10 +69,7 @@ function useVisibleSongRange(
       const rangeBlockStart =
         Math.floor(viewportRowStart / SONG_RANGE_BLOCK_SIZE) *
         SONG_RANGE_BLOCK_SIZE;
-      const start = Math.max(
-        0,
-        rangeBlockStart - SONG_ROW_OVERSCAN,
-      );
+      const start = Math.max(0, rangeBlockStart - SONG_ROW_OVERSCAN);
       const end = Math.min(
         songCount,
         rangeBlockStart +
@@ -171,8 +167,9 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
   const showLoadingMore = useMinimumLoadingDuration(loadingMore);
   const setQueue = usePlayerStore((state) => state.setQueue);
   const artistName = artist?.attributes.name ?? "";
-  const [loadMoreElement, setLoadMoreElement] =
-    useState<HTMLDivElement | null>(null);
+  const [loadMoreElement, setLoadMoreElement] = useState<HTMLDivElement | null>(
+    null,
+  );
   const [songTableElement, setSongTableElement] =
     useState<HTMLDivElement | null>(null);
   const visibleSongRange = useVisibleSongRange(songs.length, songTableElement);
@@ -237,7 +234,7 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
                 Album
               </div>
             </div>
-            <div className="w-35.25 align-middle table-cell text-end overflow-visible relative z-(--z-default) rounded-none [font:var(--callout-emphasized)] rounded-ee-(--songs-list-row-border-radius,6px) rounded-es-none rounded-se-(--songs-list-row-border-radius,6px) rounded-ss-none pe-4.5 text-[0px]! h-0 leading-0! p-0">
+            <div className="w-35.25 align-middle table-cell text-end overflow-visible relative z-(--z-default) rounded-none [font:var(--callout-emphasized)] rounded-ee-(--songs-list-row-border-radius,6px) rounded-es-none rounded-se-(--songs-list-row-border-radius,6px) rounded-ss-none pe-4.5 text-[0px]! h-0 leading-0! p-0 max-[578px]:w-12!">
               <div className="relative z-(--z-default) overflow-hidden text-ellipsis whitespace-nowrap inline-block ps-3.75 pe-8.75 text-[0px] h-0 leading-0 p-0">
                 Time
               </div>
@@ -377,7 +374,7 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
                           </div>
                         )}
 
-                        <div className="-my-1 -mx-1 py-1 px-1 text-(--systemSecondary) col-span-2 row-start-2 overflow-hidden text-ellipsis whitespace-nowrap text-left min-[1000px]:hidden max-[999px]:-mt-1.5">
+                        <div className="-my-1 -mx-1 py-1 px-1 text-(--systemSecondary) col-span-2 row-start-2 overflow-hidden text-ellipsis whitespace-nowrap text-left min-[1000px]:hidden max-[999px]:-mt-0.5">
                           <ArtistLinks
                             artists={song.artists}
                             fallbackText={song.artist}
@@ -413,7 +410,7 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
 
                 <div className="table-cell [font:var(--body)] py-0 align-middle overflow-visible relative text-end z-(--z-default) rounded-ee-(--songs-list-row-border-radius,6px) rounded-es-none rounded-se-(--songs-list-row-border-radius,6px) rounded-ss-none pe-4.5 after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
                   <div className="items-center inline-grid [grid-template-areas:'song-controls-add_song-controls-length_song-controls-context'] relative">
-                    <div className="[grid-area:song-controls-add] opacity-(--addToLibraryOpacity,0) me-1.75">
+                    <div className="[grid-area:song-controls-add] opacity-(--addToLibraryOpacity,0) me-1.75 pointer-coarse:hidden max-[578px]:hidden">
                       <button
                         onClick={(event) => event.stopPropagation()}
                         className="items-center text-(--keyColor) cursor-pointer inline-flex justify-center [transition:var(--global-transition)] h-(--add-to-library-button-width,25px) leading-0 w-(--add-to-library-button-width,25px) me-(--addToLibraryMarginEnd,4px)"
@@ -439,7 +436,7 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
                     </div>
 
                     <time
-                      className="[grid-area:song-controls-length] cursor-default inline-block leading-9.5 font-features-['tnum'] tabular-nums"
+                      className="max-[578px]:hidden [grid-area:song-controls-length] cursor-default inline-block leading-9.5 font-features-['tnum'] tabular-nums"
                       dateTime="PT1M27S"
                     >
                       {formatDuration(song.durationSec)}
@@ -462,7 +459,7 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
           />
         </div>
 
-        {showLoadingMore && <Loading fullScreen={false} size={29} />}
+        {showLoadingMore && <Loading fullScreen={false} size={26} />}
 
         {hasMore && (
           <div

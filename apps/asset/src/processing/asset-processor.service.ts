@@ -32,6 +32,8 @@ const HERO_DARK_TEXT_PRIMARY = "000000";
 const HERO_DARK_TEXT_SECONDARY = "3a3a3c";
 const HERO_DARK_TEXT_TERTIARY = "636366";
 const PROCESS_TIMEOUT_MS = 30 * 60 * 1000;
+const PERCEPTUAL_HASH_WIDTH = 9;
+const PERCEPTUAL_HASH_HEIGHT = 8;
 
 interface ArtworkPalette {
   bgColor: string;
@@ -155,6 +157,7 @@ export class AssetProcessorService implements OnModuleDestroy {
       throw new Error("ARTWORK_DIMENSIONS_INVALID");
     }
     const palette = await this.artworkPalette(normalizedSource);
+    const perceptualHash = await this.perceptualHash(normalizedSource);
 
     const normalMaximumWidth = Math.min(
       width,
@@ -253,6 +256,7 @@ export class AssetProcessorService implements OnModuleDestroy {
       variants: this.json({
         original: { width, height, contentType: asset.contentType },
         palette,
+        perceptualHash,
         renditions,
         hero: {
           width,
@@ -452,6 +456,29 @@ export class AssetProcessorService implements OnModuleDestroy {
       textColor4: textColor(0.46),
       hasP3: false,
     };
+  }
+
+  /**
+   * Difference hash (dHash) is deliberately computed from the normalized
+   * source, so file format, compression and EXIF rotation do not affect the
+   * result. It is a compact visual-similarity signal, not a security hash.
+   */
+  private async perceptualHash(source: Buffer): Promise<string> {
+    const { data } = await sharp(source)
+      .resize(PERCEPTUAL_HASH_WIDTH, PERCEPTUAL_HASH_HEIGHT, { fit: "fill" })
+      .grayscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    let bits = "";
+    for (let row = 0; row < PERCEPTUAL_HASH_HEIGHT; row += 1) {
+      const offset = row * PERCEPTUAL_HASH_WIDTH;
+      for (let column = 0; column < PERCEPTUAL_HASH_WIDTH - 1; column += 1) {
+        bits += data[offset + column] >= data[offset + column + 1] ? "1" : "0";
+      }
+    }
+    return Array.from({ length: 16 }, (_, index) =>
+      Number.parseInt(bits.slice(index * 4, index * 4 + 4), 2).toString(16),
+    ).join("");
   }
 
   private async heroTextPalette(source: Buffer): Promise<HeroTextPalette> {

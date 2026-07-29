@@ -10,7 +10,14 @@ import {
   useCatalogDetail,
 } from "@/lib/catalog/use-catalog-detail";
 import { usePlayerStore } from "@/lib/player/use-player-store";
-import { CSSProperties, useEffect, useMemo, useRef, useState } from "react";
+import {
+  CSSProperties,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import CardArtwork from "../media/common/card-artwork";
 import AmpContextMenuButton from "../custom-elements/AmpContextMenuButton";
 import Link from "next/link";
@@ -20,6 +27,15 @@ import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
 import CatalogPageLoading from "../loading/catalog-page-loading";
 import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
 import { AddToLibraryButton } from "../songs/add-to-library-button";
+import { AlbumRelatedShelves } from "./album-related-shelves";
+import type { MediaCardProps } from "../media/media-card.types";
+import { ShelfDetailLoading, ShelfDetailView } from "../media/shelf-detail-view";
+import { useAppScrollToTop } from "@/lib/layout/use-app-scroll-to-top";
+import { getCatalogAlbumRelated } from "@/lib/catalog/catalog.api";
+import {
+  mapCatalogAlbums,
+  mapCatalogPlaylists,
+} from "@/lib/catalog/search.mapper";
 
 type CatalogDetailPageProps = {
   resourceType: CatalogDetailType;
@@ -73,7 +89,88 @@ export function CatalogDetailPage({
   );
   const showInitialLoading = useMinimumLoadingDuration(loading && !data);
   const setQueue = usePlayerStore((state) => state.setQueue);
+  const [relatedShelvesAvailability, setRelatedShelvesAvailability] = useState(
+    { albumId: "", hasShelves: false },
+  );
+  const [selectedRelatedShelf, setSelectedRelatedShelf] = useState<{
+    title: string;
+    section: string;
+    items: MediaCardProps[] | null;
+    nextCursor: string;
+    loadingMore: boolean;
+  } | null>(null);
+  const selectedRelatedShelfSection = selectedRelatedShelf?.section;
+  useAppScrollToTop(resourceId);
+  useAppScrollToTop(
+    selectedRelatedShelfSection
+      ? `${resourceId}:related-shelf:${selectedRelatedShelfSection}`
+      : null,
+  );
   const tracks = useMemo(() => (data ? mapCatalogTracks(data) : []), [data]);
+  const hasRelatedShelves =
+    resourceType === "albums" &&
+    relatedShelvesAvailability.albumId === resourceId &&
+    relatedShelvesAvailability.hasShelves;
+  const handleRelatedShelvesAvailability = useCallback(
+    (hasShelves: boolean) => {
+      setRelatedShelvesAvailability((current) =>
+        current.albumId === resourceId && current.hasShelves === hasShelves
+          ? current
+          : { albumId: resourceId, hasShelves },
+      );
+    },
+    [resourceId],
+  );
+  const loadMoreRelatedShelf = useCallback(async () => {
+    if (
+      !selectedRelatedShelf?.items ||
+      !selectedRelatedShelf.nextCursor ||
+      selectedRelatedShelf.loadingMore
+    ) {
+      return;
+    }
+
+    const { section, nextCursor } = selectedRelatedShelf;
+    setSelectedRelatedShelf((current) =>
+      current ? { ...current, loadingMore: true } : current,
+    );
+    try {
+      const response = await getCatalogAlbumRelated(resourceId, {
+        section,
+        cursor: nextCursor,
+        limit: 30,
+      });
+      const newItems =
+        section === "featured-on"
+          ? mapCatalogPlaylists(response.featuredOn)
+          : mapCatalogAlbums(
+              section === "more-by" ? response.moreBy : response.youMightAlsoLike,
+            );
+      setSelectedRelatedShelf((current) => {
+        if (
+          !current ||
+          !current.items ||
+          current.section !== section ||
+          current.nextCursor !== nextCursor
+        ) {
+          return current;
+        }
+        const existingIds = new Set(current.items.map((item) => item.id));
+        return {
+          ...current,
+          items: [...current.items, ...newItems.filter((item) => !existingIds.has(item.id))],
+          nextCursor: response.nextCursor,
+          loadingMore: false,
+        };
+      });
+    } catch {
+      setSelectedRelatedShelf((current) =>
+        current && current.section === section
+          ? { ...current, loadingMore: false }
+          : current,
+      );
+    }
+  }, [resourceId, selectedRelatedShelf]);
 
   const root = data?.data[0];
   const albumResource =
@@ -224,6 +321,25 @@ export function CatalogDetailPage({
   const bottomSpacerHeight = shouldVirtualize
     ? Math.max(0, tracks.length - range.end) * rowHeight
     : 0;
+
+  if (selectedRelatedShelf) {
+    if (!selectedRelatedShelf.items) {
+      return <ShelfDetailLoading />;
+    }
+
+    return (
+      <ShelfDetailView
+        shelf={{
+          title: selectedRelatedShelf.title,
+          items: selectedRelatedShelf.items,
+        }}
+        onBack={() => setSelectedRelatedShelf(null)}
+        hasMore={Boolean(selectedRelatedShelf.nextCursor)}
+        loadingMore={selectedRelatedShelf.loadingMore}
+        onLoadMore={loadMoreRelatedShelf}
+      />
+    );
+  }
 
   return (
     <>
@@ -636,6 +752,43 @@ export function CatalogDetailPage({
               </div>
             </div>
           </div>
+
+          {hasRelatedShelves && (
+            <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) pt-3 [--songs-list-row-border-radius:12px] relative z-(--z-default) bg-(--opaqueShelfBG)">
+              <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
+                <div className="pt-4 w-full"></div>
+              </div>
+            </div>
+          )}
+
+          {resourceType === "albums" && (
+            <AlbumRelatedShelves
+              key={resourceId}
+              albumId={resourceId}
+              availableSections={albumResource?.attributes.relatedShelfHints}
+              onAvailabilityChange={handleRelatedShelvesAvailability}
+              onOpenDetail={(shelf) =>
+                setSelectedRelatedShelf({
+                  ...shelf,
+                  items: null,
+                  nextCursor: "",
+                  loadingMore: false,
+                })
+              }
+              onDetailLoaded={({ section, items, nextCursor }) =>
+                setSelectedRelatedShelf((current) =>
+                  current?.section === section
+                    ? { ...current, items, nextCursor }
+                    : current,
+                )
+              }
+              onDetailLoadError={(section) =>
+                setSelectedRelatedShelf((current) =>
+                  current?.section === section ? null : current,
+                )
+              }
+            />
+          )}
         </>
       )}
     </>
