@@ -145,11 +145,27 @@ export class SongsController {
     return this.songsService.listLibraryResources({ userId: user.userId });
   }
 
+  @Get(':songId/lyrics')
+  getLyrics(@Param('songId') songId: string) {
+    return this.songsService.getSongLyrics({ songId, includeDraft: false });
+  }
+
   @Delete('library/resources/:resourceType/:resourceId')
   @UseGuards(StrictJwtAuthGuard)
-  async removeLibraryResource(@Req() req: Request, @Param('resourceType') resourceType: string, @Param('resourceId') resourceId: string) {
+  async removeLibraryResource(
+    @Req() req: Request,
+    @Param('resourceType') resourceType: string,
+    @Param('resourceId') resourceId: string,
+  ) {
     const user = req.user as JwtUser;
-    return this.songsService.removeLibraryResource({ userId: user.userId, resourceType, resourceId, title: '', subtitle: '', artworkUrl: '' });
+    return this.songsService.removeLibraryResource({
+      userId: user.userId,
+      resourceType,
+      resourceId,
+      title: '',
+      subtitle: '',
+      artworkUrl: '',
+    });
   }
 
   @Get(':id')

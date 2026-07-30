@@ -12,6 +12,8 @@ service SongService {
   rpc GetSong(GetSongRequest) returns (GetSongResponse);
   rpc GetSongByChecksum(GetSongByChecksumRequest) returns (GetSongByChecksumResponse);
   rpc GetSongIngestInfo(GetSongIngestInfoRequest) returns (GetSongIngestInfoResponse);
+  rpc GetSongLyrics(GetSongLyricsRequest) returns (SongLyricsResponse);
+  rpc UpsertSongLyrics(UpsertSongLyricsRequest) returns (SongLyricsResponse);
   rpc ListSongs(ListSongsRequest) returns (ListSongsResponse);
 
   // Ingest-oriented APIs
@@ -58,6 +60,47 @@ service SongService {
   rpc PublishCatalogDraft(PublishCatalogDraftRequest) returns (CatalogResponse);
   rpc DeleteCatalogDraft(DeleteCatalogDraftRequest) returns (DeleteCatalogDraftResponse);
 
+}
+
+message GetSongLyricsRequest {
+  string song_id = 1;
+  bool include_draft = 2;
+}
+
+message UpsertSongLyricsRequest {
+  string song_id = 1;
+  string language = 2;
+  string source_lrc = 3;
+  bool publish = 4;
+  repeated SongLyricLine lines = 5;
+  string sync_mode = 6;
+  string actor_user_id = 7;
+  bool can_manage_all_songs = 8;
+}
+
+message SongLyricLine {
+  int32 position = 1;
+  int32 start_time_ms = 2;
+  int32 end_time_ms = 3;
+  string text = 4;
+  repeated SongLyricWord words = 5;
+}
+
+message SongLyricWord {
+  int32 position = 1;
+  int32 start_time_ms = 2;
+  int32 end_time_ms = 3;
+  string text = 4;
+}
+
+message SongLyricsResponse {
+  string song_id = 1;
+  string language = 2;
+  string plain_text = 3;
+  bool is_time_synced = 4;
+  bool published = 5;
+  repeated SongLyricLine lines = 6;
+  string sync_mode = 7;
 }
 
 enum SongStatus {

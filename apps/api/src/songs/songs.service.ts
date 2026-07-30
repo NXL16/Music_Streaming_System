@@ -15,6 +15,9 @@ import {
   SongServiceClient,
   GetSongRequest,
   GetSongResponse,
+  GetSongLyricsRequest,
+  SongLyricsResponse,
+  UpsertSongLyricsRequest,
   GetSongByChecksumRequest,
   GetSongByChecksumResponse,
   GetSongIngestInfoRequest,
@@ -173,7 +176,13 @@ export class SongsService implements OnModuleInit {
       this.songServiceClient.listLibraryResources(data),
     );
   }
-  async removeLibraryResource(data: LibraryResourceRequest): Promise<LibraryResourceResponse> { return grpcFirstValueFrom(this.songServiceClient.removeLibraryResource(data)); }
+  async removeLibraryResource(
+    data: LibraryResourceRequest,
+  ): Promise<LibraryResourceResponse> {
+    return grpcFirstValueFrom(
+      this.songServiceClient.removeLibraryResource(data),
+    );
+  }
 
   async removeSongOwnership(
     data: RemoveSongOwnershipRequest,
@@ -249,6 +258,14 @@ export class SongsService implements OnModuleInit {
       this.songServiceClient.getCatalogAlbum(data),
     );
     return this.unwrapCatalogResponse(response);
+  }
+
+  getSongLyrics(data: GetSongLyricsRequest): Promise<SongLyricsResponse> {
+    return grpcFirstValueFrom(this.songServiceClient.getSongLyrics(data));
+  }
+
+  upsertSongLyrics(data: UpsertSongLyricsRequest): Promise<SongLyricsResponse> {
+    return grpcFirstValueFrom(this.songServiceClient.upsertSongLyrics(data));
   }
 
   async getCatalogPlaylist(
@@ -331,9 +348,7 @@ export class SongsService implements OnModuleInit {
     };
   }
 
-  async searchCatalog(
-    data: SearchCatalogRequest,
-  ): Promise<CatalogResponse> {
+  async searchCatalog(data: SearchCatalogRequest): Promise<CatalogResponse> {
     const response = await grpcFirstValueFrom(
       this.songServiceClient.searchCatalog(data),
     );

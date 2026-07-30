@@ -192,6 +192,47 @@ export class ArtistStudioCatalogController {
       actorUserId: (req.user as JwtUser).userId,
     });
   }
+
+  @Post('songs/:songId/lyrics')
+  saveSongLyrics(
+    @Req() req: Request,
+    @Param('songId') songId: string,
+    @Body()
+    body: {
+      language?: string;
+      sourceLrc?: string;
+      publish?: boolean;
+      syncMode?: 'LINE' | 'WORD';
+      lines?: Array<{
+        startTimeMs: number;
+        endTimeMs: number;
+        text: string;
+        words?: Array<{
+          startTimeMs: number;
+          endTimeMs: number;
+          text: string;
+        }>;
+      }>;
+    },
+  ) {
+    return this.songsService.upsertSongLyrics({
+      songId,
+      language: body.language?.trim() || 'vi',
+      sourceLrc: body.sourceLrc || '',
+      publish: Boolean(body.publish),
+      syncMode: body.syncMode === 'WORD' ? 'WORD' : 'LINE',
+      actorUserId: (req.user as JwtUser).userId,
+      canManageAllSongs: false,
+      lines: (body.lines || []).map((line, position) => ({
+        ...line,
+        position,
+        words: (line.words || []).map((word, wordPosition) => ({
+          ...word,
+          position: wordPosition,
+        })),
+      })),
+    });
+  }
 }
 
 @Controller('admin/catalog')
@@ -219,6 +260,30 @@ export class CatalogAdminController {
     return this.songsService.saveCatalogSongDraft({
       ...body,
       actorUserId: (req.user as JwtUser).userId,
+    });
+  }
+
+  @Post('songs/:songId/lyrics')
+  saveSongLyrics(
+    @Req() req: Request,
+    @Param('songId') songId: string,
+    @Body()
+    body: {
+      language?: string;
+      sourceLrc: string;
+      publish?: boolean;
+      syncMode?: 'LINE' | 'WORD';
+    },
+  ) {
+    return this.songsService.upsertSongLyrics({
+      songId,
+      language: body.language?.trim() || 'vi',
+      sourceLrc: body.sourceLrc,
+      publish: Boolean(body.publish),
+      syncMode: body.syncMode === 'WORD' ? 'WORD' : 'LINE',
+      actorUserId: (req.user as JwtUser).userId,
+      canManageAllSongs: true,
+      lines: [],
     });
   }
 

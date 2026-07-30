@@ -13,6 +13,16 @@ enum CatalogDraftStatus {
   PUBLISHED
 }
 
+enum SongLyricStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum SongLyricSyncMode {
+  LINE
+  WORD
+}
+
 model CatalogDraft {
   id           String             @id @default(uuid())
   resourceType String             @db.VarChar(32)
@@ -101,6 +111,8 @@ model Song {
   artistCredits             SongArtistCredit[]
   favorites                 Favorite[]
   userPlaylistTracks        UserPlaylistTrack[]
+  lyric                     SongLyric?
+  lyricDraft                SongLyricDraft?
 
   @@index([status, createdAt])
   @@index([isCatalog, storefront])
@@ -112,6 +124,71 @@ model Song {
   @@index([moodAnalyzedAt])
   @@index([moodTags], type: Gin)
   @@map("songs")
+}
+
+model SongLyric {
+  id        String            @id @default(uuid())
+  songId    String            @unique @db.VarChar(128)
+  language  String            @default("vi") @db.VarChar(16)
+  sourceLrc String            @db.Text
+  plainText String            @db.Text
+  status    SongLyricStatus   @default(DRAFT)
+  syncMode  SongLyricSyncMode @default(LINE)
+  createdAt DateTime          @default(now()) @db.Timestamptz
+  updatedAt DateTime          @updatedAt @db.Timestamptz
+
+  song  Song            @relation(fields: [songId], references: [id], onDelete: Cascade)
+  lines SongLyricLine[]
+
+  @@index([status])
+  @@map("song_lyrics")
+}
+
+model SongLyricDraft {
+  id        String            @id @default(uuid())
+  songId    String            @unique @db.VarChar(128)
+  language  String            @default("vi") @db.VarChar(16)
+  sourceLrc String            @db.Text
+  plainText String            @db.Text
+  syncMode  SongLyricSyncMode @default(LINE)
+  lines     Json              @db.JsonB
+  createdAt DateTime          @default(now()) @db.Timestamptz
+  updatedAt DateTime          @updatedAt @db.Timestamptz
+
+  song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@map("song_lyric_drafts")
+}
+
+model SongLyricLine {
+  id          String @id @default(uuid())
+  lyricId     String
+  position    Int
+  startTimeMs Int
+  endTimeMs   Int
+  text        String @db.Text
+
+  lyric SongLyric       @relation(fields: [lyricId], references: [id], onDelete: Cascade)
+  words SongLyricWord[]
+
+  @@unique([lyricId, position])
+  @@index([lyricId, startTimeMs])
+  @@map("song_lyric_lines")
+}
+
+model SongLyricWord {
+  id          String @id @default(uuid())
+  lineId      String
+  position    Int
+  startTimeMs Int
+  endTimeMs   Int
+  text        String @db.VarChar(500)
+
+  line SongLyricLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
+
+  @@unique([lineId, position])
+  @@index([lineId, startTimeMs])
+  @@map("song_lyric_words")
 }
 
 model Artist {
@@ -171,12 +248,12 @@ model Album {
   tracks        AlbumTrack[]
   artistCredits AlbumArtistCredit[]
 
+  @@unique([ingestionSource, ingestionKey])
   @@index([storefront, name])
   @@index([releaseDate])
   @@index([artworkAssetId])
   @@index([editorialArtworkAssetId])
   @@index([editorialVideoAssetId])
-  @@unique([ingestionSource, ingestionKey])
   @@index([canonicalReleaseId])
   @@map("albums")
 }

@@ -61,9 +61,13 @@ import {
   BrowseCatalogResponse,
   SearchCatalogRequest,
   SearchCatalogResponse,
+  GetSongLyricsRequest,
+  SongLyricsResponse,
+  UpsertSongLyricsRequest,
 } from '@musical/shared-proto';
 import { CatalogService } from './catalog.service';
 import { CatalogAuthoringService } from './catalog-authoring.service';
+import { LyricsService } from './lyrics.service';
 
 @Controller()
 @SongServiceControllerMethods()
@@ -72,6 +76,7 @@ export class SongsController implements SongServiceController {
     private readonly songsService: SongsService,
     private readonly catalogService: CatalogService,
     private readonly catalogAuthoringService: CatalogAuthoringService,
+    private readonly lyricsService: LyricsService,
   ) {}
 
   async getSong(request: GetSongRequest): Promise<GetSongResponse> {
@@ -82,6 +87,16 @@ export class SongsController implements SongServiceController {
     request: GetSongByChecksumRequest,
   ): Promise<GetSongByChecksumResponse> {
     return this.songsService.getSongByChecksum(request);
+  }
+
+  getSongLyrics(request: GetSongLyricsRequest): Promise<SongLyricsResponse> {
+    return this.lyricsService.get(request);
+  }
+
+  upsertSongLyrics(
+    request: UpsertSongLyricsRequest,
+  ): Promise<SongLyricsResponse> {
+    return this.lyricsService.upsert(request);
   }
 
   async getSongIngestInfo(
@@ -130,7 +145,11 @@ export class SongsController implements SongServiceController {
   ): Promise<ListLibraryResourcesResponse> {
     return this.songsService.listLibraryResources(request);
   }
-  async removeLibraryResource(request: LibraryResourceRequest): Promise<LibraryResourceResponse> { return this.songsService.removeLibraryResource(request); }
+  async removeLibraryResource(
+    request: LibraryResourceRequest,
+  ): Promise<LibraryResourceResponse> {
+    return this.songsService.removeLibraryResource(request);
+  }
 
   async removeSongOwnership(
     request: RemoveSongOwnershipRequest,
