@@ -453,14 +453,28 @@ export class RecommendationsService {
   }
 
   async upsertCatalogResources(resources: CatalogResource[]): Promise<number> {
-    const catalogResources = resources.filter(
-      (resource) => resource.id && resource.type && resource.attributes,
+    // A stable lock order is essential here. Catalog synchronization can run
+    // beside imports or another recommendation worker; unordered multi-row
+    // upserts can otherwise lock the same unique keys in opposite orders.
+    const catalogResources = Array.from(
+      new Map(
+        resources
+          .filter(
+            (resource) => resource.id && resource.type && resource.attributes,
+          )
+          .map((resource) => [`${resource.type}:${resource.id}`, resource]),
+      ).values(),
+    ).sort(
+      (left, right) =>
+        left.type.localeCompare(right.type) || left.id.localeCompare(right.id),
     );
     if (catalogResources.length === 0) return 0;
 
     await this.executePersistence(() =>
-      this.prisma.$transaction((tx) =>
-        this.upsertResourceSnapshots(tx, catalogResources, false),
+      this.retryCatalogSnapshotDeadlock(() =>
+        this.prisma.$transaction((tx) =>
+          this.upsertResourceSnapshots(tx, catalogResources, false),
+        ),
       ),
     );
 
@@ -2636,6 +2650,44 @@ export class RecommendationsService {
   ];
 
   private static readonly SNAPSHOT_UPSERT_BATCH_SIZE = 100;
+  private static readonly SNAPSHOT_DEADLOCK_MAX_ATTEMPTS = 3;
+  private static readonly SNAPSHOT_DEADLOCK_RETRY_BASE_MS = 40;
+
+  private async retryCatalogSnapshotDeadlock<T>(
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    for (
+      let attempt = 1;
+      attempt <= RecommendationsService.SNAPSHOT_DEADLOCK_MAX_ATTEMPTS;
+      attempt += 1
+    ) {
+      try {
+        return await operation();
+      } catch (error) {
+        const shouldRetry =
+          this.isPostgresDeadlock(error) &&
+          attempt < RecommendationsService.SNAPSHOT_DEADLOCK_MAX_ATTEMPTS;
+        if (!shouldRetry) throw error;
+
+        const delayMs =
+          RecommendationsService.SNAPSHOT_DEADLOCK_RETRY_BASE_MS *
+          2 ** (attempt - 1);
+        this.logger.warn(
+          `Catalog snapshot upsert deadlocked; retrying attempt ${attempt + 1}/${RecommendationsService.SNAPSHOT_DEADLOCK_MAX_ATTEMPTS} in ${delayMs}ms`,
+        );
+        await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+
+    throw new Error('Catalog snapshot deadlock retry unexpectedly exhausted');
+  }
+
+  private isPostgresDeadlock(error: unknown): boolean {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === '40P01'
+    );
+  }
 
   /**
    * Batched upsert of resource snapshots via a single multi-row
