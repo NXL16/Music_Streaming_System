@@ -7,5 +7,6 @@ import { StreamService } from './stream.service';
   imports: [ConfigModule],
   controllers: [StreamController],
   providers: [StreamService],
+  exports: [StreamService],
 })
 export class StreamModule {}

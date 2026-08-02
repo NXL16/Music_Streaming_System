@@ -15,6 +15,8 @@ import { RecommendationsModule } from './recommendations/recommendations.module'
 import { AssetsModule } from './assets/assets.module';
 import { HealthModule } from './health/health.module';
 import { RequestLoggerMiddleware } from './common/middleware/request-logger.middleware';
+import { SsoModule } from './sso/sso.module';
+import { RoomIntegrationModule } from './integrations/room/room-integration.module';
 
 @Module({
   imports: [
@@ -24,6 +26,8 @@ import { RequestLoggerMiddleware } from './common/middleware/request-logger.midd
       validate: validateEnv,
     }),
     AuthModule,
+    SsoModule,
+    RoomIntegrationModule,
     SongsModule,
     RedisModule,
     StreamModule,
