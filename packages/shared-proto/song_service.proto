@@ -63,44 +63,45 @@ service SongService {
 }
 
 message GetSongLyricsRequest {
-  string song_id = 1;
-  bool include_draft = 2;
+  string song_id       = 1;
+  bool   include_draft = 2;
 }
 
 message UpsertSongLyricsRequest {
-  string song_id = 1;
-  string language = 2;
-  string source_lrc = 3;
-  bool publish = 4;
-  repeated SongLyricLine lines = 5;
-  string sync_mode = 6;
-  string actor_user_id = 7;
-  bool can_manage_all_songs = 8;
+  string                 song_id              = 1;
+  string                 language             = 2;
+  string                 source_lrc           = 3;
+  bool                   publish              = 4;
+  repeated SongLyricLine lines                = 5;
+  string                 sync_mode            = 6;
+  string                 actor_user_id        = 7;
+  bool                   can_manage_all_songs = 8;
 }
 
 message SongLyricLine {
-  int32 position = 1;
-  int32 start_time_ms = 2;
-  int32 end_time_ms = 3;
-  string text = 4;
-  repeated SongLyricWord words = 5;
+  int32                  position      = 1;
+  int32                  start_time_ms = 2;
+  int32                  end_time_ms   = 3;
+  string                 text          = 4;
+  repeated SongLyricWord words         = 5;
+  string                 kind          = 6;
 }
 
 message SongLyricWord {
-  int32 position = 1;
-  int32 start_time_ms = 2;
-  int32 end_time_ms = 3;
-  string text = 4;
+  int32  position      = 1;
+  int32  start_time_ms = 2;
+  int32  end_time_ms   = 3;
+  string text          = 4;
 }
 
 message SongLyricsResponse {
-  string song_id = 1;
-  string language = 2;
-  string plain_text = 3;
-  bool is_time_synced = 4;
-  bool published = 5;
-  repeated SongLyricLine lines = 6;
-  string sync_mode = 7;
+  string                 song_id        = 1;
+  string                 language       = 2;
+  string                 plain_text     = 3;
+  bool                   is_time_synced = 4;
+  bool                   published      = 5;
+  repeated SongLyricLine lines          = 6;
+  string                 sync_mode      = 7;
 }
 
 enum SongStatus {
@@ -622,16 +623,16 @@ message CatalogReference {
 }
 
 message CatalogArtwork {
-  string                 url         = 1;
-  string                 bg_color    = 2;
-  string                 text_color1 = 3;
-  string                 text_color2 = 4;
-  string                 text_color3 = 5;
-  string                 text_color4 = 6;
-  int32                  width       = 7;
-  int32                  height      = 8;
-  bool                   has_p3      = 9;
-  google.protobuf.Struct variants    = 10;
+  string                 url             = 1;
+  string                 bg_color        = 2;
+  string                 text_color1     = 3;
+  string                 text_color2     = 4;
+  string                 text_color3     = 5;
+  string                 text_color4     = 6;
+  int32                  width           = 7;
+  int32                  height          = 8;
+  bool                   has_p3          = 9;
+  google.protobuf.Struct variants        = 10;
   string                 perceptual_hash = 11;
 }
 
