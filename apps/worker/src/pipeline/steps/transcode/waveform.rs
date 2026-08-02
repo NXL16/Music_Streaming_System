@@ -5,7 +5,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
-pub const WAVEFORM_POINTS: usize = 100;
+// 2,400 peaks is compact enough for stream metadata, while giving the Artist
+// Studio timeline enough visual detail to place and resize lyric cues.
+pub const WAVEFORM_POINTS: usize = 2400;
 
 pub fn build_waveform_temp_path(song_id: &str) -> PathBuf {
     let ts = SystemTime::now()
