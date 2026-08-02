@@ -6,7 +6,13 @@ import { usePathname } from "next/navigation";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { http } from "@/lib/api/http";
 import { useWalletBalance } from "@/lib/wallet/use-wallet-balance";
-import { Coins, Plus, ShieldCheck } from "lucide-react";
+import {
+  Coins,
+  MessageCircle,
+  Plus,
+  Settings,
+  ShieldCheck,
+} from "lucide-react";
 import Image from "next/image";
 
 type SidebarItem = {
@@ -14,6 +20,7 @@ type SidebarItem = {
   label: string;
   href: string;
   icon: ReactNode;
+  external?: boolean;
 };
 
 type UserPlaylist = {
@@ -65,6 +72,20 @@ const primaryNavigationItems: SidebarItem[] = [
     ),
   },
 ];
+
+const roomUrl = process.env.NEXT_PUBLIC_ROOM_URL?.trim();
+
+const roomNavigationItems: SidebarItem[] = roomUrl
+  ? [
+      {
+        key: "room",
+        label: "Room",
+        href: roomUrl,
+        icon: <MessageCircle className="h-5 w-5" aria-hidden="true" />,
+        external: true,
+      },
+    ]
+  : [];
 
 const libraryItems: SidebarItem[] = [
   {
@@ -231,11 +252,13 @@ function SidebarSection({
   items,
   pathname,
   onNavigate,
+  onExternalNavigate,
 }: {
   title?: string;
   items: SidebarItem[];
   pathname: string;
   onNavigate: () => void;
+  onExternalNavigate?: () => void;
 }) {
   return (
     <div className="pt-0 in-[.app-container]:[--navigation-item-height:44px] min-[484px]:in-[.app-container]:[--navigation-item-height:36px]">
@@ -247,7 +270,8 @@ function SidebarSection({
 
       <ul className="p-0 [font:var(--title-navigation)]">
         {items.map((item) => {
-          const isSelected = isActiveRoute(pathname, item.href);
+          const isSelected =
+            !item.external && isActiveRoute(pathname, item.href);
 
           return (
             <li
@@ -257,35 +281,65 @@ function SidebarSection({
                 isSelected ? "bg-(--navSidebarSelectedState)" : "",
               ].join(" ")}
             >
-              <Link
-                href={item.href}
-                onClick={onNavigate}
-                className="rounded-[inherit] box-content block h-full -m-0.75 p-0.75"
-                aria-current={isSelected ? "page" : undefined}
-              >
-                <div
-                  className={[
-                    "items-center rounded-[inherit] flex gap-2 size-full in-[.app-container]:gap-1.5 min-[484px]:in-[.app-container]:gap-0.5",
-                    isSelected
-                      ? "text-(--keyColor)"
-                      : "text-(--navigation-item-text-color,var(--systemPrimary))",
-                  ].join(" ")}
-                >
-                  <span
-                    className={`max-[483px]:basis-(--navigation-item-icon-size,28px) flex-[0_0] basis-(--navigation-item-icon-size,32px) leading-0 in-[.app-container]:mx-0.5 min-[484px]:basis-(--navigation-item-icon-size,24px) [&>svg]:h-full [&>svg]:w-full ${isSelected ? "[&>svg]:fill-(--keyColor)" : "[&>svg]:fill-(--navigation-item-icon-color,var(--systemPrimary))"}`}
-                  >
-                    {item.icon}
-                  </span>
+              {item.external ? (
+                <a
+                  href={item.href}
+                  onClick={(event) => {
+                    if (!onExternalNavigate) {
+                      onNavigate();
+                      return;
+                    }
 
-                  <span className="flex-1 -m-1 overflow-hidden p-1 text-ellipsis whitespace-nowrap text-left">
-                    {item.label}
-                  </span>
-                </div>
-              </Link>
+                    event.preventDefault();
+                    onExternalNavigate();
+                  }}
+                  className="rounded-[inherit] box-content block h-full -m-0.75 p-0.75"
+                >
+                  <SidebarItemContent item={item} isSelected={false} />
+                </a>
+              ) : (
+                <Link
+                  href={item.href}
+                  onClick={onNavigate}
+                  className="rounded-[inherit] box-content block h-full -m-0.75 p-0.75"
+                  aria-current={isSelected ? "page" : undefined}
+                >
+                  <SidebarItemContent item={item} isSelected={isSelected} />
+                </Link>
+              )}
             </li>
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+function SidebarItemContent({
+  item,
+  isSelected,
+}: {
+  item: SidebarItem;
+  isSelected: boolean;
+}) {
+  return (
+    <div
+      className={[
+        "items-center rounded-[inherit] flex gap-2 size-full in-[.app-container]:gap-1.5 min-[484px]:in-[.app-container]:gap-0.5",
+        isSelected
+          ? "text-(--keyColor)"
+          : "text-(--navigation-item-text-color,var(--systemPrimary))",
+      ].join(" ")}
+    >
+      <span
+        className={`max-[483px]:basis-(--navigation-item-icon-size,28px) flex-[0_0] basis-(--navigation-item-icon-size,32px) leading-0 in-[.app-container]:mx-0.5 min-[484px]:basis-(--navigation-item-icon-size,24px) [&>svg]:h-full [&>svg]:w-full ${isSelected ? "[&>svg]:fill-(--keyColor)" : "[&>svg]:fill-(--navigation-item-icon-color,var(--systemPrimary))"}`}
+      >
+        {item.icon}
+      </span>
+
+      <span className="flex-1 -m-1 overflow-hidden p-1 text-ellipsis whitespace-nowrap text-left">
+        {item.label}
+      </span>
     </div>
   );
 }
@@ -378,6 +432,21 @@ export default function AppSidebar() {
     setIsExpanded(false);
   };
 
+  const openRoom = async () => {
+    closeNavigation();
+
+    try {
+      const response = await http.post("/sso/room/start");
+      const redirectUrl = response.data?.data?.redirectUrl;
+      if (typeof redirectUrl !== "string") {
+        throw new Error("ROOM_SSO_REDIRECT_URL_MISSING");
+      }
+      window.location.assign(redirectUrl);
+    } catch {
+      window.alert("Không thể mở Room. Vui lòng thử lại sau.");
+    }
+  };
+
   return (
     <div className="gap-0 [grid-area:structure-header] size-full relative z-(--z-web-chrome) min-[484px]:z-[calc(var(--z-web-chrome)-11)] min-[484px]:w-[33.8842975207vw] min-[767.32px]:w-65">
       <nav
@@ -457,6 +526,12 @@ export default function AppSidebar() {
               items={primaryNavigationItems}
               pathname={pathname}
               onNavigate={closeNavigation}
+            />
+            <SidebarSection
+              items={roomNavigationItems}
+              pathname={pathname}
+              onNavigate={closeNavigation}
+              onExternalNavigate={openRoom}
             />
             <SidebarSection
               title="Library"
@@ -551,6 +626,15 @@ export default function AppSidebar() {
                               </span>
                             </p>
                           </div>
+                        </Link>
+
+                        <Link
+                          href="/settings/account"
+                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-(--labelDivider) bg-(--systemQuinary) text-(--systemPrimary) transition hover:bg-(--systemQuaternary)"
+                          title="Settings"
+                          aria-label="Settings"
+                        >
+                          <Settings className="h-3.5 w-3.5" />
                         </Link>
 
                         <Link

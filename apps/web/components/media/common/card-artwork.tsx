@@ -8,6 +8,7 @@ type SharedCardArtworkProps = Pick<
   "title" | "altText" | "imageSrcSet" | "artworkColors"
 > & {
   containerClassName?: string;
+  aspectRatio?: string;
   containerStyle?: CSSProperties;
   sizes?: string;
   priority?: boolean;
@@ -35,6 +36,7 @@ export default function CardArtwork({
   artworkColors,
   videoSrc,
   containerClassName,
+  aspectRatio,
   containerStyle,
   sizes,
   priority = false,
@@ -43,7 +45,7 @@ export default function CardArtwork({
     return (
       <>
         <div
-          className={`bg-(--override-placeholder-bg-color,var(--placeholder-bg-color,var(--genericJoeColor))) rounded-[inherit] box-border h-full max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0) min-w-(--artwork-override-min-width,0) overflow-hidden relative w-(--artwork-override-width,100%) z-(--z-default) min-[1000px]:[anchor-name:--shelf-first-artwork] ${containerClassName ?? ""}`}
+          className={`bg-(--override-placeholder-bg-color,var(--placeholder-bg-color,var(--genericJoeColor))) rounded-[inherit] box-border contain-content max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0) min-w-(--artwork-override-min-width,0) overflow-hidden relative w-(--artwork-override-width,100%) z-(--z-default) min-[1000px]:[anchor-name:--shelf-first-artwork] ${containerClassName ?? ""}`}
           style={
             {
               "--artwork-bg-color": artworkColors.bg,
@@ -78,11 +80,11 @@ export default function CardArtwork({
 
   return (
     <div
-      className={`bg-(--override-placeholder-bg-color,var(--placeholder-bg-color,var(--genericJoeColor))) min-[1000px]:[anchor-name:--shelf-first-artwork] rounded-[inherit] box-border h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0) min-w-(--artwork-override-min-width,0) overflow-hidden relative w-(--artwork-override-width,100%) z-(--z-default) [--override-placeholder-bg-color:var(--artwork-bg-color)] after:content-[''] after:block after:absolute after:top-0 after:w-full after:h-0 after:min-w-full after:min-h-full after:max-w-full after:max-h-full after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:opacity-(--containerInnerStrokeAlpha,0.25) after:pointer-events-none after:z-[calc(var(--z-default)+1)] ${containerClassName ?? ""}`}
+      className={`bg-(--override-placeholder-bg-color,var(--placeholder-bg-color,var(--genericJoeColor))) rounded-[inherit] box-border contain-content h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0) min-w-(--artwork-override-min-width,0) overflow-hidden relative w-(--artwork-override-width,100%) z-(--z-default) after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:content-[''] after:block after:h-0 after:max-h-full after:max-w-full after:min-h-full after:min-w-full after:opacity-(--containerInnerStrokeAlpha,0.1) after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)] dark:after:opacity-(--containerInnerStrokeAlpha,0.25) ${containerClassName ?? ""}`}
       style={
         {
           "--artwork-bg-color": artworkColors.bg,
-          "--aspect-ratio": "1",
+          "--aspect-ratio": aspectRatio ?? "1",
           "--placeholder-bg-color": "transparent",
           ...containerStyle,
         } as CSSProperties

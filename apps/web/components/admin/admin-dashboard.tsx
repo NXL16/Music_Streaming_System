@@ -226,279 +226,277 @@ export default function AdminDashboard() {
   return (
     <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-3">
       <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
-        <div className="flex pt-3 in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
-          <div className="min-[1000px]:flex-1 min-[1000px]:-ms-5 min-[1000px]:min-w-0">
-            <header className="items-center flex justify-end m-[0_var(--bodyGutter)_13px]">
-              <div className="flex-1">
-                <h1 className="text-(--header-title-color,var(--systemPrimary,#000)) inline-block [font:var(--header-title-font,var(--title-2-emphasized))]">
-                  Admin
-                </h1>
-              </div>
-              <button
-                type="button"
-                onClick={() => void loadUsers()}
-                className="inline-flex items-center gap-2 rounded-full border border-(--labelDivider) bg-(--button-circle-background-color) px-4 py-2.5 text-(--systemPrimary) [font:var(--callout-emphasized)] transition hover:bg-(--navSidebarSelectedState) disabled:opacity-50"
-                disabled={loading}
-              >
-                <RefreshCw
-                  className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
-                />{" "}
-                Refresh
-              </button>
-            </header>
-
-            <nav
-              aria-label="Admin sections"
-              className="m-[0_var(--bodyGutter)_22px] flex gap-2 overflow-x-auto border-b border-(--labelDivider) pb-3"
-            >
-              {ADMIN_SECTIONS.map((section) => {
-                const Icon = section.icon;
-                const active = activeSection === section.id;
-                return (
-                  <button
-                    key={section.id}
-                    type="button"
-                    onClick={() => setActiveSection(section.id)}
-                    className={`inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 [font:var(--callout-emphasized)] transition ${active ? "bg-(--systemPrimary) text-(--background)" : "text-(--systemSecondary) hover:bg-(--navSidebarSelectedState) hover:text-(--systemPrimary)"}`}
-                  >
-                    <Icon className="h-4 w-4" />
-                    {section.label}
-                  </button>
-                );
-              })}
-            </nav>
-
-            {activeSection === "overview" && (
-              <section className="box-border p-[0_var(--shelfGridPaddingInline,var(--bodyGutter))] pb-8 relative w-full z-(--z-default)">
-                <div className="items-center flex justify-end m-[0_0_13px]">
-                  <div className="flex-1">
-                    <h2 className="text-(--header-title-color,var(--systemPrimary,#000)) inline-block [font:var(--header-title-font,var(--title-2-emphasized))]">
-                      Overview
-                    </h2>
-                  </div>
-                </div>
-                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                  <button
-                    type="button"
-                    onClick={() => setActiveSection("users")}
-                    className="group text-left border-t border-(--labelDivider) py-5 transition hover:opacity-70"
-                  >
-                    <span className="text-(--systemSecondary) [font:var(--callout)]">
-                      Users
-                    </span>
-                    <strong className="mt-1 block text-(--systemPrimary) [font:var(--title-1-emphasized)]">
-                      {total}
-                    </strong>
-                    <span className="mt-1 block text-(--systemSecondary) [font:var(--callout)]">
-                      Manage access, roles, sessions and 2FA
-                    </span>
-                  </button>
-                  <AdminCapability
-                    title="Catalog"
-                    description="Create, review and publish catalog drafts."
-                    icon={Music2}
-                  />
-                  <AdminCapability
-                    title="Assets"
-                    description="Manage uploaded artwork and media files."
-                    icon={Image}
-                  />
-                  <AdminCapability
-                    title="Recommendations"
-                    description="Generate, review and publish Home shelves."
-                    icon={Sparkles}
-                  />
-                </div>
-              </section>
-            )}
-
-            {activeSection === "users" && (
-              <>
-                <section className="pb-8 px-(--bodyGutter)">
-                  <form
-                    onSubmit={submitSearch}
-                    className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_160px_auto]"
-                  >
-                    <label className="flex items-center gap-2 rounded-xl border border-(--labelDivider) bg-(--background) px-3">
-                      <Search className="h-4 w-4 text-(--systemSecondary)" />
-                      <input
-                        value={search}
-                        onChange={(event) => setSearch(event.target.value)}
-                        placeholder="Search name, username, or email"
-                        className="h-11 w-full bg-transparent text-(--systemPrimary) [font:var(--body)] outline-none placeholder:text-(--systemSecondary)"
-                      />
-                    </label>
-                    <SelectBox
-                      value={role}
-                      placeholder="All roles"
-                      options={[
-                        { value: "", label: "All roles" },
-                        ...ROLES.map((value) => ({
-                          value,
-                          label: roleLabel(value),
-                        })),
-                      ]}
-                      onChange={(value) => {
-                        setRole(value as UserRole | "");
-                        setPage(1);
-                      }}
-                    />
-                    <SelectBox
-                      value={status}
-                      options={[
-                        { value: "all", label: "All statuses" },
-                        { value: "active", label: "Active" },
-                        { value: "disabled", label: "Disabled" },
-                      ]}
-                      onChange={(value) => {
-                        setStatus(value as typeof status);
-                        setPage(1);
-                      }}
-                    />
-                    <button
-                      className="h-11 rounded-full bg-(--keyColor) px-5 text-(--keyColorText) [font:var(--callout-emphasized)] transition hover:opacity-85"
-                      type="submit"
-                    >
-                      Search
-                    </button>
-                  </form>
-                </section>
-
-                {feedback && (
-                  <div
-                    role="status"
-                    className={`mt-5 flex items-start justify-between gap-4 rounded-xl px-4 py-3 ${feedback.kind === "error" ? "bg-(--statusNegativeBackground) text-(--keyColor)" : "bg-(--statusPositiveBackground) text-(--statusPositive)"}`}
-                  >
-                    <div>
-                      <p className="[font:var(--callout-emphasized)]">
-                        {feedback.title}
-                      </p>
-                      <p className="mt-1 [font:var(--callout)]">
-                        {feedback.description}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setFeedback(null)}
-                      className="rounded-full p-1 transition hover:bg-black/10"
-                      aria-label="Dismiss notification"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                )}
-
-                <div className="items-center flex justify-end m-[0_var(--bodyGutter)_13px]">
-                  <div className="flex-1">
-                    <h2 className="text-(--header-title-color,var(--systemPrimary,#000)) inline-block [font:var(--header-title-font,var(--title-2-emphasized))]">
-                      <span>Directory</span>
-                    </h2>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {activeSection !== "overview" && activeSection !== "users" && (
-              <AdminModulePanel section={activeSection} />
-            )}
-            <div className="pb-8">
-              <section className="box-border p-[0_var(--shelfGridPaddingInline,var(--bodyGutter))] relative w-full z-(--z-default)">
-                <div className="grid grid-cols-[minmax(140px,1fr)_minmax(120px,1fr)_minmax(220px,1.4fr)_150px_130px] gap-4 border-b border-(--labelDivider) px-3 pb-2 text-(--systemSecondary) [font:var(--subhead)] max-lg:hidden">
-                  <span>Display name</span>
-                  <span>Username</span>
-                  <span>Email</span>
-                  <span>Role</span>
-                  <span>Status</span>
-                </div>
-                <div className="box-content -me-0.5 -ms-0.5 overflow-visible pe-0.5 ps-0.5 w-full">
-                  {loading ? (
-                    <div className="py-12 text-center text-(--systemSecondary) [font:var(--body)]">
-                      Loading identity records…
-                    </div>
-                  ) : users.length === 0 ? (
-                    <div className="py-12 text-center text-(--systemSecondary) [font:var(--body)]">
-                      No users match this filter.
-                    </div>
-                  ) : (
-                    <ul className="box-border [list-style:none] m-0 overflow-hidden p-0">
-                      {users.map((user) => {
-                        return (
-                          <li key={user.userId}>
-                            <button
-                              type="button"
-                              onClick={() => void openUser(user.userId)}
-                              className="group items-center text-(--systemPrimary) grid grid-cols-[minmax(140px,1fr)_minmax(120px,1fr)_minmax(220px,1.4fr)_150px_130px] gap-4 pb-[7.5px] pt-[7.5px] relative w-full pe-(--trackLockupPaddingInlineEnd,14px) cursor-pointer after:[border-top:var(--keyline-border-style)] after:content-[''] after:inset-e-0 after:inset-s-0 after:absolute after:top-0 after:z-(--z-default) text-left max-lg:block"
-                            >
-                              <span className="truncate text-(--systemPrimary) [font:var(--body-emphasized)]">
-                                {user.displayName || user.username}
-                              </span>
-                              <span className="truncate text-(--systemSecondary) [font:var(--callout)] max-lg:mt-1">
-                                @{user.username}
-                              </span>
-                              <span className="truncate text-(--systemSecondary) [font:var(--callout)] max-lg:mt-1">
-                                {user.email}
-                              </span>
-                              <span className="text-(--systemPrimary) [font:var(--callout-emphasized)] max-lg:mt-2">
-                                {roleLabel(user.role)}
-                              </span>
-                              <span className="max-lg:mt-2">
-                                <Badge
-                                  active={user.isActive}
-                                  on="Active"
-                                  off="Disabled"
-                                />
-                              </span>
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </div>
-                <div className="flex items-center justify-between py-5">
-                  <span className="text-(--systemSecondary) [font:var(--callout)]">
-                    Page {page} of {pageCount}
-                  </span>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      disabled={page <= 1 || loading}
-                      onClick={() => setPage((value) => value - 1)}
-                      className="rounded-full border border-(--labelDivider) px-3 py-2 text-(--systemPrimary) [font:var(--subhead-emphasized)] disabled:opacity-40"
-                    >
-                      Previous
-                    </button>
-                    <button
-                      type="button"
-                      disabled={page >= pageCount || loading}
-                      onClick={() => setPage((value) => value + 1)}
-                      className="rounded-full border border-(--labelDivider) px-3 py-2 text-(--systemPrimary) [font:var(--subhead-emphasized)] disabled:opacity-40"
-                    >
-                      Next
-                    </button>
-                  </div>
-                </div>
-              </section>
+        <div className="min-[1000px]:flex-1 min-[1000px]:-ms-5 min-[1000px]:min-w-0">
+          <header className="items-center flex justify-end m-[0_var(--bodyGutter)_13px]">
+            <div className="flex-1">
+              <h1 className="text-(--header-title-color,var(--systemPrimary,#000)) inline-block [font:var(--header-title-font,var(--title-2-emphasized))]">
+                Admin
+              </h1>
             </div>
-            {selectedUserId &&
-              users.find((user) => user.userId === selectedUserId) && (
-                <UserManagementDialog
-                  user={users.find((user) => user.userId === selectedUserId)!}
-                  currentUserId={currentUser?.userId}
-                  busy={actionUserId === selectedUserId}
-                  onClose={() => setSelectedUserId(null)}
-                  onRequestConfirmation={setConfirmation}
+            <button
+              type="button"
+              onClick={() => void loadUsers()}
+              className="inline-flex items-center gap-2 rounded-full border border-(--labelDivider) bg-(--button-circle-background-color) px-4 py-2.5 text-(--systemPrimary) [font:var(--callout-emphasized)] transition hover:bg-(--navSidebarSelectedState) disabled:opacity-50"
+              disabled={loading}
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
+              />{" "}
+              Refresh
+            </button>
+          </header>
+
+          <nav
+            aria-label="Admin sections"
+            className="m-[0_var(--bodyGutter)_22px] flex gap-2 overflow-x-auto border-b border-(--labelDivider) pb-3"
+          >
+            {ADMIN_SECTIONS.map((section) => {
+              const Icon = section.icon;
+              const active = activeSection === section.id;
+              return (
+                <button
+                  key={section.id}
+                  type="button"
+                  onClick={() => setActiveSection(section.id)}
+                  className={`inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 [font:var(--callout-emphasized)] transition ${active ? "bg-(--systemPrimary) text-(--background)" : "text-(--systemSecondary) hover:bg-(--navSidebarSelectedState) hover:text-(--systemPrimary)"}`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {section.label}
+                </button>
+              );
+            })}
+          </nav>
+
+          {activeSection === "overview" && (
+            <section className="box-border p-[0_var(--shelfGridPaddingInline,var(--bodyGutter))] pb-8 relative w-full z-(--z-default)">
+              <div className="items-center flex justify-end m-[0_0_13px]">
+                <div className="flex-1">
+                  <h2 className="text-(--header-title-color,var(--systemPrimary,#000)) inline-block [font:var(--header-title-font,var(--title-2-emphasized))]">
+                    Overview
+                  </h2>
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                <button
+                  type="button"
+                  onClick={() => setActiveSection("users")}
+                  className="group text-left border-t border-(--labelDivider) py-5 transition hover:opacity-70"
+                >
+                  <span className="text-(--systemSecondary) [font:var(--callout)]">
+                    Users
+                  </span>
+                  <strong className="mt-1 block text-(--systemPrimary) [font:var(--title-1-emphasized)]">
+                    {total}
+                  </strong>
+                  <span className="mt-1 block text-(--systemSecondary) [font:var(--callout)]">
+                    Manage access, roles, sessions and 2FA
+                  </span>
+                </button>
+                <AdminCapability
+                  title="Catalog"
+                  description="Create, review and publish catalog drafts."
+                  icon={Music2}
                 />
+                <AdminCapability
+                  title="Assets"
+                  description="Manage uploaded artwork and media files."
+                  icon={Image}
+                />
+                <AdminCapability
+                  title="Recommendations"
+                  description="Generate, review and publish Home shelves."
+                  icon={Sparkles}
+                />
+              </div>
+            </section>
+          )}
+
+          {activeSection === "users" && (
+            <>
+              <section className="pb-8 px-(--bodyGutter)">
+                <form
+                  onSubmit={submitSearch}
+                  className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_160px_auto]"
+                >
+                  <label className="flex items-center gap-2 rounded-xl border border-(--labelDivider) bg-(--background) px-3">
+                    <Search className="h-4 w-4 text-(--systemSecondary)" />
+                    <input
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      placeholder="Search name, username, or email"
+                      className="h-11 w-full bg-transparent text-(--systemPrimary) [font:var(--body)] outline-none placeholder:text-(--systemSecondary)"
+                    />
+                  </label>
+                  <SelectBox
+                    value={role}
+                    placeholder="All roles"
+                    options={[
+                      { value: "", label: "All roles" },
+                      ...ROLES.map((value) => ({
+                        value,
+                        label: roleLabel(value),
+                      })),
+                    ]}
+                    onChange={(value) => {
+                      setRole(value as UserRole | "");
+                      setPage(1);
+                    }}
+                  />
+                  <SelectBox
+                    value={status}
+                    options={[
+                      { value: "all", label: "All statuses" },
+                      { value: "active", label: "Active" },
+                      { value: "disabled", label: "Disabled" },
+                    ]}
+                    onChange={(value) => {
+                      setStatus(value as typeof status);
+                      setPage(1);
+                    }}
+                  />
+                  <button
+                    className="h-11 rounded-full bg-(--keyColor) px-5 text-(--keyColorText) [font:var(--callout-emphasized)] transition hover:opacity-85"
+                    type="submit"
+                  >
+                    Search
+                  </button>
+                </form>
+              </section>
+
+              {feedback && (
+                <div
+                  role="status"
+                  className={`mt-5 flex items-start justify-between gap-4 rounded-xl px-4 py-3 ${feedback.kind === "error" ? "bg-(--statusNegativeBackground) text-(--keyColor)" : "bg-(--statusPositiveBackground) text-(--statusPositive)"}`}
+                >
+                  <div>
+                    <p className="[font:var(--callout-emphasized)]">
+                      {feedback.title}
+                    </p>
+                    <p className="mt-1 [font:var(--callout)]">
+                      {feedback.description}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFeedback(null)}
+                    className="rounded-full p-1 transition hover:bg-black/10"
+                    aria-label="Dismiss notification"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
               )}
-            {confirmation && (
-              <ConfirmationDialog
-                confirmation={confirmation}
-                loading={actionUserId === confirmation.userId}
-                onCancel={() => setConfirmation(null)}
-                onConfirm={() => void confirmAction()}
+
+              <div className="items-center flex justify-end m-[0_var(--bodyGutter)_13px]">
+                <div className="flex-1">
+                  <h2 className="text-(--header-title-color,var(--systemPrimary,#000)) inline-block [font:var(--header-title-font,var(--title-2-emphasized))]">
+                    <span>Directory</span>
+                  </h2>
+                </div>
+              </div>
+            </>
+          )}
+
+          {activeSection !== "overview" && activeSection !== "users" && (
+            <AdminModulePanel section={activeSection} />
+          )}
+          <div className="pb-8">
+            <section className="box-border p-[0_var(--shelfGridPaddingInline,var(--bodyGutter))] relative w-full z-(--z-default)">
+              <div className="grid grid-cols-[minmax(140px,1fr)_minmax(120px,1fr)_minmax(220px,1.4fr)_150px_130px] gap-4 border-b border-(--labelDivider) px-3 pb-2 text-(--systemSecondary) [font:var(--subhead)] max-lg:hidden">
+                <span>Display name</span>
+                <span>Username</span>
+                <span>Email</span>
+                <span>Role</span>
+                <span>Status</span>
+              </div>
+              <div className="box-content -me-0.5 -ms-0.5 overflow-visible pe-0.5 ps-0.5 w-full">
+                {loading ? (
+                  <div className="py-12 text-center text-(--systemSecondary) [font:var(--body)]">
+                    Loading identity records…
+                  </div>
+                ) : users.length === 0 ? (
+                  <div className="py-12 text-center text-(--systemSecondary) [font:var(--body)]">
+                    No users match this filter.
+                  </div>
+                ) : (
+                  <ul className="box-border [list-style:none] m-0 overflow-hidden p-0">
+                    {users.map((user) => {
+                      return (
+                        <li key={user.userId}>
+                          <button
+                            type="button"
+                            onClick={() => void openUser(user.userId)}
+                            className="group items-center text-(--systemPrimary) grid grid-cols-[minmax(140px,1fr)_minmax(120px,1fr)_minmax(220px,1.4fr)_150px_130px] gap-4 pb-[7.5px] pt-[7.5px] relative w-full pe-(--trackLockupPaddingInlineEnd,14px) cursor-pointer after:[border-top:var(--keyline-border-style)] after:content-[''] after:inset-e-0 after:inset-s-0 after:absolute after:top-0 after:z-(--z-default) text-left max-lg:block"
+                          >
+                            <span className="truncate text-(--systemPrimary) [font:var(--body-emphasized)]">
+                              {user.displayName || user.username}
+                            </span>
+                            <span className="truncate text-(--systemSecondary) [font:var(--callout)] max-lg:mt-1">
+                              @{user.username}
+                            </span>
+                            <span className="truncate text-(--systemSecondary) [font:var(--callout)] max-lg:mt-1">
+                              {user.email}
+                            </span>
+                            <span className="text-(--systemPrimary) [font:var(--callout-emphasized)] max-lg:mt-2">
+                              {roleLabel(user.role)}
+                            </span>
+                            <span className="max-lg:mt-2">
+                              <Badge
+                                active={user.isActive}
+                                on="Active"
+                                off="Disabled"
+                              />
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+              <div className="flex items-center justify-between py-5">
+                <span className="text-(--systemSecondary) [font:var(--callout)]">
+                  Page {page} of {pageCount}
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={page <= 1 || loading}
+                    onClick={() => setPage((value) => value - 1)}
+                    className="rounded-full border border-(--labelDivider) px-3 py-2 text-(--systemPrimary) [font:var(--subhead-emphasized)] disabled:opacity-40"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    disabled={page >= pageCount || loading}
+                    onClick={() => setPage((value) => value + 1)}
+                    className="rounded-full border border-(--labelDivider) px-3 py-2 text-(--systemPrimary) [font:var(--subhead-emphasized)] disabled:opacity-40"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            </section>
+          </div>
+          {selectedUserId &&
+            users.find((user) => user.userId === selectedUserId) && (
+              <UserManagementDialog
+                user={users.find((user) => user.userId === selectedUserId)!}
+                currentUserId={currentUser?.userId}
+                busy={actionUserId === selectedUserId}
+                onClose={() => setSelectedUserId(null)}
+                onRequestConfirmation={setConfirmation}
               />
             )}
-          </div>
+          {confirmation && (
+            <ConfirmationDialog
+              confirmation={confirmation}
+              loading={actionUserId === confirmation.userId}
+              onCancel={() => setConfirmation(null)}
+              onConfirm={() => void confirmAction()}
+            />
+          )}
         </div>
       </div>
     </div>

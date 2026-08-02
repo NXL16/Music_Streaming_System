@@ -22,6 +22,7 @@ export default function CollectionCard(props: CollectionCardProps) {
             altText={props.altText}
             imageSrcSet={props.imageSrcSet}
             artworkColors={props.artworkColors}
+            containerClassName="w-full [--override-placeholder-bg-color:var(--artwork-bg-color)] [anchor-name:--shelf-first-artwork]"
           />
 
           <div className="media-card-interaction rounded-[inherit] size-full opacity-(--scrimOpacity,0) absolute top-0 transition-(--global-transition) z-[calc(var(--z-default)+1)]">

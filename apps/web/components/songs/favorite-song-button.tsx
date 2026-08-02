@@ -1,15 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { type MouseEvent, useEffect, useState } from "react";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 
 type FavoriteSongButtonProps = {
   songId: string;
   className?: string;
   compact?: boolean;
+  onClick?: (event: MouseEvent<HTMLButtonElement>) => void;
+  ariaLabel?: string;
+  title?: string;
 };
 
-export function FavoriteSongButton({ songId }: FavoriteSongButtonProps) {
+export function FavoriteSongButton({
+  songId,
+  className,
+  onClick,
+  ariaLabel,
+  title,
+}: FavoriteSongButtonProps) {
   const songs = useFavoriteStore((state) => state.songs);
   const hydrate = useFavoriteStore((state) => state.hydrate);
   const toggle = useFavoriteStore((state) => state.toggle);
@@ -36,8 +45,13 @@ export function FavoriteSongButton({ songId }: FavoriteSongButtonProps) {
   return (
     <button
       aria-pressed={isFavorite}
-      className={`group/star items-center bg-(--favoriteButtonBackground,transparent) flex h-(--favoriteButtonSize,100%) justify-center leading-0 w-(--favoriteButtonSize,100%) [--favoriteIconStarOutline:var(--favoriteButtonStarOutline,transparent)] ${isFavorite ? "[--favoriteIconStarFill:var(--favoriteButtonStarFill,var(--keyColor))]" : "[--favoriteIconStarFill:var(--favoriteButtonStarFill,transparent)]"} hover:[--favoriteIconStarOutline:var(--keyColor)]`}
-      onClick={() => void handleClick()}
+      aria-label={ariaLabel}
+      className={`group/star items-center bg-(--favoriteButtonBackground,transparent) flex h-(--favoriteButtonSize,100%) justify-center leading-0 w-(--favoriteButtonSize,100%) [--favoriteIconStarOutline:var(--favoriteIconStarOutlineOverride,var(--favoriteButtonStarOutline,transparent))] ${isFavorite ? "[--favoriteIconStarFill:var(--favoriteButtonStarFill,var(--keyColor))]" : "[--favoriteIconStarFill:var(--favoriteButtonStarFill,transparent)]"} hover:[--favoriteIconStarOutline:var(--keyColor)] ${className ?? ""}`}
+      onClick={(event) => {
+        onClick?.(event);
+        void handleClick();
+      }}
+      title={title}
       type="button"
     >
       <svg

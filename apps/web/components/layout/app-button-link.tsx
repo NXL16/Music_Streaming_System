@@ -16,8 +16,8 @@ export function AppButtonLink({
 }: AppButtonLinkProps) {
   const variantClass =
     variant === "primary"
-      ? "bg-[#fa233b] text-white hover:bg-[#d91d32]"
-      : "bg-[#f2f2f7] text-[#1d1d1f] hover:bg-[#e5e5ea]";
+      ? "bg-(--keyColor) text-(--keyColorText) hover:brightness-95"
+      : "border border-(--labelDivider) bg-(--systemQuinary) text-(--systemPrimary) hover:bg-(--systemQuaternary)";
 
   return (
     <Link

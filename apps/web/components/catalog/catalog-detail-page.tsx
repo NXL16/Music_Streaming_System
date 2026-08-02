@@ -10,6 +10,7 @@ import {
   useCatalogDetail,
 } from "@/lib/catalog/use-catalog-detail";
 import { usePlayerStore } from "@/lib/player/use-player-store";
+import { useTrackRowSelection } from "@/lib/player/use-track-row-selection";
 import {
   CSSProperties,
   useCallback,
@@ -27,9 +28,14 @@ import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
 import CatalogPageLoading from "../loading/catalog-page-loading";
 import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
 import { AddToLibraryButton } from "../songs/add-to-library-button";
+import { FavoriteSongButton } from "../songs/favorite-song-button";
+import { PlaybackWaveform } from "../songs/playback-waveform";
 import { AlbumRelatedShelves } from "./album-related-shelves";
 import type { MediaCardProps } from "../media/media-card.types";
-import { ShelfDetailLoading, ShelfDetailView } from "../media/shelf-detail-view";
+import {
+  ShelfDetailLoading,
+  ShelfDetailView,
+} from "../media/shelf-detail-view";
 import { useAppScrollToTop } from "@/lib/layout/use-app-scroll-to-top";
 import { getCatalogAlbumRelated } from "@/lib/catalog/catalog.api";
 import {
@@ -70,6 +76,9 @@ function CatalogTrackTitle({ title, url }: { title: string; url?: string }) {
   return url ? (
     <Link
       href={url}
+      onClick={(e) => {
+        e.stopPropagation();
+      }}
       className="overflow-hidden [--linkColor:var(--systemPrimary)] hover:[text-decoration:var(--linkHoverTextDecoration,underline)] hover:text-(--linkHoverColor,var(--linkColor,inherit))"
     >
       {content}
@@ -89,9 +98,14 @@ export function CatalogDetailPage({
   );
   const showInitialLoading = useMinimumLoadingDuration(loading && !data);
   const setQueue = usePlayerStore((state) => state.setQueue);
-  const [relatedShelvesAvailability, setRelatedShelvesAvailability] = useState(
-    { albumId: "", hasShelves: false },
-  );
+  const playShuffledQueue = usePlayerStore((state) => state.playShuffledQueue);
+  const currentSong = usePlayerStore((state) => state.currentSong);
+  const playing = usePlayerStore((state) => state.playing);
+  const togglePlayback = usePlayerStore((state) => state.togglePlayback);
+  const [relatedShelvesAvailability, setRelatedShelvesAvailability] = useState({
+    albumId: "",
+    hasShelves: false,
+  });
   const [selectedRelatedShelf, setSelectedRelatedShelf] = useState<{
     title: string;
     section: string;
@@ -144,7 +158,9 @@ export function CatalogDetailPage({
         section === "featured-on"
           ? mapCatalogPlaylists(response.featuredOn)
           : mapCatalogAlbums(
-              section === "more-by" ? response.moreBy : response.youMightAlsoLike,
+              section === "more-by"
+                ? response.moreBy
+                : response.youMightAlsoLike,
             );
       setSelectedRelatedShelf((current) => {
         if (
@@ -158,7 +174,10 @@ export function CatalogDetailPage({
         const existingIds = new Set(current.items.map((item) => item.id));
         return {
           ...current,
-          items: [...current.items, ...newItems.filter((item) => !existingIds.has(item.id))],
+          items: [
+            ...current.items,
+            ...newItems.filter((item) => !existingIds.has(item.id)),
+          ],
           nextCursor: response.nextCursor,
           loadingMore: false,
         };
@@ -243,15 +262,24 @@ export function CatalogDetailPage({
         .filter(Boolean)
         .join(" · ")
     : "Playlist";
-  const hasPlayableTrack = useMemo(
-    () => tracks.some((track) => track.playbackUrl),
+  const playableTrackCount = useMemo(
+    () =>
+      tracks.reduce(
+        (count, track) => count + Number(Boolean(track.playbackUrl)),
+        0,
+      ),
     [tracks],
   );
-
-  const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
+  const hasPlayableTrack = playableTrackCount > 0;
 
   // --- Windowing danh sách bài hát ---
-  const listRef = useRef<HTMLDivElement | null>(null);
+  const {
+    activateTrack,
+    activeTrackId,
+    listRef,
+    selectTrack,
+    selectedTrackId,
+  } = useTrackRowSelection<HTMLDivElement>();
   const firstRowRef = useRef<HTMLDivElement | null>(null);
   const shouldVirtualize = tracks.length > VIRTUALIZE_THRESHOLD;
   const [rowHeight, setRowHeight] = useState(ESTIMATED_ROW_HEIGHT);
@@ -299,7 +327,7 @@ export function CatalogDetailPage({
       scrollTarget.removeEventListener("scroll", computeRange);
       window.removeEventListener("resize", computeRange);
     };
-  }, [shouldVirtualize, rowHeight, tracks.length]);
+  }, [listRef, shouldVirtualize, rowHeight, tracks.length]);
 
   useEffect(() => {
     if (!shouldVirtualize) return;
@@ -375,14 +403,14 @@ export function CatalogDetailPage({
                         "--sheen-overlay-opacity": "0",
                         "--pointer-pitch": "0.0000",
                         "--pointer-roll": "0.0000",
-                        "--pointer-light-angle": "180.00",
+                        "--pointer-light-angle": "0",
                         "--pointer-active": "0",
                       } as CSSProperties
                     }
                   >
                     {artworkProps && (
                       <>
-                        <div className="[--artwork-override-max-height:100%] filter-[blur(20px)_saturate(2)] size-full opacity-30 absolute scale-[0.88] origin-[bottom_center] z-(--radiosity-effect-z,var(--z-default))">
+                        <div className="[--artwork-override-max-height:100%] filter-[blur(20px)_saturate(2)] size-full opacity-40 absolute transform-[scale(.88)] origin-[bottom_center] z-(--radiosity-effect-z,var(--z-default)) dark:opacity-30">
                           <CardArtwork variant="cover" {...artworkProps} />
                         </div>
 
@@ -401,9 +429,7 @@ export function CatalogDetailPage({
                     )}
                   </div>
 
-                  <div
-                    className={`[align-items:var(--containerDetailHeaderAlign,center)] flex flex-col [grid-area:headings] mt-4.5 min-w-0 relative w-full self-center min-[1000px]:items-start min-[1000px]:self-center min-[1000px]:-mb-1.25 min-[1000px]:-mt-1.25 min-[1000px]:pb-1.25 min-[1000px]:pt-1.25}`}
-                  >
+                  <div className="[align-items:var(--containerDetailHeaderAlign,center)] flex flex-col [grid-area:headings] mt-4.5 min-w-0 relative w-full self-center min-[1000px]:items-start min-[1000px]:self-center min-[1000px]:-my-1.25 min-[1000px]:py-1.25 max-[483px]:[--systemPrimary:var(--systemPrimary-onDark)] max-[483px]:[--systemSecondary:var(--systemSecondary-vibrantOnDark)] max-[483px]:[--systemTertiary:var(--systemTertiary-onDark)] max-[483px]:[--systemQuaternary:var(--systemQuaternary-onDark)] max-[483px]:[--systemQuinary:var(--systemQuinary-onDark)] max-[483px]:[--keyColor:var(--systemPrimary-onDark)] max-[483px]:[--button-pill-color:#000] max-[483px]:[--button-pill-background-color:#fff] max-[483px]:[--iconEllipsisFill:var(--systemPrimary-onDark)] max-[483px]:[--button-action-background-color:#fff] max-[483px]:[--button-action-color:#000] max-[483px]:[--explicitFillOverride:var(--systemSecondary-vibrantOnDark)] max-[483px]:[--favoriteBadgeColor:var(--systemSecondary-vibrantOnDark)] max-[483px]:mix-blend-plus-lighter">
                     <div className="empty:hidden text-(--systemSecondary) [font:var(--subhead-emphasized)] mt-2.25"></div>
                     <h1 className="text-(--systemPrimary) cursor-text [font:var(--large-title-emphasized-short)] mb-[0.5px] wrap-break-word [text-align:var(--containerDetailHeaderAlign,center)] text-balance select-text line-clamp-2 min-[1000px]:[text-align:unset] max-[999px]:[font:var(--title-1-emphasized)] max-[999px]:mb-1">
                       <span dir="auto">{title}</span>
@@ -487,10 +513,17 @@ export function CatalogDetailPage({
                     <div className="order-1">
                       <div className="w-full">
                         <button
-                          className="[--button-action-width:36px] [--button-action-height:36px] [--button-action-min-width:none] aspect-square bg-(--button-circle-background-color,rgba(0,0,0,0.06)) [border:.75px_solid_var(--button-circle-border-color,rgba(0,0,0,0.04))] rounded-full items-center flex font-(--body-emphasized) h-(--button-action-height,36px) justify-center min-w-(--button-action-min-width-override,var(--button-action-min-width,none)) w-(--button-action-width,100%) text-(--linkColor,inherit) [text-align:inherit] pointer-coarse:[--button-action-width:48px] pointer-coarse:[--button-action-height:48px]"
+                          disabled={playableTrackCount < 2}
+                          onClick={() => playShuffledQueue(tracks)}
+                          title={
+                            playableTrackCount < 2
+                              ? "Need 2 songs to shuffle"
+                              : "Shuffle"
+                          }
+                          className="[--button-action-width:36px] [--button-action-height:36px] [--button-action-min-width:none] aspect-square bg-(--button-circle-background-color,rgba(0,0,0,0.06)) [border:.75px_solid_var(--button-circle-border-color,rgba(0,0,0,0.04))] rounded-full items-center flex font-(--body-emphasized) h-(--button-action-height,36px) justify-center min-w-(--button-action-min-width-override,var(--button-action-min-width,none)) w-(--button-action-width,100%) text-(--linkColor,inherit) [text-align:inherit] pointer-coarse:[--button-action-width:48px] pointer-coarse:[--button-action-height:48px] group/shuffle"
                           aria-label="Shuffle"
                         >
-                          <span className="block">
+                          <span className="block group-disabled/shuffle:opacity-30">
                             <svg
                               className="w-[inherit] block pointer-events-none shrink-0 h-(--button-action-icon-height,12px) relative top-(--button-action-icon-top-offset,1px) [--button-action-icon-height:14px] [--button-action-icon-top-offset:0] fill-(--button-action-fill-overrride,var(--systemPrimary)) text-(--button-action-fill-overrride,var(--systemPrimary)) pointer-coarse:[--button-action-icon-height:18px]"
                               viewBox="0 0 18 14"
@@ -503,7 +536,7 @@ export function CatalogDetailPage({
                       </div>
                     </div>
 
-                    <div className="order-3">
+                    <div className="order-3 [--addToLibraryFillOverride:var(--systemPrimary)]">
                       <div className="[--add-to-library-button-width:36px] [--add-to-library-icon-width:12px] pointer-coarse:[--add-to-library-button-width:48px] pointer-coarse:[--add-to-library-icon-width:16px]">
                         <AddToLibraryButton
                           resourceType={resourceType}
@@ -522,7 +555,7 @@ export function CatalogDetailPage({
 
                   <div className="flex gap-2.5 [grid-area:secondary-actions] [justify-self:var(--containerDetailHeaderAlign,end)] relative min-[1000px]:[align-self:var(--containerDetailHeaderSecondaryActionsAlignSelf,end)]">
                     <div className="flex gap-2 me-[calc(var(--bodyGutter)*-1+15px)] min-[484px]:me-[calc(var(--bodyGutter)*-1+8px)]">
-                      <div className="[--share-button-bg-color:transparent] [--share-button-icon-size:18px] [--share-button-icon-color:var(--systemPrimary)] items-center rounded-[1000px] gap-1 h-9 px-1 relative z-(--z-default) flex shrink-0 before:content-[''] before:backdrop-saturate-220 before:backdrop-blur-lg before:bg-(--glassMaterialBackground) before:rounded-[inherit] before:[box-shadow:0_10px_40px_var(--glassMaterialShadowColor)] before:inset-0 before:absolute after:content-[''] after:inset-0 after:[--containerInnerStroke:var(--glassMaterialInnerStroke)] after:[--containerInnerStrokeAlpha:var(--glassMaterialInnerStrokeAlpha)] after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:block after:h-0 after:max-h-full after:max-w-full after:min-h-full after:min-w-full after:opacity-(--containerInnerStrokeAlpha,0.25) after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)]">
+                      <div className="[--share-button-bg-color:transparent] [--share-button-icon-size:18px] [--share-button-icon-color:var(--systemPrimary)] items-center rounded-[1000px] gap-1 h-9 px-1 relative z-(--z-default) flex shrink-0 before:[backdrop-filter:saturate(220%)_blur(16px)] before:bg-(--glassMaterialBackground) before:rounded-[inherit] before:[box-shadow:0_10px_40px_var(--glassMaterialShadowColor)] before:content-[''] before:inset-0 before:absolute after:inset-0 after:[--containerInnerStroke:var(--glassMaterialInnerStroke)] after:[--containerInnerStrokeAlpha:var(--glassMaterialInnerStrokeAlpha)] after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:content-[''] after:block after:h-0 after:max-h-full after:max-w-full after:min-h-full after:min-w-full after:opacity-(--containerInnerStrokeAlpha,0.1) after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)] after:dark:opacity-(--containerInnerStrokeAlpha,0.25) [--ctxmenu-trigger-backdrop-blur:0]">
                         <div>
                           <button
                             className="items-center bg-(--share-button-bg-color,var(--systemQuinary)) rounded-full flex h-7 justify-center relative w-7 z-[calc(var(--z-default)+1)]"
@@ -586,38 +619,34 @@ export function CatalogDetailPage({
 
                 {visibleTracks.map((track, localIndex) => {
                   const index = startIndex + localIndex;
+                  const isCurrentTrack = currentSong?.id === track.id;
+                  const isTrackPlaying = isCurrentTrack && playing;
+                  const isActiveTrack = activeTrackId === track.id;
                   return (
                     <div
                       key={track.id}
                       ref={localIndex === 0 ? firstRowRef : undefined}
-                      onClick={() => setSelectedTrackId(track.id)}
-                      className={`group ${selectedTrackId === track.id ? "selected" : ""} table-row relative z-(--z-default) bg-(--rowBackgroundColor,transparent) last:[&>.table-cell]:after:[border-bottom:.5px_solid_var(--labelDivider)] last:[&>.table-cell]:after:h-full last:[&>.table-cell]:after:pointer-events-none ${
+                      onClick={() => selectTrack(track.id)}
+                      className={`group ${selectedTrackId === track.id ? "selected" : ""} text-(--systemSecondary) table-row relative z-(--z-default) [--platterBorderColor:var(--pageBG)] bg-(--rowBackgroundColor,transparent) last:[&>.table-cell]:after:[border-bottom:.5px_solid_var(--labelDivider)] last:[&>.table-cell]:after:h-full last:[&>.table-cell]:after:pointer-events-none ${
                         selectedTrackId === track.id
-                          ? "[--rowBackgroundColor:var(--selectionColor)] [--platterBorderColor:var(--selectionColor)] outline-0 [--linkColor:#fff] [--explicitFillOverride:#fff] [--contextMenuEllipsisFillOverride:#fff] [--addToLibraryFillOverride:#fff] text-white [&+_.group>.table-cell]:after:border-t-transparent"
-                          : "text-(--systemSecondary) hover:[--playButtonOpacity:1] hover:[--addToLibraryOpacity:1] hover:[--rowBackgroundColor:var(--tracklistHoverColor)] hover:[--platterBorderColor:#f0f0f0] hover:[&+_.group>.table-cell]:after:border-t-transparent"
+                          ? "[--rowBackgroundColor:var(--selectionColor)] [--platterBorderColor:var(--selectionColor)] [outline:0] [--linkColor:#fff] [--explicitFillOverride:#fff] [--contextMenuEllipsisFillOverride:#fff] [--addToLibraryFillOverride:#fff] text-white hover:[--playButtonOpacity:1] hover:[--addToLibraryOpacity:1] focus-within:[--playButtonOpacity:0] focus-within:[--addToLibraryOpacity:0] [&+_.group>.table-cell]:after:border-t-transparent"
+                          : "hover:[--playButtonOpacity:1] hover:[--addToLibraryOpacity:1] hover:[--rowBackgroundColor:var(--tracklistHoverColor)] hover:[--platterBorderColor:#f0f0f0] hover:[&+_.group>.table-cell]:after:border-t-transparent"
                       }`}
                     >
                       <div className="table-cell [font:var(--body)] py-0 align-middle h-[inherit] inset-s-1.75 overflow-visible relative z-(--z-default) after:[border-top:0.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0 group-[.selected]:after:opacity-0">
                         <div className="grid [grid-template-areas:'favorite-or-popular'] h-full -inset-s-8.25 p-0 place-items-center absolute top-1/2 transform-[translateY(-50%)] w-6.5 z-(--z-default)">
                           <div className="[grid-area:favorite-or-popular] leading-0 place-self-stretch">
-                            <button
-                              className="items-center bg-(--favoriteButtonBackground,transparent) flex h-(--favoriteButtonSize,100%) justify-center leading-0 w-(--favoriteButtonSize,100%) [--favoriteIconStarOutline:var(--favoriteButtonStarOutline,transparent)] [--favoriteIconStarFill:var(--favoriteButtonStarFill,transparent)] [--favoriteButtonBackground:transparent] group-hover:[--favoriteIconStarOutline:var(--favoriteButtonStarOutline-hover,var(--keyColor))]"
-                              aria-label="Favourite"
+                            <FavoriteSongButton
+                              ariaLabel="Favourite"
+                              className={`group-hover:[--favoriteIconStarOutline:var(--favoriteButtonStarOutline-hover,var(--keyColor))] ${
+                                isActiveTrack
+                                  ? "[--favoriteIconStarOutlineOverride:var(--favoriteButtonStarOutline-hover,var(--keyColor))]"
+                                  : ""
+                              }`}
+                              onClick={(event) => event.stopPropagation()}
+                              songId={track.id}
                               title="Tells us more about the kind of music you like."
-                            >
-                              <svg
-                                width="64"
-                                height="64"
-                                viewBox="0 0 64 64"
-                                xmlns="http://www.w3.org/2000/svg"
-                                className="pointer-events-none h-(--favoriteIconSize,9px) w-(--favoriteIconSize,9px)"
-                              >
-                                <path
-                                  className="fill-(--favoriteIconStarOutline,var(--keyColor))"
-                                  d="M13.559 60.051c1.102.86 2.5.565 4.166-.645l14.218-10.455L46.19 59.406c1.666 1.21 3.037 1.505 4.166.645 1.102-.833 1.344-2.204.672-4.166l-5.618-16.718 14.353-10.32c1.666-1.183 2.338-2.42 1.908-3.764-.43-1.29-1.693-1.935-3.763-1.908l-17.605.108-5.348-16.8C34.308 4.496 33.34 3.5 31.944 3.5c-1.372 0-2.34.995-2.984 2.984L23.61 23.283l-17.605-.108c-2.07-.027-3.333.618-3.763 1.908-.457 1.344.242 2.58 1.909 3.763l14.352 10.321-5.617 16.718c-.672 1.962-.43 3.333.672 4.166Zm3.87-5.321c-.054-.054-.027-.081 0-.242l5.349-15.374c.376-1.049.161-1.882-.78-2.527L8.613 27.341c-.134-.08-.161-.134-.134-.215.027-.08.08-.08.242-.08l16.26.295c1.103.027 1.802-.43 2.151-1.532l4.677-15.562c.027-.162.08-.215.134-.215.08 0 .135.053.162.215l4.676 15.562c.35 1.102 1.048 1.559 2.15 1.532l16.261-.296c.162 0 .216 0 .243.081.027.08-.027.134-.135.215l-13.385 9.246c-.94.645-1.156 1.478-.78 2.527l5.35 15.374c.026.161.053.188 0 .242-.055.08-.135.026-.243-.054l-12.928-9.864c-.86-.672-1.855-.672-2.715 0l-12.928 9.864c-.107.08-.188.134-.242.054Z"
-                                ></path>
-                              </svg>
-                            </button>
+                            />
                           </div>
                         </div>
                       </div>
@@ -625,31 +654,88 @@ export function CatalogDetailPage({
                       <div className="[font:var(--body)] py-0 table-cell align-middle px-0 text-(--systemPrimary) relative rounded-ee-none rounded-es-(--songs-list-row-border-radius,6px) rounded-se-none rounded-ss-(--songs-list-row-border-radius,6px) overflow-hidden text-ellipsis whitespace-nowrap after:[border-top:0.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0 group-[.selected]:after:opacity-0">
                         <div className="items-center grid [grid-template-areas:'song-artwork_song-rank_song-icon_song-name'] grid-cols-[auto_auto_auto_1fr] min-h-11.5">
                           <div
-                            className={`grid relative mt-px ${selectedTrackId === track.id ? "[--linkColor:#fff] text-white" : "text-(--systemSecondary)"}`}
+                            className={`grid relative mt-px ${isCurrentTrack ? "[--playButtonOpacity:1]" : ""} ${selectedTrackId === track.id ? "[--linkColor:#fff] text-white" : "text-(--systemSecondary)"}`}
                           >
                             <div className="[font:var(--body-tall)] [grid-area:song-index] opacity-[calc(1-var(--playButtonOpacity))] text-center w-10">
                               {index + 1}
                             </div>
-                            <div className="[grid-area:song-index] opacity-(--playButtonOpacity,0) z-[calc(var(--z-default)+2)] [--playButtonIconHoverColor:var(--keyColor)] [--playButtonIconColor:var(--keyColor)] [--nonPlatterIconFill:var(--keyColor)]">
+                            <div className="[grid-area:song-index] opacity-(--playButtonOpacity,0) z-[calc(var(--z-default)+2)] [--playButtonIconHoverColor:var(--keyColor)] [--playButtonIconColor:var(--keyColor)] [--nonPlatterIconFill:var(--keyColor)] in-[.selected]:[--playButtonIconHoverColor:#fff] in-[.selected]:[--playButtonIconColor:#fff] in-[.selected]:[--nonPlatterIconFill:#fff]">
                               <div className="[--nonPlatterIconFill:var(--nonPlatterOverrideIconColor,var(--keyColor))] size-full align-top">
                                 <button
                                   disabled={!track.playbackUrl}
-                                  onClick={() => setQueue(tracks, index)}
+                                  onClick={(e) => {
+                                    if (selectedTrackId !== null) {
+                                      activateTrack(track.id);
+                                      e.stopPropagation();
+                                    }
+
+                                    if (isCurrentTrack) {
+                                      togglePlayback();
+                                    } else {
+                                      setQueue(tracks, index);
+                                    }
+                                  }}
                                   className="[--nonPlatterIconFill:var(--playButtonIconColor,#fff)] [--playingBarColor:var(--nonPlatterIconFill,#fff)] leading-0 pointer-events-auto relative z-(--z-default) size-full align-top"
                                 >
-                                  <svg
-                                    width="16"
-                                    height="16"
-                                    viewBox="0 0 16 16"
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    className="pointer-events-none inline-block h-(--playButtonSize,16px) w-(--playButtonSize,16px) align-bottom"
-                                    aria-hidden="true"
-                                  >
-                                    <path
-                                      className="fill-(--nonPlatterIconFill,var(--keyColor,black))"
-                                      d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"
-                                    ></path>
-                                  </svg>
+                                  {isCurrentTrack ? (
+                                    <div className="bottom-0 inset-x-0 m-auto absolute top-0 z-1 h-3.75 pointer-events-none w-full">
+                                      <PlaybackWaveform
+                                        isPlaying={isTrackPlaying}
+                                        seed={track.id}
+                                      />
+
+                                      <div className="bottom-0 inset-x-0 m-auto opacity-0 absolute top-0 z-1 group-hover:opacity-100">
+                                        {isTrackPlaying ? (
+                                          <svg
+                                            width="16"
+                                            height="16"
+                                            viewBox="0 0 16 16"
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            fillRule="evenodd"
+                                            clipRule="evenodd"
+                                            strokeLinejoin="round"
+                                            strokeMiterlimit="2"
+                                            className="inline-block align-bottom"
+                                            aria-hidden="true"
+                                          >
+                                            <path
+                                              fill="var(--nonPlatterIconFill, var(--keyColor, black))"
+                                              d="M9.918.464h2.672a.89.89 0 0 1 .89.89v13.291a.89.89 0 0 1-.89.891H9.918a.89.89 0 0 1-.89-.89V1.354a.89.89 0 0 1 .89-.891zm-6.371 0h2.398c.567 0 1.027.46 1.027 1.028v13.016c0 .568-.46 1.028-1.027 1.028H3.547c-.567 0-1.028-.46-1.028-1.028V1.492c0-.568.46-1.028 1.028-1.028z"
+                                              fillRule="nonzero"
+                                            ></path>
+                                          </svg>
+                                        ) : (
+                                          <svg
+                                            width="16"
+                                            height="16"
+                                            viewBox="0 0 16 16"
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            className="inline-block align-bottom"
+                                            aria-hidden="true"
+                                          >
+                                            <path
+                                              fill="var(--nonPlatterIconFill, var(--keyColor, black))"
+                                              d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"
+                                            ></path>
+                                          </svg>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <svg
+                                      width="16"
+                                      height="16"
+                                      viewBox="0 0 16 16"
+                                      xmlns="http://www.w3.org/2000/svg"
+                                      className="pointer-events-none inline-block h-(--playButtonSize,16px) w-(--playButtonSize,16px) align-bottom"
+                                      aria-hidden="true"
+                                    >
+                                      <path
+                                        className="fill-(--nonPlatterIconFill,var(--keyColor,black))"
+                                        d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"
+                                      ></path>
+                                    </svg>
+                                  )}
                                 </button>
                               </div>
                             </div>
@@ -692,7 +778,10 @@ export function CatalogDetailPage({
                       <div className="table-cell [font:var(--body)] py-0 align-middle overflow-visible relative text-end z-(--z-default) rounded-ee-(--songs-list-row-border-radius,6px) rounded-es-none rounded-se-(--songs-list-row-border-radius,6px) rounded-ss-none pe-4.5 after:[border-top:0.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0 group-[.selected]:after:opacity-0">
                         <div className="items-center inline-grid [grid-template-areas:'song-controls-add_song-controls-length_song-controls-context'] relative">
                           <div className="pointer-coarse:hidden max-[578px]:hidden [grid-area:song-controls-add] opacity-(--addToLibraryOpacity,0) me-1.75">
-                            <button className="items-center text-(--keyColor) cursor-pointer inline-flex justify-center [transition:var(--global-transition)] h-(--add-to-library-button-width,25px) leading-0 w-(--add-to-library-button-width,25px) me-(--addToLibraryMarginEnd,4px)">
+                            <button
+                              onClick={(e) => e.stopPropagation()}
+                              className="items-center text-(--keyColor) cursor-pointer inline-flex justify-center [transition:var(--global-transition)] h-(--add-to-library-button-width,25px) leading-0 w-(--add-to-library-button-width,25px) me-(--addToLibraryMarginEnd,4px)"
+                            >
                               <svg
                                 width="10"
                                 height="10"
@@ -702,7 +791,7 @@ export function CatalogDetailPage({
                                 clipRule="evenodd"
                                 strokeLinejoin="round"
                                 strokeMiterlimit="2"
-                                className="h-(--add-to-library-icon-width,12px) w-(--add-to-library-icon-width,12px) fill-(--keyColor)"
+                                className="h-(--add-to-library-icon-width,12px) w-(--add-to-library-icon-width,12px) fill-(--addToLibraryFillOverride,var(--keyColor))"
                                 aria-hidden="true"
                               >
                                 <path

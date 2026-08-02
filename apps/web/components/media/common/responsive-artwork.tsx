@@ -43,7 +43,7 @@ export default function ResponsiveArtwork({
       {!hasFailed && srcSet && <source sizes={sizes} srcSet={srcSet} />}
       <img
         alt={alt}
-        className={className}
+        className={`${className} align-baseline`}
         decoding="async"
         fetchPriority={fetchPriority}
         height={height}

@@ -4,10 +4,8 @@ export function MusicPageLayout({ children }: { children: ReactNode }) {
   return (
     <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-3">
       <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
-        <div className="flex pt-3 in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
-          <div className="min-[1000px]:flex-1 min-[1000px]:-ms-5 min-[1000px]:min-w-0 w-full">
-            {children}
-          </div>
+        <div className="min-[1000px]:flex-1 min-[1000px]:-ms-5 min-[1000px]:min-w-0 w-full">
+          {children}
         </div>
       </div>
     </div>

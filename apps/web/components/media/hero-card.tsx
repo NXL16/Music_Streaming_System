@@ -23,7 +23,12 @@ export default function HeroCard(props: HeroCardProps) {
       <div className="h-full rounded-(--global-border-radius-xlarge,14px) overflow-hidden relative z-(--z-default)">
         <div className="h-full relative z-[calc(var(--z-default)-1)]">
           <div className="rounded-[inherit] relative z-(--z-default) h-full">
-            <CardArtwork variant="hero" {...props} priority={props.priority} />
+            <CardArtwork
+              variant="hero"
+              {...props}
+              priority={props.priority}
+              containerClassName="[--override-placeholder-bg-color:var(--artwork-bg-color,var(--genericJoeColor))] [--afterShadowBorderRadius:var(--global-border-radius-xlarge,14px)_var(--global-border-radius-xlarge,14px)_0_0] h-full"
+            />
           </div>
         </div>
 
