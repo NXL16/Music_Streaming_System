@@ -193,6 +193,19 @@ export class ArtistStudioCatalogController {
     });
   }
 
+  @Get('songs/:songId/lyrics')
+  async getSongLyrics(
+    @Req() req: Request,
+    @Param('songId') songId: string,
+  ) {
+    // Verify ownership before exposing an unpublished lyric draft.
+    await this.songsService.getSong({
+      songId,
+      requesterUserId: (req.user as JwtUser).userId,
+    });
+    return this.songsService.getSongLyrics({ songId, includeDraft: true });
+  }
+
   @Post('songs/:songId/lyrics')
   saveSongLyrics(
     @Req() req: Request,
@@ -207,6 +220,7 @@ export class ArtistStudioCatalogController {
         startTimeMs: number;
         endTimeMs: number;
         text: string;
+        kind?: 'LYRIC' | 'INSTRUMENTAL';
         words?: Array<{
           startTimeMs: number;
           endTimeMs: number;
@@ -225,6 +239,7 @@ export class ArtistStudioCatalogController {
       canManageAllSongs: false,
       lines: (body.lines || []).map((line, position) => ({
         ...line,
+        kind: line.kind === 'INSTRUMENTAL' ? 'INSTRUMENTAL' : 'LYRIC',
         position,
         words: (line.words || []).map((word, wordPosition) => ({
           ...word,

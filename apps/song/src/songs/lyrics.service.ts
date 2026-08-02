@@ -7,7 +7,7 @@ import {
   UpsertSongLyricsRequest,
 } from '@musical/shared-proto';
 import {
-  Prisma,
+  SongLyricLineKind,
   SongLyricStatus,
   SongLyricSyncMode,
 } from '../generated/prisma/client';
@@ -32,6 +32,7 @@ type PreparedLine = {
   startTimeMs: number;
   endTimeMs: number;
   text: string;
+  kind: SongLyricLineKind;
   words: PreparedWord[];
 };
 
@@ -79,6 +80,7 @@ export class LyricsService {
         startTimeMs: line.startTimeMs,
         endTimeMs: line.endTimeMs,
         text: line.text,
+        kind: line.kind,
         words: line.words.map((word) => ({
           position: word.position,
           startTimeMs: word.startTimeMs,
@@ -104,9 +106,17 @@ export class LyricsService {
         ? SongLyricSyncMode.WORD
         : SongLyricSyncMode.LINE;
     const lines = request.lines.length
-      ? this.validateLines(request.lines, song.durationInMillis, syncMode)
+      ? this.validateLines(
+          request.lines,
+          song.durationInMillis,
+          syncMode,
+          !request.publish,
+        )
       : this.parse(sourceLrc, song.durationInMillis);
-    const plainText = lines.map((line) => line.text).join('\n');
+    const plainText = lines
+      .filter((line) => line.kind === SongLyricLineKind.LYRIC)
+      .map((line) => line.text)
+      .join('\n');
 
     if (!request.publish) {
       await this.prisma.songLyricDraft.upsert({
@@ -117,14 +127,14 @@ export class LyricsService {
           sourceLrc,
           plainText,
           syncMode,
-          lines: lines as unknown as Prisma.InputJsonValue,
+          lines: lines,
         },
         update: {
           language,
           sourceLrc,
           plainText,
           syncMode,
-          lines: lines as unknown as Prisma.InputJsonValue,
+          lines: lines,
         },
       });
       return this.get({ songId: song.id, includeDraft: true });
@@ -158,6 +168,7 @@ export class LyricsService {
             startTimeMs: line.startTimeMs,
             endTimeMs: line.endTimeMs,
             text: line.text,
+            kind: line.kind,
           },
         });
         if (line.words.length) {
@@ -214,7 +225,10 @@ export class LyricsService {
       isTimeSynced: data.lines.length > 0,
       published: data.published,
       syncMode: data.syncMode,
-      lines: data.lines,
+      lines: data.lines.map((line) => ({
+        ...line,
+        kind: line.kind ?? SongLyricLineKind.LYRIC,
+      })),
     };
   }
 
@@ -235,6 +249,7 @@ export class LyricsService {
             Number(fraction || 0),
           endTimeMs: 0,
           text,
+          kind: SongLyricLineKind.LYRIC,
           words: [],
         });
       }
@@ -269,6 +284,7 @@ export class LyricsService {
     lines: UpsertSongLyricsRequest['lines'],
     durationMs: number,
     syncMode: SongLyricSyncMode,
+    allowIncompleteTiming: boolean,
   ): PreparedLine[] {
     if (!lines.length || lines.length > MAX_LINES)
       throw this.invalid('LYRIC_LINES_INVALID');
@@ -276,6 +292,7 @@ export class LyricsService {
       position,
       startTimeMs: line.startTimeMs,
       endTimeMs: line.endTimeMs,
+      kind: this.lineKind(line.kind),
       text: line.text.trim(),
       words: line.words.map((word, wordPosition) => ({
         position: wordPosition,
@@ -284,20 +301,42 @@ export class LyricsService {
         text: word.text.trim(),
       })),
     }));
-    const invalidLine = normalized.some(
-      (line, index) =>
+    const hasCompleteTiming = (line: PreparedLine | undefined) =>
+      line !== undefined &&
+      line.startTimeMs >= 0 &&
+      line.endTimeMs > line.startTimeMs;
+    const invalidLine = normalized.some((line, index) => {
+      const previous = normalized[index - 1];
+      const hasPartialTiming =
+        line.startTimeMs >= 0 || line.endTimeMs >= 0;
+
+      return (
         !Number.isSafeInteger(line.startTimeMs) ||
         !Number.isSafeInteger(line.endTimeMs) ||
-        !line.text ||
+        (line.kind === SongLyricLineKind.LYRIC && !line.text) ||
         line.text.length > MAX_LINE_TEXT_LENGTH ||
-        line.startTimeMs < 0 ||
-        line.endTimeMs <= line.startTimeMs ||
-        (index > 0 && line.startTimeMs < normalized[index - 1].endTimeMs) ||
-        (durationMs > 0 && line.endTimeMs > durationMs),
-    );
+        (line.kind === SongLyricLineKind.INSTRUMENTAL &&
+          (line.text.length > 0 || line.words.length > 0)) ||
+        (!allowIncompleteTiming &&
+          (line.startTimeMs < 0 || line.endTimeMs <= line.startTimeMs)) ||
+        (allowIncompleteTiming &&
+          hasPartialTiming &&
+          !hasCompleteTiming(line)) ||
+        (index > 0 &&
+          hasCompleteTiming(line) &&
+          hasCompleteTiming(previous) &&
+          line.startTimeMs < previous.endTimeMs) ||
+        (durationMs > 0 &&
+          hasCompleteTiming(line) &&
+          line.endTimeMs > durationMs)
+      );
+    });
     const invalidWords = normalized.some(
       (line) =>
         line.words.length > MAX_WORDS_PER_LINE ||
+        (allowIncompleteTiming &&
+          !hasCompleteTiming(line) &&
+          line.words.length > 0) ||
         line.words.some(
           (word, index) =>
             !Number.isSafeInteger(word.startTimeMs) ||
@@ -314,7 +353,14 @@ export class LyricsService {
       invalidLine ||
       invalidWords ||
       (syncMode === SongLyricSyncMode.WORD &&
-        normalized.some((line) => !line.words.length))
+        normalized.some(
+          (line) =>
+            line.kind === SongLyricLineKind.INSTRUMENTAL ||
+            (!allowIncompleteTiming && !line.words.length) ||
+            (allowIncompleteTiming &&
+              hasCompleteTiming(line) &&
+              !line.words.length),
+        ))
     ) {
       throw this.invalid('LYRIC_TIMINGS_INVALID');
     }
@@ -330,6 +376,14 @@ export class LyricsService {
       throw this.invalid('LYRIC_LANGUAGE_INVALID');
     }
     return language;
+  }
+
+  private lineKind(value: string): SongLyricLineKind {
+    const kind = value.trim().toUpperCase() || SongLyricLineKind.LYRIC;
+    if (kind === SongLyricLineKind.LYRIC) return SongLyricLineKind.LYRIC;
+    if (kind === SongLyricLineKind.INSTRUMENTAL)
+      return SongLyricLineKind.INSTRUMENTAL;
+    throw this.invalid('LYRIC_LINE_KIND_INVALID');
   }
 
   private source(value: string): string {

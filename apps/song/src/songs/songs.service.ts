@@ -40,6 +40,7 @@ const songSummarySelect = {
   id: true,
   status: true,
   durationSec: true,
+  artwork: true,
   createdAt: true,
   owners: {
     select: {
@@ -490,9 +491,8 @@ export class SongsService {
       : songs;
 
     return {
-      songs: resultSongs.map(
-        (song): SongSummary =>
-          this.mapEntityToSummary(song, requesterUserId, request.onlyPublic),
+      songs: resultSongs.map((song): SongSummary =>
+        this.mapEntityToSummary(song, requesterUserId, request.onlyPublic),
       ),
       nextCursor: hasMore
         ? this.buildCursor(resultSongs[resultSongs.length - 1])
@@ -642,8 +642,16 @@ export class SongsService {
     };
   }
 
-  async removeLibraryResource(request: LibraryResourceRequest): Promise<LibraryResourceResponse> {
-    await this.prisma.userLibraryResource.deleteMany({ where: { userId: request.userId, resourceType: request.resourceType, resourceId: request.resourceId } });
+  async removeLibraryResource(
+    request: LibraryResourceRequest,
+  ): Promise<LibraryResourceResponse> {
+    await this.prisma.userLibraryResource.deleteMany({
+      where: {
+        userId: request.userId,
+        resourceType: request.resourceType,
+        resourceId: request.resourceId,
+      },
+    });
     return { success: true };
   }
 
@@ -1036,12 +1044,21 @@ export class SongsService {
       title: ownerProfile?.title || '',
       artist: ownerProfile?.artist || '',
       album: ownerProfile?.album || '',
-      coverUrl: ownerProfile?.coverUrl || '',
+      coverUrl: ownerProfile?.coverUrl || this.artworkUrl(entity.artwork),
       isPublic: ownerProfile?.isPublic ?? false,
       status: entity.status,
       durationSec: entity.durationSec || 0,
       createdAt: entity.createdAt.getTime(),
     };
+  }
+
+  private artworkUrl(artwork: Prisma.JsonValue | null): string {
+    if (!artwork || typeof artwork !== 'object' || Array.isArray(artwork)) {
+      return '';
+    }
+
+    const url = artwork.url;
+    return typeof url === 'string' ? url : '';
   }
 
   private mapEntityToDetail(
