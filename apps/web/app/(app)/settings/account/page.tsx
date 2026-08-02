@@ -1,13 +1,31 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useState } from "react";
 import { AppButtonLink } from "@/components/layout/app-button-link";
-import { PageHero } from "@/components/layout/page-hero";
+import { SettingsTabs } from "@/components/layout/settings-tabs";
+import {
+  MusicPageHeading,
+  MusicPageLayout,
+  MusicPageSection,
+} from "@/components/layout/music-page-layout";
 import { EditProfileDialog } from "@/components/profile/edit-profile-dialog";
-import { ProfileField } from "@/components/profile/profile-field";
 import { useEmailVerificationRequest } from "@/lib/auth/use-email-verification-request";
 import { useProfile } from "@/lib/auth/use-profile";
 import { formatDateTime } from "@/lib/format/date";
+
+function DetailRow({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="grid grid-cols-[minmax(132px,.7fr)_1fr] gap-4 border-t border-(--labelDivider) py-3 text-(--systemPrimary)">
+      <span className="text-(--systemSecondary) [font:var(--callout)]">
+        {label}
+      </span>
+      <span className="min-w-0 truncate [font:var(--body-tall)]">
+        {value || "—"}
+      </span>
+    </div>
+  );
+}
 
 export default function AccountSettingsPage() {
   const { user, loading, error } = useProfile();
@@ -15,112 +33,97 @@ export default function AccountSettingsPage() {
   const [editOpen, setEditOpen] = useState(false);
 
   return (
-    <>
-      <PageHero
-        eyebrow="Account"
-        title="Account settings"
-        description="Edit profile information and keep your email status up to date."
-        actions={
-          <>
+    <MusicPageLayout>
+      <MusicPageHeading
+        title="Account"
+        trailing={
+          <div className="flex flex-wrap justify-end gap-2">
             <button
               type="button"
               onClick={() => setEditOpen(true)}
-              className="rounded-2xl bg-[#1d1d1f] px-5 py-3 font-bold text-white transition hover:bg-[#333336]"
+              className="rounded-full bg-(--keyColor) px-4 py-2 text-(--keyColorText) [font:var(--callout-emphasized)]"
             >
               Edit profile
             </button>
             <AppButtonLink href="/settings/security">Security</AppButtonLink>
             <AppButtonLink href="/profile">Profile</AppButtonLink>
-          </>
+          </div>
         }
-      >
+      />
+      <SettingsTabs />
+
+      <MusicPageSection title="Profile">
+        <p className="mb-5 max-w-2xl text-(--systemSecondary) [font:var(--body-tall)]">
+          Keep your public profile and sign-in details up to date.
+        </p>
+
         {loading && (
-          <div className="mt-6 rounded-2xl bg-[#f5f5f7] px-4 py-3 text-sm font-semibold text-[#fa233b]">
-            Syncing latest account data...
-          </div>
-        )}
-
-        {error && (
-          <div className="mt-6 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
-          </div>
-        )}
-      </PageHero>
-
-      <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_360px]">
-        <section className="rounded-4xl border border-[#e5e5ea] bg-white p-6 shadow-[0_24px_80px_rgba(95,55,25,0.1)] md:p-8">
-          <p className="text-sm font-bold uppercase tracking-[0.35em] text-[#fa233b]">
-            Details
+          <p className="pb-4 text-(--systemSecondary) [font:var(--callout)]">
+            Syncing latest account data…
           </p>
-          <h2 className="mt-2 text-3xl font-black">Profile details</h2>
+        )}
+        {error && (
+          <p className="pb-4 text-(--keyColor) [font:var(--callout)]">
+            {error}
+          </p>
+        )}
 
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
-            <ProfileField label="Display name" value={user?.displayName} />
-            <ProfileField label="Username" value={user?.username} />
-            <ProfileField label="Email" value={user?.email} />
-            <ProfileField label="Role" value={user?.role} />
-            <ProfileField
-              label="Created at"
-              value={formatDateTime(user?.createdAt)}
-            />
-            <ProfileField
-              label="Last login"
-              value={formatDateTime(user?.lastLoginAt)}
-            />
-          </div>
-        </section>
+        <div className="box-content -mx-0.5 w-full overflow-visible px-0.5">
+          <DetailRow label="Display name" value={user?.displayName} />
+          <DetailRow label="Username" value={user?.username} />
+          <DetailRow label="Email" value={user?.email} />
+          <DetailRow label="Role" value={user?.role} />
+          <DetailRow label="Created" value={formatDateTime(user?.createdAt)} />
+          <DetailRow
+            label="Last sign-in"
+            value={formatDateTime(user?.lastLoginAt)}
+          />
+        </div>
+      </MusicPageSection>
 
-        <aside className="space-y-6">
-          <section className="rounded-4xl border border-[#e5e5ea] bg-white p-6 shadow-[0_24px_80px_rgba(95,55,25,0.1)] md:p-8">
-            <p className="text-sm font-bold uppercase tracking-[0.35em] text-[#fa233b]">
-              Email
+      <MusicPageSection title="Email verification">
+        <div className="border-t border-(--labelDivider) py-5">
+          <p className="text-(--systemPrimary) [font:var(--body-tall-emphasized)]">
+            {user?.emailVerified ? "Email verified" : "Email not verified"}
+          </p>
+          <p className="mt-1 max-w-2xl text-(--systemSecondary) [font:var(--callout)]">
+            A verified email keeps account recovery and security notifications
+            available to you.
+          </p>
+
+          {!user?.emailVerified && (
+            <button
+              type="button"
+              onClick={() => void verificationRequest.sendVerificationEmail()}
+              disabled={verificationRequest.loading}
+              className="mt-4 rounded-full bg-(--keyColor) px-4 py-2 text-(--keyColorText) [font:var(--callout-emphasized)] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {verificationRequest.loading
+                ? "Sending…"
+                : "Send verification email"}
+            </button>
+          )}
+
+          {verificationRequest.message && (
+            <p className="mt-3 text-(--statusPositive) [font:var(--callout)]">
+              {verificationRequest.message}
             </p>
-            <h2 className="mt-2 text-3xl font-black">
-              {user?.emailVerified ? "Verified" : "Not verified"}
-            </h2>
-            <p className="mt-3 leading-7 text-[#6e6e73]">
-              Verified email helps protect account recovery and security flows.
+          )}
+          {verificationRequest.error && (
+            <p className="mt-3 text-(--keyColor) [font:var(--callout)]">
+              {verificationRequest.error}
             </p>
+          )}
+        </div>
+      </MusicPageSection>
 
-            {!user?.emailVerified && (
-              <button
-                type="button"
-                onClick={() => void verificationRequest.sendVerificationEmail()}
-                disabled={verificationRequest.loading}
-                className="mt-5 w-full rounded-2xl bg-[#1d1d1f] px-5 py-3 font-bold text-white transition hover:bg-[#333336] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {verificationRequest.loading
-                  ? "Sending..."
-                  : "Send verification email"}
-              </button>
-            )}
-
-            {verificationRequest.message && (
-              <div className="mt-5 rounded-2xl bg-green-50 px-4 py-3 text-sm text-green-700">
-                {verificationRequest.message}
-              </div>
-            )}
-
-            {verificationRequest.error && (
-              <div className="mt-5 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
-                {verificationRequest.error}
-              </div>
-            )}
-          </section>
-
-          <section className="rounded-4xl border border-[#e5e5ea] bg-white p-6 shadow-[0_24px_80px_rgba(95,55,25,0.1)] md:p-8">
-            <p className="text-sm font-bold uppercase tracking-[0.35em] text-[#fa233b]">
-              Bio
-            </p>
-            <h2 className="mt-2 text-3xl font-black">About</h2>
-            <p className="mt-5 leading-7 text-[#6e6e73]">
-              {user?.bio || "No bio yet."}
-            </p>
-          </section>
-        </aside>
-      </div>
+      <MusicPageSection title="About">
+        <p className="max-w-2xl border-t border-(--labelDivider) pt-5 whitespace-pre-wrap text-(--systemSecondary) [font:var(--body-tall)]">
+          {user?.bio || "No bio yet."}
+        </p>
+      </MusicPageSection>
 
       <EditProfileDialog open={editOpen} onClose={() => setEditOpen(false)} />
-    </>
+    </MusicPageLayout>
   );
 }

@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 import { AppButtonLink } from "@/components/layout/app-button-link";
-import { PageHero } from "@/components/layout/page-hero";
+import { SettingsTabs } from "@/components/layout/settings-tabs";
+import {
+  MusicPageHeading,
+  MusicPageLayout,
+  MusicPageSection,
+} from "@/components/layout/music-page-layout";
 import { ChangePasswordDialog } from "@/components/profile/change-password-dialog";
 import { SessionsPanel } from "@/components/profile/sessions-panel";
 import { TwoFactorPanel } from "@/components/profile/two-factor-panel";
@@ -13,65 +18,59 @@ export default function SecuritySettingsPage() {
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
   return (
-    <>
-      <PageHero
-        eyebrow="Security"
-        title="Security settings"
-        description="Manage password, two-factor authentication, and active sessions."
-        actions={
-          <>
+    <MusicPageLayout>
+      <MusicPageHeading
+        title="Security"
+        trailing={
+          <div className="flex flex-wrap justify-end gap-2">
             <AppButtonLink href="/settings/account">Account</AppButtonLink>
-            <AppButtonLink href="/profile" variant="primary">
-              Profile
-            </AppButtonLink>
-          </>
+            <AppButtonLink href="/profile">Profile</AppButtonLink>
+          </div>
         }
-      >
-        {loading && (
-          <div className="mt-6 rounded-2xl bg-[#f5f5f7] px-4 py-3 text-sm font-semibold text-[#fa233b]">
-            Syncing security status...
-          </div>
-        )}
+      />
+      <SettingsTabs />
 
-        {error && (
-          <div className="mt-6 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
-          </div>
-        )}
-      </PageHero>
-
-      <div className="mt-6 grid gap-6 lg:grid-cols-[360px_1fr]">
-        <aside className="space-y-6">
-          <section className="rounded-4xl border border-[#e5e5ea] bg-white p-6 shadow-[0_24px_80px_rgba(95,55,25,0.1)] md:p-8">
-            <p className="text-sm font-bold uppercase tracking-[0.35em] text-[#fa233b]">
-              Password
-            </p>
-            <h2 className="mt-2 text-3xl font-black">Change password</h2>
-            <p className="mt-3 leading-7 text-[#6e6e73]">
-              Use a strong password and update it if you suspect any account
-              risk.
-            </p>
-            <button
-              type="button"
-              onClick={() => setChangePasswordOpen(true)}
-              className="mt-5 w-full rounded-2xl bg-[#1d1d1f] px-5 py-3 font-bold text-white transition hover:bg-[#333336]"
-            >
-              Change password
-            </button>
-          </section>
-
-          <TwoFactorPanel user={user} />
-        </aside>
-
-        <div>
-          <SessionsPanel className="mt-0" />
+      <MusicPageSection title="Password">
+        <div className="border-t border-(--labelDivider) py-5">
+          <p className="text-(--systemPrimary) [font:var(--body-tall-emphasized)]">
+            Change password
+          </p>
+          <p className="mt-1 max-w-2xl text-(--systemSecondary) [font:var(--callout)]">
+            Use a strong, unique password and change it if you suspect your
+            account is at risk.
+          </p>
+          <button
+            type="button"
+            onClick={() => setChangePasswordOpen(true)}
+            className="mt-4 rounded-full bg-(--keyColor) px-4 py-2 text-(--keyColorText) [font:var(--callout-emphasized)]"
+          >
+            Change password
+          </button>
         </div>
-      </div>
+      </MusicPageSection>
+
+      <MusicPageSection title="Two-factor authentication">
+        {loading && (
+          <p className="pb-4 text-(--systemSecondary) [font:var(--callout)]">
+            Syncing security status…
+          </p>
+        )}
+        {error && (
+          <p className="pb-4 text-(--keyColor) [font:var(--callout)]">
+            {error}
+          </p>
+        )}
+        <TwoFactorPanel user={user} />
+      </MusicPageSection>
+
+      <MusicPageSection title="Signed-in devices">
+        <SessionsPanel className="mt-0" />
+      </MusicPageSection>
 
       <ChangePasswordDialog
         open={changePasswordOpen}
         onClose={() => setChangePasswordOpen(false)}
       />
-    </>
+    </MusicPageLayout>
   );
 }

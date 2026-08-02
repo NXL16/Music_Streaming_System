@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import type { UserProfile } from "@/lib/auth/auth.types";
 import { useTwoFactorSettings } from "@/lib/auth/use-two-factor-settings";
-import Image from "next/image";
 
 type TwoFactorPanelProps = {
   user: UserProfile | null;
@@ -36,20 +36,22 @@ function RecoveryCodesBox({ codes }: { codes: string[] }) {
   }
 
   return (
-    <div className="rounded-3xl border border-[#e5e5ea] bg-[#f5f5f7] p-4">
+    <div className="rounded-2xl border border-(--labelDivider) bg-(--systemQuinary) p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm font-black text-[#1d1d1f]">Recovery codes</p>
+        <p className="text-(--systemPrimary) [font:var(--body-tall-emphasized)]">
+          Recovery codes
+        </p>
 
         <button
           type="button"
           onClick={() => downloadRecoveryCodes(codes)}
-          className="rounded-2xl bg-[#1d1d1f] px-4 py-2 text-sm font-bold text-white transition hover:bg-[#333336]"
+          className="rounded-full bg-(--keyColor) px-4 py-2 text-(--keyColorText) [font:var(--callout-emphasized)]"
         >
           Tải về
         </button>
       </div>
 
-      <p className="mt-1 text-sm leading-6 text-[#6e6e73]">
+      <p className="mt-1 leading-6 text-(--systemSecondary) [font:var(--callout)]">
         Tải và lưu file ở nơi an toàn. Mỗi mã chỉ dùng được một lần.
       </p>
 
@@ -57,7 +59,7 @@ function RecoveryCodesBox({ codes }: { codes: string[] }) {
         {codes.map((code) => (
           <code
             key={code}
-            className="rounded-2xl bg-white px-3 py-2 text-sm font-black tracking-[0.12em] text-[#1d1d1f]"
+            className="rounded-xl border border-(--labelDivider) bg-(--background) px-3 py-2 text-(--systemPrimary) [font:var(--callout-emphasized)] tracking-[0.12em]"
           >
             {code}
           </code>
@@ -99,18 +101,21 @@ function TwoFactorQrCode({ value }: { value: string }) {
 
   if (!dataUrl) {
     return (
-      <div className="flex aspect-square w-full max-w-64 items-center justify-center rounded-3xl bg-[#f5f5f7] text-sm font-bold text-[#6e6e73]">
+      <div className="flex aspect-square w-full max-w-64 items-center justify-center rounded-3xl bg-(--systemQuinary) text-(--systemSecondary) [font:var(--callout-emphasized)]">
         Đang tạo QR...
       </div>
     );
   }
 
   return (
-    <Image
-      src={dataUrl}
-      alt="Two-factor authentication QR code"
-      className="aspect-square w-full max-w-64 rounded-3xl border border-[#e5e5ea] bg-[#f5f5f7] p-3"
-    />
+    <>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={dataUrl}
+        alt="Two-factor authentication QR code"
+        className="aspect-square w-full max-w-64 rounded-3xl border border-(--labelDivider) bg-white p-3"
+      />
+    </>
   );
 }
 
@@ -123,15 +128,19 @@ function TwoFactorDialog({
   onClose: () => void;
   twoFactor: ReturnType<typeof useTwoFactorSettings>;
 }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1d1d1f]/45 px-4 py-8 backdrop-blur-sm">
-      <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-4xl border border-[#e5e5ea] bg-white p-6 text-[#1d1d1f] shadow-[0_30px_100px_rgba(35,23,15,0.32)] md:p-8">
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-10050 flex items-center justify-center bg-black/70 px-4 py-8 backdrop-blur-md">
+      <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-[28px] border border-(--labelDivider) bg-(--background) p-6 text-(--systemPrimary) shadow-[0_30px_100px_var(--glassMaterialShadowColor)] md:p-8">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-bold uppercase tracking-[0.35em] text-[#fa233b]">
+            <p className="text-xs uppercase tracking-[0.2em] text-(--keyColor) [font:var(--subhead-emphasized)]">
               Security
             </p>
-            <h2 className="mt-3 text-3xl font-black">
+            <h2 className="mt-3 [font:var(--large-title-semibold)]">
               Two-factor authentication
             </h2>
           </div>
@@ -140,20 +149,20 @@ function TwoFactorDialog({
             type="button"
             onClick={onClose}
             disabled={twoFactor.loadingAction !== null}
-            className="rounded-2xl border border-[#e5e5ea] px-4 py-2 font-bold transition hover:border-[#fa233b] disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-full border border-(--labelDivider) bg-(--systemQuinary) px-4 py-2 text-(--systemPrimary) [font:var(--callout-emphasized)] transition hover:bg-(--systemQuaternary) disabled:cursor-not-allowed disabled:opacity-60"
           >
             Close
           </button>
         </div>
 
         {twoFactor.message && (
-          <div className="mt-5 rounded-2xl bg-green-50 px-4 py-3 text-sm text-green-700">
+          <div className="mt-5 rounded-2xl bg-(--statusPositiveBackground) px-4 py-3 text-(--statusPositive) [font:var(--callout)]">
             {twoFactor.message}
           </div>
         )}
 
         {twoFactor.error && (
-          <div className="mt-5 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div className="mt-5 rounded-2xl bg-(--statusNegativeBackground) px-4 py-3 text-(--keyColor) [font:var(--callout)]">
             {twoFactor.error}
           </div>
         )}
@@ -165,16 +174,16 @@ function TwoFactorDialog({
                 {twoFactor.setupData ? (
                   <TwoFactorQrCode value={twoFactor.setupData.otpauthUrl} />
                 ) : (
-                  <div className="flex aspect-square w-full max-w-64 items-center justify-center rounded-3xl bg-[#f5f5f7] px-6 text-center text-sm font-bold leading-6 text-[#6e6e73]">
+                  <div className="flex aspect-square w-full max-w-64 items-center justify-center rounded-3xl bg-(--systemQuinary) px-6 text-center leading-6 text-(--systemSecondary) [font:var(--callout-emphasized)]">
                     Bấm tạo QR để bắt đầu thiết lập 2FA.
                   </div>
                 )}
               </div>
 
-              <div className="rounded-3xl border border-[#e5e5ea] bg-[#f5f5f7] p-5">
+              <div className="rounded-3xl border border-(--labelDivider) bg-(--systemQuinary) p-5">
                 {!twoFactor.setupData ? (
                   <div className="space-y-4">
-                    <p className="leading-7 text-[#6e6e73]">
+                    <p className="leading-6 text-(--systemSecondary) [font:var(--body-tall)]">
                       Hệ thống sẽ tạo QR nội bộ. Quét QR bằng Google
                       Authenticator hoặc ứng dụng tương tự, sau đó nhập mã 6 số
                       để bật 2FA.
@@ -184,7 +193,7 @@ function TwoFactorDialog({
                       type="button"
                       onClick={() => void twoFactor.startSetup()}
                       disabled={twoFactor.loadingAction !== null}
-                      className="rounded-2xl bg-[#1d1d1f] px-5 py-3 font-bold text-white transition hover:bg-[#333336] disabled:cursor-not-allowed disabled:opacity-60"
+                      className="rounded-full bg-(--keyColor) px-5 py-3 text-(--keyColorText) [font:var(--callout-emphasized)] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {twoFactor.loadingAction === "setup"
                         ? "Đang tạo QR..."
@@ -194,14 +203,14 @@ function TwoFactorDialog({
                 ) : (
                   <form onSubmit={twoFactor.confirmSetup} className="space-y-4">
                     <div>
-                      <label className="block text-sm font-bold">
+                      <label className="block text-(--systemPrimary) [font:var(--callout-emphasized)]">
                         Mã 6 số từ Authenticator
                       </label>
                       <input
                         inputMode="numeric"
                         pattern="[0-9]{6}"
                         maxLength={6}
-                        className="mt-2 w-full rounded-2xl border border-[#e5e5ea] px-4 py-3 text-center text-xl font-black tracking-[0.28em] outline-none focus:border-[#fa233b]"
+                        className="mt-2 w-full rounded-2xl border border-(--labelDivider) bg-(--background) px-4 py-3 text-center text-xl text-(--systemPrimary) [font:var(--large-title-semibold)] tracking-[0.28em] outline-none focus:border-(--keyColor)"
                         value={twoFactor.confirmCode}
                         onChange={(event) =>
                           twoFactor.setConfirmCode(event.target.value)
@@ -215,7 +224,7 @@ function TwoFactorDialog({
                         type="button"
                         onClick={twoFactor.cancelSetup}
                         disabled={twoFactor.loadingAction !== null}
-                        className="rounded-2xl border border-[#e5e5ea] px-5 py-3 font-bold transition hover:border-[#fa233b] disabled:cursor-not-allowed disabled:opacity-60"
+                        className="rounded-full border border-(--labelDivider) bg-(--background) px-5 py-3 text-(--systemPrimary) [font:var(--callout-emphasized)] disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         Hủy
                       </button>
@@ -223,7 +232,7 @@ function TwoFactorDialog({
                       <button
                         type="submit"
                         disabled={twoFactor.loadingAction !== null}
-                        className="rounded-2xl bg-[#1d1d1f] px-5 py-3 font-bold text-white transition hover:bg-[#333336] disabled:cursor-not-allowed disabled:opacity-60"
+                        className="rounded-full bg-(--keyColor) px-5 py-3 text-(--keyColorText) [font:var(--callout-emphasized)] disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {twoFactor.loadingAction === "confirm"
                           ? "Đang xác nhận..."
@@ -240,10 +249,12 @@ function TwoFactorDialog({
                 <>
                   <form
                     onSubmit={twoFactor.disable}
-                    className="rounded-3xl border border-[#e5e5ea] bg-[#f5f5f7] p-5"
+                    className="rounded-3xl border border-(--labelDivider) bg-(--systemQuinary) p-5"
                   >
-                    <h3 className="text-xl font-black">Tắt 2FA</h3>
-                    <p className="mt-2 text-sm leading-6 text-[#6e6e73]">
+                    <h3 className="text-(--systemPrimary) [font:var(--title-2-emphasized)]">
+                      Tắt 2FA
+                    </h3>
+                    <p className="mt-2 leading-6 text-(--systemSecondary) [font:var(--callout)]">
                       Sau khi tắt 2FA, bạn sẽ được đăng xuất và cần đăng nhập
                       lại.
                     </p>
@@ -252,7 +263,7 @@ function TwoFactorDialog({
                       <input
                         type="password"
                         placeholder="Mật khẩu"
-                        className="w-full rounded-2xl border border-[#e5e5ea] px-4 py-3 outline-none focus:border-[#fa233b]"
+                        className="w-full rounded-2xl border border-(--labelDivider) bg-(--background) px-4 py-3 text-(--systemPrimary) outline-none focus:border-(--keyColor)"
                         value={twoFactor.disableForm.password}
                         onChange={(event) =>
                           twoFactor.updateDisableField(
@@ -265,7 +276,7 @@ function TwoFactorDialog({
 
                       <input
                         placeholder="Mã 2FA hoặc recovery code"
-                        className="w-full rounded-2xl border border-[#e5e5ea] px-4 py-3 outline-none focus:border-[#fa233b]"
+                        className="w-full rounded-2xl border border-(--labelDivider) bg-(--background) px-4 py-3 text-(--systemPrimary) outline-none focus:border-(--keyColor)"
                         value={twoFactor.disableForm.verificationInput}
                         onChange={(event) =>
                           twoFactor.updateDisableField(
@@ -280,7 +291,7 @@ function TwoFactorDialog({
                     <button
                       type="submit"
                       disabled={twoFactor.loadingAction !== null}
-                      className="mt-5 w-full rounded-2xl bg-[#1d1d1f] px-5 py-3 font-bold text-white transition hover:bg-[#333336] disabled:cursor-not-allowed disabled:opacity-60"
+                      className="mt-5 w-full rounded-full bg-(--keyColor) px-5 py-3 text-(--keyColorText) [font:var(--callout-emphasized)] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {twoFactor.loadingAction === "disable"
                         ? "Đang tắt..."
@@ -290,12 +301,12 @@ function TwoFactorDialog({
 
                   <form
                     onSubmit={twoFactor.regenerateRecoveryCodes}
-                    className="rounded-3xl border border-[#e5e5ea] bg-[#f5f5f7] p-5"
+                    className="rounded-3xl border border-(--labelDivider) bg-(--systemQuinary) p-5"
                   >
-                    <h3 className="text-xl font-black">
+                    <h3 className="text-(--systemPrimary) [font:var(--title-2-emphasized)]">
                       Tạo lại recovery codes
                     </h3>
-                    <p className="mt-2 text-sm leading-6 text-[#6e6e73]">
+                    <p className="mt-2 leading-6 text-(--systemSecondary) [font:var(--callout)]">
                       Codes mới sẽ thay thế toàn bộ recovery codes cũ.
                     </p>
 
@@ -303,7 +314,7 @@ function TwoFactorDialog({
                       <input
                         type="password"
                         placeholder="Mật khẩu"
-                        className="w-full rounded-2xl border border-[#e5e5ea] px-4 py-3 outline-none focus:border-[#fa233b]"
+                        className="w-full rounded-2xl border border-(--labelDivider) bg-(--background) px-4 py-3 text-(--systemPrimary) outline-none focus:border-(--keyColor)"
                         value={twoFactor.regenerateForm.password}
                         onChange={(event) =>
                           twoFactor.updateRegenerateField(
@@ -316,7 +327,7 @@ function TwoFactorDialog({
 
                       <input
                         placeholder="Mã 2FA hoặc recovery code"
-                        className="w-full rounded-2xl border border-[#e5e5ea] px-4 py-3 outline-none focus:border-[#fa233b]"
+                        className="w-full rounded-2xl border border-(--labelDivider) bg-(--background) px-4 py-3 text-(--systemPrimary) outline-none focus:border-(--keyColor)"
                         value={twoFactor.regenerateForm.verificationInput}
                         onChange={(event) =>
                           twoFactor.updateRegenerateField(
@@ -331,7 +342,7 @@ function TwoFactorDialog({
                     <button
                       type="submit"
                       disabled={twoFactor.loadingAction !== null}
-                      className="mt-5 w-full rounded-2xl border border-[#e5e5ea] px-5 py-3 font-bold transition hover:border-[#fa233b] disabled:cursor-not-allowed disabled:opacity-60"
+                      className="mt-5 w-full rounded-full border border-(--labelDivider) bg-(--background) px-5 py-3 text-(--systemPrimary) [font:var(--callout-emphasized)] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {twoFactor.loadingAction === "regenerate"
                         ? "Đang tạo..."
@@ -346,7 +357,8 @@ function TwoFactorDialog({
           <RecoveryCodesBox codes={twoFactor.recoveryCodes} />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -357,16 +369,21 @@ export function TwoFactorPanel({ user }: TwoFactorPanelProps) {
 
   return (
     <>
-      <div className="rounded-3xl bg-[#f5f5f7] px-5 py-4">
-        <p className="text-xs font-bold uppercase tracking-[0.24em] text-[#fa233b]">
-          2FA Status
+      <div className="border-t border-(--labelDivider) py-5">
+        <p className="text-(--systemPrimary) [font:var(--body-tall-emphasized)]">
+          {enabled
+            ? "Two-factor authentication is on"
+            : "Two-factor authentication is off"}
         </p>
-        <p className="mt-2 font-black">{enabled ? "Đã bật" : "Chưa bật"}</p>
+        <p className="mt-1 text-(--systemSecondary) [font:var(--callout)]">
+          Add an authenticator code when signing in to better protect your
+          account.
+        </p>
 
         <button
           type="button"
           onClick={() => setDialogOpen(true)}
-          className="mt-4 rounded-2xl bg-[#1d1d1f] px-4 py-2 text-sm font-bold text-white transition hover:bg-[#333336]"
+          className="mt-4 rounded-full bg-(--keyColor) px-4 py-2 text-(--keyColorText) [font:var(--callout-emphasized)]"
         >
           {enabled ? "Quản lý 2FA" : "Bật 2FA"}
         </button>

@@ -28,16 +28,13 @@ export function SessionsPanel({ className = "mt-6" }: SessionsPanelProps) {
   } = useSessions();
 
   return (
-    <section
-      className={`${className} rounded-4xl border border-[#e5e5ea] bg-white p-6 shadow-[0_24px_80px_rgba(95,55,25,0.1)] md:p-8`}
-    >
+    <section className={`${className} border-t border-(--labelDivider) pt-5`}>
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <p className="text-sm font-bold uppercase tracking-[0.35em] text-[#fa233b]">
-            Sessions
+          <p className="text-(--systemPrimary) [font:var(--body-tall-emphasized)]">
+            Thiết bị đăng nhập
           </p>
-          <h2 className="mt-2 text-3xl font-black">Thiết bị đăng nhập</h2>
-          <p className="mt-2 text-[#6e6e73]">
+          <p className="mt-1 text-(--systemSecondary) [font:var(--callout)]">
             Quản lý các phiên đăng nhập và đăng xuất thiết bị khác khi cần.
           </p>
         </div>
@@ -47,7 +44,7 @@ export function SessionsPanel({ className = "mt-6" }: SessionsPanelProps) {
             type="button"
             onClick={() => void reload()}
             disabled={loading}
-            className="rounded-2xl border border-[#e5e5ea] px-5 py-3 font-bold transition hover:border-[#fa233b] disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-full border border-(--labelDivider) bg-(--systemQuinary) px-4 py-2 text-(--systemPrimary) [font:var(--callout-emphasized)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {loading ? "Đang tải..." : "Refresh"}
           </button>
@@ -56,7 +53,7 @@ export function SessionsPanel({ className = "mt-6" }: SessionsPanelProps) {
             type="button"
             onClick={() => void revokeAllSessions()}
             disabled={logoutAllLoading}
-            className="rounded-2xl bg-[#1d1d1f] px-5 py-3 font-bold text-white transition hover:bg-[#333336] disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-full bg-(--keyColor) px-4 py-2 text-(--keyColorText) [font:var(--callout-emphasized)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {logoutAllLoading ? "Đang đăng xuất..." : "Logout all"}
           </button>
@@ -64,14 +61,14 @@ export function SessionsPanel({ className = "mt-6" }: SessionsPanelProps) {
       </div>
 
       {error && (
-        <div className="mt-5 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="mt-5 text-(--keyColor) [font:var(--callout)]">
           {error}
         </div>
       )}
 
       <div className="mt-6 space-y-4">
         {sessions.length === 0 && !loading && (
-          <div className="rounded-3xl border border-[#e5e5ea] bg-[#f5f5f7] px-5 py-4 text-sm font-semibold text-[#6e6e73]">
+          <div className="py-5 text-(--systemSecondary) [font:var(--callout)]">
             Chưa có phiên đăng nhập nào.
           </div>
         )}
@@ -79,33 +76,37 @@ export function SessionsPanel({ className = "mt-6" }: SessionsPanelProps) {
         {sessions.map((session) => (
           <div
             key={session.deviceId}
-            className="rounded-3xl border border-[#e5e5ea] bg-[#f5f5f7] p-5"
+            className="border-t border-(--labelDivider) py-5"
           >
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className="break-all font-black">
+                  <p className="break-all text-(--systemPrimary) [font:var(--body-tall-emphasized)]">
                     {shortDeviceId(session.deviceId)}
                   </p>
 
                   {session.isCurrent && (
-                    <span className="rounded-full bg-[#1d1d1f] px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-white">
+                    <span className="rounded-full bg-(--systemQuaternary) px-3 py-1 text-(--systemPrimary) [font:var(--subhead-emphasized)]">
                       Current
                     </span>
                   )}
                 </div>
 
-                <p className="mt-2 wrap-break-word text-sm font-semibold text-[#6e6e73]">
+                <p className="mt-2 wrap-break-word text-(--systemSecondary) [font:var(--callout)]">
                   {session.userAgent || "Unknown user agent"}
                 </p>
 
-                <div className="mt-3 grid gap-2 text-sm text-[#6e6e73] sm:grid-cols-2">
+                <div className="mt-3 grid gap-2 text-(--systemSecondary) [font:var(--callout)] sm:grid-cols-2">
                   <p>
-                    <span className="font-bold text-[#1d1d1f]">IP:</span>{" "}
+                    <span className="text-(--systemPrimary) [font:var(--callout-emphasized)]">
+                      IP:
+                    </span>{" "}
                     {session.ipAddress || "Unknown"}
                   </p>
                   <p>
-                    <span className="font-bold text-[#1d1d1f]">Last seen:</span>{" "}
+                    <span className="text-(--systemPrimary) [font:var(--callout-emphasized)]">
+                      Last seen:
+                    </span>{" "}
                     {formatDateTime(session.lastSeenAt)}
                   </p>
                 </div>
@@ -117,7 +118,7 @@ export function SessionsPanel({ className = "mt-6" }: SessionsPanelProps) {
                 disabled={
                   session.isCurrent || actionDeviceId === session.deviceId
                 }
-                className="rounded-2xl border border-[#e5e5ea] px-4 py-2 font-bold transition hover:border-[#fa233b] disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-full border border-(--labelDivider) bg-(--systemQuinary) px-4 py-2 text-(--systemPrimary) [font:var(--callout-emphasized)] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {actionDeviceId === session.deviceId
                   ? "Đăng xuất..."

@@ -19,38 +19,42 @@ export function ChangePasswordDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1d1d1f]/45 px-4 py-8 backdrop-blur-sm">
-      <div className="w-full max-w-xl rounded-4xl border border-[#e5e5ea] bg-white p-6 text-[#1d1d1f] shadow-[0_30px_100px_rgba(35,23,15,0.32)] md:p-8">
+    <div className="fixed inset-0 z-10050 flex items-center justify-center bg-black/70 px-4 py-8 backdrop-blur-md">
+      <div className="w-full max-w-xl rounded-[28px] border border-(--labelDivider) bg-(--background) p-6 text-(--systemPrimary) shadow-[0_30px_100px_var(--glassMaterialShadowColor)] md:p-8">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-bold uppercase tracking-[0.35em] text-[#fa233b]">
+            <p className="text-xs uppercase tracking-[0.2em] text-(--keyColor) [font:var(--subhead-emphasized)]">
               Security
             </p>
 
-            <h2 className="mt-3 text-3xl font-black">Đổi mật khẩu</h2>
+            <h2 className="mt-3 [font:var(--large-title-semibold)]">
+              Đổi mật khẩu
+            </h2>
           </div>
 
           <button
             type="button"
             onClick={onClose}
             disabled={loading}
-            className="rounded-2xl border border-[#e5e5ea] px-4 py-2 font-bold transition hover:border-[#fa233b] disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-full border border-(--labelDivider) bg-(--systemQuinary) px-4 py-2 text-(--systemPrimary) [font:var(--callout-emphasized)] transition hover:bg-(--systemQuaternary) disabled:cursor-not-allowed disabled:opacity-60"
           >
             Close
           </button>
         </div>
 
-        <p className="mt-4 text-sm leading-6 text-[#6e6e73]">
+        <p className="mt-4 leading-6 text-(--systemSecondary) [font:var(--body-tall)]">
           Sau khi đổi mật khẩu thành công, bạn sẽ được đăng xuất và cần đăng
           nhập lại bằng mật khẩu mới
         </p>
 
         <form onSubmit={handleSubmit} className="mt-7 space-y-5">
           <div>
-            <label className="block text-sm font-bold">Current password</label>
+            <label className="block text-(--systemPrimary) [font:var(--callout-emphasized)]">
+              Current password
+            </label>
             <input
               type="password"
-              className="mt-2 w-full rounded-2xl border border-[#e5e5ea] px-4 py-3 outline-none focus:border-[#fa233b]"
+              className="mt-2 w-full rounded-2xl border border-(--labelDivider) bg-(--systemQuinary) px-4 py-3 text-(--systemPrimary) outline-none focus:border-(--keyColor)"
               value={form.currentPassword}
               onChange={(event) =>
                 updateField("currentPassword", event.target.value)
@@ -60,10 +64,12 @@ export function ChangePasswordDialog({
           </div>
 
           <div>
-            <label className="block text-sm font-bold">New password</label>
+            <label className="block text-(--systemPrimary) [font:var(--callout-emphasized)]">
+              New password
+            </label>
             <input
               type="password"
-              className="mt-2 w-full rounded-2xl border border-[#e5e5ea] px-4 py-3 outline-none focus:border-[#fa233b]"
+              className="mt-2 w-full rounded-2xl border border-(--labelDivider) bg-(--systemQuinary) px-4 py-3 text-(--systemPrimary) outline-none focus:border-(--keyColor)"
               value={form.newPassword}
               onChange={(event) =>
                 updateField("newPassword", event.target.value)
@@ -74,12 +80,12 @@ export function ChangePasswordDialog({
           </div>
 
           <div>
-            <label className="block text-sm font-bold">
+            <label className="block text-(--systemPrimary) [font:var(--callout-emphasized)]">
               Confirm new password
             </label>
             <input
               type="password"
-              className="mt-2 w-full rounded-2xl border border-[#e5e5ea] px-4 py-3 outline-none focus:border-[#fa233b]"
+              className="mt-2 w-full rounded-2xl border border-(--labelDivider) bg-(--systemQuinary) px-4 py-3 text-(--systemPrimary) outline-none focus:border-(--keyColor)"
               value={form.confirmPassword}
               onChange={(event) =>
                 updateField("confirmPassword", event.target.value)
@@ -90,7 +96,7 @@ export function ChangePasswordDialog({
           </div>
 
           {error && (
-            <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div className="rounded-2xl bg-(--statusNegativeBackground) px-4 py-3 text-(--keyColor) [font:var(--callout)]">
               {error}
             </div>
           )}
@@ -100,7 +106,7 @@ export function ChangePasswordDialog({
               type="button"
               onClick={onClose}
               disabled={loading}
-              className="rounded-2xl border border-[#e5e5ea] px-5 py-3 font-bold transition hover:border-[#fa233b] disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-full border border-(--labelDivider) bg-(--systemQuinary) px-5 py-3 text-(--systemPrimary) [font:var(--callout-emphasized)] transition hover:bg-(--systemQuaternary) disabled:cursor-not-allowed disabled:opacity-60"
             >
               Huy
             </button>
@@ -108,7 +114,7 @@ export function ChangePasswordDialog({
             <button
               type="submit"
               disabled={loading}
-              className="rounded-2xl bg-[#1d1d1f] px-5 py-3 font-bold text-white transition hover:bg-[#333336] disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-full bg-(--keyColor) px-5 py-3 text-(--keyColorText) [font:var(--callout-emphasized)] transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? "Đang đổi..." : "Đổi mật khẩu"}
             </button>
