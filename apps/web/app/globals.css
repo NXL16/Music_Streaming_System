@@ -95,6 +95,8 @@
     --systemTertiary-onDark: hsla(0, 0%, 100%, .4);
     --systemQuaternary-onDark: hsla(0, 0%, 100%, .1);
     --systemQuinary-onDark: hsla(0, 0%, 100%, .05);
+    --systemSecondary-vibrantOnDark: #a1a1a6;
+
 
     --keyColor: #e24154;
     --keyColorText: #ffffff;
@@ -131,7 +133,6 @@
     --button-circle-border-color: hsla(0, 0%, 100%, .08);
     --add-to-library-bg-color: hsla(0, 0%, 100%, .04);
     --add-to-library-border-color: hsla(0, 0%, 100%, .08);
-    --addToLibraryFillOverride: hsla(0, 0%, 100%, .92);
 
     --genericJoeColor: #323232;
     --tracklistHoverColor: hsla(0, 0%, 100%, .06);
@@ -981,4 +982,36 @@ html[dir=rtl] .chrome-volume__slider.svelte-13xdpwq.svelte-13xdpwq {
   [tabindex]:not([tabindex="-1"])):focus-visible {
   outline: none !important;
   box-shadow: none !important;
+}
+
+/* ==================================== */
+.header--tall-artwork {
+  --artworkShadowInset: none;
+  --containerInnerStroke: none;
+}
+
+.playback-bars__bar {
+  animation-delay: var(--delay, 0);
+  animation-direction: alternate;
+  animation-duration: var(--duration, .4s);
+  animation-iteration-count: infinite;
+  animation-name: none;
+  animation-timing-function: ease-in;
+  transform: translateY(9px);
+  fill: var(--playingBarColor, var(--keyColor));
+}
+
+.playback-bars__bar--playing {
+  animation-name: playback-bar;
+  will-change: transform;
+}
+
+@keyframes playback-bar {
+  0% {
+    transform: translateY(9px);
+  }
+
+  100% {
+    transform: translateY(var(--max-height-offset));
+  }
 }

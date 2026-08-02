@@ -2,20 +2,20 @@
 
 import { ChangeEvent, FormEvent, useState } from "react";
 import Image from "next/image";
-import { ImagePlus } from "lucide-react";
-import {
-  MusicPageHeading,
-  MusicPageLayout,
-  MusicPageSection,
-} from "@/components/layout/music-page-layout";
+import Link from "next/link";
+import { Captions, ImagePlus, ListMusic } from "lucide-react";
+import { MusicPageLayout } from "@/components/layout/music-page-layout";
 import { http } from "@/lib/api/http";
 import { useAuthStore } from "@/lib/auth/auth-store";
 
-type Mode = "album" | "playlist";
+type ReleaseKind = "album" | "playlist";
+
+const inputClass =
+  "mt-1.5 w-full rounded-xl border border-(--labelDivider) bg-(--background) px-3 py-2.5 text-(--systemPrimary) outline-none transition focus:border-(--systemSecondary)";
 
 export default function ArtistStudioPage() {
   const user = useAuthStore((state) => state.user);
-  const [mode, setMode] = useState<Mode>("album");
+  const [releaseKind, setReleaseKind] = useState<ReleaseKind>("album");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [releaseDate, setReleaseDate] = useState("");
@@ -50,8 +50,7 @@ export default function ArtistStudioPage() {
         asset?: { id?: string };
         uploadUrl?: string;
       };
-      if (!asset?.id || !uploadUrl)
-        throw new Error("Artwork upload could not be prepared.");
+      if (!asset?.id || !uploadUrl) throw new Error("Upload unavailable");
       await fetch(uploadUrl, {
         method: "PUT",
         headers: { "Content-Type": file.type || "image/jpeg" },
@@ -61,9 +60,9 @@ export default function ArtistStudioPage() {
         `/studio/assets/${encodeURIComponent(asset.id)}/finalize`,
       );
       setArtworkAssetId(asset.id);
-      setMessage("Artwork is ready.");
+      setMessage("Đã tải ảnh bìa lên.");
     } catch {
-      setMessage("Could not upload artwork.");
+      setMessage("Không thể tải ảnh bìa. Thử lại sau.");
     } finally {
       setBusy(false);
     }
@@ -73,12 +72,12 @@ export default function ArtistStudioPage() {
     event.preventDefault();
     setMessage("");
     if (!name.trim()) {
-      setMessage("Title is required.");
+      setMessage("Hãy nhập tên phát hành.");
       return;
     }
     setBusy(true);
     const tracks = trackIds
-      .split(/[,\n]/)
+      .split(/[\n,]/)
       .map((id, index) =>
         id.trim()
           ? { songId: id.trim(), position: index + 1, discNumber: 1 }
@@ -86,7 +85,7 @@ export default function ArtistStudioPage() {
       )
       .filter(Boolean);
     try {
-      if (mode === "album")
+      if (releaseKind === "album") {
         await http.post("/studio/catalog/albums/draft", {
           storefront: "vn",
           name: name.trim(),
@@ -111,7 +110,7 @@ export default function ArtistStudioPage() {
           editorialArtworkAssetId: "",
           editorialVideoAssetId: "",
         });
-      else
+      } else {
         await http.post("/studio/catalog/playlists/draft", {
           storefront: "vn",
           name: name.trim(),
@@ -133,9 +132,10 @@ export default function ArtistStudioPage() {
           editorialArtworkAssetId: "",
           editorialVideoAssetId: "",
         });
-      setMessage("Draft saved successfully.");
+      }
+      setMessage("Đã lưu bản nháp vào catalog.");
     } catch {
-      setMessage("Could not save draft. Check the required metadata.");
+      setMessage("Không thể lưu nháp. Kiểm tra lại thông tin bắt buộc.");
     } finally {
       setBusy(false);
     }
@@ -144,108 +144,184 @@ export default function ArtistStudioPage() {
   if (!canAuthor)
     return (
       <MusicPageLayout>
-        <MusicPageHeading title="Artist Studio" />
-        <MusicPageSection title="Access">
-          <p className="text-(--systemSecondary) [font:var(--body)]">
-            Artist Studio is available to artists and administrators.
+        <section className="mx-auto max-w-xl py-16 text-center">
+          <h1 className="text-(--systemPrimary) [font:var(--title-1-emphasized)]">
+            Artist Studio
+          </h1>
+          <p className="mt-3 text-(--systemSecondary)">
+            Khu vực này dành cho nghệ sĩ và quản trị viên.
           </p>
-        </MusicPageSection>
+        </section>
       </MusicPageLayout>
     );
+
   return (
     <MusicPageLayout>
-      <MusicPageHeading title="Artist Studio" />
-      <MusicPageSection title="Create">
-        <div className="mb-6 flex gap-2 border-b border-(--labelDivider) pb-3">
-          <button
-            type="button"
-            onClick={() => setMode("album")}
-            className={`rounded-full px-4 py-2 [font:var(--callout-emphasized)] ${mode === "album" ? "bg-(--systemPrimary) text-(--background)" : "text-(--systemSecondary)"}`}
-          >
-            Album
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("playlist")}
-            className={`rounded-full px-4 py-2 [font:var(--callout-emphasized)] ${mode === "playlist" ? "bg-(--systemPrimary) text-(--background)" : "text-(--systemSecondary)"}`}
-          >
-            Playlist
-          </button>
-        </div>
-        <form
-          onSubmit={saveDraft}
-          className="grid gap-6 lg:grid-cols-[180px_minmax(0,1fr)]"
-        >
-          <label className="flex aspect-square cursor-pointer items-center justify-center overflow-hidden rounded-[5px] border border-(--labelDivider) bg-(--systemQuinary)">
-            {artworkPreview ? (
-              <Image
-                src={artworkPreview}
-                alt="Artwork preview"
-                className="h-full w-full object-cover"
-                height={720}
-                unoptimized
-                width={720}
-              />
-            ) : (
-              <span className="text-center text-(--systemSecondary) [font:var(--callout)]">
-                <ImagePlus className="mx-auto mb-2 h-6 w-6" />
-                Choose cover
-              </span>
-            )}
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={uploadArtwork}
-            />
-          </label>
-          <div className="grid gap-4">
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={`${mode === "album" ? "Album" : "Playlist"} title`}
-              className="border-b border-(--labelDivider) bg-transparent py-3 text-(--systemPrimary) [font:var(--title-2-emphasized)] outline-none"
-            />
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Description"
-              className="min-h-20 border-b border-(--labelDivider) bg-transparent py-3 text-(--systemPrimary) [font:var(--body)] outline-none"
-            />
-            {mode === "album" && (
-              <input
-                type="date"
-                value={releaseDate}
-                onChange={(e) => setReleaseDate(e.target.value)}
-                className="border-b border-(--labelDivider) bg-transparent py-3 text-(--systemPrimary)"
-              />
-            )}
-            <input
-              value={genre}
-              onChange={(e) => setGenre(e.target.value)}
-              placeholder="Genre"
-              className="border-b border-(--labelDivider) bg-transparent py-3 text-(--systemPrimary)"
-            />
-            <textarea
-              value={trackIds}
-              onChange={(e) => setTrackIds(e.target.value)}
-              placeholder="Track song IDs, one per line"
-              className="min-h-28 border-b border-(--labelDivider) bg-transparent py-3 text-(--systemPrimary) [font:var(--callout)] outline-none"
-            />
-            <button
-              disabled={busy}
-              className="w-fit rounded-full bg-(--keyColor) px-5 py-2.5 text-(--keyColorText) [font:var(--callout-emphasized)] disabled:opacity-50"
-            >
-              {busy ? "Saving…" : "Save draft"}
-            </button>
-            {message && (
-              <p className="text-(--systemSecondary) [font:var(--callout)]">
-                {message}
-              </p>
-            )}
+      <main className="mx-auto max-w-350 pb-28">
+        <header className="flex flex-col gap-5 border-b border-(--labelDivider) pb-6 min-[760px]:flex-row min-[760px]:items-end min-[760px]:justify-between">
+          <div>
+            <p className="text-sm text-(--systemSecondary)">Artist Studio</p>
+            <h1 className="mt-1 text-(--systemPrimary) [font:var(--title-1-emphasized)]">
+              Không gian phát hành
+            </h1>
+            <p className="mt-2 max-w-2xl text-(--systemSecondary)">
+              Quản lý catalog và chuẩn bị lyrics đồng bộ trong hai workspace
+              tách biệt.
+            </p>
           </div>
-        </form>
-      </MusicPageSection>
+          <Link
+            href="/lyrics-sync"
+            className="flex w-fit items-center gap-2 rounded-full bg-(--keyColor) px-4 py-2.5 text-sm text-(--keyColorText) [font:var(--callout-emphasized)]"
+          >
+            <Captions className="h-4 w-4" />
+            Mở Lyrics Sync
+          </Link>
+        </header>
+
+        <section className="mt-6">
+            <div className="mb-5 flex flex-col justify-between gap-3 min-[700px]:flex-row min-[700px]:items-end">
+              <div>
+                <h2 className="text-(--systemPrimary) [font:var(--title-2-emphasized)]">
+                  Tạo bản nháp
+                </h2>
+                <p className="mt-1 text-sm text-(--systemSecondary)">
+                  Điền thông tin cơ bản trước, danh sách bài hát được thêm ở
+                  bước cuối.
+                </p>
+              </div>
+              <div className="flex rounded-lg border border-(--labelDivider) p-1">
+                <button
+                  type="button"
+                  onClick={() => setReleaseKind("album")}
+                  className={`rounded-md px-3 py-1.5 text-sm ${releaseKind === "album" ? "bg-(--systemQuaternary) text-(--systemPrimary)" : "text-(--systemSecondary)"}`}
+                >
+                  Album
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReleaseKind("playlist")}
+                  className={`rounded-md px-3 py-1.5 text-sm ${releaseKind === "playlist" ? "bg-(--systemQuaternary) text-(--systemPrimary)" : "text-(--systemSecondary)"}`}
+                >
+                  Playlist
+                </button>
+              </div>
+            </div>
+            <form
+              onSubmit={saveDraft}
+              className="grid gap-5 min-[1000px]:grid-cols-[260px_minmax(0,1fr)_320px]"
+            >
+              <section className="rounded-2xl border border-(--labelDivider) bg-(--systemQuinary) p-4">
+                <p className="text-sm text-(--systemPrimary) [font:var(--headline)]">
+                  Ảnh bìa
+                </p>
+                <label className="mt-4 flex aspect-square cursor-pointer items-center justify-center overflow-hidden rounded-xl border border-dashed border-(--labelDivider) bg-(--background)">
+                  {artworkPreview ? (
+                    <Image
+                      src={artworkPreview}
+                      alt="Artwork preview"
+                      className="h-full w-full object-cover"
+                      height={720}
+                      unoptimized
+                      width={720}
+                    />
+                  ) : (
+                    <span className="text-center text-sm text-(--systemSecondary)">
+                      <ImagePlus className="mx-auto mb-2 h-6 w-6" />
+                      Tải ảnh bìa
+                    </span>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={uploadArtwork}
+                  />
+                </label>
+                <p className="mt-3 text-xs leading-5 text-(--systemSecondary)">
+                  PNG hoặc JPG vuông. Có thể thay đổi ảnh sau khi lưu nháp.
+                </p>
+              </section>
+              <section className="rounded-2xl border border-(--labelDivider) bg-(--systemQuinary) p-5">
+                <p className="text-sm text-(--systemSecondary)">
+                  Thông tin phát hành
+                </p>
+                <label className="mt-4 block text-sm text-(--systemSecondary)">
+                  Tên {releaseKind === "album" ? "album" : "playlist"}
+                  <input
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    placeholder={
+                      releaseKind === "album"
+                        ? "Ví dụ: Những ngày bình yên"
+                        : "Ví dụ: Nhạc cho buổi tối"
+                    }
+                    className={inputClass}
+                  />
+                </label>
+                <label className="mt-4 block text-sm text-(--systemSecondary)">
+                  Mô tả
+                  <textarea
+                    value={description}
+                    onChange={(event) => setDescription(event.target.value)}
+                    placeholder="Giới thiệu ngắn về bản phát hành"
+                    className={`${inputClass} min-h-28 resize-y`}
+                  />
+                </label>
+                <div className="mt-4 grid gap-4 min-[640px]:grid-cols-2">
+                  <label className="block text-sm text-(--systemSecondary)">
+                    Thể loại
+                    <input
+                      value={genre}
+                      onChange={(event) => setGenre(event.target.value)}
+                      placeholder="Pop, Hip-hop…"
+                      className={inputClass}
+                    />
+                  </label>
+                  {releaseKind === "album" && (
+                    <label className="block text-sm text-(--systemSecondary)">
+                      Ngày phát hành
+                      <input
+                        type="date"
+                        value={releaseDate}
+                        onChange={(event) => setReleaseDate(event.target.value)}
+                        className={inputClass}
+                      />
+                    </label>
+                  )}
+                </div>
+              </section>
+              <aside className="rounded-2xl border border-(--labelDivider) bg-(--systemQuinary) p-5">
+                <div className="flex items-center gap-2">
+                  <ListMusic className="h-4 w-4 text-(--systemSecondary)" />
+                  <p className="text-sm text-(--systemPrimary) [font:var(--headline)]">
+                    Danh sách bài hát
+                  </p>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-(--systemSecondary)">
+                  Tạm thời nhập mỗi song ID trên một dòng. Bước sau sẽ thay bằng
+                  picker bài hát.
+                </p>
+                <textarea
+                  value={trackIds}
+                  onChange={(event) => setTrackIds(event.target.value)}
+                  placeholder="song-id-1\nsong-id-2"
+                  className={`${inputClass} min-h-48 font-mono text-xs`}
+                />
+                <button
+                  disabled={busy}
+                  className="mt-4 w-full rounded-full bg-(--keyColor) px-4 py-2.5 text-(--keyColorText) [font:var(--callout-emphasized)] disabled:opacity-50"
+                >
+                  {busy ? "Đang lưu…" : "Lưu bản nháp"}
+                </button>
+                {message && (
+                  <p className="mt-3 text-sm leading-5 text-(--systemSecondary)">
+                    {message}
+                  </p>
+                )}
+              </aside>
+            </form>
+        </section>
+      </main>
     </MusicPageLayout>
   );
 }

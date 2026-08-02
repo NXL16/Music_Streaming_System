@@ -41,7 +41,7 @@ export function AuthenticatedAppShell({
               </div>
             </main>
 
-            <AppFooter />
+            {pathname !== "/lyrics-sync" && <AppFooter />}
           </div>
         </div>
       </div>

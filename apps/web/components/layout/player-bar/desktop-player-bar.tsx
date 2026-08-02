@@ -4,10 +4,28 @@ import {
   type CSSProperties,
   type RefObject,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  type DragEndEvent,
+  type Modifier,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import AmpPlayPauseButton from "@/components/custom-elements/AmpPlayPauseButton";
 import AmpRepeatButton from "@/components/custom-elements/AmpRepeatButton";
 import AmpShuffleButton from "@/components/custom-elements/AmpShuffleButton";
@@ -27,13 +45,132 @@ import {
   type RepeatMode,
 } from "@/lib/player/use-player-store";
 import type { FormattedArtist } from "@/lib/media/use-formatted-artists";
+import { formatDuration } from "@/lib/format/duration";
+import { useTrackRowSelection } from "@/lib/player/use-track-row-selection";
+import { ContextMenu } from "@/components/ui/context-menu";
+
+const restrictQueueToVerticalAxis: Modifier = ({ transform }) => ({
+  ...transform,
+  x: 0,
+});
+
+function PlayerSongArtwork({ song }: { song: PlayerSong }) {
+  return (
+    <div
+      className="bg-(--override-placeholder-bg-color,var(--placeholder-bg-color,var(--genericJoeColor))) rounded-[inherit] box-border contain-content h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0px) min-w-(--artwork-override-min-width,0px) overflow-hidden relative w-(--artwork-override-width,100%) z-(--z-default) after:content-[''] after:block after:absolute after:top-0 after:w-full after:h-0 after:min-h-full after:min-w-full after:max-h-full after:max-w-full after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:opacity-(--containerInnerStrokeAlpha,0.25) after:pointer-events-none after:z-[calc(var(--z-default)+1)]"
+      style={
+        {
+          "--aspect-ratio": "1",
+          "--placeholder-bg-color": "transparent",
+        } as CSSProperties
+      }
+    >
+      <ResponsiveArtwork
+        alt=""
+        className="block h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0px) min-w-(--artwork-override-min-width,0px) [object-fit:var(--artwork-override-object-fit,fill)] object-(--artwork-override-object-position,center) w-(--artwork-override-width,100%) rounded-[inherit] transition-(--global-transition,opacity_.1s_ease-in)"
+        height={40}
+        pictureClassName="block size-full"
+        role="presentation"
+        sizes="40px"
+        src="/assets/artwork/1x1.gif"
+        srcSet={song.thumbnailArtworkSrcSet ?? song.artworkSrcSet}
+        style={{ opacity: 1 }}
+        width={40}
+      />
+    </div>
+  );
+}
+
+type SortableQueueSongProps = {
+  song: PlayerSong;
+  draggable: boolean;
+  selected: boolean;
+  active: boolean;
+  selectedRowRef: RefObject<HTMLLIElement | null>;
+  onSelect: (songId: string) => void;
+  onRemove: (songId: string) => void;
+};
+
+function SortableQueueSong({
+  song,
+  draggable,
+  selected,
+  active,
+  selectedRowRef,
+  onSelect,
+  onRemove,
+}: SortableQueueSongProps) {
+  const {
+    attributes,
+    isDragging,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({ id: song.id, disabled: !draggable });
+
+  return (
+    <li
+      ref={(node) => {
+        setNodeRef(node);
+        if (selected) selectedRowRef.current = node;
+      }}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+      onClick={() => onSelect(song.id)}
+      {...(draggable ? attributes : {})}
+      {...(draggable ? listeners : {})}
+      className={`group ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${selected ? "selected bg-(--systemQuaternary) [--queueKeylineColor:transparent] [&+_.group]:[--queueKeylineColor:transparent]" : ""} ${active ? "active [--selectionColor:rgba(31,31,31,.04)]! [--selectedTextColor:inherit]! [--contextMenuEllipsisFillOverride:inherit]! bg-(--selectionColor)! dark:[--selectionColor:hsla(0,0%,100%,.05)]!" : ""} ${isDragging ? "opacity-40 z-[calc(var(--z-default)+3)]" : ""} [--artwork-override-height:auto] [--artwork-override-max-width:40px] [--artwork-override-max-height:40px] [--artwork-override-width:40px] [--queueKeylineColor:var(--labelDivider)] items-center rounded-md gap-x-3 grid grid-cols-[[left-edge]_40px_[artwork-edge]_calc(100%-104px)_[title-edge]_40px_[right-edge]] grid-rows-[55px] [outline:none] px-2.5 before:self-start before:[border-top:.5px_solid_var(--queueKeylineColor)] before:content-[''] before:col-[artwork-edge/right-edge] before:row-span-full before:h-0 first:before:col-[left-edge/right-edge] [&.selected]:before:border-t-transparent`}
+    >
+      <div className="rounded-[3px] col-[left-edge/artwork-edge] row-span-full relative">
+        <PlayerSongArtwork song={song} />
+      </div>
+
+      <div className="col-[artwork-edge/title-edge] row-span-full overflow-hidden">
+        <div className="text-(--selectedTextColor,var(--systemPrimary)) overflow-hidden text-ellipsis whitespace-nowrap">
+          {song.title}
+        </div>
+        <div className="text-(--selectedTextColor,var(--systemSecondary)) mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap">
+          {song.artist}
+        </div>
+      </div>
+
+      <div className="[--controlsOpacity:0] [--timeOpacity:calc(1-var(--controlsOpacity))] items-center grid col-[title-edge/right-edge] row-span-full [grid-template-areas:'time-and-controls'] justify-end group-hover:[--controlsOpacity:1]">
+        <div className="text-(--selectedTextColor,var(--systemSecondary)) font-features-['tnum'] [font-variant-numeric:tabular-nums] [grid-area:time-and-controls] opacity-(--timeOpacity,1) z-[calc(var(--z-default)+1)]">
+          {formatDuration(song.durationSec)}
+        </div>
+
+        <div className="[--contextMenuEllipsisFillOverride:var(--systemPrimary)] [--contextMenuButtonSize:28] [grid-area:time-and-controls] opacity-(--controlsOpacity,0) z-[calc(var(--z-default)+2)]">
+          {!draggable ? (
+            <AmpContextMenuButton />
+          ) : (
+            <ContextMenu
+              items={[
+                {
+                  id: "remove-from-up-next",
+                  label: "Remove from Up Next",
+                  tone: "destructive",
+                  onSelect: () => onRemove(song.id),
+                },
+              ]}
+            >
+              <AmpContextMenuButton />
+            </ContextMenu>
+          )}
+        </div>
+      </div>
+    </li>
+  );
+}
 
 type DesktopPlayerBarProps = {
   audioRef: RefObject<HTMLAudioElement | null>;
   currentSong: PlayerSong | null;
-  currentArtworkSrcSet?: string;
   currentArtists: FormattedArtist[];
   queue: PlayerSong[];
+  currentIndex: number;
   isPlaying: boolean;
   shuffleEnabled: boolean;
   stationMode: boolean;
@@ -60,9 +197,9 @@ type DesktopPlayerBarProps = {
 export function DesktopPlayerBar({
   audioRef,
   currentSong,
-  currentArtworkSrcSet,
   currentArtists,
   queue,
+  currentIndex,
   isPlaying,
   shuffleEnabled,
   stationMode,
@@ -89,13 +226,128 @@ export function DesktopPlayerBar({
   const [lyricsMounted, setLyricsMounted] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
   const [queueMounted, setQueueMounted] = useState(false);
+  const {
+    activeTrackId: activeQueueSongId,
+    clearActiveTrack: clearActiveQueueSong,
+    listRef: queueListRef,
+    selectTrack: selectQueueSong,
+    selectedTrackId: selectedQueueSongId,
+  } = useTrackRowSelection<HTMLUListElement>();
+  const [stationVisibleQueueIds, setStationVisibleQueueIds] = useState<
+    string[]
+  >([]);
   const lyricsUnmountTimerRef = useRef<
     ReturnType<typeof setTimeout> | undefined
   >(undefined);
   const queueUnmountTimerRef = useRef<
     ReturnType<typeof setTimeout> | undefined
   >(undefined);
+  const previousStationIndexRef = useRef<number | null>(null);
+  const previousStationQueueRef = useRef<PlayerSong[] | null>(null);
+  const selectedQueueRowRef = useRef<HTMLLIElement | null>(null);
   const setDrawerOpen = usePlayerStore((state) => state.setDrawerOpen);
+  const reorderUpcomingQueue = usePlayerStore(
+    (state) => state.reorderUpcomingQueue,
+  );
+  const removeUpcomingSong = usePlayerStore(
+    (state) => state.removeUpcomingSong,
+  );
+  const clearUpcomingQueue = usePlayerStore(
+    (state) => state.clearUpcomingQueue,
+  );
+  const queueSensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 6 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+
+  useEffect(() => {
+    const clearActiveQueueSongOnOutsideSelectedRow = (event: PointerEvent) => {
+      if (!selectedQueueRowRef.current?.contains(event.target as Node)) {
+        clearActiveQueueSong();
+      }
+    };
+
+    document.addEventListener(
+      "pointerdown",
+      clearActiveQueueSongOnOutsideSelectedRow,
+    );
+    return () =>
+      document.removeEventListener(
+        "pointerdown",
+        clearActiveQueueSongOnOutsideSelectedRow,
+      );
+  }, [clearActiveQueueSong]);
+
+  useEffect(() => {
+    const previousIndex = previousStationIndexRef.current;
+    const queueChanged = previousStationQueueRef.current !== queue;
+    previousStationIndexRef.current = currentIndex;
+    previousStationQueueRef.current = queue;
+
+    const frame = requestAnimationFrame(() => {
+      if (!stationMode || currentIndex < 0) {
+        setStationVisibleQueueIds([]);
+        return;
+      }
+
+      const remainingSongs = queue.slice(currentIndex + 1);
+      const nextSong = remainingSongs.find((song) => song.playbackUrl);
+      const remainingSongIds = new Set(remainingSongs.map((song) => song.id));
+
+      if (
+        !queueChanged &&
+        previousIndex !== null &&
+        currentIndex < previousIndex
+      ) {
+        const revisitedSongs = queue
+          .slice(currentIndex + 1, previousIndex + 1)
+          .filter((song) => song.playbackUrl);
+
+        setStationVisibleQueueIds((visibleIds) => [
+          ...new Set([
+            ...revisitedSongs.map((song) => song.id),
+            ...visibleIds.filter((id) => remainingSongIds.has(id)),
+          ]),
+        ]);
+        return;
+      }
+
+      setStationVisibleQueueIds((visibleIds) => {
+        const remainingVisibleIds = visibleIds.filter((id) =>
+          remainingSongIds.has(id),
+        );
+        return remainingVisibleIds.length > 0
+          ? remainingVisibleIds
+          : nextSong
+            ? [nextSong.id]
+            : [];
+      });
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [currentIndex, queue, stationMode]);
+
+  const upcomingSongs = useMemo(() => {
+    if (currentIndex < 0) return [];
+
+    const remainingSongs = queue.slice(currentIndex + 1);
+    if (!stationMode) return remainingSongs;
+
+    const songsById = new Map(remainingSongs.map((song) => [song.id, song]));
+    const visibleSongs = stationVisibleQueueIds.flatMap((id) => {
+      const song = songsById.get(id);
+      return song?.playbackUrl ? [song] : [];
+    });
+
+    if (visibleSongs.length > 0) return visibleSongs;
+
+    const nextStationSong = remainingSongs.find((song) => song.playbackUrl);
+    return nextStationSong ? [nextStationSong] : [];
+  }, [currentIndex, queue, stationMode, stationVisibleQueueIds]);
 
   useEffect(
     () => () => {
@@ -177,6 +429,11 @@ export function DesktopPlayerBar({
     }
   };
 
+  const handleQueueDragEnd = ({ active, over }: DragEndEvent) => {
+    if (stationMode || !over || active.id === over.id) return;
+    reorderUpcomingQueue(String(active.id), String(over.id));
+  };
+
   return (
     <div className="block">
       <div className="rounded-[1000px] grid grid-cols-[auto_1fr_auto] h-14 max-w-167 px-4 place-items-center relative mx-auto before:backdrop-saturate-220 before:backdrop-blur-lg before:bg-(--glassMaterialBackground) before:rounded-[1000px] before:shadow-[0_10px_40px_var(--glassMaterialShadowColor)] before:content-[''] before:inset-0 before:absolute before:z-(--z-default) after:content-[''] after:block after:h-0 after:min-w-full after:min-h-full after:max-w-full after:max-h-full after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)] after:rounded-[1000px] after:shadow-[inset_.5px_.5px_var(--glassMaterialInnerStroke),inset_.5px_-.5px_var(--glassMaterialInnerStroke),inset_-.5px_.5px_var(--glassMaterialInnerStroke),inset_-.5px_-.5px_var(--glassMaterialInnerStroke)] after:opacity-10 dark:after:opacity-25">
@@ -226,28 +483,7 @@ export function DesktopPlayerBar({
                   <div
                     className={`aspect-square rounded-md [grid-area:artwork] scale-100 transition-transform duration-150 ease-out hover:scale-110 ${isProgressExpanded ? "opacity-50" : ""}`}
                   >
-                    <div
-                      className="bg-(--override-placeholder-bg-color,var(--placeholder-bg-color,var(--genericJoeColor))) rounded-[inherit] box-border contain-content h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0px) min-w-(--artwork-override-min-width,0px) overflow-hidden relative w-(--artwork-override-width,100%) z-(--z-default) after:content-[''] after:block after:absolute after:top-0 after:w-full after:h-0 after:min-h-full after:min-w-full after:max-h-full after:max-w-full after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:opacity-(--containerInnerStrokeAlpha,0.25) after:pointer-events-none after:z-[calc(var(--z-default)+1)]"
-                      style={
-                        {
-                          "--aspect-ratio": "1",
-                          "--placeholder-bg-color": "transparent",
-                        } as CSSProperties
-                      }
-                    >
-                      <ResponsiveArtwork
-                        alt=""
-                        className="block h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0px) min-w-(--artwork-override-min-width,0px) [object-fit:var(--artwork-override-object-fit,fill)] object-(--artwork-override-object-position,center) w-(--artwork-override-width,100%) rounded-[inherit] transition-(--global-transition,opacity_.1s_ease-in)"
-                        height={40}
-                        pictureClassName="block size-full"
-                        role="presentation"
-                        sizes="40px"
-                        src="/assets/artwork/1x1.gif"
-                        srcSet={currentArtworkSrcSet}
-                        style={{ opacity: 1 }}
-                        width={40}
-                      />
-                    </div>
+                    <PlayerSongArtwork song={currentSong} />
 
                     <button className="bg-[rgba(51,51,51,0.3)] rounded-[inherit] text-white grid inset-0 opacity-0 place-items-center absolute transition-opacity duration-150 ease-out z-(--z-default) hover:opacity-100">
                       <ExpansionButton />
@@ -435,7 +671,10 @@ export function DesktopPlayerBar({
                           </button>
                         </div>
 
-                        <AmpLyrics />
+                        <AmpLyrics
+                          songId={currentSong?.id}
+                          audioRef={audioRef}
+                        />
                       </div>
                     </div>
                   </div>,
@@ -469,23 +708,60 @@ export function DesktopPlayerBar({
                           Up next
                         </h3>
                         <div className="flex items-center">
+                          {!stationMode && upcomingSongs.length > 0 && (
+                            <button
+                              onClick={clearUpcomingQueue}
+                              className="text-(--keyColor) [font:var(--title-3)] px-2.5"
+                            >
+                              Clear
+                            </button>
+                          )}
                           <div className="pe-2.5">{/* something */}</div>
                         </div>
                       </div>
                     </div>
 
-                    <div className="z-[calc(var(--z-default)+4)] absolute inset-0 flex items-center justify-center size-full m-auto text-center [font:var(--callout)]">
-                      <div
-                        slot="empty"
-                        className="flex items-center justify-center size-full text-center px-(--side-panel-horizontal-padding,0px)"
-                      >
-                        {stationMode
-                          ? "1 song up next"
-                          : queue.length > 0
-                            ? `${queue.length} songs queued.`
-                            : "No upcoming songs"}
+                    {upcomingSongs.length > 0 ? (
+                      <div className="h-[calc(100dvh-58px)] overflow-y-auto">
+                        <div className="px-2.5 min-h-full">
+                          <DndContext
+                            collisionDetection={closestCenter}
+                            modifiers={[restrictQueueToVerticalAxis]}
+                            onDragEnd={handleQueueDragEnd}
+                            sensors={queueSensors}
+                          >
+                            <SortableContext
+                              items={upcomingSongs.map((song) => song.id)}
+                              strategy={verticalListSortingStrategy}
+                            >
+                              <ul ref={queueListRef}>
+                                {upcomingSongs.map((song) => (
+                                  <SortableQueueSong
+                                    key={song.id}
+                                    song={song}
+                                    draggable={!stationMode}
+                                    selected={selectedQueueSongId === song.id}
+                                    active={activeQueueSongId === song.id}
+                                    selectedRowRef={selectedQueueRowRef}
+                                    onSelect={selectQueueSong}
+                                    onRemove={removeUpcomingSong}
+                                  />
+                                ))}
+                              </ul>
+                            </SortableContext>
+                          </DndContext>
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="items-center bottom-0 flex [font:var(--callout)] size-full inset-x-0 justify-center m-auto absolute text-center top-0 z-1 min-[1000px]:z-[calc(var(--z-default)+4)] min-[1000px]:absolute">
+                        <div
+                          slot="empty"
+                          className="items-center flex size-full justify-center text-center px-(--side-panel-horizontal-padding,0px)"
+                        >
+                          No upcoming songs
+                        </div>
+                      </div>
+                    )}
                   </div>,
                   document.body,
                 )}

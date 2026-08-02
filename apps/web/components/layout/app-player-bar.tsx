@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  useEffect,
-  useRef,
-  useState,
-  useCallback,
-  useMemo,
-  useSyncExternalStore,
-} from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { usePlayerStore, type PlayerSong } from "@/lib/player/use-player-store";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { useShallow } from "zustand/react/shallow";
@@ -18,6 +11,7 @@ import type { MediaCardProps } from "@/components/media/media-card.types";
 import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
 import { DesktopPlayerBar } from "./player-bar/desktop-player-bar";
 import { CompactPlayerBar } from "./player-bar/compact-player-bar";
+import { useMediaQuery } from "@/hooks/use-media-query";
 
 const LISTENING_QUALIFY_SECONDS = 3;
 const LOCK_SCREEN_SEEK_SECONDS = 10;
@@ -102,6 +96,7 @@ export function AppPlayerBar() {
   const {
     currentSong,
     queue,
+    currentIndex,
     playing,
     shuffleEnabled,
     stationMode,
@@ -112,10 +107,13 @@ export function AppPlayerBar() {
     pause,
     next,
     previous,
+    setPlaybackTimeMs,
+    playbackRate,
   } = usePlayerStore(
     useShallow((state) => ({
       currentSong: state.currentSong,
       queue: state.queue,
+      currentIndex: state.currentIndex,
       playing: state.playing,
       shuffleEnabled: state.shuffleEnabled,
       stationMode: state.stationMode,
@@ -126,6 +124,8 @@ export function AppPlayerBar() {
       pause: state.pause,
       next: state.next,
       previous: state.previous,
+      setPlaybackTimeMs: state.setPlaybackTimeMs,
+      playbackRate: state.playbackRate,
     })),
   );
   const { isMseActive } = useMsePlayback(audioRef);
@@ -149,6 +149,8 @@ export function AppPlayerBar() {
   const [isProgressExpanded, setIsProgressExpanded] = useState(false);
   const [isSecondaryMarqueeActive, setIsSecondaryMarqueeActive] =
     useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const useCompactPlayer = useMediaQuery("(max-width: 739px)");
   const { volume, lastAudibleVolume, setVolume } = usePersistentVolume();
   const trackedSongRef = useRef<string | null>(null);
 
@@ -196,11 +198,41 @@ export function AppPlayerBar() {
     emitEvent(currentSong, "PLAY_START", audio.currentTime);
   }, [currentSong, emitEvent, playing]);
 
+  const handleTimeUpdate = useCallback(() => {
+    const audio = audioRef.current;
+    if (audio) setPlaybackTimeMs(Math.floor(audio.currentTime * 1000));
+    markQualifiedPlay();
+  }, [markQualifiedPlay, setPlaybackTimeMs]);
+
   useEffect(() => {
     if (audioRef.current) {
       audioRef.current.volume = volume;
     }
   }, [volume]);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.playbackRate = playbackRate;
+      audioRef.current.defaultPlaybackRate = playbackRate;
+    }
+  }, [playbackRate]);
+
+  useEffect(() => {
+    const seekFromEditor = (event: Event) => {
+      const timeMs = (event as CustomEvent<{ timeMs?: number }>).detail?.timeMs;
+      const audio = audioRef.current;
+      if (!audio || !Number.isFinite(timeMs)) return;
+      const maxTimeMs = Number.isFinite(audio.duration)
+        ? Math.max(0, audio.duration * 1000)
+        : Number.MAX_SAFE_INTEGER;
+      const nextTimeMs = Math.min(Math.max(0, timeMs as number), maxTimeMs);
+      audio.currentTime = nextTimeMs / 1000;
+      setPlaybackTimeMs(Math.round(nextTimeMs));
+    };
+
+    window.addEventListener("musical:seek", seekFromEditor);
+    return () => window.removeEventListener("musical:seek", seekFromEditor);
+  }, [setPlaybackTimeMs]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -395,29 +427,6 @@ export function AppPlayerBar() {
     }
   };
 
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-
-  function useMediaQuery(query: string) {
-    const subscribe = useCallback(
-      (onStoreChange: () => void) => {
-        const media = window.matchMedia(query);
-
-        media.addEventListener("change", onStoreChange);
-        return () => media.removeEventListener("change", onStoreChange);
-      },
-      [query],
-    );
-
-    const getSnapshot = useCallback(
-      () => window.matchMedia(query).matches,
-      [query],
-    );
-
-    return useSyncExternalStore(subscribe, getSnapshot, () => false);
-  }
-
-  const useCompactPlayer = useMediaQuery("(max-width: 739px)");
-
   return (
     <div
       className={`bottom-0 shrink-0 h-13.5 w-full inset-e-0 fixed z-[calc(var(--z-web-chrome)-1)] min-[484px]:self-end min-[484px]:[grid-area:structure-main-section] min-[484px]:inset-s-[unset] min-[484px]:mb-5 min-[484px]:ps-5 min-[484px]:sticky min-[484px]:max-[999px]:[--contextMenuPosition:fixed] max-[483px]:h-15.25 min-[484px]:w-[calc(100vw-var(--web-navigation-width))] motion-safe:[transition:padding-inline-end_0.3s_cubic-bezier(0.215,0.61,0.355,1)] will-change-[padding-inline-end] ${isSidebarOpen ? "min-[484px]:pe-80" : "min-[484px]:pe-5"}`}
@@ -428,7 +437,7 @@ export function AppPlayerBar() {
         preload="metadata"
         onEnded={handleEnded}
         onError={pause}
-        onTimeUpdate={markQualifiedPlay}
+        onTimeUpdate={handleTimeUpdate}
       />
       {useCompactPlayer ? (
         <CompactPlayerBar
@@ -442,9 +451,9 @@ export function AppPlayerBar() {
         <DesktopPlayerBar
           audioRef={audioRef}
           currentSong={currentSong}
-          currentArtworkSrcSet={currentArtworkSrcSet}
           currentArtists={currentArtists}
           queue={queue}
+          currentIndex={currentIndex}
           isPlaying={isPlaying}
           shuffleEnabled={shuffleEnabled}
           stationMode={stationMode}
