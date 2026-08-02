@@ -6,6 +6,7 @@ interface Env {
 const EDGE_TTL = 86400;
 const BLOCK_SIZE = 256 * 1024;
 const MAX_BLOCKS_PER_REQUEST = 6;
+const CACHE_READ_TIMEOUT_MS = 150;
 
 const CACHE_HEADERS: Record<string, string> = {
   "Content-Type": "audio/mp4",
@@ -26,13 +27,36 @@ type StreamBlock = {
   r2DurationMs: number;
 };
 
+function resolveWithin<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<T | undefined> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(undefined), timeoutMs);
+    void promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(undefined);
+      },
+    );
+  });
+}
+
 function parseClosedRange(range: string): ByteRange | null {
   const match = /^bytes=(\d+)-(\d+)$/.exec(range);
   if (!match) return null;
 
   const start = Number(match[1]);
   const end = Number(match[2]);
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end < start) {
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    end < start
+  ) {
     return null;
   }
 
@@ -54,12 +78,19 @@ async function readStreamBlock(
   blockIndex: number,
 ): Promise<StreamBlock | null> {
   const cacheKey = blockCacheKey(cacheUrl, blockIndex);
-  const cached = await cache.match(cacheKey);
+  const cached = await resolveWithin(
+    cache.match(cacheKey),
+    CACHE_READ_TIMEOUT_MS,
+  );
   if (cached) {
     const totalSize = Number(cached.headers.get("X-Stream-Object-Size"));
-    if (Number.isSafeInteger(totalSize) && totalSize >= 0) {
+    const data = await resolveWithin(
+      cached.arrayBuffer(),
+      CACHE_READ_TIMEOUT_MS,
+    );
+    if (data && Number.isSafeInteger(totalSize) && totalSize >= 0) {
       return {
-        data: await cached.arrayBuffer(),
+        data,
         etag: cached.headers.get("ETag") || "",
         totalSize,
         cacheHit: true,
@@ -109,10 +140,8 @@ function createRangeBody(
         const blockStart = (firstBlockIndex + index) * BLOCK_SIZE;
         const start = Math.max(range.start, blockStart) - blockStart;
         const end =
-          Math.min(
-            range.end,
-            blockStart + blocks[index].data.byteLength - 1,
-          ) - blockStart;
+          Math.min(range.end, blockStart + blocks[index].data.byteLength - 1) -
+          blockStart;
         if (end < start) continue;
 
         controller.enqueue(
@@ -306,7 +335,9 @@ export default {
     const requestedRange = parseClosedRange(rangeHeader);
     if (requestedRange) {
       const firstBlockIndex = Math.floor(requestedRange.start / BLOCK_SIZE);
-      const requestedLastBlockIndex = Math.floor(requestedRange.end / BLOCK_SIZE);
+      const requestedLastBlockIndex = Math.floor(
+        requestedRange.end / BLOCK_SIZE,
+      );
       const requestedBlockCount = requestedLastBlockIndex - firstBlockIndex + 1;
 
       if (requestedBlockCount <= MAX_BLOCKS_PER_REQUEST) {
@@ -372,7 +403,11 @@ export default {
                 ...cors,
                 ETag: etag,
                 "Cache-Control": CACHE_HEADERS["Cache-Control"],
-                "Server-Timing": serverTiming(startedAt, cacheStatus, r2DurationMs),
+                "Server-Timing": serverTiming(
+                  startedAt,
+                  cacheStatus,
+                  r2DurationMs,
+                ),
                 "X-Stream-Cache": cacheStatus,
               },
             });
@@ -387,7 +422,11 @@ export default {
               "Content-Length": String(range.end - range.start + 1),
               "Content-Range": `bytes ${range.start}-${range.end}/${firstBlock.totalSize}`,
               ETag: etag,
-              "Server-Timing": serverTiming(startedAt, cacheStatus, r2DurationMs),
+              "Server-Timing": serverTiming(
+                startedAt,
+                cacheStatus,
+                r2DurationMs,
+              ),
               "X-Stream-Cache": cacheStatus,
             },
           });
@@ -433,11 +472,7 @@ export default {
         "Content-Length": String(end - start + 1),
         "Content-Range": `bytes ${start}-${end}/${totalSize}`,
         ETag: object.etag,
-        "Server-Timing": serverTiming(
-          startedAt,
-          "BYPASS",
-          r2DurationMs,
-        ),
+        "Server-Timing": serverTiming(startedAt, "BYPASS", r2DurationMs),
         "X-Stream-Cache": "BYPASS",
       },
     });
