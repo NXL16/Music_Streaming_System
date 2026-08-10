@@ -1468,6 +1468,42 @@ export class RecommendationsService {
       ]),
     );
 
+    const userPlaylistIds = recentContexts
+      .filter(
+        (context) =>
+          context.resourceType === 'playlists' &&
+          !snapshotByKey.has(
+            this.resourceKey(context.resourceType, context.resourceId),
+          ),
+      )
+      .map((context) => context.resourceId);
+    const playlistEvents = userPlaylistIds.length
+      ? await this.prisma.listeningEvent.findMany({
+          where: {
+            userId,
+            eventType: 'PLAY_START',
+            playlistId: { in: userPlaylistIds },
+          },
+          orderBy: { createdAt: 'desc' },
+          select: {
+            playlistId: true,
+            playlistName: true,
+            playlistCuratorName: true,
+            playlistArtworkUrl: true,
+            playlistArtworkBgColor: true,
+          },
+        })
+      : [];
+    const playlistEventById = new Map<
+      string,
+      (typeof playlistEvents)[number]
+    >();
+    for (const event of playlistEvents) {
+      if (!playlistEventById.has(event.playlistId)) {
+        playlistEventById.set(event.playlistId, event);
+      }
+    }
+
     const records = recentContexts.flatMap((context) => {
       const snapshot = snapshotByKey.get(
         this.resourceKey(context.resourceType, context.resourceId),
@@ -1476,15 +1512,13 @@ export class RecommendationsService {
       return snapshot ? [this.snapshotRecord(snapshot)] : [];
     });
 
-    if (records.length === 0) return null;
-
     const visibleRecords = records.slice(0, itemLimit);
 
     if (includeArtistResources) {
       await this.hydrateReferencedArtists(resources, visibleRecords);
     }
 
-    const refs = visibleRecords.map((record) => {
+    const snapshotRefs = visibleRecords.map((record) => {
       const bucket = this.getCatalogBucket(resources, record.resourceType);
 
       if (bucket) {
@@ -1494,6 +1528,49 @@ export class RecommendationsService {
       return this.itemRef(record);
     });
 
+    const refs = recentContexts.slice(0, itemLimit).flatMap((context) => {
+      const snapshot = snapshotByKey.get(
+        this.resourceKey(context.resourceType, context.resourceId),
+      );
+      if (snapshot) {
+        return snapshotRefs.filter(
+          (ref) =>
+            ref.type === context.resourceType && ref.id === context.resourceId,
+        );
+      }
+
+      const event = playlistEventById.get(context.resourceId);
+      if (!event?.playlistName || context.resourceType !== 'playlists') return [];
+
+      const href = `/library/playlist/${encodeURIComponent(context.resourceId)}`;
+      resources.playlists[context.resourceId] = {
+        id: context.resourceId,
+        type: 'playlists',
+        href,
+        attributes: this.wrapStruct({
+          name: event.playlistName,
+          curatorName: event.playlistCuratorName || 'Musical',
+          isUserPlaylist: true,
+          url: href,
+          artwork: {
+            url: event.playlistArtworkUrl,
+            bgColor: event.playlistArtworkBgColor || '2c2c2e',
+          },
+          playParams: { id: context.resourceId, kind: 'playlist' },
+        }),
+        relationships: undefined,
+      };
+      return [
+        {
+          id: context.resourceId,
+          type: 'playlists',
+          href,
+        },
+      ];
+    });
+
+    if (refs.length === 0) return null;
+
     const sectionId = 'user-recently-played';
     resources.personalRecommendation[sectionId] = {
       id: sectionId,
@@ -1501,7 +1578,7 @@ export class RecommendationsService {
       href: this.sectionHref(sectionId, pageName),
       attributes: {
         display: { kind: 'MusicCoverShelf', decorations: [] },
-        hasSeeAll: records.length > visibleRecords.length,
+        hasSeeAll: recentContexts.length > refs.length,
         isGroupRecommendation: false,
         kind: 'recently-played',
         nextUpdateDate: '',

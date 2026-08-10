@@ -248,6 +248,7 @@ model ListeningEvent {
     albumId                String   @default("") @db.VarChar(128)
     playlistId             String   @default("") @db.VarChar(128)
     playlistName           String   @default("") @db.Text
+    playlistCuratorName    String   @default("") @db.Text
     playlistArtworkUrl     String   @default("") @db.VarChar(1000)
     playlistArtworkBgColor String   @default("") @db.VarChar(16)
     stationId              String   @default("") @db.VarChar(128)
@@ -280,6 +281,7 @@ model UserListeningStats {
     albumId                String   @default("") @db.VarChar(128)
     playlistId             String   @default("") @db.VarChar(128)
     playlistName           String   @default("") @db.Text
+    playlistCuratorName    String   @default("") @db.Text
     playlistArtworkUrl     String   @default("") @db.VarChar(1000)
     playlistArtworkBgColor String   @default("") @db.VarChar(16)
     stationId              String   @default("") @db.VarChar(128)

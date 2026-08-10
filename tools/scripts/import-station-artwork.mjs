@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
-const apiBase = (process.env.MUSICAL_API_URL || 'http://localhost:9999/api/v1').replace(/\/$/, '');
+const apiBase = (process.env.MUSICAL_API_URL || 'http://localhost:9999/v1').replace(/\/$/, '');
 const token = process.env.ADMIN_ACCESS_TOKEN?.trim();
 if (!token) {
   throw new Error('ADMIN_ACCESS_TOKEN is required (it is used only for this process).');

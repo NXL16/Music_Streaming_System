@@ -15,12 +15,20 @@ service RecommendationService {
   rpc PublishRecommendationPage(PublishRecommendationPageRequest) returns (GetHomeRecommendationsResponse);
   rpc GetRecommendationPageForAdmin(GetRecommendationPageForAdminRequest) returns (GetHomeRecommendationsResponse);
   rpc RecordListeningEvent(RecordListeningEventRequest) returns (RecordListeningEventResponse);
+  rpc CleanupPlaylistHistory(CleanupPlaylistHistoryRequest) returns (CleanupPlaylistHistoryResponse);
   rpc GenerateRecommendations(GenerateRecommendationsRequest) returns (GetHomeRecommendationsResponse);
   rpc GetListeningAnalytics(GetListeningAnalyticsRequest) returns (ListeningAnalyticsResponse);
   rpc GetRecommendationQualityAnalytics(GetRecommendationQualityAnalyticsRequest) returns (RecommendationQualityAnalyticsResponse);
   rpc RecordRecommendationInteraction(RecordRecommendationInteractionRequest) returns (RecordRecommendationInteractionResponse);
   rpc UpsertSystemStationArtwork(UpsertSystemStationArtworkRequest) returns (SystemStationArtworkResponse);
 }
+
+message CleanupPlaylistHistoryRequest {
+  string user_id = 1;
+  string playlist_id = 2;
+}
+
+message CleanupPlaylistHistoryResponse { bool success = 1; }
 
 message UpsertSystemStationArtworkRequest {
   string station_key   = 1;
@@ -249,6 +257,7 @@ message RecordListeningEventRequest {
   string             station_name              = 15;
   string             station_artwork_url       = 16;
   string             station_artwork_bg_color  = 17;
+  string             playlist_curator_name     = 18;
 }
 
 message RecordListeningEventResponse {

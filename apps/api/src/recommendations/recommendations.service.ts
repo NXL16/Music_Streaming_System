@@ -23,6 +23,8 @@ import {
   RecommendationQualityAnalyticsResponse,
   SystemStationArtworkResponse,
   UpsertSystemStationArtworkRequest,
+  CleanupPlaylistHistoryRequest,
+  CleanupPlaylistHistoryResponse,
 } from '@musical/shared-proto';
 import { grpcFirstValueFrom } from '../common/utils/grpc-timeout';
 import { ConfigService } from '@nestjs/config';
@@ -53,6 +55,17 @@ export class RecommendationsService implements OnModuleInit {
       this.client.getService<RecommendationServiceClient>(
         'RecommendationService',
       );
+  }
+
+  async cleanupPlaylistHistory(
+    request: CleanupPlaylistHistoryRequest,
+  ): Promise<CleanupPlaylistHistoryResponse> {
+    return grpcFirstValueFrom(
+      this.recommendationClient.cleanupPlaylistHistory(
+        request,
+        this.metadata(),
+      ),
+    );
   }
 
   async getHomeRecommendations(

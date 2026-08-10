@@ -1128,6 +1128,20 @@ export class GenerationService {
       artworkSource.attributes,
     );
     const description = 'A fresh mix built from the music you love.';
+    const playlistHref = `/playlist/daily-mix/${playlistId}`;
+    await this.catalogService.upsertSystemPlaylist({
+      playlistId,
+      storefront: 'vn',
+      name: 'Daily Mix',
+      description,
+      url: 'daily-mix',
+      artworkUrl: artworkSource.artworkUrl,
+      artworkBgColor: artworkSource.artworkBgColor,
+      artworkVariantsJson: JSON.stringify(artworkVariants ?? {}),
+      artworkWidth,
+      artworkHeight,
+      songIds: selected.map((song) => song.resourceId),
+    });
     const relationships = {
       tracks: {
         href: `/me/system-playlists/${playlistId}/tracks`,
@@ -1152,8 +1166,8 @@ export class GenerationService {
         name: 'Daily Mix',
         title: 'Daily Mix',
         curatorName: 'Musical',
-        href: `/playlist/${playlistId}`,
-        externalUrl: `/playlist/${playlistId}`,
+        href: playlistHref,
+        externalUrl: playlistHref,
         artworkUrl: artworkSource.artworkUrl,
         artworkBgColor: artworkSource.artworkBgColor,
         artworkWidth,
@@ -1176,7 +1190,7 @@ export class GenerationService {
           },
           playlistType: 'system-personalized',
           trackCount: selected.length,
-          url: `/playlist/${playlistId}`,
+          url: 'daily-mix',
         },
         relationships,
       },
@@ -1184,8 +1198,8 @@ export class GenerationService {
         name: 'Daily Mix',
         title: 'Daily Mix',
         curatorName: 'Musical',
-        href: `/playlist/${playlistId}`,
-        externalUrl: `/playlist/${playlistId}`,
+        href: playlistHref,
+        externalUrl: playlistHref,
         artworkUrl: artworkSource.artworkUrl,
         artworkBgColor: artworkSource.artworkBgColor,
         artworkWidth,
@@ -1208,7 +1222,7 @@ export class GenerationService {
           },
           playlistType: 'system-personalized',
           trackCount: selected.length,
-          url: `/playlist/${playlistId}`,
+          url: 'daily-mix',
         },
         relationships,
       },
@@ -1238,6 +1252,8 @@ export class GenerationService {
       }
 
       const variantTitle = `Daily Mix ${mixIndex + 1}`;
+      const variantSlug = `daily-mix-${mixIndex + 1}`;
+      const variantHref = `/playlist/${variantSlug}/${variantId}`;
       const variantArtwork =
         variantSelected.find((song) => song.artworkUrl) ?? variantSelected[0];
       const variantWidth = variantArtwork.artworkWidth || 1000;
@@ -1255,12 +1271,25 @@ export class GenerationService {
           })),
         },
       };
+      await this.catalogService.upsertSystemPlaylist({
+        playlistId: variantId,
+        storefront: 'vn',
+        name: variantTitle,
+        description,
+        url: `daily-mix-${mixIndex + 1}`,
+        artworkUrl: variantArtwork.artworkUrl,
+        artworkBgColor: variantArtwork.artworkBgColor,
+        artworkVariantsJson: JSON.stringify(variantArtworkVariants ?? {}),
+        artworkWidth: variantWidth,
+        artworkHeight: variantHeight,
+        songIds: variantSelected.map((song) => song.resourceId),
+      });
       const variantData = {
         name: variantTitle,
         title: variantTitle,
         curatorName: 'Musical',
-        href: `/playlist/${variantId}`,
-        externalUrl: `/playlist/${variantId}`,
+        href: variantHref,
+        externalUrl: variantHref,
         artworkUrl: variantArtwork.artworkUrl,
         artworkBgColor: variantArtwork.artworkBgColor,
         artworkWidth: variantWidth,
@@ -1285,7 +1314,7 @@ export class GenerationService {
           },
           playlistType: 'system-personalized',
           trackCount: variantSelected.length,
-          url: `/playlist/${variantId}`,
+          url: variantSlug,
         },
         relationships: variantRelationships,
       };
@@ -1352,9 +1381,10 @@ export class GenerationService {
   }
 
   private dailyMixId(userId: string, mixIndex = 0): string {
-    const digest = createHash('sha256').update(userId).digest('hex');
-    const baseId = `daily-mix-${digest.slice(0, 32)}`;
-    return mixIndex === 0 ? baseId : `${baseId}-${mixIndex}`;
+    return createHash('sha256')
+      .update(`${userId}:${mixIndex}`)
+      .digest('hex')
+      .slice(0, 32);
   }
 
   /**

@@ -53,6 +53,24 @@ export class ListeningService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  async cleanupPlaylistHistory(userId: string, playlistId: string) {
+    await this.prisma.$transaction([
+      this.prisma.listeningEvent.deleteMany({ where: { userId, playlistId } }),
+      this.prisma.userListeningStats.updateMany({
+        where: { userId, playlistId },
+        data: {
+          playlistId: '',
+          playlistName: '',
+          playlistArtworkUrl: '',
+          playlistArtworkBgColor: '',
+        },
+      }),
+      this.prisma.userRecentlyPlayedContext.deleteMany({
+        where: { userId, resourceType: 'playlists', resourceId: playlistId },
+      }),
+    ]);
+  }
+
   private resolveRecentlyPlayedContext({
     stationId,
     playlistId,
@@ -119,6 +137,10 @@ export class ListeningService {
       request.playlistName,
       MAX_METADATA_TEXT_LENGTH,
     );
+    const playlistCuratorName = normalizeText(
+      request.playlistCuratorName,
+      MAX_METADATA_TEXT_LENGTH,
+    );
     const playlistArtworkUrl = normalizeOptionalValue(
       request.playlistArtworkUrl,
       MAX_ARTWORK_URL_LENGTH,
@@ -155,6 +177,7 @@ export class ListeningService {
           albumId,
           playlistId,
           playlistName,
+          playlistCuratorName,
           playlistArtworkUrl,
           playlistArtworkBgColor,
           stationId,
@@ -189,6 +212,7 @@ export class ListeningService {
           albumId,
           playlistId,
           playlistName,
+          playlistCuratorName,
           playlistArtworkUrl,
           playlistArtworkBgColor,
           stationId,
@@ -208,6 +232,7 @@ export class ListeningService {
           ...(albumId && { albumId }),
           playlistId,
           playlistName,
+          playlistCuratorName,
           playlistArtworkUrl,
           playlistArtworkBgColor,
           stationId,

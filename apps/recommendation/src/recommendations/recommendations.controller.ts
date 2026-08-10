@@ -22,6 +22,8 @@ import {
   RecommendationQualityAnalyticsResponse,
   UpsertSystemStationArtworkRequest,
   SystemStationArtworkResponse,
+  CleanupPlaylistHistoryRequest,
+  CleanupPlaylistHistoryResponse,
 } from '@musical/shared-proto';
 import { RecommendationsService } from './recommendations.service';
 import { ListeningService } from '../listening/listening.service';
@@ -46,6 +48,16 @@ export class RecommendationsController implements RecommendationServiceControlle
     private readonly systemStationArtworkService: SystemStationArtworkService,
     private readonly recommendationEngine: RecommendationEngineService,
   ) {}
+
+  async cleanupPlaylistHistory(
+    request: CleanupPlaylistHistoryRequest,
+  ): Promise<CleanupPlaylistHistoryResponse> {
+    await this.listeningService.cleanupPlaylistHistory(
+      request.userId,
+      request.playlistId,
+    );
+    return { success: true };
+  }
 
   async getAlbumRelatedRecommendations(
     request: GetAlbumRelatedRecommendationsRequest,

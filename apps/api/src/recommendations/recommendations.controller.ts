@@ -190,6 +190,7 @@ export class RecommendationsController {
       albumId?: string;
       playlistId?: string;
       playlistName?: string;
+      playlistCuratorName?: string;
       playlistArtworkUrl?: string;
       playlistArtworkBgColor?: string;
       stationId?: string;
@@ -211,6 +212,7 @@ export class RecommendationsController {
       albumId: body.albumId ?? '',
       playlistId: body.playlistId ?? '',
       playlistName: body.playlistName ?? '',
+      playlistCuratorName: body.playlistCuratorName ?? '',
       playlistArtworkUrl: body.playlistArtworkUrl ?? '',
       playlistArtworkBgColor: body.playlistArtworkBgColor ?? '',
       stationId: body.stationId ?? '',

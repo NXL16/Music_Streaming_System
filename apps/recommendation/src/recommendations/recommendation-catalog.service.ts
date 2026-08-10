@@ -7,6 +7,7 @@ import {
   CatalogResponse,
   BrowseCatalogResponse,
   SongServiceClient,
+  UpsertSystemPlaylistRequest,
 } from '@musical/shared-proto';
 import { firstValueFrom } from 'rxjs';
 
@@ -102,6 +103,19 @@ export class RecommendationCatalogService implements OnModuleInit {
   ): Promise<CatalogResource[]> {
     return (await this.browsePage(resourceType, limit, sort, storefront))
       .resources;
+  }
+
+  async upsertSystemPlaylist(
+    request: UpsertSystemPlaylistRequest,
+  ): Promise<void> {
+    try {
+      await firstValueFrom(this.client.upsertSystemPlaylist(request));
+    } catch {
+      throw new RpcException({
+        code: status.UNAVAILABLE,
+        message: 'Catalog system playlist publishing is temporarily unavailable',
+      });
+    }
   }
 
   async browsePage(
