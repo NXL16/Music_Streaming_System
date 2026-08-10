@@ -55,9 +55,13 @@ export function LyricsBackground({
     if (!scene) return;
 
     let cancelled = false;
+    let transitioned = false;
     const artwork = new Image();
     const transition = () => {
-      if (!cancelled) sceneRef.current?.transitionToArtwork(artwork);
+      if (cancelled || transitioned) return;
+
+      transitioned = true;
+      sceneRef.current?.transitionToArtwork(artwork);
     };
 
     artwork.addEventListener("load", transition, { once: true });
@@ -67,6 +71,7 @@ export function LyricsBackground({
 
     return () => {
       cancelled = true;
+      artwork.removeEventListener("load", transition);
     };
   }, [backgroundArtworkUrl]);
 

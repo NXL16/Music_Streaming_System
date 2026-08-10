@@ -11,18 +11,15 @@ import { TwistFilter } from "@pixi/filter-twist";
 
 export class LyricsScene {
   private static readonly ARTWORK_TRANSITION_MS = 800;
-  private static readonly TRANSITION_MIN_ALPHA = 0.45;
 
-  app: Application;
-  container: Container;
-  blurFilters: KawaseBlurFilter[];
-  twist: TwistFilter;
-  saturate: AdjustmentFilter;
-  pendingArtwork: SpriteSource | null = null;
-  artworkTransitionElapsed = 0;
-  artworkSwapDone = false;
-  transitionStartAlpha = 1;
-  paused = false;
+  private app: Application;
+  private container: Container;
+  private blurFilters: KawaseBlurFilter[];
+  private twist: TwistFilter;
+  private saturate: AdjustmentFilter;
+  private currentSprites: Sprite[] = [];
+  private incomingSprites: Sprite[] | null = null;
+  private artworkTransitionElapsed = 0;
 
   constructor(canvas: HTMLCanvasElement, imageSource: SpriteSource) {
     const width = Math.max(1, Math.round(canvas.clientWidth));
@@ -63,40 +60,46 @@ export class LyricsScene {
     });
     this.container.filters = [this.twist, ...this.blurFilters, this.saturate];
 
-    this.addSpritesToContainer(
-      Array.from({ length: 4 }, () => Sprite.from(imageSource)),
-    );
+    this.currentSprites = this.createSprites(imageSource);
+    this.addSpritesToContainer(this.currentSprites);
 
     this.app.ticker.add(() => this.animate());
   }
 
   transitionToArtwork(artwork: SpriteSource) {
-    this.pendingArtwork = artwork;
+    if (this.incomingSprites) {
+      this.container.removeChild(...this.incomingSprites);
+      this.incomingSprites.forEach((sprite) => sprite.destroy());
+      this.currentSprites.forEach((sprite) => {
+        sprite.alpha = 1;
+      });
+    }
+
+    this.incomingSprites = this.createSprites(artwork);
+    this.incomingSprites.forEach((sprite, index) => {
+      sprite.alpha = 0;
+      sprite.rotation = this.currentSprites[index]?.rotation ?? 0;
+    });
+    this.addSpritesToContainer(this.incomingSprites);
     this.artworkTransitionElapsed = 0;
-    this.artworkSwapDone = false;
-    this.transitionStartAlpha = this.container.alpha;
   }
 
-  private updateArtwork(artwork: SpriteSource) {
-    const previousSprites = this.container.children as Sprite[];
-    const sprites = Array.from({ length: 4 }, (_, index) => {
-      const sprite = Sprite.from(artwork);
-      const previous = previousSprites[index];
-
-      if (previous) sprite.rotation = previous.rotation;
-      return sprite;
-    });
-
-    this.container.removeChildren();
-    this.addSpritesToContainer(sprites);
+  private createSprites(artwork: SpriteSource) {
+    return Array.from({ length: 4 }, () => Sprite.from(artwork));
   }
 
   resize(width: number, height: number) {
-    if (width <= 0 || height <= 0) return;
+    const nextWidth = Math.round(width);
+    const nextHeight = Math.round(height);
+    if (nextWidth <= 0 || nextHeight <= 0) return;
 
-    this.app.renderer.resize(width, height);
-    this.twist.offset.set(width / 2, height / 2);
-    this.layoutSprites();
+    const { width: currentWidth, height: currentHeight } = this.app.screen;
+    if (currentWidth === nextWidth && currentHeight === nextHeight) return;
+
+    this.app.renderer.resize(nextWidth, nextHeight);
+    this.twist.offset.set(nextWidth / 2, nextHeight / 2);
+    this.layoutSprites(this.currentSprites);
+    if (this.incomingSprites) this.layoutSprites(this.incomingSprites);
   }
 
   destroy() {
@@ -110,12 +113,11 @@ export class LyricsScene {
   private addSpritesToContainer(sprites: Sprite[]) {
     for (const sprite of sprites) sprite.anchor.set(0.5, 0.5);
     this.container.addChild(...sprites);
-    this.layoutSprites();
+    this.layoutSprites(sprites);
   }
 
-  private layoutSprites() {
-    const [large, medium, movingLarge, movingSmall] = this.container
-      .children as Sprite[];
+  private layoutSprites(sprites: Sprite[]) {
+    const [large, medium, movingLarge, movingSmall] = sprites;
     if (!large || !medium || !movingLarge || !movingSmall) return;
 
     const { width, height } = this.app.screen;
@@ -138,12 +140,9 @@ export class LyricsScene {
   }
 
   private animate() {
-    if (this.paused) return;
-
     this.updateArtworkTransition();
 
-    const [large, medium, movingLarge, movingSmall] = this.container
-      .children as Sprite[];
+    const [large, medium, movingLarge, movingSmall] = this.currentSprites;
     if (!large || !medium || !movingLarge || !movingSmall) return;
 
     const frameScale = this.app.ticker.deltaMS / 33.333333;
@@ -167,36 +166,43 @@ export class LyricsScene {
       height / 2 +
       width * 0.1 +
       (width / 4) * Math.sin(movingSmall.rotation * 0.75);
+
+    this.syncIncomingSprites();
+  }
+
+  private syncIncomingSprites() {
+    if (!this.incomingSprites) return;
+
+    this.incomingSprites.forEach((sprite, index) => {
+      const currentSprite = this.currentSprites[index];
+      if (!currentSprite) return;
+
+      sprite.position.copyFrom(currentSprite.position);
+      sprite.rotation = currentSprite.rotation;
+      sprite.scale.copyFrom(currentSprite.scale);
+    });
   }
 
   private updateArtworkTransition() {
-    if (!this.pendingArtwork) return;
+    if (!this.incomingSprites) return;
 
     this.artworkTransitionElapsed += this.app.ticker.deltaMS;
-    const halfDuration = LyricsScene.ARTWORK_TRANSITION_MS / 2;
-    const minAlpha = LyricsScene.TRANSITION_MIN_ALPHA;
-
-    if (this.artworkTransitionElapsed < halfDuration) {
-      const progress = this.artworkTransitionElapsed / halfDuration;
-      this.container.alpha =
-        this.transitionStartAlpha + (minAlpha - this.transitionStartAlpha) * progress;
-      return;
-    }
-
-    if (!this.artworkSwapDone) {
-      this.updateArtwork(this.pendingArtwork);
-      this.artworkSwapDone = true;
-    }
-
     const progress = Math.min(
       1,
-      (this.artworkTransitionElapsed - halfDuration) / halfDuration,
+      this.artworkTransitionElapsed / LyricsScene.ARTWORK_TRANSITION_MS,
     );
-    this.container.alpha = minAlpha + (1 - minAlpha) * progress;
+    this.currentSprites.forEach((sprite) => {
+      sprite.alpha = 1 - progress;
+    });
+    this.incomingSprites.forEach((sprite) => {
+      sprite.alpha = progress;
+    });
 
     if (progress === 1) {
-      this.pendingArtwork = null;
-      this.container.alpha = 1;
+      this.container.removeChild(...this.currentSprites);
+      this.currentSprites.forEach((sprite) => sprite.destroy());
+      this.currentSprites = this.incomingSprites;
+      this.incomingSprites = null;
     }
   }
 }
