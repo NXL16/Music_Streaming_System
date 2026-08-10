@@ -17,6 +17,8 @@ import {
   FavoriteResponse,
   ListFavoriteSongsRequest,
   ListFavoriteSongsResponse,
+  UpsertFavoriteArtworkRequest,
+  FavoriteArtworkResponse,
   LibraryResourceRequest,
   LibraryResourceResponse,
   ListLibraryResourcesRequest,
@@ -31,16 +33,22 @@ import {
   SongIngestInfo,
   GetSongIngestInfoRequest,
   GetSongIngestInfoResponse,
+  ProtobufStruct,
 } from '@musical/shared-proto';
 import { SONG_ASSET_CLEANUP_QUEUE } from '@musical/shared-types';
 import { PrismaService } from '../database/prisma.service';
 import { Prisma, PrismaClient } from '../generated/prisma/client';
+import { CatalogAssetsService } from './catalog-assets.service';
 
 const songSummarySelect = {
   id: true,
   status: true,
+  contentRating: true,
   durationSec: true,
   artwork: true,
+  catalogTitle: true,
+  albumName: true,
+  artistName: true,
   createdAt: true,
   owners: {
     select: {
@@ -55,6 +63,16 @@ const songSummarySelect = {
     orderBy: {
       createdAt: 'asc',
     },
+  },
+  albumTracks: {
+    orderBy: { position: 'asc' },
+    take: 1,
+    select: { album: { select: { id: true, url: true } } },
+  },
+  artistCredits: {
+    where: { role: { not: 'composer' } },
+    orderBy: { position: 'asc' },
+    select: { artist: { select: { id: true, name: true, url: true } } },
   },
 } as const;
 
@@ -144,6 +162,7 @@ export class SongsService {
   constructor(
     prismaService: PrismaService,
     @Inject('REDIS_INSTANCE') private readonly redis: Redis,
+    private readonly catalogAssetsService: CatalogAssetsService,
   ) {
     this.prisma = prismaService;
   }
@@ -576,6 +595,11 @@ export class SongsService {
     const hasMore = favorites.length > limit;
     const results = hasMore ? favorites.slice(0, limit) : favorites;
 
+    const storedArtwork = await this.prisma.systemFavoriteArtwork.findUnique({
+      where: { key: 'favorite' },
+      select: { assetId: true, artwork: true },
+    });
+
     return {
       songs: results.map(({ song }) =>
         this.mapEntityToSummary(song, request.userId, false),
@@ -584,7 +608,63 @@ export class SongsService {
         ? `${results[results.length - 1].createdAt.getTime()}:${results[results.length - 1].id}`
         : '',
       hasMore,
+      collection: this.toProtobufStruct({
+        key: 'favorite', title: 'Favourite Songs', description: 'Songs you loved',
+        artworkAssetId: storedArtwork?.assetId ?? '', artwork: storedArtwork?.artwork,
+      }),
     };
+  }
+
+  async upsertFavoriteArtwork(
+    request: UpsertFavoriteArtworkRequest,
+  ): Promise<FavoriteArtworkResponse> {
+    if (!request.assetId.trim()) this.throwInvalidArgument('ASSET_ID_REQUIRED');
+    const artwork = await this.catalogAssetsService.bindArtworkUsage({
+      ownerService: 'song',
+      ownerType: 'system-favorite',
+      ownerId: 'favorite',
+      assetId: request.assetId,
+    });
+    await this.prisma.systemFavoriteArtwork.upsert({
+      where: { key: 'favorite' },
+      create: {
+        key: 'favorite',
+        assetId: request.assetId,
+        artwork: artwork as Prisma.InputJsonObject,
+      },
+      update: {
+        assetId: request.assetId,
+        artwork: artwork as Prisma.InputJsonObject,
+      },
+    });
+    return { assetId: request.assetId, artwork: this.toProtobufStruct(artwork) };
+  }
+
+  private toProtobufStruct(value: Record<string, unknown>): ProtobufStruct {
+    return {
+      fields: Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [
+          key,
+          this.toProtobufValue(item),
+        ]),
+      ),
+    };
+  }
+
+  private toProtobufValue(value: unknown): Record<string, unknown> {
+    if (value === null || value === undefined) return { nullValue: 0 };
+    if (typeof value === 'string') return { stringValue: value };
+    if (typeof value === 'number') return { numberValue: value };
+    if (typeof value === 'boolean') return { boolValue: value };
+    if (Array.isArray(value)) {
+      return { listValue: { values: value.map((item) => this.toProtobufValue(item)) } };
+    }
+    if (typeof value === 'object') {
+      return {
+        structValue: this.toProtobufStruct(value as Record<string, unknown>),
+      };
+    }
+    return { nullValue: 0 };
   }
 
   async addLibraryResource(
@@ -606,9 +686,9 @@ export class SongsService {
         },
       },
       update: {
-        title: request.title,
-        subtitle: request.subtitle,
-        artworkUrl: request.artworkUrl,
+        title: request.title || undefined,
+        subtitle: request.subtitle || undefined,
+        artworkUrl: request.artworkUrl || undefined,
       },
       create: {
         userId: request.userId,
@@ -619,7 +699,7 @@ export class SongsService {
         artworkUrl: request.artworkUrl,
       },
     });
-    return { success: true };
+    return { success: true, deletedUserPlaylist: false };
   }
 
   async listLibraryResources(
@@ -638,6 +718,8 @@ export class SongsService {
         subtitle: resource.subtitle,
         artworkUrl: resource.artworkUrl,
         createdAt: resource.createdAt.getTime(),
+        isPinned: resource.isPinned,
+        pinnedAt: resource.pinnedAt?.getTime() ?? 0,
       })),
     };
   }
@@ -645,14 +727,58 @@ export class SongsService {
   async removeLibraryResource(
     request: LibraryResourceRequest,
   ): Promise<LibraryResourceResponse> {
-    await this.prisma.userLibraryResource.deleteMany({
+    let deletedUserPlaylist = false;
+    await this.prisma.$transaction(async (tx) => {
+      if (request.resourceType === 'playlists') {
+        const ownedPlaylist = await tx.userPlaylist.findFirst({
+          where: { id: request.resourceId, userId: request.userId },
+          select: { id: true },
+        });
+
+        if (ownedPlaylist) {
+          await tx.userPlaylist.delete({ where: { id: ownedPlaylist.id } });
+          deletedUserPlaylist = true;
+        }
+      }
+
+      await tx.userLibraryResource.deleteMany({
+        where: {
+          userId: request.userId,
+          resourceType: request.resourceType,
+          resourceId: request.resourceId,
+        },
+      });
+    });
+    return { success: true, deletedUserPlaylist };
+  }
+
+  async pinLibraryResource(
+    request: LibraryResourceRequest,
+  ): Promise<LibraryResourceResponse> {
+    const result = await this.prisma.userLibraryResource.updateMany({
       where: {
         userId: request.userId,
         resourceType: request.resourceType,
         resourceId: request.resourceId,
       },
+      data: { isPinned: true, pinnedAt: new Date() },
     });
-    return { success: true };
+    if (!result.count) this.throwNotFound('LIBRARY_RESOURCE_NOT_FOUND');
+    return { success: true, deletedUserPlaylist: false };
+  }
+
+  async unpinLibraryResource(
+    request: LibraryResourceRequest,
+  ): Promise<LibraryResourceResponse> {
+    await this.prisma.userLibraryResource.updateMany({
+      where: {
+        userId: request.userId,
+        resourceType: request.resourceType,
+        resourceId: request.resourceId,
+      },
+      data: { isPinned: false, pinnedAt: null },
+    });
+    return { success: true, deletedUserPlaylist: false };
   }
 
   async removeSongOwnership(
@@ -775,9 +901,10 @@ export class SongsService {
 
     return {
       playlist: {
-        id: playlist.id,
-        name: playlist.name,
-        ownerId: playlist.userId,
+      id: playlist.id,
+      name: playlist.name,
+      description: playlist.description,
+      ownerId: playlist.userId,
         songs: playlist.tracks.map(({ song }) =>
           this.mapEntityToSummary(song, requesterUserId, true),
         ),
@@ -796,13 +923,28 @@ export class SongsService {
     if (!userId) this.throwInvalidArgument('USER_ID_REQUIRED');
     if (!name.trim()) this.throwInvalidArgument('PLAYLIST_NAME_REQUIRED');
 
-    const playlist = await this.prisma.userPlaylist.create({
-      data: {
-        userId,
-        name: name.trim(),
-        description: description?.trim() || '',
-        isPublic,
-      },
+    const playlist = await this.prisma.$transaction(async (tx) => {
+      const createdPlaylist = await tx.userPlaylist.create({
+        data: {
+          userId,
+          name: name.trim(),
+          description: description?.trim() || '',
+          isPublic,
+        },
+      });
+
+      await tx.userLibraryResource.create({
+        data: {
+          userId,
+          resourceType: 'playlists',
+          resourceId: createdPlaylist.id,
+          title: createdPlaylist.name,
+          subtitle: '',
+          artworkUrl: '',
+        },
+      });
+
+      return createdPlaylist;
     });
 
     return {
@@ -862,7 +1004,16 @@ export class SongsService {
     if (existing.userId !== userId)
       this.throwPermissionDenied('PLAYLIST_ACCESS_DENIED');
 
-    await this.prisma.userPlaylist.delete({ where: { id: playlistId } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.userPlaylist.delete({ where: { id: playlistId } });
+      await tx.userLibraryResource.deleteMany({
+        where: {
+          userId,
+          resourceType: 'playlists',
+          resourceId: playlistId,
+        },
+      });
+    });
     return { success: true };
   }
 
@@ -900,6 +1051,11 @@ export class SongsService {
       take: take + 1,
       include: {
         _count: { select: { tracks: true } },
+        tracks: {
+          take: 1,
+          orderBy: { position: 'asc' },
+          select: { song: { select: songSummarySelect } },
+        },
       },
     });
 
@@ -915,6 +1071,10 @@ export class SongsService {
         trackCount: pl._count.tracks,
         createdAt: pl.createdAt.getTime(),
         updatedAt: pl.updatedAt.getTime(),
+        artworkUrl: pl.tracks[0]
+          ? this.mapEntityToSummary(pl.tracks[0].song, requesterUserId, !isSelf)
+              .coverUrl
+          : '',
       })),
       nextCursor: hasMore
         ? `${result[result.length - 1].createdAt.getTime()}:${result[result.length - 1].id}`
@@ -1038,17 +1198,30 @@ export class SongsService {
         : undefined) ??
       entity.owners.find((owner) => owner.isPublic) ??
       entity.owners[0];
+    const artists = entity.artistCredits.map(({ artist }) => ({
+      id: artist.id,
+      name: artist.name,
+      url: artist.url,
+    }));
+    const primaryArtist = artists[0];
+    const primaryAlbum = entity.albumTracks[0]?.album;
 
     return {
       id: entity.id,
-      title: ownerProfile?.title || '',
-      artist: ownerProfile?.artist || '',
-      album: ownerProfile?.album || '',
+      title: ownerProfile?.title || entity.catalogTitle,
+      artist: ownerProfile?.artist || entity.artistName,
+      album: ownerProfile?.album || entity.albumName,
       coverUrl: ownerProfile?.coverUrl || this.artworkUrl(entity.artwork),
       isPublic: ownerProfile?.isPublic ?? false,
       status: entity.status,
+      contentRating: entity.contentRating,
       durationSec: entity.durationSec || 0,
       createdAt: entity.createdAt.getTime(),
+      artistId: primaryArtist?.id || '',
+      artistUrl: primaryArtist?.url || '',
+      artists,
+      albumId: primaryAlbum?.id || '',
+      albumUrl: primaryAlbum?.url || '',
     };
   }
 

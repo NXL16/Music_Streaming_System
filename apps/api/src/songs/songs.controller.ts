@@ -15,6 +15,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { SongsService } from './songs.service';
+import { RecommendationsService } from '../recommendations/recommendations.service';
 import type {
   UpdateSongProcessingResultRequest,
   ListSongsRequest,
@@ -33,6 +34,7 @@ export class SongsController {
   constructor(
     private readonly songsService: SongsService,
     private readonly configService: ConfigService,
+    private readonly recommendationsService: RecommendationsService,
   ) {}
 
   @Post('request-upload')
@@ -145,6 +147,19 @@ export class SongsController {
     return this.songsService.listLibraryResources({ userId: user.userId });
   }
 
+  @Get('library/media-cards')
+  @UseGuards(StrictJwtAuthGuard)
+  async listLibraryMediaCards(
+    @Req() req: Request,
+    @Query('storefront') storefront?: string,
+  ) {
+    const user = req.user as JwtUser;
+    return this.songsService.listLibraryMediaCards(
+      user.userId,
+      storefront?.trim() || 'vn',
+    );
+  }
+
   @Get(':songId/lyrics')
   getLyrics(@Param('songId') songId: string) {
     return this.songsService.getSongLyrics({ songId, includeDraft: false });
@@ -158,7 +173,50 @@ export class SongsController {
     @Param('resourceId') resourceId: string,
   ) {
     const user = req.user as JwtUser;
-    return this.songsService.removeLibraryResource({
+    const result = await this.songsService.removeLibraryResource({
+      userId: user.userId,
+      resourceType,
+      resourceId,
+      title: '',
+      subtitle: '',
+      artworkUrl: '',
+    });
+    if (result.deletedUserPlaylist) {
+      await this.recommendationsService.cleanupPlaylistHistory({
+        userId: user.userId,
+        playlistId: resourceId,
+      });
+    }
+    return result;
+  }
+
+  @Post('library/resources/:resourceType/:resourceId/pin')
+  @UseGuards(StrictJwtAuthGuard)
+  async pinLibraryResource(
+    @Req() req: Request,
+    @Param('resourceType') resourceType: string,
+    @Param('resourceId') resourceId: string,
+  ) {
+    const user = req.user as JwtUser;
+    return this.songsService.pinLibraryResource({
+      userId: user.userId,
+      resourceType,
+      resourceId,
+      title: '',
+      subtitle: '',
+      artworkUrl: '',
+    });
+  }
+
+  @Delete('library/resources/:resourceType/:resourceId/pin')
+  @UseGuards(StrictJwtAuthGuard)
+  async unpinLibraryResource(
+    @Req() req: Request,
+    @Param('resourceType') resourceType: string,
+    @Param('resourceId') resourceId: string,
+  ) {
+    const user = req.user as JwtUser;
+    return this.songsService.unpinLibraryResource({
       userId: user.userId,
       resourceType,
       resourceId,

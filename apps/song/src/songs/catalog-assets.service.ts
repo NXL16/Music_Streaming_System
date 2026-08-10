@@ -48,6 +48,36 @@ export class CatalogAssetsService implements OnModuleInit {
       this.grpcClient.getService<AssetServiceClient>('AssetService');
   }
 
+  async bindArtworkUsage(input: {
+    ownerService: string;
+    ownerType: string;
+    ownerId: string;
+    assetId: string;
+  }): Promise<JsonObject> {
+    const response = await firstValueFrom(
+      this.client.registerAssetUsages(
+        {
+          ownerService: input.ownerService,
+          ownerType: input.ownerType,
+          ownerId: input.ownerId,
+          usages: [{
+            slot: 'artwork',
+            assetId: input.assetId,
+            expectedKind: AssetKind.ASSET_KIND_IMAGE,
+            expectedPurpose: AssetPurpose.ASSET_PURPOSE_ARTWORK,
+          }],
+        },
+        this.metadata(),
+      ),
+    );
+    const asset = response.assets.find((item) => item.id === input.assetId);
+    if (!asset) {
+      this.failedPrecondition('ASSET_NOT_FOUND');
+      throw new Error('ASSET_NOT_FOUND');
+    }
+    return this.artwork(asset);
+  }
+
   async resolveForPublish(
     resourceType: string,
     resourceId: string,

@@ -24,8 +24,11 @@ service SongService {
   rpc AddFavorite(FavoriteRequest) returns (FavoriteResponse);
   rpc RemoveFavorite(FavoriteRequest) returns (FavoriteResponse);
   rpc ListFavoriteSongs(ListFavoriteSongsRequest) returns (ListFavoriteSongsResponse);
+  rpc UpsertFavoriteArtwork(UpsertFavoriteArtworkRequest) returns (FavoriteArtworkResponse);
   rpc AddLibraryResource(LibraryResourceRequest) returns (LibraryResourceResponse);
   rpc RemoveLibraryResource(LibraryResourceRequest) returns (LibraryResourceResponse);
+  rpc PinLibraryResource(LibraryResourceRequest) returns (LibraryResourceResponse);
+  rpc UnpinLibraryResource(LibraryResourceRequest) returns (LibraryResourceResponse);
   rpc ListLibraryResources(ListLibraryResourcesRequest) returns (ListLibraryResourcesResponse);
   rpc RemoveSongOwnership(RemoveSongOwnershipRequest) returns (RemoveSongOwnershipResponse);
   rpc GetPlaylist(GetPlaylistRequest) returns (GetPlaylistResponse);
@@ -42,6 +45,7 @@ service SongService {
   rpc GetCatalogAlbum(GetCatalogAlbumRequest) returns (CatalogResponse);
   rpc GetCatalogPlaylist(GetCatalogPlaylistRequest) returns (CatalogResponse);
   rpc GetCatalogPlaylistTracks(GetCatalogPlaylistRequest) returns (CatalogResponse);
+  rpc UpsertSystemPlaylist(UpsertSystemPlaylistRequest) returns (CatalogResponse);
   rpc GetCatalogResources(GetCatalogResourcesRequest) returns (CatalogResponse);
   rpc GetCatalogArtistAlbums(GetCatalogArtistAlbumsRequest) returns (CatalogResponse);
   rpc GetCatalogArtistSongs(GetCatalogArtistSongsRequest) returns (GetCatalogArtistSongsResponse);
@@ -123,6 +127,18 @@ message SongSummary {
   int32      duration_sec = 7;
   int64      created_at   = 8;
   string     cover_url    = 9;
+  string     artist_id    = 10;
+  string     artist_url   = 11;
+  string     album_id     = 12;
+  string     album_url    = 13;
+  repeated SongArtist artists = 14;
+  string     content_rating = 15;
+}
+
+message SongArtist {
+  string id  = 1;
+  string name = 2;
+  string url = 3;
 }
 
 // Full detail for playback
@@ -257,6 +273,14 @@ message ListFavoriteSongsResponse {
   repeated SongSummary songs       = 1;
   string               next_cursor = 2;
   bool                 has_more    = 3;
+  google.protobuf.Struct collection = 4;
+}
+
+message UpsertFavoriteArtworkRequest { string asset_id = 1; }
+
+message FavoriteArtworkResponse {
+  string asset_id = 1;
+  google.protobuf.Struct artwork = 2;
 }
 
 message LibraryResourceRequest {
@@ -268,7 +292,10 @@ message LibraryResourceRequest {
   string artwork_url   = 6;
 }
 
-message LibraryResourceResponse { bool success = 1; }
+message LibraryResourceResponse {
+  bool success = 1;
+  bool deleted_user_playlist = 2;
+}
 
 message ListLibraryResourcesRequest { string user_id = 1; }
 
@@ -279,6 +306,8 @@ message LibraryResource {
   string subtitle      = 4;
   string artwork_url   = 5;
   int64  created_at    = 6;
+  bool   is_pinned     = 7;
+  int64  pinned_at     = 8;
 }
 
 message ListLibraryResourcesResponse { repeated LibraryResource resources = 1; }
@@ -299,6 +328,7 @@ message Playlist {
   repeated SongSummary songs      = 4;
   int64                created_at = 5;
   int64                updated_at = 6;
+  string               description = 7;
 }
 
 message GetPlaylistRequest {
@@ -352,6 +382,7 @@ message UserPlaylistSummary {
   int32  track_count = 5;
   int64  created_at  = 6;
   int64  updated_at  = 7;
+  string artwork_url = 8;
 }
 
 message UserPlaylistInfo {
@@ -387,6 +418,21 @@ message GetCatalogAlbumRequest {
 message GetCatalogPlaylistRequest {
   string storefront  = 1;
   string playlist_id = 2;
+}
+
+// Internal-only: Recommendation publishes a generated playlist into Catalog.
+message UpsertSystemPlaylistRequest {
+  string playlist_id = 1;
+  string storefront = 2;
+  string name = 3;
+  string description = 4;
+  string url = 5;
+  string artwork_url = 6;
+  string artwork_bg_color = 7;
+  repeated string song_ids = 8;
+  string artwork_variants_json = 9;
+  int32 artwork_width = 10;
+  int32 artwork_height = 11;
 }
 
 message GetCatalogArtistAlbumsRequest {

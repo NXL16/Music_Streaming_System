@@ -418,6 +418,16 @@ model Favorite {
   @@map("favorites")
 }
 
+model SystemFavoriteArtwork {
+  key       String   @id @db.VarChar(64)
+  assetId   String   @unique @db.VarChar(128)
+  artwork   Json
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  @@map("system_favorite_artworks")
+}
+
 model UserPlaylist {
   id          String   @id @default(uuid())
   userId      String   @db.VarChar(128)
@@ -458,9 +468,12 @@ model UserLibraryResource {
   title        String   @default("") @db.VarChar(255)
   subtitle     String   @default("") @db.VarChar(255)
   artworkUrl   String   @default("") @db.VarChar(1000)
+  isPinned     Boolean  @default(false)
+  pinnedAt     DateTime? @db.Timestamptz
   createdAt    DateTime @default(now()) @db.Timestamptz
 
   @@unique([userId, resourceType, resourceId])
   @@index([userId, createdAt])
+  @@index([userId, isPinned, pinnedAt])
   @@map("user_library_resources")
 }

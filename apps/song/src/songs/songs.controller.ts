@@ -19,6 +19,8 @@ import {
   FavoriteResponse,
   ListFavoriteSongsRequest,
   ListFavoriteSongsResponse,
+  UpsertFavoriteArtworkRequest,
+  FavoriteArtworkResponse,
   LibraryResourceRequest,
   LibraryResourceResponse,
   ListLibraryResourcesRequest,
@@ -29,6 +31,7 @@ import {
   GetPlaylistResponse,
   GetCatalogAlbumRequest,
   GetCatalogPlaylistRequest,
+  UpsertSystemPlaylistRequest,
   GetCatalogResourcesRequest,
   GetCatalogArtistAlbumsRequest,
   GetCatalogArtistSongsRequest,
@@ -135,6 +138,12 @@ export class SongsController implements SongServiceController {
     return this.songsService.listFavoriteSongs(request);
   }
 
+  upsertFavoriteArtwork(
+    request: UpsertFavoriteArtworkRequest,
+  ): Promise<FavoriteArtworkResponse> {
+    return this.songsService.upsertFavoriteArtwork(request);
+  }
+
   async addLibraryResource(
     request: LibraryResourceRequest,
   ): Promise<LibraryResourceResponse> {
@@ -149,6 +158,18 @@ export class SongsController implements SongServiceController {
     request: LibraryResourceRequest,
   ): Promise<LibraryResourceResponse> {
     return this.songsService.removeLibraryResource(request);
+  }
+
+  async pinLibraryResource(
+    request: LibraryResourceRequest,
+  ): Promise<LibraryResourceResponse> {
+    return this.songsService.pinLibraryResource(request);
+  }
+
+  async unpinLibraryResource(
+    request: LibraryResourceRequest,
+  ): Promise<LibraryResourceResponse> {
+    return this.songsService.unpinLibraryResource(request);
   }
 
   async removeSongOwnership(
@@ -244,6 +265,12 @@ export class SongsController implements SongServiceController {
     request: GetCatalogPlaylistRequest,
   ): Promise<CatalogResponse> {
     return this.catalogService.getPlaylistTracks(request);
+  }
+
+  async upsertSystemPlaylist(
+    request: UpsertSystemPlaylistRequest,
+  ): Promise<CatalogResponse> {
+    return this.catalogService.upsertSystemPlaylist(request);
   }
 
   async getCatalogResources(

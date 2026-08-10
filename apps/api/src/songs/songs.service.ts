@@ -9,6 +9,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { ClientGrpc } from '@nestjs/microservices';
+import { status } from '@grpc/grpc-js';
 import type { Redis } from 'ioredis';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -30,8 +31,9 @@ import {
   UpdateSongProcessingResultResponse,
   FavoriteRequest,
   FavoriteResponse,
+  FavoriteArtworkResponse,
   ListFavoriteSongsRequest,
-  ListFavoriteSongsResponse,
+  UpsertFavoriteArtworkRequest,
   LibraryResourceRequest,
   LibraryResourceResponse,
   ListLibraryResourcesRequest,
@@ -159,10 +161,20 @@ export class SongsService implements OnModuleInit {
 
   async listFavoriteSongs(
     data: ListFavoriteSongsRequest,
-  ): Promise<ListFavoriteSongsResponse> {
-    return await grpcFirstValueFrom(
+  ) {
+    const response = await grpcFirstValueFrom(
       this.songServiceClient.listFavoriteSongs(data),
     );
+    return {
+      ...response,
+      collection: unwrapStructOutput(response.collection),
+    };
+  }
+
+  async upsertFavoriteArtwork(
+    data: UpsertFavoriteArtworkRequest,
+  ): Promise<FavoriteArtworkResponse> {
+    return grpcFirstValueFrom(this.songServiceClient.upsertFavoriteArtwork(data));
   }
   async addLibraryResource(
     data: LibraryResourceRequest,
@@ -176,12 +188,130 @@ export class SongsService implements OnModuleInit {
       this.songServiceClient.listLibraryResources(data),
     );
   }
+
+  /**
+   * Composes a library membership record with its canonical Catalog metadata.
+   * Keeping this join in the API gateway prevents clients from making a
+   * follow-up Catalog request just to render a library card.
+   */
+  async listLibraryMediaCards(userId: string, storefront: string) {
+    const library = await this.listLibraryResources({ userId });
+    const userPlaylists = await this.listUserPlaylists({
+      userId,
+      requesterUserId: userId,
+      limit: 50,
+      cursor: '',
+    });
+    const userPlaylistById = new Map(
+      userPlaylists.playlists.map((playlist) => [playlist.id, playlist]),
+    );
+    const catalogReferences = library.resources
+      .filter(
+        (resource) =>
+          resource.resourceType === 'albums' ||
+          (resource.resourceType === 'playlists' &&
+            !userPlaylistById.has(resource.resourceId)),
+      )
+      .map((resource) => ({
+        type: resource.resourceType,
+        id: resource.resourceId,
+      }));
+
+    let catalog: CatalogResponse | undefined;
+    if (catalogReferences.length) {
+      try {
+        catalog = await this.getCatalogResources({
+          storefront,
+          resources: catalogReferences,
+        });
+      } catch (error) {
+        this.logger.warn(
+          `Could not enrich ${catalogReferences.length} library resources from Catalog: ${error instanceof Error ? error.message : 'unknown error'}`,
+        );
+      }
+    }
+
+    return {
+      resources: library.resources.map((resource) => {
+        const userPlaylist =
+          resource.resourceType === 'playlists'
+            ? userPlaylistById.get(resource.resourceId)
+            : undefined;
+        if (userPlaylist) {
+          return {
+            resourceType: resource.resourceType,
+            resourceId: resource.resourceId,
+            title: userPlaylist.name,
+            subtitle: 'You',
+            artworkUrl: userPlaylist.artworkUrl || resource.artworkUrl,
+            catalogUrl: `/library/playlist/${encodeURIComponent(resource.resourceId)}`,
+            contentRating: '',
+            artists: [],
+            createdAt: resource.createdAt,
+          };
+        }
+
+        const album =
+          resource.resourceType === 'albums'
+            ? catalog?.resources?.albums[resource.resourceId]
+            : undefined;
+        const playlist =
+          resource.resourceType === 'playlists'
+            ? catalog?.resources?.playlists[resource.resourceId]
+            : undefined;
+        const attributes = album?.attributes ?? playlist?.attributes;
+        const artistReferences = album?.relationships?.artists?.data ?? [];
+        const artists = artistReferences.flatMap((reference) => {
+          const artist = catalog?.resources?.artists[reference.id];
+          if (!artist?.attributes?.name || !artist.attributes.url) return [];
+          return [
+            {
+              id: artist.id,
+              name: artist.attributes.name,
+              url: artist.attributes.url,
+            },
+          ];
+        });
+
+        return {
+          resourceType: resource.resourceType,
+          resourceId: resource.resourceId,
+          title: attributes?.name || resource.title,
+          subtitle:
+            album?.attributes?.artistName ||
+            playlist?.attributes?.curatorName ||
+            resource.subtitle,
+          artworkUrl: attributes?.artwork?.url || resource.artworkUrl,
+          artwork: attributes?.artwork,
+          catalogUrl: attributes?.url || '',
+          contentRating:
+            resource.resourceType === 'albums'
+              ? album?.attributes?.contentRating || ''
+              : '',
+          artists,
+          createdAt: resource.createdAt,
+        };
+      }),
+    };
+  }
   async removeLibraryResource(
     data: LibraryResourceRequest,
   ): Promise<LibraryResourceResponse> {
     return grpcFirstValueFrom(
       this.songServiceClient.removeLibraryResource(data),
     );
+  }
+
+  async pinLibraryResource(
+    data: LibraryResourceRequest,
+  ): Promise<LibraryResourceResponse> {
+    return grpcFirstValueFrom(this.songServiceClient.pinLibraryResource(data));
+  }
+
+  async unpinLibraryResource(
+    data: LibraryResourceRequest,
+  ): Promise<LibraryResourceResponse> {
+    return grpcFirstValueFrom(this.songServiceClient.unpinLibraryResource(data));
   }
 
   async removeSongOwnership(
@@ -208,6 +338,174 @@ export class SongsService implements OnModuleInit {
   ): Promise<UserPlaylistInfo> {
     return await grpcFirstValueFrom(
       this.songServiceClient.createUserPlaylist(data),
+    );
+  }
+
+  async createPlaylistFromSource(
+    userId: string,
+    input: {
+      name: string;
+      description?: string;
+      source: {
+        kind: 'song' | 'collection';
+        songId?: string;
+        songIds?: string[];
+        resourceType?: 'albums' | 'playlists';
+        resourceId?: string;
+        sourceOrigin?: 'catalog' | 'favorite' | 'user-playlist';
+      };
+    },
+  ) {
+    const playlist = await this.createUserPlaylist({
+      userId,
+      name: input.name,
+      description: input.description || '',
+      isPublic: false,
+    });
+    try {
+      const songIds = await this.resolvePlaylistSourceTracks(
+        userId,
+        input.source,
+      );
+      for (const songId of songIds) {
+        await this.addTrackToPlaylist({ userId, playlistId: playlist.id, songId });
+      }
+      return playlist;
+    } catch (error) {
+      await this.deleteUserPlaylist({ userId, playlistId: playlist.id }).catch(
+        () => undefined,
+      );
+      throw error;
+    }
+  }
+
+  async addPlaylistSource(
+    userId: string,
+    playlistId: string,
+    source: {
+      kind: 'song' | 'collection';
+      songId?: string;
+      songIds?: string[];
+      resourceType?: 'albums' | 'playlists';
+      resourceId?: string;
+    },
+  ) {
+    const songIds = await this.resolvePlaylistSourceTracks(userId, source);
+    let addedCount = 0;
+
+    for (const songId of songIds) {
+      try {
+        await this.addTrackToPlaylist({ userId, playlistId, songId });
+        addedCount += 1;
+      } catch (error) {
+        if (!this.isTrackAlreadyInPlaylist(error)) throw error;
+      }
+    }
+
+    return { addedCount };
+  }
+
+  private isTrackAlreadyInPlaylist(error: unknown) {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      (error as { code?: number }).code === status.ALREADY_EXISTS
+    );
+  }
+
+  private async resolvePlaylistSourceTracks(
+    requesterUserId: string,
+    source: {
+    kind: 'song' | 'collection';
+    songId?: string;
+    songIds?: string[];
+    resourceType?: 'albums' | 'playlists';
+    resourceId?: string;
+    sourceOrigin?: 'catalog' | 'favorite' | 'user-playlist';
+    },
+  ) {
+    if (source.kind === 'song') {
+      if (!source.songId) {
+        throw new BadRequestException('PLAYLIST_SOURCE_INVALID');
+      }
+      return [source.songId];
+    }
+
+    if (source.songIds?.length) {
+      return [...new Set(source.songIds.filter(Boolean))];
+    }
+
+    if (
+      source.kind !== 'collection' ||
+      !source.resourceId ||
+      (source.resourceType !== 'albums' && source.resourceType !== 'playlists')
+    ) {
+      throw new BadRequestException('PLAYLIST_SOURCE_INVALID');
+    }
+
+    if (source.resourceType === 'albums') {
+      const catalog = await this.getCatalogAlbum({
+        storefront: 'vn',
+        albumId: source.resourceId,
+      });
+
+      return (
+        catalog.resources?.albums?.[source.resourceId]?.relationships?.tracks?.data
+          ?.filter((item) => item.type === 'songs')
+          .map((item) => item.id) ?? []
+      );
+    }
+
+    if (source.sourceOrigin === 'user-playlist') {
+      const userPlaylist = await this.getPlaylist({
+        playlistId: source.resourceId,
+        requesterUserId,
+      });
+      return userPlaylist.playlist?.songs.map((song) => song.id) ?? [];
+    }
+
+    if (source.sourceOrigin === 'favorite') {
+      return [];
+    }
+
+    if (source.sourceOrigin !== 'catalog') {
+      throw new BadRequestException('PLAYLIST_SOURCE_ORIGIN_INVALID');
+    }
+
+    try {
+      const catalog = await this.getCatalogPlaylistTracks({
+        storefront: 'vn',
+        playlistId: source.resourceId,
+      });
+
+      return catalog.data
+        .filter((item) => item.type === 'songs')
+        .map((item) => item.id);
+    } catch (tracksError) {
+      if (!this.isNotFound(tracksError)) throw tracksError;
+
+      // Some catalog playlists expose songs in their detail relationship but
+      // not through the dedicated tracks endpoint. This is still a public
+      // source, so do not fall through to the private-playlist service.
+      const catalog = await this.getCatalogPlaylist({
+        storefront: 'vn',
+        playlistId: source.resourceId,
+      });
+      return (
+        catalog.resources?.playlists?.[source.resourceId]?.relationships?.tracks?.data
+          ?.filter((item) => item.type === 'songs')
+          .map((item) => item.id) ?? []
+      );
+    }
+  }
+
+  private isNotFound(error: unknown) {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      (error as { code?: number }).code === status.NOT_FOUND
     );
   }
 

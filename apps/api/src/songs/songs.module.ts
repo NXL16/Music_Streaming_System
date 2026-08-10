@@ -6,6 +6,7 @@ import { R2Module } from '../common/r2/r2.module';
 import { ArtistOrAdminGuard } from '../common/guards/artist-or-admin.guard';
 import { RecommendationsModule } from '../recommendations/recommendations.module';
 import { PlaylistsController } from './playlists.controller';
+import { FavoriteArtworkAdminController } from './favorite-artwork.controller';
 import {
   CatalogAdminController,
   ArtistStudioCatalogController,
@@ -40,6 +41,7 @@ import {
     CatalogController,
     CatalogAdminController,
     ArtistStudioCatalogController,
+    FavoriteArtworkAdminController,
   ],
   providers: [SongsService, ArtistOrAdminGuard],
   exports: [SongsService],

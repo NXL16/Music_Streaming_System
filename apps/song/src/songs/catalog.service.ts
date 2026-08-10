@@ -13,6 +13,7 @@ import {
   CatalogSongResource,
   GetCatalogAlbumRequest,
   GetCatalogPlaylistRequest,
+  UpsertSystemPlaylistRequest,
   GetCatalogResourcesRequest,
   GetCatalogArtistAlbumsRequest,
   GetCatalogArtistSongsRequest,
@@ -153,13 +154,17 @@ export class CatalogService {
     const playlist = await this.prisma.playlist.findFirst({
       where: { id: playlistId, storefront, isPublic: true },
       include: playlistCatalogInclude,
-    });
+    }) ??
+      (await this.prisma.playlist.findFirst({
+        where: { id: playlistId, isPublic: true },
+        include: playlistCatalogInclude,
+      }));
 
     if (!playlist) {
       this.throwNotFound('PLAYLIST_NOT_FOUND');
     }
 
-    return this.playlistResponse(playlist, storefront, true);
+    return this.playlistResponse(playlist, playlist.storefront, true);
   }
 
   async getPlaylistTracks(
@@ -170,16 +175,76 @@ export class CatalogService {
       request.playlistId,
       'PLAYLIST_ID_REQUIRED',
     );
-    const playlist = await this.prisma.playlist.findFirst({
-      where: { id: playlistId, storefront, isPublic: true },
-      include: playlistCatalogInclude,
-    });
+    const playlist =
+      (await this.prisma.playlist.findFirst({
+        where: { id: playlistId, storefront, isPublic: true },
+        include: playlistCatalogInclude,
+      })) ??
+      (await this.prisma.playlist.findFirst({
+        where: { id: playlistId, isPublic: true },
+        include: playlistCatalogInclude,
+      }));
 
     if (!playlist) {
       this.throwNotFound('PLAYLIST_NOT_FOUND');
     }
 
-    return this.playlistResponse(playlist, storefront, false);
+    return this.playlistResponse(playlist, playlist.storefront, false);
+  }
+
+  async upsertSystemPlaylist(
+    request: UpsertSystemPlaylistRequest,
+  ): Promise<CatalogResponse> {
+    const storefront = this.storefront(request.storefront);
+    const playlistId = this.required(request.playlistId, 'PLAYLIST_ID_REQUIRED');
+    const name = this.required(request.name, 'PLAYLIST_NAME_REQUIRED');
+    const songIds = [...new Set(request.songIds.filter(Boolean))];
+    if (songIds.length === 0) this.throwInvalidArgument('PLAYLIST_TRACKS_REQUIRED');
+    const artwork = this.systemPlaylistArtwork(request);
+
+    await this.prisma.$transaction(async (tx) => {
+      const songCount = await tx.song.count({
+        where: { id: { in: songIds }, storefront, isCatalog: true },
+      });
+      if (songCount !== songIds.length) {
+        this.throwInvalidArgument('SYSTEM_PLAYLIST_TRACK_NOT_CATALOG');
+      }
+
+      await tx.playlist.upsert({
+        where: { id: playlistId },
+        create: {
+          id: playlistId,
+          storefront,
+          name,
+          curatorName: 'Musical',
+          descriptionShort: request.description || '',
+          descriptionStandard: request.description || '',
+          artwork,
+          playlistType: 'system-personalized',
+          url: request.url,
+          ownerId: 'system',
+          isPublic: true,
+        },
+        update: {
+          storefront,
+          name,
+          curatorName: 'Musical',
+          descriptionShort: request.description || '',
+          descriptionStandard: request.description || '',
+          artwork,
+          playlistType: 'system-personalized',
+          url: request.url,
+          ownerId: 'system',
+          isPublic: true,
+        },
+      });
+      await tx.playlistTrack.deleteMany({ where: { playlistId } });
+      await tx.playlistTrack.createMany({
+        data: songIds.map((songId, position) => ({ playlistId, songId, position })),
+      });
+    });
+
+    return this.getPlaylist({ storefront, playlistId });
   }
 
   async getArtistAlbums(
@@ -1019,22 +1084,38 @@ export class CatalogService {
     };
   }
 
-  private playlistResponse(
+  private async playlistResponse(
     playlist: CatalogPlaylistEntity,
     storefront: string,
     includePlaylist: boolean,
-  ): CatalogResponse {
+  ): Promise<CatalogResponse> {
+    const albumIds = [
+      ...new Set(
+        playlist.tracks.flatMap(({ song }) =>
+          song.albumTracks.map(({ album }) => album.id),
+        ),
+      ),
+    ];
+    const albums = albumIds.length
+      ? await this.prisma.album.findMany({
+          where: { id: { in: albumIds }, storefront },
+          include: albumCatalogBrowseInclude,
+        })
+      : [];
     const songs = Object.fromEntries(
       playlist.tracks.map(({ song }) => [
         song.id,
         this.songResource(song, storefront),
       ]),
     );
-    const artists = this.collectArtists(
-      playlist.tracks.map(({ song }) => song),
-      [],
-      storefront,
-    );
+    const artists = {
+      ...this.collectArtists(
+        playlist.tracks.map(({ song }) => song),
+        [],
+        storefront,
+      ),
+      ...this.collectAlbumArtists(albums, storefront),
+    };
     const trackData = playlist.tracks.map(({ song }) =>
       this.reference(song.id, 'songs', storefront),
     );
@@ -1044,7 +1125,12 @@ export class CatalogService {
         ? [this.reference(playlist.id, 'playlists', storefront)]
         : trackData,
       resources: {
-        albums: {},
+        albums: Object.fromEntries(
+          albums.map((album) => [
+            album.id,
+            this.albumResource(album, storefront),
+          ]),
+        ),
         playlists: includePlaylist
           ? {
               [playlist.id]: this.playlistResource(
@@ -1466,6 +1552,32 @@ export class CatalogService {
     };
   }
 
+  private systemPlaylistArtwork(
+    request: UpsertSystemPlaylistRequest,
+  ): Prisma.InputJsonObject | undefined {
+    if (!request.artworkUrl) return undefined;
+
+    const variants = this.parseJsonObject(request.artworkVariantsJson);
+    return {
+      url: request.artworkUrl,
+      bgColor: request.artworkBgColor || '2c2c2e',
+      ...(request.artworkWidth > 0 ? { width: request.artworkWidth } : {}),
+      ...(request.artworkHeight > 0
+        ? { height: request.artworkHeight }
+        : {}),
+      ...(variants && Object.keys(variants).length > 0 ? { variants } : {}),
+    } as Prisma.InputJsonObject;
+  }
+
+  private parseJsonObject(value: string): JsonObject | undefined {
+    if (!value) return undefined;
+    try {
+      return this.optionalObject(JSON.parse(value));
+    } catch {
+      return undefined;
+    }
+  }
+
   private storefront(value: string): string {
     const storefront = value.trim().toLowerCase() || DEFAULT_STOREFRONT;
     if (!/^[a-z]{2}$/.test(storefront)) {
@@ -1629,7 +1741,11 @@ export class CatalogService {
 
     if (resourceType === 'playlists') {
       const playlists = await this.prisma.playlist.findMany({
-        where: { storefront, isPublic: true },
+        where: {
+          storefront,
+          isPublic: true,
+          playlistType: { not: 'system-personalized' },
+        },
         include: playlistCatalogBrowseInclude,
         orderBy: syncById ? { id: 'asc' } : orderBy,
         cursor: syncById && request.cursor ? { id: request.cursor } : undefined,
