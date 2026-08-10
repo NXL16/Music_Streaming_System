@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type ResponsiveArtworkProps = {
   alt: string;
@@ -10,6 +10,7 @@ type ResponsiveArtworkProps = {
   height: number;
   loading?: "eager" | "lazy";
   pictureClassName?: string;
+  retainPreviousArtwork?: boolean;
   role?: string;
   sizes?: string;
   src: string;
@@ -20,11 +21,12 @@ type ResponsiveArtworkProps = {
 
 export default function ResponsiveArtwork({
   alt,
-  className,
+  className = "",
   fetchPriority = "auto",
   height,
   loading = "lazy",
   pictureClassName,
+  retainPreviousArtwork = false,
   role,
   sizes,
   src,
@@ -32,15 +34,41 @@ export default function ResponsiveArtwork({
   style,
   width,
 }: ResponsiveArtworkProps) {
+  const [displayedSrcSet, setDisplayedSrcSet] = useState(srcSet);
   const [failedSrcSet, setFailedSrcSet] = useState<string>();
-  const hasFailed = failedSrcSet === srcSet;
+  const activeSrcSet = retainPreviousArtwork ? displayedSrcSet : srcSet;
+  const hasFailed = failedSrcSet === activeSrcSet;
+
+  useEffect(() => {
+    if (!retainPreviousArtwork) return;
+    if (srcSet === displayedSrcSet) return;
+
+    let cancelled = false;
+    const image = new Image();
+    const showArtwork = () => {
+      if (!cancelled) setDisplayedSrcSet(srcSet);
+    };
+
+    image.addEventListener("load", showArtwork, { once: true });
+    image.srcset = srcSet ?? "";
+    image.sizes = sizes ?? "";
+    image.src = src;
+
+    if (image.complete && image.naturalWidth > 0) showArtwork();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [displayedSrcSet, retainPreviousArtwork, sizes, src, srcSet]);
 
   return (
     <picture
-      key={`${src}|${srcSet ?? ""}|${sizes ?? ""}`}
+      key={`${src}|${activeSrcSet ?? ""}|${sizes ?? ""}`}
       className={pictureClassName}
     >
-      {!hasFailed && srcSet && <source sizes={sizes} srcSet={srcSet} />}
+      {!hasFailed && activeSrcSet && (
+        <source sizes={sizes} srcSet={activeSrcSet} />
+      )}
       <img
         alt={alt}
         className={`${className} align-baseline`}
@@ -48,7 +76,7 @@ export default function ResponsiveArtwork({
         fetchPriority={fetchPriority}
         height={height}
         loading={loading}
-        onError={() => setFailedSrcSet(srcSet)}
+        onError={() => setFailedSrcSet(activeSrcSet)}
         role={role}
         src={src}
         style={style}

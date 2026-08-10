@@ -12,6 +12,7 @@ type SharedCardArtworkProps = Pick<
   containerStyle?: CSSProperties;
   sizes?: string;
   priority?: boolean;
+  retainPreviousArtwork?: boolean;
 };
 
 type CardArtworkProps = SharedCardArtworkProps &
@@ -40,6 +41,7 @@ export default function CardArtwork({
   containerStyle,
   sizes,
   priority = false,
+  retainPreviousArtwork = false,
 }: CardArtworkProps) {
   if (variant === "hero") {
     return (
@@ -62,6 +64,7 @@ export default function CardArtwork({
             height={800}
             loading={priority ? "eager" : "lazy"}
             pictureClassName="block size-full"
+            retainPreviousArtwork={retainPreviousArtwork}
             sizes={sizes || "(max-width: 1679px) 450px, 600px"}
             src={PLACEHOLDER_SRC}
             srcSet={imageSrcSet}
@@ -97,6 +100,7 @@ export default function CardArtwork({
         height={316}
         loading={priority ? "eager" : "lazy"}
         pictureClassName=""
+        retainPreviousArtwork={retainPreviousArtwork}
         sizes={
           sizes ||
           "(max-width:1319px) 296px,(min-width:1320px) and (max-width:1679px) 316px,316px"
