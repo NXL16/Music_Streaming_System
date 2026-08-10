@@ -4,11 +4,12 @@ import { useEffect, useState, useCallback } from "react";
 import { getApiErrorMessage } from "@/lib/api/api-error";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { getWalletBalance, type WalletBalanceResponse } from "./wallet.api";
+import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 
 export function useWalletBalance() {
   const status = useAuthStore((state) => state.status);
   const [balance, setBalance] = useState<WalletBalanceResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useMinimumLoadingState();
   const [error, setError] = useState("");
 
   const loadBalance = useCallback(async (isSilent = false) => {
@@ -36,7 +37,7 @@ export function useWalletBalance() {
         setLoading(false);
       }
     }
-  }, [status]);
+  }, [setLoading, status]);
 
   useEffect(() => {
     if (status === "authenticated") {

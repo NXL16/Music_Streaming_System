@@ -9,9 +9,21 @@ import {
 } from "./recommendation.mapper";
 import { getRecommendationSection } from "./recommendation.api";
 import { RECENTLY_PLAYED_ITEM_EVENT } from "./listening-events";
+import {
+  normalizeRecentlyPlayedCard,
+  RECENTLY_PLAYED_SHELF_ID,
+} from "./recently-played-presentation";
+import {
+  getRecentlyPlayedSnapshot,
+  RECENTLY_PLAYED_PLAYLIST_REMOVED_EVENT,
+  setRecentlyPlayedSnapshot,
+} from "./recently-played-snapshot";
+import { developmentCacheDisabled } from "@/lib/config/development-cache";
+import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 
-const RECENTLY_PLAYED_SHELF_ID = "user-recently-played";
-
+// This is a view snapshot, not a second API cache: it keeps the already
+// rendered Home cards mounted in memory across client navigation so Back can
+// restore the viewport without showing a new skeleton.
 function itemKey(item: Pick<MediaCardProps, "resourceType" | "resourceId">) {
   return `${item.resourceType}:${item.resourceId}`;
 }
@@ -34,12 +46,21 @@ function mergeRecentlyPlayedItems(
 }
 
 export function useRecentlyPlayedSection() {
-  const [serverShelf, setServerShelf] = useState<HomeShelf | null>(null);
+  const initialShelf = developmentCacheDisabled
+    ? undefined
+    : getRecentlyPlayedSnapshot();
+  const [serverShelf, setServerShelf] = useState<HomeShelf | null>(
+    initialShelf ?? null,
+  );
   const [optimisticItems, setOptimisticItems] = useState<MediaCardProps[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useMinimumLoadingState(
+    initialShelf === undefined,
+  );
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    if (developmentCacheDisabled || getRecentlyPlayedSnapshot() === undefined) {
+      setLoading(true);
+    }
 
     try {
       const response = await getRecommendationSection(RECENTLY_PLAYED_SHELF_ID);
@@ -48,15 +69,20 @@ export function useRecentlyPlayedSection() {
         (shelf) => shelf.id === RECENTLY_PLAYED_SHELF_ID,
       );
 
-      setServerShelf(nextShelf ?? null);
+      const nextSnapshot = nextShelf ?? null;
+      if (!developmentCacheDisabled) setRecentlyPlayedSnapshot(nextSnapshot);
+      setServerShelf(nextSnapshot);
     } catch {
+      if (!developmentCacheDisabled) setRecentlyPlayedSnapshot(null);
       setServerShelf(null);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setLoading]);
 
   useEffect(() => {
+    if (!developmentCacheDisabled && getRecentlyPlayedSnapshot() !== undefined)
+      return;
     queueMicrotask(() => void refresh());
   }, [refresh]);
 
@@ -88,7 +114,38 @@ export function useRecentlyPlayedSection() {
         handleRecentlyPlayedItem,
       );
     };
-  }, []);
+  }, [setLoading]);
+
+  useEffect(() => {
+    const handlePlaylistRemoved = (event: Event) => {
+      const playlistId = (event as CustomEvent<string>).detail;
+      if (!playlistId) return;
+
+      setOptimisticItems((items) =>
+        items.filter((item) => item.resourceId !== playlistId),
+      );
+      setServerShelf((current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.filter(
+                (item) => item.resourceId !== playlistId,
+              ),
+            }
+          : null,
+      );
+    };
+
+    window.addEventListener(
+      RECENTLY_PLAYED_PLAYLIST_REMOVED_EVENT,
+      handlePlaylistRemoved,
+    );
+    return () =>
+      window.removeEventListener(
+        RECENTLY_PLAYED_PLAYLIST_REMOVED_EVENT,
+        handlePlaylistRemoved,
+      );
+  }, [setLoading]);
 
   const shelf = useMemo(() => {
     if (!serverShelf && optimisticItems.length === 0) return null;
@@ -111,7 +168,9 @@ export function useRecentlyPlayedSection() {
 
     return {
       ...baseShelf,
-      items: mergedItems,
+      displayKind: "MusicCoverShelf" as const,
+      sourceDisplayKind: "MusicCoverShelf",
+      items: mergedItems.map(normalizeRecentlyPlayedCard),
     };
   }, [optimisticItems, serverShelf]);
 

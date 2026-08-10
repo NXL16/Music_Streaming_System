@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { getApiErrorMessage } from "./api-error";
+import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 
 type ResourceLoader<T> = (signal?: AbortSignal) => Promise<T>;
 
@@ -11,7 +12,7 @@ export function useAsyncResource<T>(
   fallbackErrorMessage: string,
 ) {
   const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useMinimumLoadingState(true);
   const [error, setError] = useState("");
 
   const load = useCallback(
@@ -32,7 +33,7 @@ export function useAsyncResource<T>(
         if (!signal?.aborted) setLoading(false);
       }
     },
-    [fallbackErrorMessage, loadResource],
+    [fallbackErrorMessage, loadResource, setLoading],
   );
 
   useEffect(() => {

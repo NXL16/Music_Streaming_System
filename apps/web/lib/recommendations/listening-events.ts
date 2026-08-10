@@ -1,5 +1,6 @@
 import { http } from "@/lib/api/http";
 import type { MediaCardProps } from "@/components/media/media-card.types";
+import { prependRecentlyPlayedSnapshot } from "./recently-played-snapshot";
 
 export type ListeningEventType = "PLAY_START" | "PLAY_COMPLETE" | "SKIP";
 export const RECENTLY_PLAYED_ITEM_EVENT = "recently-played:item";
@@ -15,6 +16,7 @@ type ListeningEventPayload = {
   albumId?: string;
   playlistId?: string;
   playlistName?: string;
+  playlistCuratorName?: string;
   playlistArtworkUrl?: string;
   playlistArtworkBgColor?: string;
   stationId?: string;
@@ -30,6 +32,7 @@ export async function sendListeningEvent(payload: ListeningEventPayload) {
     payload.recentlyPlayedItem &&
     typeof window !== "undefined"
   ) {
+    prependRecentlyPlayedSnapshot(payload.recentlyPlayedItem);
     window.dispatchEvent(
       new CustomEvent<MediaCardProps>(RECENTLY_PLAYED_ITEM_EVENT, {
         detail: payload.recentlyPlayedItem,

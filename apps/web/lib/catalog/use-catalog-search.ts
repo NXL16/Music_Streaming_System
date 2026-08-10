@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { isAxiosError } from "axios";
 import { searchCatalog } from "./catalog.api";
 import { mapSearchResults, type SearchResults } from "./search.mapper";
+import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 
 const DEBOUNCE_MS = 300;
 
@@ -16,7 +17,7 @@ const EMPTY_RESULTS: SearchResults = {
 
 export function useCatalogSearch(query: string) {
   const [results, setResults] = useState<SearchResults>(EMPTY_RESULTS);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useMinimumLoadingState();
   const [error, setError] = useState<string | null>(null);
   const hasQuery = Boolean(query.trim());
 
@@ -48,7 +49,7 @@ export function useCatalogSearch(query: string) {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [query]);
+  }, [query, setLoading]);
 
   // Empty-query state is derived instead of synchronously resetting state in
   // the effect. This avoids an unnecessary render cascade when the user

@@ -3,8 +3,8 @@
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 
 const DEFAULT_VOLUME = 0.7;
-const VOLUME_STORAGE_KEY = "music-player:volume:v1";
-const VOLUME_CHANGE_EVENT = "music-player:volume-change";
+const VOLUME_STORAGE_KEY = "volume:v1";
+const VOLUME_CHANGE_EVENT = "volume-change";
 
 type StoredVolume = {
   volume: number;
@@ -103,8 +103,7 @@ export function usePersistentVolume() {
 
       saveStoredVolume({
         volume,
-        lastAudibleVolume:
-          volume > 0 ? volume : storedVolume.lastAudibleVolume,
+        lastAudibleVolume: volume > 0 ? volume : storedVolume.lastAudibleVolume,
       });
     },
     [storedVolume.lastAudibleVolume],

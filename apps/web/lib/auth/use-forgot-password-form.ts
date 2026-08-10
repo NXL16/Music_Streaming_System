@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { getApiErrorMessage } from "@/lib/api/api-error";
 import { forgotPassword } from "@/lib/auth/auth.api";
+import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 
 type ForgotPasswordForm = {
   email: string;
@@ -16,7 +17,7 @@ export function useForgotPasswordForm() {
   const [form, setForm] = useState<ForgotPasswordForm>(initialForm);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useMinimumLoadingState();
 
   function updateField<TField extends keyof ForgotPasswordForm>(
     field: TField,

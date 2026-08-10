@@ -6,6 +6,7 @@ import { getApiErrorMessage } from "@/lib/api/api-error";
 import { signup } from "@/lib/auth/auth.api";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { getOrCreateDeviceId } from "@/lib/auth/device-id";
+import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 
 type SignupForm = {
   displayName: string;
@@ -27,7 +28,7 @@ export function useSignupForm() {
 
   const [form, setForm] = useState<SignupForm>(initialSignupForm);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useMinimumLoadingState();
 
   function updateField<TField extends keyof SignupForm>(
     field: TField,

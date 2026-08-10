@@ -1,4 +1,5 @@
 import { http } from "@/lib/api/http";
+import { invalidateCatalogResourceCache } from "@/lib/catalog/catalog.api";
 
 type AdminPayload = Record<string, unknown>;
 
@@ -21,11 +22,13 @@ export async function saveCatalogDraft(
 }
 
 export async function publishCatalogDraft(draftId: string) {
-  return (
+  const response = (
     await http.post(
       `/admin/catalog/drafts/${encodeURIComponent(draftId)}/publish`,
     )
   ).data;
+  invalidateCatalogResourceCache();
+  return response;
 }
 
 export async function deleteCatalogDraft(draftId: string) {

@@ -13,6 +13,7 @@ import type {
   CatalogAlbumResource,
 } from "./catalog.types";
 import type { PlayerSong } from "@/lib/player/use-player-store";
+import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 
 const CACHE_TTL_MS = 2 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 12;
@@ -138,7 +139,7 @@ export function useCatalogArtist(
   const [artist, setArtist] = useState<CatalogArtistResource | null>(null);
   const [albums, setAlbums] = useState<CatalogAlbumResource[]>([]);
   const [songs, setSongs] = useState<PlayerSong[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useMinimumLoadingState(true);
   const [error, setError] = useState("");
 
   const fetchData = useCallback(
@@ -195,7 +196,7 @@ export function useCatalogArtist(
     });
 
     return () => controller.abort();
-  }, [fetchData]);
+  }, [fetchData, setLoading]);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -215,7 +216,7 @@ export function useCatalogArtist(
     } finally {
       setLoading(false);
     }
-  }, [fetchData]);
+  }, [fetchData, setLoading]);
 
   return {
     artist,

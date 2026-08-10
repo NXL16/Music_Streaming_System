@@ -5,9 +5,11 @@ import {
   removeFavoriteSong,
 } from "@/lib/songs/song.api";
 import type { SongSummary } from "@/lib/songs/song.types";
+import type { FavoriteCollection } from "@/lib/songs/song.types";
 
 type FavoriteState = {
   songs: SongSummary[];
+  collection?: FavoriteCollection;
   loading: boolean;
   loaded: boolean;
   hydrate: (force?: boolean) => Promise<void>;
@@ -22,8 +24,12 @@ export const useFavoriteStore = create<FavoriteState>((set, get) => ({
     if (get().loading || (get().loaded && !force)) return;
     set({ loading: true });
     try {
-      const response = await listFavoriteSongs({ limit: 50 });
-      set({ songs: response.songs ?? [], loaded: true });
+      const response = await listFavoriteSongs({ limit: 50 }, { force });
+      set({
+        songs: response.songs ?? [],
+        collection: response.collection,
+        loaded: true,
+      });
     } finally {
       set({ loading: false });
     }
@@ -33,7 +39,9 @@ export const useFavoriteStore = create<FavoriteState>((set, get) => ({
     const currentlyFavorite = get().songs.some((song) => song.id === songId);
     if (currentlyFavorite) {
       await removeFavoriteSong(songId);
-      set((state) => ({ songs: state.songs.filter((song) => song.id !== songId) }));
+      set((state) => ({
+        songs: state.songs.filter((song) => song.id !== songId),
+      }));
       return false;
     }
 
@@ -44,3 +52,12 @@ export const useFavoriteStore = create<FavoriteState>((set, get) => ({
     return true;
   },
 }));
+
+export function clearFavoriteStore() {
+  useFavoriteStore.setState({
+    songs: [],
+    collection: undefined,
+    loading: false,
+    loaded: false,
+  });
+}

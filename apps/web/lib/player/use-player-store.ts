@@ -26,6 +26,10 @@ export type PlayerSong = {
   sourcePlaylist?: {
     id: string;
     name: string;
+    playlistKind?: "catalog" | "favorite" | "user";
+    isUserPlaylist?: boolean;
+    curatorName?: string;
+    href?: string;
     artworkUrl: string;
     artworkSrcSet?: string;
     artworkBgColor?: string;
@@ -61,6 +65,7 @@ type PlayerState = {
   setQueue: (songs: PlayerSong[], startIndex?: number) => void;
   reorderUpcomingQueue: (activeSongId: string, overSongId: string) => void;
   removeUpcomingSong: (songId: string) => void;
+  removePlaylistSong: (playlistId: string, songId: string) => void;
   clearUpcomingQueue: () => void;
   playShuffledQueue: (songs: PlayerSong[]) => void;
   startStation: (songs: PlayerSong[]) => void;
@@ -234,6 +239,52 @@ export const usePlayerStore = create<PlayerState>((set) => ({
         originalQueue: state.shuffleEnabled
           ? state.originalQueue.filter((song) => song.id !== songId)
           : queue,
+      };
+    }),
+  removePlaylistSong: (playlistId, songId) =>
+    set((state) => {
+      const belongsToPlaylist = (song: PlayerSong) =>
+        song.id === songId && song.sourcePlaylist?.id === playlistId;
+      const currentSongIsRemoved =
+        state.currentSong !== null && belongsToPlaylist(state.currentSong);
+      const queue = state.queue.filter((song) => !belongsToPlaylist(song));
+      const originalQueue = state.originalQueue.filter(
+        (song) => !belongsToPlaylist(song),
+      );
+
+      if (!currentSongIsRemoved) {
+        const currentIndex = state.currentSong
+          ? queue.findIndex((song) => song.id === state.currentSong?.id)
+          : -1;
+        return {
+          queue,
+          originalQueue,
+          currentIndex,
+        };
+      }
+
+      const nextSong = state.queue
+        .slice(state.currentIndex + 1)
+        .find((song) => song.sourcePlaylist?.id === playlistId && song.playbackUrl);
+
+      if (!nextSong) {
+        return {
+          queue,
+          originalQueue,
+          currentSong: null,
+          currentIndex: -1,
+          playbackTimeMs: 0,
+          playing: false,
+        };
+      }
+
+      return {
+        queue,
+        originalQueue,
+        currentSong: nextSong,
+        currentIndex: queue.findIndex((song) => song.id === nextSong.id),
+        playbackTimeMs: 0,
+        playing: true,
       };
     }),
   clearUpcomingQueue: () =>

@@ -6,6 +6,7 @@ import { getApiErrorMessage } from "@/lib/api/api-error";
 import { verifyTwoFactorLogin } from "@/lib/auth/auth.api";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { resolveTwoFactorVerificationInput } from "@/lib/auth/two-factor-verification";
+import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 import {
   clearTwoFactorChallengeId,
   getTwoFactorChallengeId,
@@ -17,7 +18,7 @@ export function useTwoFactorLoginForm() {
 
   const [verificationInput, setVerificationInput] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useMinimumLoadingState();
 
   useEffect(() => {
     const challengeId = getTwoFactorChallengeId();

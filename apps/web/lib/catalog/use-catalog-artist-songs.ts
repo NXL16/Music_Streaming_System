@@ -7,14 +7,15 @@ import {
   invalidateCatalogArtistSongPages,
 } from "./artist-song-pages";
 import type { PlayerSong } from "@/lib/player/use-player-store";
+import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 
 const LOAD_MORE_DELAY_MS = 300;
 
 export function useCatalogArtistSongs(artistId: string) {
   const [songs, setSongs] = useState<PlayerSong[]>([]);
   const [nextCursor, setNextCursor] = useState<string | undefined>();
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const [loading, setLoading] = useMinimumLoadingState(true);
+  const [loadingMore, setLoadingMore] = useMinimumLoadingState();
   const [error, setError] = useState("");
   const isMountedRef = useRef(true);
   const loadMoreRequestIdRef = useRef(0);
@@ -65,7 +66,7 @@ export function useCatalogArtistSongs(artistId: string) {
     return () => {
       active = false;
     };
-  }, [fetchFirstPage]);
+  }, [fetchFirstPage, setLoading, setLoadingMore]);
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
@@ -110,7 +111,7 @@ export function useCatalogArtistSongs(artistId: string) {
         setLoadingMore(false);
       }
     }
-  }, [artistId, loadingMore, nextCursor]);
+  }, [artistId, loadingMore, nextCursor, setLoadingMore]);
 
   const reload = useCallback(async () => {
     invalidateCatalogArtistSongPages(artistId);
@@ -133,7 +134,7 @@ export function useCatalogArtistSongs(artistId: string) {
     } finally {
       if (isMountedRef.current) setLoading(false);
     }
-  }, [artistId, fetchFirstPage]);
+  }, [artistId, fetchFirstPage, setLoading]);
 
   return {
     songs,

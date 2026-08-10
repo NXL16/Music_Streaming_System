@@ -3,13 +3,13 @@ import type {
   CatalogArtwork,
   CatalogResponse,
 } from "./catalog.types";
-import { artistRoute } from "./artist-route";
 import {
   getArtworkRenditionUrl,
   getArtworkSrcSet,
 } from "@/lib/media/artwork";
 import { albumRoute } from "./album-route";
 import { songRoute } from "./song-route";
+import { catalogArtists } from "./catalog-artists";
 
 export function catalogArtworkUrl(
   artwork: CatalogArtwork | undefined,
@@ -29,26 +29,7 @@ function mapTrackArtists(
   response: CatalogResponse,
   song: CatalogResponse["resources"]["songs"][string],
 ) {
-  const artistResources = response.resources.artists;
-  const artists = new Map<
-    string,
-    { id: string; name: string; url?: string }
-  >();
-
-  for (const artistReference of song.relationships.artists?.data ?? []) {
-    const artist = artistResources[artistReference.id];
-    if (!artist) continue;
-
-    artists.set(artist.id, {
-      id: artist.id,
-      name: artist.attributes.name,
-      ...(artist.attributes.url
-        ? { url: artistRoute(artist.attributes.url, artist.id) }
-        : {}),
-    });
-  }
-
-  return [...artists.values()];
+  return catalogArtists(response, song.relationships.artists?.data);
 }
 
 export function mapCatalogTracks(response: CatalogResponse): PlayerSong[] {

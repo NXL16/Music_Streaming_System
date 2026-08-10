@@ -1,7 +1,7 @@
 import type {
   MediaCardArtist,
   MediaCardProps,
-} from "@/components/media/media-card.types";
+} from "@/lib/media/media-card.types";
 import type {
   Artwork,
   CatalogResource,
@@ -12,11 +12,13 @@ import type {
 } from "./recommendation.types";
 
 import type { MediaShelfDisplayKind } from "@/components/media/media-shelf";
-import { artistRoute } from "@/lib/catalog/artist-route";
 import { albumRoute } from "@/lib/catalog/album-route";
-import { songRoute } from "@/lib/catalog/song-route";
 import { formatArtistNames } from "@/lib/media/artist-names";
-import { getArtworkRenditionUrl, getArtworkSrcSet } from "@/lib/media/artwork";
+import {
+  createMediaResourceCard,
+  type CanonicalMediaResourceType,
+} from "@/lib/media/normalize-media-resource";
+import { projectLinkedArtists } from "@/lib/media/project-linked-artists";
 
 export type HomeShelf = {
   id: string;
@@ -36,30 +38,6 @@ export type HomeShelf = {
   sourceAlbumHref?: string;
   items: MediaCardProps[];
 };
-
-function artworkUrl(
-  artwork: Artwork,
-  width: number,
-  useHeroRenditions = false,
-) {
-  return getArtworkRenditionUrl(
-    artwork,
-    width,
-    useHeroRenditions ? "hero" : "default",
-  );
-}
-
-function artworkSrcSet(
-  artwork: Artwork,
-  fallbackSizes: Array<[width: number, height?: number]>,
-  useHeroRenditions = false,
-) {
-  return getArtworkSrcSet(
-    artwork,
-    fallbackSizes.map(([width]) => width),
-    useHeroRenditions ? "hero" : "default",
-  );
-}
 
 function formatColor(color: string | undefined) {
   const normalized = color?.replace(/^#/, "").trim();
@@ -215,9 +193,7 @@ function getSectionRefs(
  */
 function sequenceShelfArtwork<
   T extends Pick<MediaCardProps, "id" | "imageUrl">,
->(
-  items: T[],
-) {
+>(items: T[]) {
   const remaining = [...items];
   const ordered: T[] = [];
   let previousArtwork = "";
@@ -236,7 +212,9 @@ function sequenceShelfArtwork<
 
 function shelfArtworkKey(item: Pick<MediaCardProps, "id" | "imageUrl">) {
   const checksum = item.imageUrl?.match(/(?:^|\/)([a-f0-9]{64})(?:\/|$)/i)?.[1];
-  return checksum ? `checksum:${checksum.toLowerCase()}` : item.imageUrl || item.id;
+  return checksum
+    ? `checksum:${checksum.toLowerCase()}`
+    : item.imageUrl || item.id;
 }
 
 function closestArtwork(
@@ -322,7 +300,7 @@ function getArtists(
   const artistResources = response.resources?.artists;
   if (!artistResources) return [];
 
-  return artistRefs.flatMap((artistRef) => {
+  return projectLinkedArtists(artistRefs.flatMap((artistRef) => {
     const artist = artistResources[artistRef.id];
     const name = artist?.attributes?.name;
     const artistUrl = artist?.attributes?.url;
@@ -332,10 +310,10 @@ function getArtists(
       {
         id: artist.id,
         name,
-        url: artistRoute(artistUrl, artist.id),
+        url: artistUrl,
       },
     ];
-  });
+  }));
 }
 
 function getCardType(
@@ -348,24 +326,6 @@ function getCardType(
   if (displayKind === "MusicSocialCardShelf") return "social";
   if (resourceType === "stations") return "station";
   return "collection";
-}
-
-function getResourceSlug(resource: CatalogResource) {
-  if (resource.type === "albums") {
-    const albumUrl = resource.attributes?.url;
-    return albumUrl ? albumRoute(albumUrl, resource.id) : undefined;
-  }
-  if (resource.type === "playlists") {
-    return `/playlist/${encodeURIComponent(resource.id)}`;
-  }
-  if (resource.type === "songs") {
-    return songRoute(resource.id);
-  }
-  if (resource.type === "artists") {
-    const artistUrl = resource.attributes?.url;
-    return artistUrl ? artistRoute(artistUrl, resource.id) : undefined;
-  }
-  return resource.attributes?.url;
 }
 
 export function mapHomeRecommendations(
@@ -441,53 +401,52 @@ export function mapHomeRecommendations(
       const notes = resource.attributes.plainEditorialNotes;
 
       return [
-        {
-          id: `${resource.type}-${resource.id}`,
-          resourceId: resource.id,
-          resourceType: resource.type,
-          cardType: getCardType(resource.type, isHero, displayKind),
-          title: resource.attributes.name ?? notes?.name ?? "Untitled",
-          subtitle,
-          slug: getResourceSlug(resource),
-          artists: getArtists(response, resource),
-          imageUrl: isHero
-            ? artworkUrl(artwork, 600, true)
-            : artworkUrl(artwork, 632),
-          imageSrcSet: isHero
-            ? artworkSrcSet(
-                artwork,
-                [
-                  [450, 600],
-                  [600, 800],
-                  [900, 1200],
-                  [1200, 1600],
-                ],
-                true,
-              )
-            : artworkSrcSet(artwork, [[296], [316], [592], [632]]),
-          artworkColors: {
-            bg: color,
-            main: color,
-            textPrimary: primaryTextColor,
-            textSecondary: secondaryTextColor,
-            ...(tertiaryTextColor ? { textTertiary: tertiaryTextColor } : {}),
-            ...(scrimColor && heroPalette?.scrimOpacity !== undefined
-              ? {
-                  textScrimColor: scrimColor,
-                  textScrimOpacity: heroPalette.scrimOpacity,
-                }
-              : {}),
+        createMediaResourceCard(
+          {
+            id: resource.id,
+            type: resource.type as CanonicalMediaResourceType,
+            name: resource.attributes.name ?? notes?.name ?? "Untitled",
+            url: resource.attributes.url,
+            artistName: resource.attributes.artistName,
+            curatorName: resource.attributes.curatorName,
+            artwork,
+            contentRating:
+              resource.type === "albums"
+                ? resource.attributes.contentRating
+                : undefined,
+            isUserPlaylist: Boolean(
+              (resource.attributes as { isUserPlaylist?: boolean })
+                .isUserPlaylist,
+            ),
           },
-          ...(videoAsset?.video ? { videoSrc: videoAsset.video } : {}),
-          typeTag: notes?.tag ?? (isHero ? sectionTitle : notes?.name),
-          description:
-            notes?.short ??
-            notes?.standard ??
-            resource.attributes.description?.short ??
-            resource.attributes.description?.standard ??
+          {
+            cardType: getCardType(resource.type, isHero, displayKind),
             subtitle,
-          altText: artwork.alt ?? resource.attributes.name,
-        },
+            artists: getArtists(response, resource),
+            artworkColors: {
+              bg: color,
+              main: color,
+              textPrimary: primaryTextColor,
+              textSecondary: secondaryTextColor,
+              ...(tertiaryTextColor ? { textTertiary: tertiaryTextColor } : {}),
+              ...(scrimColor && heroPalette?.scrimOpacity !== undefined
+                ? {
+                    textScrimColor: scrimColor,
+                    textScrimOpacity: heroPalette.scrimOpacity,
+                  }
+                : {}),
+            },
+            ...(videoAsset?.video ? { videoSrc: videoAsset.video } : {}),
+            typeTag: notes?.tag ?? (isHero ? sectionTitle : notes?.name),
+            description:
+              notes?.short ??
+              notes?.standard ??
+              resource.attributes.description?.short ??
+              resource.attributes.description?.standard ??
+              subtitle,
+            altText: artwork.alt ?? resource.attributes.name,
+          },
+        ),
       ];
     });
 

@@ -7,6 +7,7 @@ import { login } from "@/lib/auth/auth.api";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { getOrCreateDeviceId } from "@/lib/auth/device-id";
 import { saveTwoFactorChallengeId } from "@/lib/auth/two-factor-challenge-store";
+import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 
 type LoginForm = {
   identifier: string;
@@ -24,7 +25,7 @@ export function useLoginForm() {
 
   const [form, setForm] = useState<LoginForm>(initialLoginForm);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useMinimumLoadingState();
 
   function updateField<TField extends keyof LoginForm>(
     field: TField,

@@ -1,4 +1,10 @@
 import { http } from "@/lib/api/http";
+import {
+  getCachedQuery,
+  invalidateCachedQuery,
+  setCachedQuery,
+} from "@/lib/api/query-cache";
+import { clearClientSessionCache } from "./session-cache";
 import type {
   ApiResponse,
   AuthSession,
@@ -28,12 +34,16 @@ import type {
   UserRole,
 } from "./auth.types";
 
+const PROFILE_KEY = "auth:profile";
+const PROFILE_TTL_MS = 5 * 60 * 1000;
+
 export async function signup(payload: SignupPayload) {
   const response = await http.post<ApiResponse<AuthSession>>(
     "/auth/signup",
     payload,
   );
 
+  clearClientSessionCache();
   return response.data;
 }
 
@@ -43,6 +53,7 @@ export async function login(payload: LoginPayload) {
     payload,
   );
 
+  clearClientSessionCache();
   return response.data;
 }
 
@@ -52,6 +63,7 @@ export async function loginWithGoogle(payload: GoogleLoginPayload) {
     payload,
   );
 
+  clearClientSessionCache();
   return response.data;
 }
 
@@ -61,13 +73,15 @@ export async function verifyTwoFactorLogin(payload: TwoFactorLoginPayload) {
     payload,
   );
 
+  clearClientSessionCache();
   return response.data;
 }
 
 export async function beginTwoFactorSetup() {
-  const response = await http.post<ApiResponse<BeginTwoFactorSetupResponse>>(
-    "/auth/2fa/setup",
-  );
+  const response =
+    await http.post<ApiResponse<BeginTwoFactorSetupResponse>>(
+      "/auth/2fa/setup",
+    );
 
   return response.data;
 }
@@ -104,9 +118,11 @@ export async function regenerateTwoFactorRecoveryCodes(
 }
 
 export async function getProfile() {
-  const response = await http.get<ApiResponse<UserProfile>>("/auth/me");
-
-  return response.data;
+  return getCachedQuery(
+    PROFILE_KEY,
+    async () => (await http.get<ApiResponse<UserProfile>>("/auth/me")).data,
+    PROFILE_TTL_MS,
+  );
 }
 
 export async function updateProfile(payload: UpdateProfilePayload) {
@@ -115,6 +131,7 @@ export async function updateProfile(payload: UpdateProfilePayload) {
     payload,
   );
 
+  setCachedQuery(PROFILE_KEY, response.data, PROFILE_TTL_MS);
   return response.data;
 }
 
@@ -130,6 +147,7 @@ export async function finalizeAvatarUpload(assetId: string) {
   const response = await http.post<ApiResponse<AvatarFinalizeResponse>>(
     `/auth/me/avatar/${encodeURIComponent(assetId)}/finalize`,
   );
+  invalidateCachedQuery(PROFILE_KEY);
   return response.data;
 }
 
@@ -164,6 +182,7 @@ export async function logout() {
   const response =
     await http.post<ApiResponse<Record<string, never>>>("/auth/logout");
 
+  clearClientSessionCache();
   return response.data;
 }
 
@@ -187,6 +206,7 @@ export async function logoutAll() {
   const response =
     await http.post<ApiResponse<Record<string, never>>>("/auth/logout-all");
 
+  clearClientSessionCache();
   return response.data;
 }
 

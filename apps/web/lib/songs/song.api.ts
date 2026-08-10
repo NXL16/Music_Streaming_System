@@ -1,11 +1,16 @@
 import { http } from "@/lib/api/http";
+import { getCachedQuery, invalidateCachedQuery } from "@/lib/api/query-cache";
 import type {
   DeleteSongResponse,
   GetSongResponse,
+  ListFavoriteSongsResponse,
   ListSongsResponse,
   RequestUploadPayload,
   RequestUploadResponse,
 } from "./song.types";
+
+const FAVORITES_KEY = "songs:favorites";
+const FAVORITES_TTL_MS = 60_000;
 
 export async function listPublicSongs(params?: {
   cursor?: string;
@@ -39,24 +44,35 @@ export async function listMySongs(params?: {
   return response.data;
 }
 
-export async function listFavoriteSongs(params?: {
-  cursor?: string;
-  limit?: number;
-}) {
-  const response = await http.get<ListSongsResponse>("/songs/favorites", {
-    params: {
-      cursor: params?.cursor,
-      limit: params?.limit ?? 50,
-    },
-  });
+export async function listFavoriteSongs(
+  params?: {
+    cursor?: string;
+    limit?: number;
+  },
+  options?: { force?: boolean },
+) {
+  if (options?.force) invalidateCachedQuery(FAVORITES_KEY);
 
-  return response.data;
+  return getCachedQuery(
+    FAVORITES_KEY,
+    async () =>
+      (
+        await http.get<ListFavoriteSongsResponse>("/songs/favorites", {
+          params: {
+            cursor: params?.cursor,
+            limit: params?.limit ?? 50,
+          },
+        })
+      ).data,
+    FAVORITES_TTL_MS,
+  );
 }
 
 export async function addFavoriteSong(songId: string) {
   const response = await http.post<{ success: boolean }>(
     `/songs/${encodeURIComponent(songId)}/favorite`,
   );
+  invalidateCachedQuery(FAVORITES_KEY);
   return response.data;
 }
 
@@ -64,6 +80,7 @@ export async function removeFavoriteSong(songId: string) {
   const response = await http.delete<{ success: boolean }>(
     `/songs/${encodeURIComponent(songId)}/favorite`,
   );
+  invalidateCachedQuery(FAVORITES_KEY);
   return response.data;
 }
 

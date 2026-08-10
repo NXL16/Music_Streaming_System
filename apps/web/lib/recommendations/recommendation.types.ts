@@ -59,6 +59,7 @@ export type CatalogResourceAttributes = {
     [key: string]: unknown;
   };
   url?: string;
+  contentRating?: string;
   [key: string]: unknown;
 };
 

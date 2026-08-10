@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getApiErrorMessage } from "@/lib/api/api-error";
 import { resetPassword } from "@/lib/auth/auth.api";
+import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 
 type ResetPasswordForm = {
   newPassword: string;
@@ -24,7 +25,7 @@ export function useResetPasswordForm() {
   const [form, setForm] = useState<ResetPasswordForm>(initialForm);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useMinimumLoadingState();
 
   function updateField<TField extends keyof ResetPasswordForm>(
     field: TField,

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { getApiErrorMessage } from "@/lib/api/api-error";
 import { changePassword, logout } from "@/lib/auth/auth.api";
 import { useAuthStore } from "@/lib/auth/auth-store";
+import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 
 type ChangePasswordForm = {
   currentPassword: string;
@@ -24,7 +25,7 @@ export function useChangePasswordForm() {
 
   const [form, setForm] = useState<ChangePasswordForm>(initialForm);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useMinimumLoadingState();
 
   function updateField<TField extends keyof ChangePasswordForm>(
     field: TField,

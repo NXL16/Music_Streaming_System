@@ -1,17 +1,14 @@
-import type { MediaCardProps } from "@/components/media/media-card.types";
+import type { MediaCardProps } from "@/lib/media/media-card.types";
 import type {
   CatalogAlbumResource,
   CatalogArtistResource,
-  CatalogArtwork,
   CatalogPlaylistResource,
   CatalogResponse,
   CatalogSongResource,
 } from "./catalog.types";
-import { catalogArtworkSrcSet, catalogArtworkUrl } from "./catalog.mapper";
-import { artistRoute } from "./artist-route";
-import { albumRoute } from "./album-route";
-import { songRoute } from "./song-route";
 import { formatArtistNames } from "@/lib/media/artist-names";
+import { createMediaResourceCard } from "@/lib/media/normalize-media-resource";
+import { catalogArtists } from "./catalog-artists";
 
 export type SearchResults = {
   songs: MediaCardProps[];
@@ -20,85 +17,78 @@ export type SearchResults = {
   isEmpty: boolean;
 };
 
-const CARD_WIDTHS = [296, 316, 592, 632];
-
-function artworkColor(artwork: CatalogArtwork | undefined) {
-  const normalized = artwork?.bgColor?.replace(/^#/, "").trim();
-  return normalized && /^[0-9a-f]{6}$/i.test(normalized)
-    ? `#${normalized}`
-    : "#2c2c2e";
-}
-
-function baseCard(
-  id: string,
-  resourceType: string,
-  artwork: CatalogArtwork | undefined,
-): Pick<
-  MediaCardProps,
-  "id" | "resourceId" | "resourceType" | "imageUrl" | "imageSrcSet" | "artworkColors"
-> {
-  const color = artworkColor(artwork);
-  return {
-    id: `${resourceType}-${id}`,
-    resourceId: id,
-    resourceType,
-    imageUrl: catalogArtworkUrl(artwork, 316),
-    imageSrcSet: catalogArtworkSrcSet(artwork, CARD_WIDTHS),
-    artworkColors: { bg: color, main: color },
-  };
-}
-
-function mapSong(song: CatalogSongResource): MediaCardProps {
-  return {
-    ...baseCard(song.id, "songs", song.attributes.artwork),
-    cardType: "collection",
-    title: song.attributes.name,
-    subtitle: formatArtistNames(song.attributes.artistName),
-    slug: songRoute(song.id),
-    altText: song.attributes.name,
-  };
+function mapSong(
+  response: CatalogResponse,
+  song: CatalogSongResource,
+): MediaCardProps {
+  return createMediaResourceCard(
+    {
+      id: song.id,
+      type: "songs",
+      name: song.attributes.name,
+      artistName: formatArtistNames(song.attributes.artistName),
+      artwork: song.attributes.artwork,
+    },
+    {
+      cardType: "collection",
+      artists: catalogArtists(response, song.relationships.artists?.data),
+    },
+  );
 }
 
 function mapArtist(artist: CatalogArtistResource): MediaCardProps {
-  const url = artist.attributes.url;
-  return {
-    ...baseCard(artist.id, "artists", artist.attributes.artwork),
-    cardType: "circle",
-    title: artist.attributes.name,
-    subtitle: "Nghệ sĩ",
-    slug: url ? artistRoute(url, artist.id) : undefined,
-    altText: artist.attributes.name,
-  };
+  return createMediaResourceCard(
+    {
+      id: artist.id,
+      type: "artists",
+      name: artist.attributes.name,
+      url: artist.attributes.url,
+      artwork: artist.attributes.artwork,
+    },
+    { cardType: "circle", subtitle: "Nghệ sĩ" },
+  );
 }
 
-function mapAlbum(album: CatalogAlbumResource): MediaCardProps {
-  const url = album.attributes.url;
-  return {
-    ...baseCard(album.id, "albums", album.attributes.artwork),
-    cardType: "collection",
-    title: album.attributes.name,
-    subtitle: formatArtistNames(album.attributes.artistName),
-    slug: url ? albumRoute(url, album.id) : undefined,
-    altText: album.attributes.name,
-  };
+function mapAlbum(
+  response: CatalogResponse,
+  album: CatalogAlbumResource,
+): MediaCardProps {
+  return createMediaResourceCard(
+    {
+      id: album.id,
+      type: "albums",
+      name: album.attributes.name,
+      url: album.attributes.url,
+      artistName: formatArtistNames(album.attributes.artistName),
+      artwork: album.attributes.artwork,
+      contentRating: album.attributes.contentRating,
+    },
+    {
+      cardType: "collection",
+      artists: catalogArtists(response, album.relationships.artists?.data),
+    },
+  );
 }
 
 function mapPlaylist(playlist: CatalogPlaylistResource): MediaCardProps {
-  return {
-    ...baseCard(playlist.id, "playlists", playlist.attributes.artwork),
-    cardType: "collection",
-    title: playlist.attributes.name,
-    subtitle: playlist.attributes.curatorName || "Playlist",
-    slug: `/playlist/${encodeURIComponent(playlist.id)}`,
-    altText: playlist.attributes.name,
-  };
+  return createMediaResourceCard(
+    {
+      id: playlist.id,
+      type: "playlists",
+      name: playlist.attributes.name,
+      url: playlist.attributes.url,
+      curatorName: playlist.attributes.curatorName || "Playlist",
+      artwork: playlist.attributes.artwork,
+    },
+    { cardType: "collection" },
+  );
 }
 
 export function mapCatalogAlbums(response: CatalogResponse): MediaCardProps[] {
   return response.data.flatMap((reference) => {
     if (reference.type !== "albums") return [];
     const album = response.resources.albums[reference.id];
-    return album ? [mapAlbum(album)] : [];
+    return album ? [mapAlbum(response, album)] : [];
   });
 }
 
@@ -123,13 +113,13 @@ export function mapSearchResults(response: CatalogResponse): SearchResults {
   for (const reference of response.data) {
     if (reference.type === "songs") {
       const song = response.resources.songs[reference.id];
-      if (song) songs.push(mapSong(song));
+      if (song) songs.push(mapSong(response, song));
     } else if (reference.type === "artists") {
       const artist = response.resources.artists[reference.id];
       if (artist) artists.push(mapArtist(artist));
     } else if (reference.type === "albums") {
       const album = response.resources.albums[reference.id];
-      if (album) albums.push(mapAlbum(album));
+      if (album) albums.push(mapAlbum(response, album));
     }
   }
 

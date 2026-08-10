@@ -8,6 +8,7 @@ import {
   updateProfile,
 } from "@/lib/auth/auth.api";
 import { useAuthStore } from "@/lib/auth/auth-store";
+import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 
 type EditProfileForm = {
   displayName: string;
@@ -51,7 +52,7 @@ export function useEditProfileForm(onSaved?: () => void) {
 
   const [form, setForm] = useState<EditProfileForm>(initialForm);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useMinimumLoadingState();
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
 
   useEffect(() => {

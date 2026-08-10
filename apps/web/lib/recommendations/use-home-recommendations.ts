@@ -7,12 +7,16 @@ import {
   invalidateHomeRecommendationsCache,
 } from "./recommendation.api";
 import type { RecommendationResponse } from "./recommendation.types";
+import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 
 export function useHomeRecommendations() {
   const cached = getCachedHomeRecommendations();
   const [data, setData] = useState<RecommendationResponse | null>(cached);
-  const [loading, setLoading] = useState(cached === null);
-  const [needsInitialRequest] = useState(cached === null);
+  const [loading, setLoading] = useMinimumLoadingState(cached === null);
+  // A snapshot is valid UI for instant Back navigation. Revalidate on every
+  // mount; the API layer coalesces requests and serves a fresh cache without
+  // a network call, while stale data refreshes in the background.
+  const [needsInitialRequest] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(
@@ -33,7 +37,7 @@ export function useHomeRecommendations() {
         if (!signal?.aborted) setLoading(false);
       }
     },
-    [],
+    [setLoading],
   );
 
   useEffect(() => {

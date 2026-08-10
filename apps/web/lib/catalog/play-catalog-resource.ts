@@ -1,8 +1,13 @@
-import { getCatalogAlbum, getCatalogPlaylistTracks } from "./catalog.api";
-import { mapCatalogTracks } from "./catalog.mapper";
+import { getCatalogAlbum, getCatalogPlaylist } from "./catalog.api";
+import {
+  catalogArtworkSrcSet,
+  catalogArtworkUrl,
+  mapCatalogTracks,
+} from "./catalog.mapper";
 import { usePlayerStore } from "@/lib/player/use-player-store";
-import { isDailyMixId, loadDailyMix } from "@/lib/recommendations/daily-mix";
 import { recordPlayFromRecommendationOpen } from "@/lib/recommendations/recommendation.api";
+import { playlistRoute } from "./playlist-route";
+import { withPlaylistPlaybackSource } from "@/lib/player/playlist-playback-source";
 
 const pendingRequests = new Map<string, Promise<boolean>>();
 
@@ -21,32 +26,40 @@ export function playCatalogResource(
   const existing = pendingRequests.get(key);
   if (existing) return existing;
 
-  if (resourceType === "playlists" && isDailyMixId(normalizedId)) {
-    const request = loadDailyMix(normalizedId)
-      .then((mix) => {
-        if (!mix?.tracks.length) return false;
-
-        usePlayerStore.getState().setQueue(mix.tracks);
-        recordPlayFromRecommendationOpen(resourceType, normalizedId);
-        return true;
-      })
-      .catch(() => false)
-      .finally(() => {
-        pendingRequests.delete(key);
-      });
-
-    pendingRequests.set(key, request);
-    return request;
-  }
-
   const request = (
     resourceType === "albums"
       ? getCatalogAlbum(normalizedId)
-      : getCatalogPlaylistTracks(normalizedId)
+      : getCatalogPlaylist(normalizedId)
   )
     .then((response) => {
-      const tracks = mapCatalogTracks(response);
+      let tracks = mapCatalogTracks(response);
       if (!tracks.some((track) => track.playbackUrl)) return false;
+
+      if (resourceType === "playlists") {
+        const root = response.data.find(
+          (reference) => reference.type === "playlists",
+        );
+        const playlist = root
+          ? response.resources.playlists[root.id]
+          : undefined;
+        if (!playlist) return false;
+
+        const artwork = playlist.attributes.artwork;
+        tracks = withPlaylistPlaybackSource(tracks, {
+          id: playlist.id,
+          name: playlist.attributes.name,
+          curatorName: playlist.attributes.curatorName,
+          href: playlistRoute(playlist.attributes.url, playlist.id),
+          artworkUrl:
+            catalogArtworkUrl(artwork, 316) ?? tracks[0]?.artworkUrl ?? "",
+          artworkSrcSet:
+            catalogArtworkSrcSet(artwork, [40, 80, 316, 632]) ||
+            tracks[0]?.artworkSrcSet,
+          artworkBgColor: artwork?.bgColor
+            ? `#${artwork.bgColor.replace(/^#/, "")}`
+            : tracks[0]?.artworkBgColor,
+        });
+      }
 
       usePlayerStore.getState().setQueue(tracks);
       recordPlayFromRecommendationOpen(resourceType, normalizedId);

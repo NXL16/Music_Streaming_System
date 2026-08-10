@@ -10,6 +10,12 @@ export type SongSummary = {
   durationSec: number;
   createdAt: number;
   coverUrl: string;
+  artistId?: string;
+  artistUrl?: string;
+  artists?: Array<{ id: string; name: string; url: string }>;
+  albumId?: string;
+  albumUrl?: string;
+  contentRating?: string;
 };
 
 export type SongDetail = {
@@ -33,6 +39,18 @@ export type ListSongsResponse = {
   songs: SongSummary[];
   nextCursor: string;
   hasMore: boolean;
+};
+
+export type FavoriteCollection = {
+  key: string;
+  title: string;
+  description?: string;
+  artworkAssetId?: string;
+  artwork?: Record<string, unknown>;
+};
+
+export type ListFavoriteSongsResponse = ListSongsResponse & {
+  collection?: FavoriteCollection;
 };
 
 export type RequestUploadPayload = {

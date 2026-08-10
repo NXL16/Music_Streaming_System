@@ -2,6 +2,7 @@ import { loadCatalogTracks } from "@/lib/catalog/load-catalog-tracks";
 import { getArtworkRenditionUrl, getArtworkSrcSet } from "@/lib/media/artwork";
 import { usePlayerStore } from "@/lib/player/use-player-store";
 import { getHomeRecommendations } from "./recommendation.api";
+import type { CatalogResourceAttributes } from "./recommendation.types";
 
 const SYSTEM_STATION_ID_PATTERN = /^(?:station-for-you|mood-station)-[a-f0-9]{32}-\d+$/;
 const PLAYABLE_SYSTEM_STATION_KINDS = new Set([
@@ -9,8 +10,44 @@ const PLAYABLE_SYSTEM_STATION_KINDS = new Set([
   "system-mood",
 ]);
 
+export type SystemStationDetail = {
+  id: string;
+  name: string;
+  description: string;
+  artwork: CatalogResourceAttributes["artwork"];
+};
+
 export function isPlayableSystemStationId(stationId: string): boolean {
   return SYSTEM_STATION_ID_PATTERN.test(stationId);
+}
+
+/** Reads the existing Home recommendation snapshot; it never regenerates a station. */
+export async function getSystemStationDetail(
+  stationId: string,
+): Promise<SystemStationDetail | null> {
+  if (!isPlayableSystemStationId(stationId)) return null;
+
+  const response = await getHomeRecommendations();
+  const station = response.resources?.stations[stationId];
+  const attributes = station?.attributes;
+  const kind = typeof attributes?.kind === "string" ? attributes.kind : "";
+  if (!station || !attributes || !PLAYABLE_SYSTEM_STATION_KINDS.has(kind)) {
+    return null;
+  }
+
+  const description =
+    typeof attributes.description?.short === "string"
+      ? attributes.description.short
+      : typeof attributes.description?.standard === "string"
+        ? attributes.description.standard
+        : "";
+
+  return {
+    id: stationId,
+    name: typeof attributes.name === "string" ? attributes.name : "Station",
+    description,
+    artwork: attributes.artwork,
+  };
 }
 
 /** Plays both personalised and mood stations from their persisted tracklist. */

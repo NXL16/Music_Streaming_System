@@ -5,6 +5,7 @@ import { getApiErrorMessage } from "@/lib/api/api-error";
 import { deleteMySong, listMySongs } from "@/lib/songs/song.api";
 import { subscribeSongLibraryChanged } from "@/lib/songs/song-library-events";
 import type { SongSummary } from "@/lib/songs/song.types";
+import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 
 const POLLING_INTERVAL_MS = 5000;
 const ACTIVE_PROCESSING_STATUSES = new Set([1, 2]);
@@ -17,8 +18,8 @@ export function useSongLibrary(refreshKey = 0) {
   const [songs, setSongs] = useState<SongSummary[]>([]);
   const [nextCursor, setNextCursor] = useState("");
   const [hasMore, setHasMore] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const [loading, setLoading] = useMinimumLoadingState();
+  const [loadingMore, setLoadingMore] = useMinimumLoadingState();
   const [deletingSongId, setDeletingSongId] = useState("");
   const [error, setError] = useState("");
   const hasProcessingRef = useRef(false);
@@ -47,7 +48,7 @@ export function useSongLibrary(refreshKey = 0) {
         setLoading(false);
       }
     }
-  }, []);
+  }, [setLoading]);
 
   const loadMore = useCallback(async () => {
     if (!hasMore || !nextCursor || loadingMore) {
@@ -71,7 +72,7 @@ export function useSongLibrary(refreshKey = 0) {
     } finally {
       setLoadingMore(false);
     }
-  }, [hasMore, loadingMore, nextCursor]);
+  }, [hasMore, loadingMore, nextCursor, setLoadingMore]);
 
   const removeSong = useCallback(async (songId: string) => {
     setError("");
@@ -123,4 +124,3 @@ export function useSongLibrary(refreshKey = 0) {
     removeSong,
   };
 }
-

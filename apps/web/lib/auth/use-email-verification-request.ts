@@ -3,9 +3,10 @@
 import { useState } from "react";
 import { getApiErrorMessage } from "@/lib/api/api-error";
 import { requestEmailVerification } from "@/lib/auth/auth.api";
+import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 
 export function useEmailVerificationRequest() {
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useMinimumLoadingState();
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 

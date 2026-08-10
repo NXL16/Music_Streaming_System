@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type SetStateAction,
+} from "react";
 
 const DEFAULT_MINIMUM_LOADING_MS = 300;
 
@@ -35,4 +41,22 @@ export function useMinimumLoadingDuration(
   }, [isLoading, isVisible, minimumDurationMs]);
 
   return isLoading || isVisible;
+}
+
+/**
+ * State variant for request hooks. It exposes one loading value for the UI
+ * while retaining the familiar `setLoading(true|false)` request lifecycle.
+ */
+export function useMinimumLoadingState(
+  initialLoading = false,
+  minimumDurationMs = DEFAULT_MINIMUM_LOADING_MS,
+) {
+  const [isLoading, setIsLoadingState] = useState(initialLoading);
+  const loading = useMinimumLoadingDuration(isLoading, minimumDurationMs);
+  const setLoading = useCallback(
+    (next: SetStateAction<boolean>) => setIsLoadingState(next),
+    [],
+  );
+
+  return [loading, setLoading] as const;
 }
