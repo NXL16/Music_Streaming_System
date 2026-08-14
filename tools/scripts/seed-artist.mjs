@@ -612,6 +612,70 @@ async function fetchAppleMusicArtworkHighRes(artistId) {
   }
 }
 
+function parseAppleMusicServerData(html) {
+  const targetId = 'serialized-server-data';
+  const startTag = `id="${targetId}"`;
+  const startIdx = html.indexOf(startTag);
+  if (startIdx === -1) return null;
+
+  const tagEndIdx = html.indexOf('>', startIdx);
+  const endTagIdx = html.indexOf('</script>', tagEndIdx);
+  if (tagEndIdx === -1 || endTagIdx === -1) return null;
+
+  return JSON.parse(html.substring(tagEndIdx + 1, endTagIdx).trim());
+}
+
+/**
+ * Apple Music keeps motion artwork in the page's serialized data, but the
+ * motion key differs by resource type and storefront. Find the first valid
+ * videoArtwork dictionary instead of depending on a single layout key.
+ */
+function findAppleMusicVideoArtwork(value, seen = new Set()) {
+  if (!value || typeof value !== 'object' || seen.has(value)) return null;
+  seen.add(value);
+
+  if (value.videoArtwork?.dictionary) {
+    const dictionary = value.videoArtwork.dictionary;
+    for (const motion of Object.values(dictionary)) {
+      if (!motion || typeof motion !== 'object' || typeof motion.video !== 'string') continue;
+      if (motion.video.startsWith('https://')) {
+        return {
+          hlsUrl: motion.video,
+          previewFrame: typeof motion.previewFrame === 'string' ? motion.previewFrame : '',
+        };
+      }
+    }
+  }
+
+  for (const child of Object.values(value)) {
+    const found = findAppleMusicVideoArtwork(child, seen);
+    if (found) return found;
+  }
+
+  return null;
+}
+
+async function fetchAppleMusicAlbumVideo(album) {
+  const albumName = album.collectionName || album.name || album.collectionId;
+  const albumId = album.collectionId;
+  if (!albumId) return null;
+
+  logInfo(`Fetching Apple Music motion artwork for album "${albumName}"...`);
+  try {
+    const url = `https://music.apple.com/${STOREFRONT}/album/_/${albumId}`;
+    const res = await fetch(url, { headers: APPLE_MUSIC_HEADERS });
+    if (!res.ok) return null;
+
+    const pageData = parseAppleMusicServerData(await res.text());
+    const videoArtwork = findAppleMusicVideoArtwork(pageData);
+    if (videoArtwork) logOk(`Found motion artwork for album "${albumName}"`);
+    return videoArtwork;
+  } catch (err) {
+    logWarn(`Could not fetch album video for "${albumName}": ${err.message}`);
+    return null;
+  }
+}
+
 /**
  * Fallback metadata source for artists whose Apple Music page has no artwork.
  * Only an exact normalized artist-name match is accepted: a plausible image is
@@ -1623,7 +1687,7 @@ async function createAndPublishSongDraft(
     discNumber: track.discNumber || 1,
     durationInMillis: track.trackTimeMillis || 0,
     genreNames: [track.primaryGenreName || 'Hip-Hop/Rap'],
-    hasLyrics: true,
+    hasLyrics: false,
     hasTimeSyncedLyrics: false,
     isrc: '',
     releaseDate: releaseDate || '',
@@ -1641,7 +1705,7 @@ async function createAndPublishSongDraft(
   return draftId;
 }
 
-async function createAndPublishAlbum(album, artistId, songMappings, artworkAssetId) {
+async function createAndPublishAlbum(album, artistId, songMappings, artworkAssetId, editorialVideoAssetId) {
   const albumName = album.collectionName || album.name;
   const releaseDate = album.releaseDate ? album.releaseDate.split('T')[0] : '';
   const isSingle = (album.trackCount || 0) <= 3;
@@ -1669,7 +1733,7 @@ async function createAndPublishAlbum(album, artistId, songMappings, artworkAsset
 
   logInfo(`Creating album draft "${albumName}" with ${tracks.length} tracks...`);
 
-  const draftRes = await apiCall('POST', '/admin/catalog/albums/draft', {
+  const draftBody = {
     // The public catalog ID must always be opaque and internal. The provider
     // identifier is stored separately and makes repeated seeds an upsert.
     resourceId: crypto.randomUUID(),
@@ -1693,11 +1757,40 @@ async function createAndPublishAlbum(album, artistId, songMappings, artworkAsset
     artistIds: [artistId],
     artworkAssetId,
     tracks,
-  });
+  };
 
+  if (editorialVideoAssetId) {
+    draftBody.editorialVideoAssetId = editorialVideoAssetId;
+  }
+
+  const draftRes = await apiCall('POST', '/admin/catalog/albums/draft', draftBody);
   const draftId = draftRes.draftId || draftRes.id;
   logInfo('Publishing album draft...');
-  await apiCall('POST', `/admin/catalog/drafts/${draftId}/publish`);
+
+  try {
+    await apiCall('POST', `/admin/catalog/drafts/${draftId}/publish`);
+  } catch (error) {
+    // Albums seeded before ingestionKey was introduced cannot be found by the
+    // normal upsert. The catalog guard returns their ID, which lets us migrate
+    // that exact existing album instead of creating a duplicate.
+    const existingAlbumId = String(error.message || '').match(
+      /ALBUM_SEMANTIC_DUPLICATE: matches existing album ([a-z0-9-]+)/i,
+    )?.[1];
+    if (!existingAlbumId) throw error;
+
+    logWarn(
+      `Album "${albumName}" exists from an older seed — updating ${existingAlbumId} with the new metadata`,
+    );
+    await apiCall('DELETE', `/admin/catalog/drafts/${draftId}`);
+
+    const migrationDraftRes = await apiCall('POST', '/admin/catalog/albums/draft', {
+      ...draftBody,
+      resourceId: existingAlbumId,
+    });
+    const migrationDraftId = migrationDraftRes.draftId || migrationDraftRes.id;
+    await apiCall('POST', `/admin/catalog/drafts/${migrationDraftId}/publish`);
+  }
+
   logOk(`Album "${albumName}" published!`);
 }
 
@@ -1878,6 +1971,7 @@ async function main() {
   }
 
   const albumArtworks = {};
+  const albumVideoBanners = {};
   for (const { album } of albumsWithTracks) {
     const albumSlug = slugify(album.collectionName);
     const albumArtworkPath = path.join(tmpDir, `album-${albumSlug}-artwork.jpg`);
@@ -1885,6 +1979,14 @@ async function main() {
     if (artworkUrl) {
       await downloadArtwork(artworkUrl, albumArtworkPath, `Album "${album.collectionName}"`);
       albumArtworks[album.collectionId] = albumArtworkPath;
+    }
+
+    const videoArtwork = await fetchAppleMusicAlbumVideo(album);
+    if (!videoArtwork?.hlsUrl) continue;
+
+    const albumVideoPath = path.join(tmpDir, `album-${albumSlug}-video.mp4`);
+    if (await downloadVideoBanner(videoArtwork.hlsUrl, albumVideoPath, `Album "${album.collectionName}"`)) {
+      albumVideoBanners[album.collectionId] = albumVideoPath;
     }
   }
 
@@ -1975,6 +2077,20 @@ async function main() {
     const assetId = await uploadArtworkAsset(artworkPath, `Album "${album.collectionName}"`);
     albumArtworkAssetIds[album.collectionId] = assetId;
     state.set('albumArtworkAssetIds', albumArtworkAssetIds);
+  }
+
+  const albumVideoAssetIds = state.get('albumVideoAssetIds') || {};
+  for (const { album } of albumsWithTracks) {
+    const videoPath = albumVideoBanners[album.collectionId];
+    if (!videoPath || albumVideoAssetIds[album.collectionId]) continue;
+
+    try {
+      const assetId = await uploadVideoAsset(videoPath, `Album "${album.collectionName}"`);
+      albumVideoAssetIds[album.collectionId] = assetId;
+      state.set('albumVideoAssetIds', albumVideoAssetIds);
+    } catch (err) {
+      logWarn(`Failed to upload video for album "${album.collectionName}": ${err.message}`);
+    }
   }
 
   // ── PHASE 4: Create Artist + Upload Songs ──────────
@@ -2125,14 +2241,25 @@ async function main() {
     }
 
     const albumPublished = state.get(`albumPublished:${album.collectionId}`);
-    if (albumPublished) {
+    const albumVideoAssetId = albumVideoAssetIds[album.collectionId];
+    const albumVideoPublished = state.get(`albumVideoPublished:${album.collectionId}`);
+    if (albumPublished && (!albumVideoAssetId || albumVideoPublished)) {
       logOk(`Album "${albumName}" already published`);
       continue;
     }
 
     try {
-      await createAndPublishAlbum(album, artistId, songMappings, albumArtworkAssetId);
+      await createAndPublishAlbum(
+        album,
+        artistId,
+        songMappings,
+        albumArtworkAssetId,
+        albumVideoAssetId,
+      );
       state.set(`albumPublished:${album.collectionId}`, true);
+      if (albumVideoAssetId) {
+        state.set(`albumVideoPublished:${album.collectionId}`, true);
+      }
     } catch (err) {
       logErr(`Failed to publish album "${albumName}": ${err.message}`);
     }
