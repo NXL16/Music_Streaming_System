@@ -22,6 +22,53 @@ export const songCompletionProcessedKey = (songId: string): string =>
 export const songCompletionLockKey = (songId: string): string =>
   `song_completion_lock:${songId}`;
 
+type ArtworkRendition = { url: string; width: number };
+
+/**
+ * Builds a responsive srcSet by selecting the smallest available rendition
+ * that satisfies each requested width. Invalid artwork metadata is ignored.
+ */
+export function getArtworkRenditionSrcSet(
+  artwork: unknown,
+  widths: readonly number[],
+): string {
+  if (!artwork || typeof artwork !== "object" || Array.isArray(artwork)) {
+    return "";
+  }
+
+  const variants = (artwork as { variants?: unknown }).variants;
+  if (!variants || typeof variants !== "object" || Array.isArray(variants)) {
+    return "";
+  }
+
+  const renditions = (variants as { renditions?: unknown }).renditions;
+  if (!Array.isArray(renditions)) return "";
+
+  const available = renditions
+    .flatMap((rendition): ArtworkRendition[] => {
+      if (!rendition || typeof rendition !== "object") return [];
+      const { url, width } = rendition as { url?: unknown; width?: unknown };
+      return typeof url === "string" && typeof width === "number" && width > 0
+        ? [{ url, width }]
+        : [];
+    })
+    .sort((left, right) => left.width - right.width);
+
+  if (!available.length) return "";
+
+  const selected = new Map<number, string>();
+  for (const width of widths) {
+    const rendition =
+      available.find((item) => item.width >= width) ?? available.at(-1);
+    if (rendition) selected.set(rendition.width, rendition.url);
+  }
+
+  return [...selected.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([width, url]) => `${url} ${width}w`)
+    .join(", ");
+}
+
 // ==========================================
 // CONSTANTS & TYPES
 // ==========================================

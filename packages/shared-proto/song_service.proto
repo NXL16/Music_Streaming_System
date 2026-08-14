@@ -30,14 +30,17 @@ service SongService {
   rpc PinLibraryResource(LibraryResourceRequest) returns (LibraryResourceResponse);
   rpc UnpinLibraryResource(LibraryResourceRequest) returns (LibraryResourceResponse);
   rpc ListLibraryResources(ListLibraryResourcesRequest) returns (ListLibraryResourcesResponse);
+  rpc ListLibrarySongs(ListLibrarySongsRequest) returns (ListLibrarySongsResponse);
   rpc RemoveSongOwnership(RemoveSongOwnershipRequest) returns (RemoveSongOwnershipResponse);
   rpc GetPlaylist(GetPlaylistRequest) returns (GetPlaylistResponse);
+  rpc ListPlaylistTracks(ListPlaylistTracksRequest) returns (ListPlaylistTracksResponse);
 
   // User playlist CRUD
   rpc CreateUserPlaylist(CreateUserPlaylistRequest) returns (UserPlaylistInfo);
   rpc UpdateUserPlaylist(UpdateUserPlaylistRequest) returns (UserPlaylistInfo);
   rpc DeleteUserPlaylist(DeleteUserPlaylistRequest) returns (DeleteUserPlaylistResponse);
   rpc ListUserPlaylists(ListUserPlaylistsRequest) returns (ListUserPlaylistsResponse);
+  rpc GetPlaylistSourceMembership(PlaylistSourceMembershipRequest) returns (PlaylistSourceMembershipResponse);
   rpc AddTrackToPlaylist(PlaylistTrackRequest) returns (PlaylistTrackResponse);
   rpc RemoveTrackFromPlaylist(PlaylistTrackRequest) returns (PlaylistTrackResponse);
 
@@ -118,27 +121,28 @@ enum SongStatus {
 
 // Lightweight summary for list/browse use cases
 message SongSummary {
-  string     id           = 1;
-  string     title        = 2;
-  string     artist       = 3;
-  string     album        = 4;
-  bool       is_public    = 5;
-  SongStatus status       = 6;
-  int32      duration_sec = 7;
-  int64      created_at   = 8;
-  string     cover_url    = 9;
-  string     artist_id    = 10;
-  string     artist_url   = 11;
-  string     album_id     = 12;
-  string     album_url    = 13;
-  repeated SongArtist artists = 14;
-  string     content_rating = 15;
+  string              id                      = 1;
+  string              title                   = 2;
+  string              artist                  = 3;
+  string              album                   = 4;
+  bool                is_public               = 5;
+  SongStatus          status                  = 6;
+  int32               duration_sec            = 7;
+  int64               created_at              = 8;
+  string              cover_url               = 9;
+  string              artist_id               = 10;
+  string              artist_url              = 11;
+  string              album_id                = 12;
+  string              album_url               = 13;
+  repeated SongArtist artists                 = 14;
+  string              content_rating          = 15;
+  string              thumbnail_cover_src_set = 16;
 }
 
 message SongArtist {
-  string id  = 1;
+  string id   = 1;
   string name = 2;
-  string url = 3;
+  string url  = 3;
 }
 
 // Full detail for playback
@@ -270,17 +274,17 @@ message ListFavoriteSongsRequest {
 }
 
 message ListFavoriteSongsResponse {
-  repeated SongSummary songs       = 1;
-  string               next_cursor = 2;
-  bool                 has_more    = 3;
-  google.protobuf.Struct collection = 4;
+  repeated SongSummary   songs       = 1;
+  string                 next_cursor = 2;
+  bool                   has_more    = 3;
+  google.protobuf.Struct collection  = 4;
 }
 
 message UpsertFavoriteArtworkRequest { string asset_id = 1; }
 
 message FavoriteArtworkResponse {
-  string asset_id = 1;
-  google.protobuf.Struct artwork = 2;
+  string                 asset_id = 1;
+  google.protobuf.Struct artwork  = 2;
 }
 
 message LibraryResourceRequest {
@@ -293,7 +297,7 @@ message LibraryResourceRequest {
 }
 
 message LibraryResourceResponse {
-  bool success = 1;
+  bool success               = 1;
   bool deleted_user_playlist = 2;
 }
 
@@ -312,6 +316,23 @@ message LibraryResource {
 
 message ListLibraryResourcesResponse { repeated LibraryResource resources = 1; }
 
+// A database-paginated view of Library Song memberships. Metadata enrichment
+// is performed by the API gateway only for this page of resources.
+message ListLibrarySongsRequest {
+  string          user_id   = 1;
+  string          cursor    = 2;
+  int32           limit     = 3;
+  string          sort_by   = 4;
+  string          direction = 5;
+  repeated string song_ids  = 6;
+}
+
+message ListLibrarySongsResponse {
+  repeated LibraryResource resources   = 1;
+  string                   next_cursor = 2;
+  bool                     has_more    = 3;
+}
+
 message RemoveSongOwnershipRequest {
   string user_id = 1;
   string song_id = 2;
@@ -322,22 +343,39 @@ message RemoveSongOwnershipResponse {
 }
 
 message Playlist {
-  string               id         = 1;
-  string               name       = 2;
-  string               owner_id   = 3;
-  repeated SongSummary songs      = 4;
-  int64                created_at = 5;
-  int64                updated_at = 6;
+  string               id          = 1;
+  string               name        = 2;
+  string               owner_id    = 3;
+  repeated SongSummary songs       = 4;
+  int64                created_at  = 5;
+  int64                updated_at  = 6;
   string               description = 7;
+  string               artwork_url = 8;
 }
 
 message GetPlaylistRequest {
   string playlist_id       = 1;
   string requester_user_id = 2;
+  bool   include_songs     = 3;
 }
 
 message GetPlaylistResponse {
   Playlist playlist = 1;
+}
+
+// Position is unique within a user playlist, so it is the stable cursor for
+// ordered track pages.
+message ListPlaylistTracksRequest {
+  string playlist_id       = 1;
+  string requester_user_id = 2;
+  string cursor            = 3;
+  int32  limit             = 4;
+}
+
+message ListPlaylistTracksResponse {
+  repeated SongSummary songs       = 1;
+  string               next_cursor = 2;
+  bool                 has_more    = 3;
 }
 
 message CreateUserPlaylistRequest {
@@ -356,6 +394,8 @@ message UpdateUserPlaylistRequest {
   bool   has_name        = 6;
   bool   has_description = 7;
   bool   has_is_public   = 8;
+  string cover_url       = 9;
+  bool   has_cover_url   = 10;
 }
 
 message DeleteUserPlaylistRequest {
@@ -392,12 +432,23 @@ message UserPlaylistInfo {
   bool   is_public   = 4;
   int64  created_at  = 5;
   int64  updated_at  = 6;
+  string artwork_url = 7;
 }
 
 message ListUserPlaylistsResponse {
   repeated UserPlaylistSummary playlists   = 1;
   string                       next_cursor = 2;
   bool                         has_more    = 3;
+}
+
+// Playlists owned by the user that contain every supplied song.
+message PlaylistSourceMembershipRequest {
+  string          user_id  = 1;
+  repeated string song_ids = 2;
+}
+
+message PlaylistSourceMembershipResponse {
+  repeated string playlist_ids = 1;
 }
 
 message PlaylistTrackRequest {
@@ -422,17 +473,17 @@ message GetCatalogPlaylistRequest {
 
 // Internal-only: Recommendation publishes a generated playlist into Catalog.
 message UpsertSystemPlaylistRequest {
-  string playlist_id = 1;
-  string storefront = 2;
-  string name = 3;
-  string description = 4;
-  string url = 5;
-  string artwork_url = 6;
-  string artwork_bg_color = 7;
-  repeated string song_ids = 8;
-  string artwork_variants_json = 9;
-  int32 artwork_width = 10;
-  int32 artwork_height = 11;
+  string          playlist_id           = 1;
+  string          storefront            = 2;
+  string          name                  = 3;
+  string          description           = 4;
+  string          url                   = 5;
+  string          artwork_url           = 6;
+  string          artwork_bg_color      = 7;
+  repeated string song_ids              = 8;
+  string          artwork_variants_json = 9;
+  int32           artwork_width         = 10;
+  int32           artwork_height        = 11;
 }
 
 message GetCatalogArtistAlbumsRequest {

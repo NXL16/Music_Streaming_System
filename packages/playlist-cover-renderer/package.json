@@ -1,0 +1,10 @@
+{
+  "name": "@musical/playlist-cover-renderer",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "types": "index.d.ts",
+  "dependencies": {
+    "sharp": "^0.35.3"
+  }
+}
