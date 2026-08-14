@@ -19,6 +19,8 @@ export type SongSummaryProjectionSource = {
   album?: string;
   albumId?: string;
   albumUrl?: string;
+  albumVideoSrc?: string;
+  hasLyrics?: boolean;
   contentRating?: string;
   durationSec?: number;
   coverUrl?: string;
@@ -38,6 +40,8 @@ export type PlayerSongProjectionSource = {
   album?: string;
   albumId?: string;
   albumUrl?: string;
+  albumVideoSrc?: string;
+  hasLyrics?: boolean;
   durationSec?: number;
   artworkUrl?: string;
   artworkSrcSet?: string;
@@ -68,6 +72,8 @@ export function projectPlayerSong(
       song.albumId && song.albumUrl
         ? albumRoute(song.albumUrl, song.albumId)
         : undefined,
+    albumVideoSrc: song.albumVideoSrc,
+    hasLyrics: song.hasLyrics,
     durationSec: song.durationSec || 0,
     artworkUrl,
     artworkSrcSet: song.artworkSrcSet || artworkUrl || undefined,
@@ -106,6 +112,7 @@ export function projectSongSummary(
     album: song.album || "",
     albumId: song.albumId,
     albumUrl: song.albumUrl,
+    hasLyrics: song.hasLyrics,
     durationSec: song.durationSec,
     artworkUrl: song.coverUrl,
     thumbnailArtworkSrcSet: song.thumbnailCoverSrcSet,

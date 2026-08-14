@@ -71,6 +71,9 @@ export function mapCatalogTracks(response: CatalogResponse): PlayerSong[] {
         album: playbackAlbum?.attributes.name ?? song.attributes.albumName,
         albumId: playbackAlbumId,
         albumUrl: playbackAlbumUrl,
+        albumVideoSrc:
+          playbackAlbum?.attributes.editorialVideo?.primary?.video,
+        hasLyrics: song.attributes.hasLyrics,
         durationSec: Math.round(song.attributes.durationInMillis / 1000),
         artworkUrl: catalogArtworkUrl(playbackArtwork, 316),
         artworkSrcSet: catalogArtworkSrcSet(

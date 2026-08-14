@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ElementType } from "react";
-import Hls from "hls.js";
+import type Hls from "hls.js";
 
 // Home cards are decorative videos. Keeping too many decoders active competes
 // with scrolling and image compositing, especially on integrated GPUs.
@@ -447,7 +447,23 @@ export default function AmbientVideo({
         return;
       }
 
-      if (Hls.isSupported()) {
+      // Safari can play HLS itself, so it never needs to download hls.js.
+      if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        nativeCanPlayHandler = () => {
+          tryPlay();
+        };
+
+        video.addEventListener("canplay", nativeCanPlayHandler);
+        video.src = src;
+        return;
+      }
+
+      // Import the HLS runtime only after this card is both rendered and
+      // eligible to play. This keeps hls.js out of normal card/list routes.
+      void import("hls.js").then(({ default: Hls }) => {
+        if (disposed || hlsRef.current || video.currentSrc) return;
+        if (!Hls.isSupported()) return;
+
         const hls = new Hls({
           enableWorker: true,
           autoStartLoad: true,
@@ -480,18 +496,7 @@ export default function AmbientVideo({
 
         hls.loadSource(src);
         hls.attachMedia(video);
-
-        return;
-      }
-
-      if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        nativeCanPlayHandler = () => {
-          tryPlay();
-        };
-
-        video.addEventListener("canplay", nativeCanPlayHandler);
-        video.src = src;
-      }
+      });
     };
 
     const requestPlayback = (interactionPriority = 0) => {

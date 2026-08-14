@@ -15,6 +15,8 @@ export type PlayerSong = {
   album: string;
   albumId?: string;
   albumUrl?: string;
+  albumVideoSrc?: string;
+  hasLyrics?: boolean;
   durationSec: number;
   artworkUrl: string;
   artworkSrcSet?: string;

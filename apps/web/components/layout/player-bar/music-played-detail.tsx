@@ -15,9 +15,18 @@ import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 
 const LyricsBackground = dynamic(
-  () => import("@/components/player/lyrics-background").then((module) => module.LyricsBackground),
+  () =>
+    import("@/components/player/lyrics-background").then(
+      (module) => module.LyricsBackground,
+    ),
   { ssr: false },
 );
+
+const AmbientVideo = dynamic(
+  () => import("@/components/custom-elements/AmpVideo"),
+  { ssr: false, loading: () => null },
+);
+
 type MusicPlayDetailProps = {
   audioRef: React.RefObject<HTMLAudioElement | null>;
   currentSong: PlayerSong;
@@ -46,6 +55,7 @@ export default function MusicPlayDetail({
   const isCurrentSongFavorite = useFavoriteStore((state) =>
     state.songs.some((song) => song.id === currentSong.id),
   );
+
   const handleFavoriteClick = async () => {
     if (isFavoriteSaving) return;
 
@@ -100,7 +110,7 @@ export default function MusicPlayDetail({
                       />
                     </div>
                   </div>
-                  <div className="items-center rounded-lg flex [grid-area:artwork] size-full justify-center [transition:var(--global-transition)] shadow-[0_4px_10px_rgba(0,0,0,.1)] min-[1320px]:rounded-[10px] min-[1680px]:rounded-xl">
+                  <div className="items-center rounded-lg flex [grid-area:artwork] size-full justify-center overflow-hidden relative [transition:var(--global-transition)] shadow-[0_4px_10px_rgba(0,0,0,.1)] min-[1320px]:rounded-[10px] min-[1680px]:rounded-xl">
                     <CardArtwork
                       variant="cover"
                       sizes="(max-width:1319px) 450px,(min-width:1320px) and (max-width:1679px) 600px,600px"
@@ -109,6 +119,16 @@ export default function MusicPlayDetail({
                       artworkColors={artworkColors}
                       retainPreviousArtwork
                     />
+
+                    {currentSong.albumVideoSrc && (
+                      <div className="rounded-[inherit] size-full pointer-events-none absolute top-0 z-(--z-default)">
+                        <AmbientVideo
+                          src={currentSong.albumVideoSrc}
+                          variant="artist"
+                          keepAlive
+                        />
+                      </div>
+                    )}
                   </div>
 
                   <div className="items-center flex justify-between w-full min-w-0 overflow-hidden">

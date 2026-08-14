@@ -1,7 +1,12 @@
 import type { CSSProperties } from "react";
-import AmbientVideo from "@/components/custom-elements/AmpVideo";
+import dynamic from "next/dynamic";
 import { MediaCardProps } from "../media-card.types";
 import ResponsiveArtwork from "./responsive-artwork";
+
+const AmbientVideo = dynamic(
+  () => import("@/components/custom-elements/AmpVideo"),
+  { ssr: false, loading: () => null },
+);
 
 type SharedCardArtworkProps = Pick<
   MediaCardProps,

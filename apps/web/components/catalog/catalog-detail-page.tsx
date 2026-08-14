@@ -46,11 +46,17 @@ import {
 import { ExplicitBadgeIcon } from "../icons/explicit-badge-icon";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
+import dynamic from "next/dynamic";
 import PlaylistDetailView, {
   type GenericPlaylist,
 } from "./playlist-detail-view";
 import { playlistRoute } from "@/lib/catalog/playlist-route";
 import { albumRoute } from "@/lib/catalog/album-route";
+
+const AmbientVideo = dynamic(() => import("../custom-elements/AmpVideo"), {
+  ssr: false,
+  loading: () => null,
+});
 
 type CatalogDetailPageProps = {
   resourceType: CatalogDetailType;
@@ -393,6 +399,9 @@ export function CatalogDetailPage({
     return <PlaylistDetailView playlist={catalogPlaylist} />;
   }
 
+  const albumVideoSrc =
+    albumResource?.attributes.editorialVideo?.primary?.video;
+
   return (
     <>
       {showInitialLoading && <CatalogPageLoading />}
@@ -443,7 +452,15 @@ export function CatalogDetailPage({
                         <div className="relative z-1 rounded-(--global-border-radius-large,10px) [box-shadow:calc(var(--pointer-roll,0)*8px)_calc(var(--pointer-pitch,0)*8px+3px)_10px_rgba(0,0,0,var(--shadow-opacity,0))] overflow-hidden">
                           <CardArtwork variant="cover" {...artworkProps} />
 
-                          <div></div>
+                          {albumVideoSrc && (
+                            <div className="rounded-[inherit] size-full pointer-events-none absolute top-0 z-(--z-default)">
+                              <AmbientVideo
+                                src={albumVideoSrc}
+                                variant="artist"
+                                keepAlive
+                              />
+                            </div>
+                          )}
 
                           <div className="[background:conic-gradient(from_calc(var(--pointer-light-angle,0)*1deg)_at_50%_50%,hsla(0,0%,100%,.6)_0deg,hsla(0,0%,100%,.15)_72deg,hsla(0,0%,100%,.05)_180deg,hsla(0,0%,100%,.15)_288deg,hsla(0,0%,100%,.6)_1turn)] rounded-[inherit] inset-0 [mask:linear-gradient(#fff_0_0)_content-box,linear-gradient(#fff_0_0)] mask-exclude mix-blend-plus-lighter opacity-(--refraction-border-opacity,0) p-px pointer-events-none absolute z-3"></div>
 

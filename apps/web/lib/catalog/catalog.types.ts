@@ -96,6 +96,12 @@ export type CatalogAlbumResource = {
     trackCount: number;
     upc: string;
     url: string;
+    editorialVideoAssetId?: string;
+    editorialVideo?: {
+      primary?: {
+        video?: string;
+      };
+    };
     relatedShelfHints?: {
       moreBy: boolean;
       featuredOn: boolean;
