@@ -12,6 +12,7 @@ go.sum
 *.tsbuildinfo
 
 # Generated files
+next-env.d.ts
 **/src/generated/
 node_modules/
 .pnpm-store/
