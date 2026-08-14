@@ -19,7 +19,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { listLibrarySongs } from "@/lib/songs/song.api";
+import { getAllLibrarySongs, listLibrarySongs } from "@/lib/songs/song.api";
 import type { SongSummary } from "@/lib/songs/song.types";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { usePlayerStore } from "@/lib/player/use-player-store";
@@ -45,7 +45,10 @@ import {
   useVisibleSongRange,
 } from "@/lib/player/song-list-virtualization";
 import { useInfiniteScrollLoadMore } from "@/lib/pagination/use-infinite-scroll-sentinel";
-import { appendUniqueById, getSafeNextCursor } from "@/lib/pagination/cursor-page";
+import {
+  appendUniqueById,
+  getSafeNextCursor,
+} from "@/lib/pagination/cursor-page";
 
 const LIBRARY_SONG_PAGE_SIZE = 40;
 
@@ -86,9 +89,24 @@ export default function SongsPage() {
       ),
     [songs],
   );
-  const libraryQueue = useMemo(
-    () => sortedSongs.map(projectSongSummary),
-    [sortedSongs],
+  const playLibrarySong = useCallback(
+    async (songId: string) => {
+      try {
+        const queue = (
+          await getAllLibrarySongs({
+            sortBy,
+            direction: sortDirection,
+          })
+        )
+          .filter((song) => !isLibraryResourcePendingRemoval("songs", song.id))
+          .map(projectSongSummary);
+        const index = queue.findIndex((song) => song.id === songId);
+        if (index >= 0) setQueue(queue, index);
+      } catch {
+        // Keep the current queue intact when a playback-page load fails.
+      }
+    },
+    [setQueue, sortBy, sortDirection],
   );
 
   const loadFirstPage = useCallback(async () => {
@@ -165,11 +183,12 @@ export default function SongsPage() {
     });
   }, [loadFirstPage]);
 
-  const { sentinelRef: loadMoreSentinelRef, showLoadingMore } = useInfiniteScrollLoadMore({
-    enabled: Boolean(nextCursor),
-    loading: loadingMore,
-    onLoadMore: loadMore,
-  });
+  const { sentinelRef: loadMoreSentinelRef, showLoadingMore } =
+    useInfiniteScrollLoadMore({
+      enabled: Boolean(nextCursor),
+      loading: loadingMore,
+      onLoadMore: loadMore,
+    });
 
   const setSongTableRef = useCallback(
     (node: HTMLDivElement | null) => {
@@ -248,8 +267,7 @@ export default function SongsPage() {
               height={visibleSongRange.start * SONG_ROW_HEIGHT}
             />
 
-            {visibleSongs.map((track, visibleIndex) => {
-              const index = visibleSongRange.start + visibleIndex;
+            {visibleSongs.map((track) => {
               const isCurrentTrack = currentSong?.id === track.id;
               const isTrackPlaying = isCurrentTrack && playing;
 
@@ -328,7 +346,7 @@ export default function SongsPage() {
                                 if (isCurrentTrack) {
                                   togglePlayback();
                                 } else {
-                                  setQueue(libraryQueue, index);
+                                  void playLibrarySong(track.id);
                                 }
                               }}
                               className="[--nonPlatterIconFill:var(--playButtonIconColor,#fff)] [--playingBarColor:var(--nonPlatterIconFill,#fff)] leading-0 pointer-events-auto relative z-(--z-default) h-full align-top w-full"

@@ -7,6 +7,7 @@ import ResponsiveArtwork from "../media/common/responsive-artwork";
 import { formatDuration } from "@/lib/format/duration";
 import { useCatalogArtist } from "@/lib/catalog/use-catalog-artist";
 import { useCatalogArtistSongs } from "@/lib/catalog/use-catalog-artist-songs";
+import { getAllCatalogArtistSongs } from "@/lib/catalog/artist-song-pages";
 import { ArtistLinks } from "../media/artist-links";
 import { usePlayerStore } from "@/lib/player/use-player-store";
 import Loading from "@/app/loading";
@@ -78,11 +79,22 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
     [favoriteSongs],
   );
 
-  const { sentinelRef: loadMoreSentinelRef, showLoadingMore } = useInfiniteScrollLoadMore({
-    enabled: hasMore,
-    loading: loadingMore,
-    onLoadMore: loadMore,
-  });
+  const { sentinelRef: loadMoreSentinelRef, showLoadingMore } =
+    useInfiniteScrollLoadMore({
+      enabled: hasMore,
+      loading: loadingMore,
+      onLoadMore: loadMore,
+    });
+
+  const playArtistSong = async (songId: string) => {
+    try {
+      const queue = await getAllCatalogArtistSongs(artistId);
+      const index = queue.findIndex((song) => song.id === songId);
+      if (index >= 0) setQueue(queue, index);
+    } catch {
+      // Keep the current queue intact when a playback-page load fails.
+    }
+  };
 
   if (showInitialLoading) {
     return <CatalogPageLoading />;
@@ -222,7 +234,7 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
                               if (isCurrentTrack) {
                                 togglePlayback();
                               } else {
-                                setQueue(songs, index);
+                                void playArtistSong(song.id);
                               }
                             }}
                             className="[--nonPlatterIconFill:var(--playButtonIconColor,#fff)] [--playingBarColor:var(--nonPlatterIconFill,#fff)] leading-0 pointer-events-auto relative z-(--z-default) h-full align-top w-full"

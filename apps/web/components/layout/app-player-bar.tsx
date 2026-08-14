@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+} from "react";
 import { usePlayerStore, type PlayerSong } from "@/lib/player/use-player-store";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { useShallow } from "zustand/react/shallow";
@@ -129,6 +136,7 @@ function recentlyPlayedCard(song: PlayerSong): MediaCardProps {
 
 export function AppPlayerBar() {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const playbackTimeSongIdRef = useRef<string | undefined>(undefined);
   const {
     currentSong,
     queue,
@@ -229,11 +237,27 @@ export function AppPlayerBar() {
     emitEvent(currentSong, "PLAY_START", audio.currentTime);
   }, [currentSong, emitEvent, playing]);
 
+  useLayoutEffect(() => {
+    playbackTimeSongIdRef.current = undefined;
+    setPlaybackTimeMs(0);
+  }, [currentSong?.id, setPlaybackTimeMs]);
+
+  const handleLoadedMetadata = useCallback(() => {
+    const audio = audioRef.current;
+    const songId = currentSong?.id;
+    if (!audio || !songId) return;
+
+    playbackTimeSongIdRef.current = songId;
+    setPlaybackTimeMs(Math.floor(audio.currentTime * 1000));
+  }, [currentSong?.id, setPlaybackTimeMs]);
+
   const handleTimeUpdate = useCallback(() => {
     const audio = audioRef.current;
-    if (audio) setPlaybackTimeMs(Math.floor(audio.currentTime * 1000));
+    if (!audio || playbackTimeSongIdRef.current !== currentSong?.id) return;
+
+    setPlaybackTimeMs(Math.floor(audio.currentTime * 1000));
     markQualifiedPlay();
-  }, [markQualifiedPlay, setPlaybackTimeMs]);
+  }, [currentSong?.id, markQualifiedPlay, setPlaybackTimeMs]);
 
   useEffect(() => {
     if (audioRef.current) {
@@ -464,6 +488,7 @@ export function AppPlayerBar() {
         preload="metadata"
         onEnded={handleEnded}
         onError={pause}
+        onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={handleTimeUpdate}
       />
       {useCompactPlayer ? (

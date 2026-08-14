@@ -1,6 +1,6 @@
 "use client";
 
-import { CSSProperties, type ReactNode, useMemo } from "react";
+import { CSSProperties, type ReactNode, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePlayerStore, type PlayerSong } from "@/lib/player/use-player-store";
 import CardArtwork from "../media/common/card-artwork";
@@ -21,6 +21,11 @@ import { useAuthStore } from "@/lib/auth/auth-store";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { withPlaylistPlaybackSource } from "@/lib/player/playlist-playback-source";
 import { ExplicitBadgeIcon } from "../icons/explicit-badge-icon";
+import {
+  SONG_ROW_HEIGHT,
+  SongTableSpacer,
+  useVisibleSongRange,
+} from "@/lib/player/song-list-virtualization";
 
 export type GenericArtwork = {
   bgColor?: string;
@@ -58,12 +63,15 @@ export default function PlaylistDetailView({
   playlist,
   afterTracks,
   showMetadata = true,
+  resolvePlaybackTracks,
 }: {
   playlist: GenericPlaylist;
   /** Content rendered directly below the track list, before playlist metadata. */
   afterTracks?: ReactNode;
   /** Lets paginated user playlists defer their footer until loading completes. */
   showMetadata?: boolean;
+  /** Loads the complete queue without requiring every UI page to be visible. */
+  resolvePlaybackTracks?: () => Promise<GenericTrack[]>;
 }) {
   const playlistKind =
     playlist.playlistKind ?? (playlist.isUserPlaylist ? "user" : "catalog");
@@ -76,6 +84,9 @@ export default function PlaylistDetailView({
   const playing = usePlayerStore((state) => state.playing);
   const togglePlayback = usePlayerStore((state) => state.togglePlayback);
   const maxWidth739 = useMediaQuery("(max-width: 739px)");
+  const [songTableElement, setSongTableElement] =
+    useState<HTMLDivElement | null>(null);
+  const [isPreparingPlayback, setIsPreparingPlayback] = useState(false);
   const {
     activateTrack,
     activeTrackId,
@@ -85,6 +96,15 @@ export default function PlaylistDetailView({
   } = useTrackRowSelection<HTMLDivElement>();
 
   useAppScrollToTop(playlist.id);
+
+  const visibleSongRange = useVisibleSongRange(
+    playlist.tracks.length,
+    songTableElement,
+  );
+  const visibleTracks = playlist.tracks.slice(
+    visibleSongRange.start,
+    visibleSongRange.end,
+  );
 
   const artworkImageUrl = getArtworkRenditionUrl(playlist.artwork, 316);
   const artworkProps = artworkImageUrl
@@ -116,25 +136,46 @@ export default function PlaylistDetailView({
     () => new Set(favoriteSongs.map((song) => song.id)),
     [favoriteSongs],
   );
-  const playlistQueue = useMemo(
-    () =>
-      withPlaylistPlaybackSource(playlist.tracks, {
+  const startPlaylistPlayback = async (trackId?: string, shuffle = false) => {
+    if (isPreparingPlayback) return;
+
+    setIsPreparingPlayback(true);
+    try {
+      const tracks = resolvePlaybackTracks
+        ? await resolvePlaybackTracks()
+        : playlist.tracks;
+      const queue = withPlaylistPlaybackSource(tracks, {
         id: playlist.id,
         name: playlist.title,
         playlistKind,
-        isUserPlaylist: isUserPlaylist,
+        isUserPlaylist,
         curatorName: playlist.curatorName,
         href: playlist.sourcePlaylistHref,
-        artworkUrl: artworkImageUrl || playlist.tracks[0]?.artworkUrl || "",
+        artworkUrl: artworkImageUrl || tracks[0]?.artworkUrl || "",
         artworkSrcSet: artworkImageUrl
           ? getArtworkSrcSet(playlist.artwork, [...PLAYLIST_ARTWORK_WIDTHS])
-          : playlist.tracks[0]?.artworkSrcSet,
+          : tracks[0]?.artworkSrcSet,
         artworkBgColor: playlist.artwork?.bgColor
           ? `#${playlist.artwork.bgColor.replace(/^#/, "")}`
-          : playlist.tracks[0]?.artworkBgColor,
-      }),
-    [artworkImageUrl, isUserPlaylist, playlist, playlistKind],
-  );
+          : tracks[0]?.artworkBgColor,
+      });
+      if (!queue.some((track) => track.playbackUrl)) return;
+
+      if (shuffle) {
+        playShuffledQueue(queue);
+        return;
+      }
+
+      const index = trackId
+        ? queue.findIndex((track) => track.id === trackId)
+        : 0;
+      setQueue(queue, Math.max(index, 0));
+    } catch {
+      // Keep the current queue intact when a background playback-page load fails.
+    } finally {
+      setIsPreparingPlayback(false);
+    }
+  };
 
   return (
     <>
@@ -222,8 +263,8 @@ export default function PlaylistDetailView({
                   <div className="w-full">
                     <button
                       type="button"
-                      disabled={!hasPlayableTrack}
-                      onClick={() => setQueue(playlistQueue)}
+                      disabled={!hasPlayableTrack || isPreparingPlayback}
+                      onClick={() => void startPlaylistPlayback()}
                       className="[--button-action-min-width:130px] [--button-action-height:36px] bg-(--button-pill-background-color,#000) rounded-(--button-action-border-radius,24px) text-(--button-pill-color,#fff) [font:var(--title-3-semibold)] px-3 items-center flex h-(--button-action-height,36px) justify-center min-w-(--button-action-min-width-override,var(--button-action-min-width,none)) w-(--button-action-width,100%) disabled:opacity-50 pointer-coarse:[--button-action-height:48px] pointer-coarse:[--button-action-min-width:160px] pointer-coarse:[font:var(--title-2-semibold)]"
                     >
                       <span className="block">
@@ -244,8 +285,10 @@ export default function PlaylistDetailView({
                 <div className="order-1">
                   <div className="w-full">
                     <button
-                      disabled={playableTrackCount < 2}
-                      onClick={() => playShuffledQueue(playlistQueue)}
+                      disabled={playableTrackCount < 2 || isPreparingPlayback}
+                      onClick={() =>
+                        void startPlaylistPlayback(undefined, true)
+                      }
                       title={
                         playableTrackCount < 2
                           ? "Need 2 songs to shuffle"
@@ -374,7 +417,10 @@ export default function PlaylistDetailView({
       <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) [--songs-list-row-border-radius:12px] relative z-(--z-default) pt-0">
         <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
           <div
-            ref={listRef}
+            ref={(node) => {
+              listRef.current = node;
+              setSongTableElement(node);
+            }}
             className="[--linkColor:var(--systemSecondary)] border-collapse border-spacing-0 table [font:var(--callout)] table-fixed w-[calc(100%-var(--bodyGutter)*2)] ms-(--bodyGutter) me-(--bodyGutter)"
           >
             <div className="text-(--systemSecondary) table-row [font:var(--callout-emphasized)] relative max-[999px]:[clip:rect(1px,1px,1px,1px)] max-[999px]:border-0 max-[999px]:[clip-path:inset(0_0_99.9%_99.9%)] max-[999px]:h-px max-[999px]:overflow-hidden max-[999px]:p-0 max-[999px]:static max-[999px]:w-px">
@@ -407,7 +453,11 @@ export default function PlaylistDetailView({
               </div>
             </div>
 
-            {playlist.tracks.map((track, index) => {
+            <SongTableSpacer
+              height={visibleSongRange.start * SONG_ROW_HEIGHT}
+            />
+
+            {visibleTracks.map((track) => {
               const isCurrentTrack = currentSong?.id === track.id;
               const isTrackPlaying = isCurrentTrack && playing;
 
@@ -478,7 +528,9 @@ export default function PlaylistDetailView({
                         <div className="[grid-area:song-index] opacity-(--playButtonOpacity,0) [--playButtonIconHoverColor:#fff] items-center bg-[rgba(0,0,0,.45)] rounded-[5px] flex size-full inset-s-0 justify-center absolute top-0 z-(--transgray-scrim-z,var(--z-default))">
                           <div className="[--nonPlatterIconFill:var(--nonPlatterOverrideIconColor,var(--keyColor))] h-full align-top w-full">
                             <button
-                              disabled={!track.playbackUrl}
+                              disabled={
+                                !track.playbackUrl || isPreparingPlayback
+                              }
                               onClick={(event) => {
                                 if (selectedTrackId !== null) {
                                   activateTrack(track.id);
@@ -488,7 +540,7 @@ export default function PlaylistDetailView({
                                 if (isCurrentTrack) {
                                   togglePlayback();
                                 } else {
-                                  setQueue(playlistQueue, index);
+                                  void startPlaylistPlayback(track.id);
                                 }
                               }}
                               className="[--nonPlatterIconFill:var(--playButtonIconColor,#fff)] [--playingBarColor:var(--nonPlatterIconFill,#fff)] leading-0 pointer-events-auto relative z-(--z-default) h-full align-top w-full"
@@ -651,6 +703,13 @@ export default function PlaylistDetailView({
                 </div>
               );
             })}
+
+            <SongTableSpacer
+              height={
+                (playlist.tracks.length - visibleSongRange.end) *
+                SONG_ROW_HEIGHT
+              }
+            />
           </div>
         </div>
       </div>

@@ -23,10 +23,14 @@ import {
 import { playlistArtworkVariants } from "@/lib/playlists/generated-playlist-cover";
 import {
   getUserPlaylist,
+  getAllUserPlaylistTracks,
   listUserPlaylistTracks,
 } from "@/lib/playlists/user-playlists.api";
 import { useInfiniteScrollLoadMore } from "@/lib/pagination/use-infinite-scroll-sentinel";
-import { appendUniqueById, getSafeNextCursor } from "@/lib/pagination/cursor-page";
+import {
+  appendUniqueById,
+  getSafeNextCursor,
+} from "@/lib/pagination/cursor-page";
 import Loading from "@/app/loading";
 
 type Track = SongSummaryProjectionSource;
@@ -103,14 +107,16 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
         listUserPlaylistTracks(playlistId),
       ])
         .then(([playlistDetail, firstPage]) => {
-          if (!active || requestVersion !== pageRequestVersionRef.current) return;
+          if (!active || requestVersion !== pageRequestVersionRef.current)
+            return;
           setPlaylist(playlistDetail);
           setTracks(firstPage.songs ?? []);
           setNextCursor(getSafeNextCursor(firstPage, seenCursorsRef.current));
           setError("");
         })
         .catch(() => {
-          if (!active || requestVersion !== pageRequestVersionRef.current) return;
+          if (!active || requestVersion !== pageRequestVersionRef.current)
+            return;
           setError("Could not load playlist.");
         })
         .finally(() => {
@@ -137,22 +143,25 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
       setTracks((current) => appendUniqueById(current, page.songs));
       setNextCursor(getSafeNextCursor(page, seenCursorsRef.current));
     } finally {
-      if (requestVersion === pageRequestVersionRef.current) setLoadingMore(false);
+      if (requestVersion === pageRequestVersionRef.current)
+        setLoadingMore(false);
     }
   }, [isFavorites, loadingMore, nextCursor, playlistId]);
 
-  const { sentinelRef: loadMoreSentinelRef, showLoadingMore } = useInfiniteScrollLoadMore({
-    enabled: !isFavorites && Boolean(nextCursor),
-    loading: loadingMore,
-    onLoadMore: loadMore,
-  });
+  const { sentinelRef: loadMoreSentinelRef, showLoadingMore } =
+    useInfiniteScrollLoadMore({
+      enabled: !isFavorites && Boolean(nextCursor),
+      loading: loadingMore,
+      onLoadMore: loadMore,
+    });
 
   useEffect(() => {
     if (isFavorites) return;
 
     return subscribeLibraryResourcesChanged((change) => {
       if (
-        (change?.operation === "pending-remove" || change?.operation === "remove") &&
+        (change?.operation === "pending-remove" ||
+          change?.operation === "remove") &&
         change.resourceType === "playlists" &&
         change.resourceId === playlistId
       ) {
@@ -166,8 +175,7 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
 
     const handlePlaylistChanged = (event: Event) => {
       if (
-        (event as CustomEvent<PlaylistChange>).detail?.playlistId ===
-        playlistId
+        (event as CustomEvent<PlaylistChange>).detail?.playlistId === playlistId
       ) {
         setRevision((current) => current + 1);
       }
@@ -194,9 +202,9 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
 
   const formattedTracks: GenericTrack[] = rawTracks.map(projectSongSummary);
   const playlistArtwork = isFavorites
-    ? (favoriteCollection?.artwork as GenericArtwork | undefined) ?? {
+    ? ((favoriteCollection?.artwork as GenericArtwork | undefined) ?? {
         bgColor: "2c2c2e",
-      }
+      })
     : resolvePlaylistArtwork(
         playlist?.artworkUrl
           ? {
@@ -230,6 +238,14 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
     <PlaylistDetailView
       playlist={formattedPlaylist}
       showMetadata={!showLoadingMore}
+      resolvePlaybackTracks={
+        isFavorites
+          ? undefined
+          : async () =>
+              (await getAllUserPlaylistTracks(playlistId)).map(
+                projectSongSummary,
+              )
+      }
       afterTracks={
         !isFavorites && (showLoadingMore || nextCursor) ? (
           <>

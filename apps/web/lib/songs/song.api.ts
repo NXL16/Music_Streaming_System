@@ -7,6 +7,7 @@ import type {
   ListSongsResponse,
   RequestUploadPayload,
   RequestUploadResponse,
+  SongSummary,
 } from "./song.types";
 
 const FAVORITES_KEY = "songs:favorites";
@@ -75,6 +76,33 @@ export async function listLibrarySongs(params?: {
     },
   });
   return response.data;
+}
+
+/** Loads every cursor page when playback needs the complete Library queue. */
+export async function getAllLibrarySongs(params?: {
+  sortBy?: "title" | "recently-added";
+  direction?: "ascending" | "descending";
+  songIds?: string[];
+}) {
+  const songs: SongSummary[] = [];
+  const songIds = new Set<string>();
+  const cursors = new Set<string>();
+  let cursor: string | undefined;
+
+  while (true) {
+    const page = await listLibrarySongs({ ...params, cursor, limit: 100 });
+    for (const song of page.songs ?? []) {
+      if (songIds.has(song.id)) continue;
+      songIds.add(song.id);
+      songs.push(song);
+    }
+    if (!page.hasMore) return songs;
+    if (!page.nextCursor || cursors.has(page.nextCursor)) {
+      throw new Error("INVALID_LIBRARY_SONG_CURSOR");
+    }
+    cursors.add(page.nextCursor);
+    cursor = page.nextCursor;
+  }
 }
 
 export async function listFavoriteSongs(
