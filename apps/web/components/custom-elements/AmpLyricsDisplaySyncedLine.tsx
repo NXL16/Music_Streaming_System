@@ -9,6 +9,8 @@ export type SyncedLyricLine = {
 };
 
 const TAG_NAME = "amp-lyrics-display-synced-line";
+const INSTRUMENTAL_PLACEHOLDER_WIDTH_PX = 40;
+const INSTRUMENTAL_PLACEHOLDER_HEIGHT_PX = 10;
 
 export class AmpLyricsDisplaySyncedLine extends HTMLElement {
   private line?: SyncedLyricLine;
@@ -18,7 +20,10 @@ export class AmpLyricsDisplaySyncedLine extends HTMLElement {
   private isCurrent = false;
   private isPlaying = false;
   private currentTimeMs = 0;
-  private instrumentalHeightFrame?: number;
+  private instrumentalRendered = false;
+  private instrumentalRenderTimer?: number;
+  private instrumentalExitTimer?: number;
+  private shouldDelayInstrumentalRender = false;
 
   connectedCallback() {
     if (this.root) {
@@ -43,10 +48,8 @@ export class AmpLyricsDisplaySyncedLine extends HTMLElement {
   }
 
   disconnectedCallback() {
-    if (this.instrumentalHeightFrame) {
-      cancelAnimationFrame(this.instrumentalHeightFrame);
-      this.instrumentalHeightFrame = undefined;
-    }
+    this.cancelInstrumentalRender();
+    this.cancelInstrumentalExit();
     this.button?.removeEventListener("click", this.handleSeek);
   }
 
@@ -63,11 +66,16 @@ export class AmpLyricsDisplaySyncedLine extends HTMLElement {
     this.root?.classList.toggle("is-animating", value);
     this.button?.setAttribute("aria-current", value ? "true" : "false");
     this.syncInstrumentalCurrent();
+    this.scheduleInstrumentalRender();
   }
 
   set playing(value: boolean) {
     this.isPlaying = value;
     this.syncInstrumentalCurrent();
+  }
+
+  set delayInstrumentalRender(value: boolean) {
+    this.shouldDelayInstrumentalRender = value;
   }
 
   set playbackTimeMs(value: number) {
@@ -91,21 +99,28 @@ export class AmpLyricsDisplaySyncedLine extends HTMLElement {
     );
 
     if (this.line.kind === "INSTRUMENTAL") {
-      const instrumental = document.createElement(
-        "amp-lyrics-display-instrumental-line",
-      ) as HTMLElement & { duration: number; elapsed: number };
-      instrumental.duration = this.line.endTimeMs - this.line.startTimeMs;
-      instrumental.elapsed = Math.max(
-        0,
-        this.currentTimeMs - this.line.startTimeMs,
-      );
-      instrumental.classList.toggle(
-        "is-current",
-        this.isCurrent && this.isPlaying,
-      );
       this.button.disabled = true;
       this.button.setAttribute("aria-label", "Đoạn nhạc không lời");
-      this.button.replaceChildren(instrumental);
+      if (this.instrumentalRendered) {
+        const instrumental = document.createElement(
+          "amp-lyrics-display-instrumental-line",
+        ) as HTMLElement & { duration: number; elapsed: number };
+        instrumental.duration = this.line.endTimeMs - this.line.startTimeMs;
+        instrumental.elapsed = Math.max(
+          0,
+          this.currentTimeMs - this.line.startTimeMs,
+        );
+        instrumental.classList.toggle(
+          "is-current",
+          this.isCurrent && this.isPlaying,
+        );
+        this.button.replaceChildren(instrumental);
+      } else {
+        const placeholder = document.createElement("span");
+        placeholder.setAttribute("aria-hidden", "true");
+        placeholder.style.cssText = `display:block;width:${INSTRUMENTAL_PLACEHOLDER_WIDTH_PX}px;height:${INSTRUMENTAL_PLACEHOLDER_HEIGHT_PX}px;visibility:hidden;`;
+        this.button.replaceChildren(placeholder);
+      }
       return;
     }
 
@@ -143,25 +158,102 @@ export class AmpLyricsDisplaySyncedLine extends HTMLElement {
       ?.classList.toggle("is-current", this.isCurrent && this.isPlaying);
   }
 
-  private syncInstrumentalHeight() {
-    if (this.line?.kind !== "INSTRUMENTAL" || !this.root) return;
+  private scheduleInstrumentalRender() {
+    if (this.line?.kind !== "INSTRUMENTAL") return;
 
-    if (this.instrumentalHeightFrame) {
-      cancelAnimationFrame(this.instrumentalHeightFrame);
-      this.instrumentalHeightFrame = undefined;
+    this.cancelInstrumentalRender();
+    if (!this.isCurrent) {
+      this.scheduleInstrumentalExit();
+      return;
     }
-    if (!this.isCurrent) return;
 
-    this.root.style.setProperty("--instrumental-line-height", "0px");
-    this.instrumentalHeightFrame = requestAnimationFrame(() => {
-      this.instrumentalHeightFrame = undefined;
-      if (!this.isCurrent || !this.root) return;
+    this.cancelInstrumentalExit();
+    if (this.instrumentalRendered) return;
 
-      this.root.style.setProperty(
-        "--instrumental-line-height",
-        `${this.root.scrollHeight}px`,
-      );
-    });
+    if (!this.shouldDelayInstrumentalRender) {
+      this.instrumentalRendered = true;
+      this.render();
+      return;
+    }
+
+    if (!this.root) return;
+    const delay =
+      Number.parseFloat(
+        getComputedStyle(this.root).getPropertyValue(
+          "--instrumental-render-delay",
+        ),
+      ) || 0;
+    this.instrumentalRenderTimer = window.setTimeout(() => {
+      this.instrumentalRenderTimer = undefined;
+      if (!this.isCurrent || this.line?.kind !== "INSTRUMENTAL") return;
+
+      this.instrumentalRendered = true;
+      this.render();
+    }, delay);
+  }
+
+  private cancelInstrumentalRender() {
+    if (this.instrumentalRenderTimer) {
+      clearTimeout(this.instrumentalRenderTimer);
+      this.instrumentalRenderTimer = undefined;
+    }
+  }
+
+  private scheduleInstrumentalExit() {
+    if (!this.instrumentalRendered || !this.root) return;
+
+    this.cancelInstrumentalExit();
+    const exitDuration =
+      Number.parseFloat(
+        getComputedStyle(this.root).getPropertyValue(
+          "--instrumental-exit-duration",
+        ),
+      ) || 0;
+    this.instrumentalExitTimer = window.setTimeout(() => {
+      this.instrumentalExitTimer = undefined;
+      if (this.isCurrent) return;
+
+      this.instrumentalRendered = false;
+      this.render();
+    }, exitDuration);
+  }
+
+  private cancelInstrumentalExit() {
+    if (this.instrumentalExitTimer) {
+      clearTimeout(this.instrumentalExitTimer);
+      this.instrumentalExitTimer = undefined;
+    }
+  }
+
+  private syncInstrumentalHeight() {
+    if (
+      this.line?.kind !== "INSTRUMENTAL" ||
+      !this.isCurrent ||
+      !this.root ||
+      !this.button
+    ) {
+      return;
+    }
+
+    const buttonStyle = getComputedStyle(this.button);
+    const marginBottom = Number.parseFloat(buttonStyle.marginBottom) || 0;
+    const currentPadding =
+      (Number.parseFloat(buttonStyle.paddingTop) || 0) +
+      (Number.parseFloat(buttonStyle.paddingBottom) || 0);
+    const targetPadding =
+      Number.parseFloat(
+        getComputedStyle(this.root).getPropertyValue(
+          "--lyrics-current-line-padding-block",
+        ),
+      ) || 12;
+    const height =
+      this.button.offsetTop +
+      this.button.offsetHeight -
+      currentPadding +
+      targetPadding * 2 +
+      marginBottom;
+
+    this.root.style.setProperty("--instrumental-line-height", `${height}px`);
   }
 }
 

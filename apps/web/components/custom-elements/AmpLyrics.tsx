@@ -18,6 +18,8 @@ type LoadedLyrics = {
   lines: LyricLine[];
 };
 
+type LyricsLoadStatus = "pending" | "loading" | "ready";
+
 type TimeSyncedLyricsDisplay = HTMLElement & {
   setLines(lines: LyricLine[]): void;
   setActiveLineTopRatio(value: number): void;
@@ -31,6 +33,8 @@ type TimeSyncedLyricsDisplay = HTMLElement & {
 const MANUAL_SCROLL_RESUME_MS = 4_000;
 const LINE_SEEK_SCROLL_LOCK_MS = 450;
 const LINE_SEEK_MAX_WAIT_MS = 1_500;
+const LOADING_DELAY_MS = 160;
+const MIN_LOADING_VISIBLE_MS = 200;
 
 const APPLE_CSS = `:host { width: 100%; max-width: 300px; max-height: 100%; display: grid; box-sizing: border-box; grid-template: "header" "lyrics" 1fr; position: relative; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; background-color: var(--lyricsBg); } [lang]:lang(ar) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Arabic UI Text", "SF Pro Icons", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(bn) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Bengali", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(gu) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Gujarati", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(he) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Arial Hebrew", "SF Pro Icons", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(hi) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Devanagari", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(ja) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Hiragino Sans", "SF Pro Icons", "Hiragino Kaku Gothic Pro", "ヒラギノ角ゴ Pro W3", メイリオ, Meiryo, "ＭＳ Ｐゴシック", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(kn) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Kannada", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(ko) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Apple SD Gothic Neo", "SF Pro Icons", "Apple Gothic", "HY Gulim", MalgunGothic, "HY Dotum", "Lexi Gulim", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(ml) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Malayalam", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(mr) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Devanagari", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(or) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Odia", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(pa) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Gurmukhi", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(ta) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Tamil", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(te) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Telugu", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(th) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Thonburi Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(ur) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Geeza Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(zh-CN) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang SC", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(zh-HK) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang HK", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(zh-MO) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang HK", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(zh-TW) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang TC", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__header { grid-area: header; } .lyrics__lyrics { grid-area: lyrics; overflow-y: auto; } .lyrics__lyrics.auto-scrolling { --lyrics-display-synced-line-opacity: 0; overflow-y: hidden; } .lyrics__lyrics.auto-scrolling ::-webkit-scrollbar { background: transparent; } .lyrics__loading, .lyrics__error, .lyrics__none, .lyrics__empty { font-size: 12px; line-height: 1.25; font-weight: 400; letter-spacing: 0em; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; margin: 0px; width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--lyrics-null-color, var(--systemSecondary)); text-align: center; } .lyrics__loading:lang(bn), .lyrics__error:lang(bn), .lyrics__none:lang(bn), .lyrics__empty:lang(bn) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Bengali", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__loading:lang(gu), .lyrics__error:lang(gu), .lyrics__none:lang(gu), .lyrics__empty:lang(gu) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Gujarati", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__loading:lang(hi), .lyrics__error:lang(hi), .lyrics__none:lang(hi), .lyrics__empty:lang(hi) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Devanagari", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__loading:lang(kn), .lyrics__error:lang(kn), .lyrics__none:lang(kn), .lyrics__empty:lang(kn) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Kannada", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__loading:lang(ml), .lyrics__error:lang(ml), .lyrics__none:lang(ml), .lyrics__empty:lang(ml) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Malayalam", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__loading:lang(mr), .lyrics__error:lang(mr), .lyrics__none:lang(mr), .lyrics__empty:lang(mr) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Devanagari", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__loading:lang(or), .lyrics__error:lang(or), .lyrics__none:lang(or), .lyrics__empty:lang(or) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Odia", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__loading:lang(pa), .lyrics__error:lang(pa), .lyrics__none:lang(pa), .lyrics__empty:lang(pa) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Gurmukhi", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__loading:lang(ta), .lyrics__error:lang(ta), .lyrics__none:lang(ta), .lyrics__empty:lang(ta) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Tamil", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__loading:lang(te), .lyrics__error:lang(te), .lyrics__none:lang(te), .lyrics__empty:lang(te) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Telugu", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__loading:lang(ur), .lyrics__error:lang(ur), .lyrics__none:lang(ur), .lyrics__empty:lang(ur) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Geeza Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__loading:lang(th), .lyrics__error:lang(th), .lyrics__none:lang(th), .lyrics__empty:lang(th) { line-height: 1.48125; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Thonburi Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__loading:lang(ar), .lyrics__error:lang(ar), .lyrics__none:lang(ar), .lyrics__empty:lang(ar) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Arabic UI Text", "SF Pro Icons", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__loading:lang(he), .lyrics__error:lang(he), .lyrics__none:lang(he), .lyrics__empty:lang(he) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Arial Hebrew", "SF Pro Icons", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__loading:lang(ja), .lyrics__error:lang(ja), .lyrics__none:lang(ja), .lyrics__empty:lang(ja) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Hiragino Sans", "SF Pro Icons", "Hiragino Kaku Gothic Pro", "ヒラギノ角ゴ Pro W3", メイリオ, Meiryo, "ＭＳ Ｐゴシック", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__loading:lang(ko), .lyrics__error:lang(ko), .lyrics__none:lang(ko), .lyrics__empty:lang(ko) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Apple SD Gothic Neo", "SF Pro Icons", "Apple Gothic", "HY Gulim", MalgunGothic, "HY Dotum", "Lexi Gulim", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__loading:lang(zh-CN), .lyrics__error:lang(zh-CN), .lyrics__none:lang(zh-CN), .lyrics__empty:lang(zh-CN) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang SC", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__loading:lang(zh-HK), .lyrics__error:lang(zh-HK), .lyrics__none:lang(zh-HK), .lyrics__empty:lang(zh-HK) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang HK", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__loading:lang(zh-MO), .lyrics__error:lang(zh-MO), .lyrics__none:lang(zh-MO), .lyrics__empty:lang(zh-MO) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang HK", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__loading:lang(zh-TW), .lyrics__error:lang(zh-TW), .lyrics__none:lang(zh-TW), .lyrics__empty:lang(zh-TW) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang TC", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__empty-title { font-size: 12px; line-height: 1.25; font-weight: 600; letter-spacing: 0em; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__empty-title:lang(bn) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Bengali", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__empty-title:lang(gu) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Gujarati", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__empty-title:lang(hi) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Devanagari", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__empty-title:lang(kn) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Kannada", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__empty-title:lang(ml) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Malayalam", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__empty-title:lang(mr) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Devanagari", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__empty-title:lang(or) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Odia", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__empty-title:lang(pa) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Gurmukhi", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__empty-title:lang(ta) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Tamil", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__empty-title:lang(te) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Telugu", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__empty-title:lang(ur) { line-height: 1.875; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Geeza Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__empty-title:lang(th) { line-height: 1.48125; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Thonburi Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__empty-title:lang(ar) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Arabic UI Text", "SF Pro Icons", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__empty-title:lang(he) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Arial Hebrew", "SF Pro Icons", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__empty-title:lang(ja) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Hiragino Sans", "SF Pro Icons", "Hiragino Kaku Gothic Pro", "ヒラギノ角ゴ Pro W3", メイリオ, Meiryo, "ＭＳ Ｐゴシック", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__empty-title:lang(ko) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Apple SD Gothic Neo", "SF Pro Icons", "Apple Gothic", "HY Gulim", MalgunGothic, "HY Dotum", "Lexi Gulim", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__empty-title:lang(zh-CN) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang SC", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__empty-title:lang(zh-HK) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang HK", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__empty-title:lang(zh-MO) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang HK", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .lyrics__empty-title:lang(zh-TW) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang TC", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; }`;
 
@@ -73,6 +77,10 @@ export default function AmpLyrics({
   const containerRef = useRef<HTMLElement>(null);
   const activeLineTopRatio = inDetailView ? 0.32 : 0.18;
   const [loadedLyrics, setLoadedLyrics] = useState<LoadedLyrics | null>(null);
+  const [lyricsLoadStatus, setLyricsLoadStatus] = useState<{
+    songId?: string;
+    status: LyricsLoadStatus;
+  }>({ status: "pending" });
   const lines = useMemo<LyricLine[]>(() => {
     if (!loadedLyrics || loadedLyrics.songId !== songId) return [];
     return loadedLyrics.lines;
@@ -82,16 +90,53 @@ export default function AmpLyrics({
     if (!songId) return;
 
     let cancelled = false;
+    let loadingVisibleAt: number | undefined;
+    let loadingTimer: number | undefined;
+    let settleTimer: number | undefined;
+
+    loadingTimer = window.setTimeout(() => {
+      loadingTimer = undefined;
+      loadingVisibleAt = performance.now();
+      setLyricsLoadStatus({ songId, status: "loading" });
+    }, LOADING_DELAY_MS);
+
+    const resolveLyrics = (lines: LyricLine[]) => {
+      if (loadingTimer) {
+        window.clearTimeout(loadingTimer);
+        loadingTimer = undefined;
+      }
+
+      const commit = () => {
+        if (cancelled) return;
+        setLoadedLyrics({ songId, lines });
+        setLyricsLoadStatus({ songId, status: "ready" });
+      };
+
+      const remainingVisibleTime = loadingVisibleAt
+        ? Math.max(
+            0,
+            loadingVisibleAt + MIN_LOADING_VISIBLE_MS - performance.now(),
+          )
+        : 0;
+      if (remainingVisibleTime > 0) {
+        settleTimer = window.setTimeout(commit, remainingVisibleTime);
+      } else {
+        commit();
+      }
+    };
+
     void getSongLyrics(songId)
       .then((lines) => {
-        if (!cancelled) setLoadedLyrics({ songId, lines });
+        resolveLyrics(lines);
       })
       .catch(() => {
-        if (!cancelled) setLoadedLyrics({ songId, lines: [] });
+        resolveLyrics([]);
       });
 
     return () => {
       cancelled = true;
+      if (loadingTimer) window.clearTimeout(loadingTimer);
+      if (settleTimer) window.clearTimeout(settleTimer);
     };
   }, [songId]);
 
@@ -100,6 +145,44 @@ export default function AmpLyrics({
     if (!el) return;
 
     const lyricsContainer = getLyricsContainer(el);
+    const status = songId
+      ? lyricsLoadStatus.songId === songId
+        ? lyricsLoadStatus.status
+        : "pending"
+      : "ready";
+
+    const renderMessage = (
+      className: "lyrics__loading" | "lyrics__empty",
+      title: string,
+      description?: string,
+      emphasizeTitle = true,
+    ) => {
+      const message = document.createElement("div");
+      message.className = className;
+
+      const titlePara = document.createElement("p");
+      if (emphasizeTitle) titlePara.className = "lyrics__empty-title";
+      titlePara.textContent = title;
+      message.appendChild(titlePara);
+
+      if (description) {
+        const descriptionPara = document.createElement("p");
+        descriptionPara.textContent = description;
+        message.appendChild(descriptionPara);
+      }
+
+      lyricsContainer.replaceChildren(message);
+    };
+
+    if (status === "pending") {
+      lyricsContainer.replaceChildren();
+      return;
+    }
+
+    if (status === "loading") {
+      renderMessage("lyrics__loading", "Loading lyrics…", undefined, false);
+      return;
+    }
 
     if (lines.length) {
       let cancelled = false;
@@ -124,7 +207,11 @@ export default function AmpLyrics({
       };
       const syncActiveLine = (shouldScroll = true) => {
         if (!display || !audio) return;
-        const timeMs = Math.floor(audio.currentTime * 1000);
+        const playerState = usePlayerStore.getState();
+        const timeMs =
+          playerState.currentSong?.id === songId
+            ? playerState.playbackTimeMs
+            : 0;
         const activeIndex = lines.findLastIndex(
           (line) => line.startTimeMs <= timeMs && line.endTimeMs > timeMs,
         );
@@ -147,7 +234,9 @@ export default function AmpLyrics({
             autoFollowEnabled,
         );
         activeLineIndex = activeIndex;
-        display.setPlaying?.(!audio.paused);
+        display.setPlaying?.(
+          playerState.currentSong?.id === songId && playerState.playing,
+        );
         display.setPlaybackTimeMs?.(timeMs);
 
         if (isInitialSync && activeIndex >= 0) {
@@ -172,7 +261,8 @@ export default function AmpLyrics({
         }
         if (isLineSeekInProgress) {
           isLineSeekInProgress = false;
-          lineSeekScrollLockUntil = performance.now() + LINE_SEEK_SCROLL_LOCK_MS;
+          lineSeekScrollLockUntil =
+            performance.now() + LINE_SEEK_SCROLL_LOCK_MS;
           if (lineSeekScrollLockTimer) {
             window.clearTimeout(lineSeekScrollLockTimer);
           }
@@ -273,8 +363,12 @@ export default function AmpLyrics({
         });
         lyricsContainer.replaceChildren(display);
         setAutoScroll(autoFollowEnabled);
-        syncActiveLine();
-        startFrameSync();
+        requestAnimationFrame(() => {
+          if (cancelled) return;
+
+          syncActiveLine();
+          startFrameSync();
+        });
       });
 
       audio?.addEventListener("timeupdate", handleAudioSync);
@@ -303,19 +397,7 @@ export default function AmpLyrics({
       };
     }
 
-    const lyricsEmpty = document.createElement("div");
-    lyricsEmpty.className = "lyrics__empty";
-
-    const titlePara = document.createElement("p");
-    titlePara.className = "lyrics__empty-title";
-    titlePara.textContent = emptyTitle;
-
-    const descPara = document.createElement("p");
-    descPara.textContent = emptyDescription;
-
-    lyricsEmpty.appendChild(titlePara);
-    lyricsEmpty.appendChild(descPara);
-    lyricsContainer.replaceChildren(lyricsEmpty);
+    renderMessage("lyrics__empty", emptyTitle, emptyDescription);
   }, [
     activeLineTopRatio,
     audioRef,
@@ -323,6 +405,8 @@ export default function AmpLyrics({
     emptyTitle,
     inDetailView,
     lines,
+    lyricsLoadStatus,
+    songId,
   ]);
 
   const AmpLyricsTag = "amp-lyrics" as unknown as ComponentType<{

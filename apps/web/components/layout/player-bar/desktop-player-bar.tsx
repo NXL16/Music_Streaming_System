@@ -53,7 +53,6 @@ import { ExplicitBadgeIcon } from "@/components/icons/explicit-badge-icon";
 import VolumeControl from "@/components/custom-elements/VolumeControl";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
-import { getSongLyrics } from "@/lib/lyrics/song-lyrics.api";
 
 // The detail modal owns the Pixi lyrics scene. It is only needed after the
 // listener opens the expanded player, so keep it out of the desktop controls
@@ -281,24 +280,14 @@ export function DesktopPlayerBar({
   const [showQueue, setShowQueue] = useState(false);
   const [queueMounted, setQueueMounted] = useState(false);
   const [isOpenMusicPlayer, setIsOpenMusicPlayer] = useState(false);
-  const [openMusicPlayerWithLyrics, setOpenMusicPlayerWithLyrics] =
+  const [isMusicPlayerLyricOpen, setIsMusicPlayerLyricOpen] =
     useState(false);
 
-  const openMusicPlayer = async () => {
-    const songId = currentSong?.id;
-    let hasLyrics = false;
-
-    if (songId) {
-      try {
-        hasLyrics = (await getSongLyrics(songId)).length > 0;
-      } catch {
-        hasLyrics = false;
-      }
-    }
-
-    if (usePlayerStore.getState().currentSong?.id !== songId) return;
-    setOpenMusicPlayerWithLyrics(hasLyrics);
+  const openMusicPlayer = (
+    initialLyricOpen = currentSong?.hasLyrics ?? false,
+  ) => {
     setIsOpenMusicPlayer(true);
+    setIsMusicPlayerLyricOpen(initialLyricOpen);
   };
   const {
     activeTrackId: activeQueueSongId,
@@ -582,8 +571,11 @@ export function DesktopPlayerBar({
                       <MusicPlayDetail
                         audioRef={audioRef}
                         currentSong={currentSong}
-                        initialLyricOpen={openMusicPlayerWithLyrics}
-                        onClose={setIsOpenMusicPlayer}
+                        initialLyricOpen={isMusicPlayerLyricOpen}
+                        onClose={(isOpen) => {
+                          setIsOpenMusicPlayer(isOpen);
+                          if (!isOpen) setIsMusicPlayerLyricOpen(false);
+                        }}
                         volume={volume}
                         onSetVolume={onSetVolume}
                       />
@@ -773,7 +765,7 @@ export function DesktopPlayerBar({
                         <div className="group-hover:opacity-100 [--lyrics-toggle-button-size:26px] bg-(--lyrics-bg) text-[0] my-2.5 mx-4 opacity-0 p-1.25 absolute right-0 align-top z-(--z-default)">
                           <button
                             type="button"
-                            onClick={() => void openMusicPlayer()}
+                            onClick={() => openMusicPlayer(true)}
                             className="backdrop-blur-[60px] bg-(--systemQuaternary) rounded-lg p-1 relative z-(--z-default)"
                           >
                             <svg
