@@ -26,6 +26,7 @@
     "@grpc/proto-loader": "^0.8.0",
     "@musical/shared-proto": "workspace:*",
     "@musical/shared-types": "workspace:*",
+    "@musical/playlist-cover-renderer": "workspace:*",
     "@nest-lab/throttler-storage-redis": "^1.2.0",
     "@nestjs/common": "^11.1.28",
     "@nestjs/config": "^4.0.3",

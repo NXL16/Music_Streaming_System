@@ -38,10 +38,14 @@ import {
   LibraryResourceResponse,
   ListLibraryResourcesRequest,
   ListLibraryResourcesResponse,
+  ListLibrarySongsRequest,
+  ListLibrarySongsResponse,
   RemoveSongOwnershipRequest,
   RemoveSongOwnershipResponse,
   GetPlaylistRequest,
   GetPlaylistResponse,
+  ListPlaylistTracksRequest,
+  ListPlaylistTracksResponse,
   SongStatus,
   GetCatalogAlbumRequest,
   GetCatalogPlaylistRequest,
@@ -75,6 +79,7 @@ import {
   DeleteUserPlaylistResponse,
   ListUserPlaylistsRequest,
   ListUserPlaylistsResponse,
+  PlaylistSourceMembershipResponse,
   PlaylistTrackRequest,
   PlaylistTrackResponse,
   UserPlaylistInfo,
@@ -83,7 +88,10 @@ import { grpcFirstValueFrom } from '../common/utils/grpc-timeout';
 import { R2Service } from '../common/r2/r2.service';
 import { RequestUploadDto } from './dto/request-upload.dto';
 import { FinalizeUploadDto } from './dto/finalize-upload.dto';
-import { TRANSCODE_QUEUE } from '@musical/shared-types';
+import {
+  getArtworkRenditionSrcSet,
+  TRANSCODE_QUEUE,
+} from '@musical/shared-types';
 import {
   wrapStructInput,
   wrapStructInputs,
@@ -159,9 +167,7 @@ export class SongsService implements OnModuleInit {
     );
   }
 
-  async listFavoriteSongs(
-    data: ListFavoriteSongsRequest,
-  ) {
+  async listFavoriteSongs(data: ListFavoriteSongsRequest) {
     const response = await grpcFirstValueFrom(
       this.songServiceClient.listFavoriteSongs(data),
     );
@@ -174,19 +180,230 @@ export class SongsService implements OnModuleInit {
   async upsertFavoriteArtwork(
     data: UpsertFavoriteArtworkRequest,
   ): Promise<FavoriteArtworkResponse> {
-    return grpcFirstValueFrom(this.songServiceClient.upsertFavoriteArtwork(data));
+    return grpcFirstValueFrom(
+      this.songServiceClient.upsertFavoriteArtwork(data),
+    );
   }
   async addLibraryResource(
-    data: LibraryResourceRequest,
+    data: LibraryResourceRequest & {
+      sourceOrigin?: 'catalog' | 'favorite' | 'user-playlist';
+      songIds?: string[];
+    },
   ): Promise<LibraryResourceResponse> {
-    return grpcFirstValueFrom(this.songServiceClient.addLibraryResource(data));
+    const result = await grpcFirstValueFrom(
+      this.songServiceClient.addLibraryResource(data),
+    );
+
+    if (
+      data.sourceOrigin &&
+      (data.resourceType === 'albums' || data.resourceType === 'playlists')
+    ) {
+      const songIds = await this.resolvePlaylistSourceTracks(data.userId, {
+        kind: 'collection',
+        resourceType: data.resourceType,
+        resourceId: data.resourceId,
+        sourceOrigin: data.sourceOrigin,
+        songIds: data.songIds,
+      });
+      const songResources = await this.resolveLibrarySongResources(
+        data.userId,
+        songIds,
+      );
+      await Promise.all(
+        songResources.map((song) =>
+          grpcFirstValueFrom(this.songServiceClient.addLibraryResource(song)),
+        ),
+      );
+    }
+
+    return result;
   }
+
+  /**
+   * Persist display metadata with cascade-created song memberships so the Song
+   * service can sort and paginate them without resolving the entire library.
+   */
+  private async resolveLibrarySongResources(
+    userId: string,
+    songIds: string[],
+  ): Promise<LibraryResourceRequest[]> {
+    const uniqueSongIds = [...new Set(songIds.filter(Boolean))];
+    if (!uniqueSongIds.length) return [];
+
+    let catalog: CatalogResponse | undefined;
+    try {
+      catalog = await this.getCatalogResources({
+        storefront: 'vn',
+        resources: uniqueSongIds.map((id) => ({ type: 'songs', id })),
+      });
+    } catch {
+      // Private uploads are not catalog entries; resolve those individually.
+    }
+
+    const catalogSongs = catalog?.resources?.songs ?? {};
+    const missingSongIds = uniqueSongIds.filter((id) => !catalogSongs[id]);
+    const privateSongs = new Map<string, GetSongResponse['song']>();
+    await Promise.all(
+      missingSongIds.map(async (songId) => {
+        try {
+          const response = await this.getSong({
+            songId,
+            requesterUserId: userId,
+          });
+          if (response.song) privateSongs.set(songId, response.song);
+        } catch {
+          // Keep an existing library action resilient if a stale source track
+          // was deleted between resolving the collection and this write.
+        }
+      }),
+    );
+
+    return uniqueSongIds.map((songId) => {
+      const catalogSong = catalogSongs[songId];
+      const attributes = catalogSong?.attributes;
+      const privateSong = privateSongs.get(songId);
+      return {
+        userId,
+        resourceType: 'songs',
+        resourceId: songId,
+        title: attributes?.name || privateSong?.title || '',
+        subtitle: attributes?.artistName || privateSong?.artist || '',
+        artworkUrl: attributes?.artwork?.url || '',
+      };
+    });
+  }
+
   async listLibraryResources(
     data: ListLibraryResourcesRequest,
   ): Promise<ListLibraryResourcesResponse> {
     return grpcFirstValueFrom(
       this.songServiceClient.listLibraryResources(data),
     );
+  }
+
+  async getLibrarySongPage(
+    data: ListLibrarySongsRequest,
+  ): Promise<ListLibrarySongsResponse> {
+    return grpcFirstValueFrom(this.songServiceClient.listLibrarySongs(data));
+  }
+
+  async listLibrarySongs(
+    userId: string,
+    options: {
+      cursor?: string;
+      limit?: number;
+      sortBy?: 'title' | 'recently-added';
+      direction?: 'ascending' | 'descending';
+      songIds?: string[];
+    } = {},
+  ) {
+    const limit = Math.min(
+      Math.max(options.limit || 40, 1),
+      options.songIds?.length ? 100 : 40,
+    );
+    const sortBy = options.sortBy || 'recently-added';
+    const page = await this.getLibrarySongPage({
+      userId,
+      cursor: options.cursor || '',
+      limit,
+      sortBy,
+      direction: options.direction || 'descending',
+      songIds: options.songIds || [],
+    });
+    const songResources = page.resources;
+
+    let catalog: CatalogResponse | undefined;
+    try {
+      if (songResources.length) {
+        catalog = await this.getCatalogResources({
+          storefront: 'vn',
+          resources: songResources.map((resource) => ({
+            type: 'songs',
+            id: resource.resourceId,
+          })),
+        });
+      }
+    } catch {
+      // Uploaded/private songs are not necessarily catalog resources; their
+      // owner metadata remains the fallback below.
+    }
+
+    const resolvedSongs = await Promise.all(
+      songResources.map(async (resource) => {
+        const catalogSong = catalog?.resources?.songs[resource.resourceId];
+        const attributes = catalogSong?.attributes;
+        if (attributes) {
+          const albumReference = catalogSong.relationships?.albums?.data[0];
+          const album = albumReference
+            ? catalog?.resources?.albums[albumReference.id]
+            : undefined;
+          const artists = (
+            catalogSong.relationships?.artists?.data ?? []
+          ).flatMap((reference) => {
+            const artist = catalog?.resources?.artists[reference.id];
+            if (!artist?.attributes?.name) return [];
+            return [
+              {
+                id: artist.id,
+                name: artist.attributes.name,
+                url: artist.attributes.url,
+              },
+            ];
+          });
+          return {
+            id: catalogSong.id,
+            title: attributes.name || resource.title,
+            artist: attributes.artistName || resource.subtitle,
+            album: attributes.albumName,
+            isPublic: true,
+            status: 3,
+            durationSec: Math.round(attributes.durationInMillis / 1000),
+            createdAt: resource.createdAt,
+            coverUrl: attributes.artwork?.url || resource.artworkUrl,
+            thumbnailCoverSrcSet:
+              getArtworkRenditionSrcSet(attributes.artwork, [40, 80]) ||
+              attributes.artwork?.url ||
+              '',
+            artists,
+            artistId: artists[0]?.id || '',
+            artistUrl: artists[0]?.url || '',
+            albumId: album?.id || '',
+            albumUrl: album?.attributes?.url || '',
+            contentRating: attributes.contentRating || '',
+          };
+        }
+        try {
+          const response = await this.getSong({
+            songId: resource.resourceId,
+            requesterUserId: userId,
+          });
+          const song = response.song;
+          if (!song) return null;
+          return {
+            id: song.id,
+            title: song.title || resource.title,
+            artist: song.artist || resource.subtitle,
+            album: song.album,
+            isPublic: song.isPublic,
+            status: song.status,
+            durationSec: song.durationSec,
+            createdAt: resource.createdAt,
+            coverUrl: resource.artworkUrl,
+          };
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    const songs = resolvedSongs.filter(
+      (song): song is NonNullable<typeof song> => song !== null,
+    );
+    return {
+      songs,
+      nextCursor: page.nextCursor,
+      hasMore: page.hasMore,
+    };
   }
 
   /**
@@ -196,6 +413,14 @@ export class SongsService implements OnModuleInit {
    */
   async listLibraryMediaCards(userId: string, storefront: string) {
     const library = await this.listLibraryResources({ userId });
+    // Recently Added and the sidebar's collection cards deliberately exclude
+    // song memberships. Saving an album also saves its tracks to Library Songs,
+    // but those track records do not have a collection-card representation yet.
+    const collectionResources = library.resources.filter(
+      (resource) =>
+        resource.resourceType === 'albums' ||
+        resource.resourceType === 'playlists',
+    );
     const userPlaylists = await this.listUserPlaylists({
       userId,
       requesterUserId: userId,
@@ -205,7 +430,7 @@ export class SongsService implements OnModuleInit {
     const userPlaylistById = new Map(
       userPlaylists.playlists.map((playlist) => [playlist.id, playlist]),
     );
-    const catalogReferences = library.resources
+    const catalogReferences = collectionResources
       .filter(
         (resource) =>
           resource.resourceType === 'albums' ||
@@ -232,7 +457,7 @@ export class SongsService implements OnModuleInit {
     }
 
     return {
-      resources: library.resources.map((resource) => {
+      resources: collectionResources.map((resource) => {
         const userPlaylist =
           resource.resourceType === 'playlists'
             ? userPlaylistById.get(resource.resourceId)
@@ -261,6 +486,10 @@ export class SongsService implements OnModuleInit {
             : undefined;
         const attributes = album?.attributes ?? playlist?.attributes;
         const artistReferences = album?.relationships?.artists?.data ?? [];
+        const trackReferences =
+          album?.relationships?.tracks?.data ??
+          playlist?.relationships?.tracks?.data ??
+          [];
         const artists = artistReferences.flatMap((reference) => {
           const artist = catalog?.resources?.artists[reference.id];
           if (!artist?.attributes?.name || !artist.attributes.url) return [];
@@ -289,17 +518,70 @@ export class SongsService implements OnModuleInit {
               ? album?.attributes?.contentRating || ''
               : '',
           artists,
+          // The Library card already has the Catalog collection response in
+          // hand. Preserve its track ids so an optimistic remove can hide the
+          // derived Library Songs during the Undo window without another
+          // client request.
+          songIds: trackReferences
+            .filter((reference) => reference.type === 'songs')
+            .map((reference) => reference.id),
           createdAt: resource.createdAt,
         };
       }),
     };
   }
   async removeLibraryResource(
-    data: LibraryResourceRequest,
+    data: LibraryResourceRequest & {
+      sourceOrigin?: 'catalog' | 'favorite' | 'user-playlist';
+      songIds?: string[];
+    },
   ): Promise<LibraryResourceResponse> {
-    return grpcFirstValueFrom(
+    // Collection saves create Library Song memberships. Resolve the same source
+    // before deleting the collection so its derived Song memberships stay in sync.
+    let derivedSongIds: string[] = [];
+    if (
+      (data.resourceType === 'albums' || data.resourceType === 'playlists') &&
+      data.sourceOrigin
+    ) {
+      try {
+        derivedSongIds = await this.resolvePlaylistSourceTracks(data.userId, {
+          kind: 'collection',
+          resourceType: data.resourceType,
+          resourceId: data.resourceId,
+          sourceOrigin: data.sourceOrigin,
+          songIds: data.songIds,
+        });
+      } catch (error) {
+        // Deleting the collection must still succeed if its source is temporarily
+        // unavailable. A later library cleanup can remove any leftover songs.
+        this.logger.warn(
+          `Could not resolve songs for removed ${data.resourceType} ${data.resourceId}: ${error instanceof Error ? error.message : 'unknown error'}`,
+        );
+      }
+    }
+
+    const result = await grpcFirstValueFrom(
       this.songServiceClient.removeLibraryResource(data),
     );
+
+    if (result.success && derivedSongIds.length) {
+      await Promise.all(
+        derivedSongIds.map((resourceId) =>
+          grpcFirstValueFrom(
+            this.songServiceClient.removeLibraryResource({
+              userId: data.userId,
+              resourceType: 'songs',
+              resourceId,
+              title: '',
+              subtitle: '',
+              artworkUrl: '',
+            }),
+          ),
+        ),
+      );
+    }
+
+    return result;
   }
 
   async pinLibraryResource(
@@ -311,7 +593,9 @@ export class SongsService implements OnModuleInit {
   async unpinLibraryResource(
     data: LibraryResourceRequest,
   ): Promise<LibraryResourceResponse> {
-    return grpcFirstValueFrom(this.songServiceClient.unpinLibraryResource(data));
+    return grpcFirstValueFrom(
+      this.songServiceClient.unpinLibraryResource(data),
+    );
   }
 
   async removeSongOwnership(
@@ -331,6 +615,14 @@ export class SongsService implements OnModuleInit {
 
   async getPlaylist(data: GetPlaylistRequest): Promise<GetPlaylistResponse> {
     return await grpcFirstValueFrom(this.songServiceClient.getPlaylist(data));
+  }
+
+  async listPlaylistTracks(
+    data: ListPlaylistTracksRequest,
+  ): Promise<ListPlaylistTracksResponse> {
+    return await grpcFirstValueFrom(
+      this.songServiceClient.listPlaylistTracks(data),
+    );
   }
 
   async createUserPlaylist(
@@ -368,7 +660,11 @@ export class SongsService implements OnModuleInit {
         input.source,
       );
       for (const songId of songIds) {
-        await this.addTrackToPlaylist({ userId, playlistId: playlist.id, songId });
+        await this.addTrackToPlaylist({
+          userId,
+          playlistId: playlist.id,
+          songId,
+        });
       }
       return playlist;
     } catch (error) {
@@ -405,6 +701,23 @@ export class SongsService implements OnModuleInit {
     return { addedCount };
   }
 
+  async getPlaylistSourceMembershipForUser(
+    userId: string,
+    source: {
+      kind: 'song' | 'collection';
+      songId?: string;
+      songIds?: string[];
+      resourceType?: 'albums' | 'playlists';
+      resourceId?: string;
+      sourceOrigin?: 'catalog' | 'favorite' | 'user-playlist';
+    },
+  ): Promise<PlaylistSourceMembershipResponse> {
+    const songIds = await this.resolvePlaylistSourceTracks(userId, source);
+    return await grpcFirstValueFrom(
+      this.songServiceClient.getPlaylistSourceMembership({ userId, songIds }),
+    );
+  }
+
   private isTrackAlreadyInPlaylist(error: unknown) {
     return (
       typeof error === 'object' &&
@@ -417,12 +730,12 @@ export class SongsService implements OnModuleInit {
   private async resolvePlaylistSourceTracks(
     requesterUserId: string,
     source: {
-    kind: 'song' | 'collection';
-    songId?: string;
-    songIds?: string[];
-    resourceType?: 'albums' | 'playlists';
-    resourceId?: string;
-    sourceOrigin?: 'catalog' | 'favorite' | 'user-playlist';
+      kind: 'song' | 'collection';
+      songId?: string;
+      songIds?: string[];
+      resourceType?: 'albums' | 'playlists';
+      resourceId?: string;
+      sourceOrigin?: 'catalog' | 'favorite' | 'user-playlist';
     },
   ) {
     if (source.kind === 'song') {
@@ -451,7 +764,9 @@ export class SongsService implements OnModuleInit {
       });
 
       return (
-        catalog.resources?.albums?.[source.resourceId]?.relationships?.tracks?.data
+        catalog.resources?.albums?.[
+          source.resourceId
+        ]?.relationships?.tracks?.data
           ?.filter((item) => item.type === 'songs')
           .map((item) => item.id) ?? []
       );
@@ -461,6 +776,7 @@ export class SongsService implements OnModuleInit {
       const userPlaylist = await this.getPlaylist({
         playlistId: source.resourceId,
         requesterUserId,
+        includeSongs: true,
       });
       return userPlaylist.playlist?.songs.map((song) => song.id) ?? [];
     }
@@ -493,7 +809,9 @@ export class SongsService implements OnModuleInit {
         playlistId: source.resourceId,
       });
       return (
-        catalog.resources?.playlists?.[source.resourceId]?.relationships?.tracks?.data
+        catalog.resources?.playlists?.[
+          source.resourceId
+        ]?.relationships?.tracks?.data
           ?.filter((item) => item.type === 'songs')
           .map((item) => item.id) ?? []
       );

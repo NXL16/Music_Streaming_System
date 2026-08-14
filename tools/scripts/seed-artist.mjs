@@ -41,7 +41,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ─── Config ────────────────────────────────────────────
-const BASE_URL = process.env.BASE_URL || 'http://localhost:9999/api/v1';
+const BASE_URL = process.env.BASE_URL || 'http://localhost:9999/v1';
 let ADMIN_TOKEN = '';
 
 function catalogIngestionKey(collectionId) {

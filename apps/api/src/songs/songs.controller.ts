@@ -127,6 +127,8 @@ export class SongsController {
       title?: string;
       subtitle?: string;
       artworkUrl?: string;
+      sourceOrigin?: 'catalog' | 'favorite' | 'user-playlist';
+      songIds?: string[];
     },
   ) {
     const user = req.user as JwtUser;
@@ -137,6 +139,8 @@ export class SongsController {
       title: body.title || '',
       subtitle: body.subtitle || '',
       artworkUrl: body.artworkUrl || '',
+      sourceOrigin: body.sourceOrigin,
+      songIds: body.songIds,
     });
   }
 
@@ -145,6 +149,26 @@ export class SongsController {
   async listLibraryResources(@Req() req: Request) {
     const user = req.user as JwtUser;
     return this.songsService.listLibraryResources({ userId: user.userId });
+  }
+
+  @Get('library/songs')
+  @UseGuards(StrictJwtAuthGuard)
+  async listLibrarySongs(
+    @Req() req: Request,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('direction') direction?: string,
+    @Query('songIds') songIds?: string,
+  ) {
+    const user = req.user as JwtUser;
+    return this.songsService.listLibrarySongs(user.userId, {
+      cursor,
+      limit: Number(limit) || 40,
+      sortBy: sortBy === 'title' ? 'title' : 'recently-added',
+      direction: direction === 'ascending' ? 'ascending' : 'descending',
+      songIds: songIds?.split(',').filter(Boolean),
+    });
   }
 
   @Get('library/media-cards')
@@ -171,6 +195,11 @@ export class SongsController {
     @Req() req: Request,
     @Param('resourceType') resourceType: string,
     @Param('resourceId') resourceId: string,
+    @Body()
+    body: {
+      sourceOrigin?: 'catalog' | 'favorite' | 'user-playlist';
+      songIds?: string[];
+    },
   ) {
     const user = req.user as JwtUser;
     const result = await this.songsService.removeLibraryResource({
@@ -180,6 +209,8 @@ export class SongsController {
       title: '',
       subtitle: '',
       artworkUrl: '',
+      sourceOrigin: body?.sourceOrigin,
+      songIds: body?.songIds,
     });
     if (result.deletedUserPlaylist) {
       await this.recommendationsService.cleanupPlaylistHistory({

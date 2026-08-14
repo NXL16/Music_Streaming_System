@@ -5,6 +5,7 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
@@ -72,5 +73,37 @@ export class R2Service {
       contentLength: Number(response.ContentLength ?? 0),
       eTag: (response.ETag ?? '').replace(/"/g, ''),
     };
+  }
+
+  async putObject(
+    objectKey: string,
+    body: Buffer,
+    contentType: string,
+  ): Promise<void> {
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: objectKey,
+        Body: body,
+        ContentType: contentType,
+        CacheControl: 'public, max-age=31536000, immutable',
+      }),
+    );
+  }
+
+  async deleteObject(objectKey: string): Promise<void> {
+    await this.client.send(
+      new DeleteObjectCommand({
+        Bucket: this.bucket,
+        Key: objectKey,
+      }),
+    );
+  }
+
+  publicUrl(objectKey: string, baseUrl: string): string {
+    return `${baseUrl.replace(/\/$/, '')}/${objectKey
+      .split('/')
+      .map((part) => encodeURIComponent(part))
+      .join('/')}`;
   }
 }
