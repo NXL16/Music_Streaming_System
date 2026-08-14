@@ -474,6 +474,8 @@ model UserLibraryResource {
 
   @@unique([userId, resourceType, resourceId])
   @@index([userId, createdAt])
+  @@index([userId, resourceType, createdAt, resourceId])
+  @@index([userId, resourceType, title, resourceId])
   @@index([userId, isPinned, pinnedAt])
   @@map("user_library_resources")
 }

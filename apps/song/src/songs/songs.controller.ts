@@ -25,10 +25,14 @@ import {
   LibraryResourceResponse,
   ListLibraryResourcesRequest,
   ListLibraryResourcesResponse,
+  ListLibrarySongsRequest,
+  ListLibrarySongsResponse,
   RemoveSongOwnershipRequest,
   RemoveSongOwnershipResponse,
   GetPlaylistRequest,
   GetPlaylistResponse,
+  ListPlaylistTracksRequest,
+  ListPlaylistTracksResponse,
   GetCatalogAlbumRequest,
   GetCatalogPlaylistRequest,
   UpsertSystemPlaylistRequest,
@@ -58,6 +62,8 @@ import {
   DeleteUserPlaylistResponse,
   ListUserPlaylistsRequest,
   ListUserPlaylistsResponse,
+  PlaylistSourceMembershipRequest,
+  PlaylistSourceMembershipResponse,
   PlaylistTrackRequest,
   PlaylistTrackResponse,
   BrowseCatalogRequest,
@@ -154,6 +160,12 @@ export class SongsController implements SongServiceController {
   ): Promise<ListLibraryResourcesResponse> {
     return this.songsService.listLibraryResources(request);
   }
+
+  async listLibrarySongs(
+    request: ListLibrarySongsRequest,
+  ): Promise<ListLibrarySongsResponse> {
+    return this.songsService.listLibrarySongs(request);
+  }
   async removeLibraryResource(
     request: LibraryResourceRequest,
   ): Promise<LibraryResourceResponse> {
@@ -182,6 +194,12 @@ export class SongsController implements SongServiceController {
     return this.songsService.getPlaylist(request);
   }
 
+  async listPlaylistTracks(
+    request: ListPlaylistTracksRequest,
+  ): Promise<ListPlaylistTracksResponse> {
+    return this.songsService.listPlaylistTracks(request);
+  }
+
   async createUserPlaylist(
     request: CreateUserPlaylistRequest,
   ): Promise<UserPlaylistInfo> {
@@ -196,11 +214,16 @@ export class SongsController implements SongServiceController {
   async updateUserPlaylist(
     request: UpdateUserPlaylistRequest,
   ): Promise<UserPlaylistInfo> {
-    const data: { name?: string; description?: string; isPublic?: boolean } =
-      {};
+    const data: {
+      name?: string;
+      description?: string;
+      isPublic?: boolean;
+      coverUrl?: string;
+    } = {};
     if (request.hasName) data.name = request.name;
     if (request.hasDescription) data.description = request.description;
     if (request.hasIsPublic) data.isPublic = request.isPublic;
+    if (request.hasCoverUrl) data.coverUrl = request.coverUrl;
 
     return this.songsService.updateUserPlaylist(
       request.userId,
@@ -226,6 +249,15 @@ export class SongsController implements SongServiceController {
       request.requesterUserId,
       request.limit,
       request.cursor,
+    );
+  }
+
+  async getPlaylistSourceMembership(
+    request: PlaylistSourceMembershipRequest,
+  ): Promise<PlaylistSourceMembershipResponse> {
+    return this.songsService.getPlaylistSourceMembership(
+      request.userId,
+      request.songIds,
     );
   }
 

@@ -23,10 +23,14 @@ import {
   LibraryResourceResponse,
   ListLibraryResourcesRequest,
   ListLibraryResourcesResponse,
+  ListLibrarySongsRequest,
+  ListLibrarySongsResponse,
   RemoveSongOwnershipRequest,
   RemoveSongOwnershipResponse,
   GetPlaylistRequest,
   GetPlaylistResponse,
+  ListPlaylistTracksRequest,
+  ListPlaylistTracksResponse,
   SongStatus,
   SongSummary,
   SongDetail,
@@ -35,7 +39,10 @@ import {
   GetSongIngestInfoResponse,
   ProtobufStruct,
 } from '@musical/shared-proto';
-import { SONG_ASSET_CLEANUP_QUEUE } from '@musical/shared-types';
+import {
+  getArtworkRenditionSrcSet,
+  SONG_ASSET_CLEANUP_QUEUE,
+} from '@musical/shared-types';
 import { PrismaService } from '../database/prisma.service';
 import { Prisma, PrismaClient } from '../generated/prisma/client';
 import { CatalogAssetsService } from './catalog-assets.service';
@@ -609,8 +616,11 @@ export class SongsService {
         : '',
       hasMore,
       collection: this.toProtobufStruct({
-        key: 'favorite', title: 'Favourite Songs', description: 'Songs you loved',
-        artworkAssetId: storedArtwork?.assetId ?? '', artwork: storedArtwork?.artwork,
+        key: 'favorite',
+        title: 'Favourite Songs',
+        description: 'Songs you loved',
+        artworkAssetId: storedArtwork?.assetId ?? '',
+        artwork: storedArtwork?.artwork,
       }),
     };
   }
@@ -637,7 +647,10 @@ export class SongsService {
         artwork: artwork as Prisma.InputJsonObject,
       },
     });
-    return { assetId: request.assetId, artwork: this.toProtobufStruct(artwork) };
+    return {
+      assetId: request.assetId,
+      artwork: this.toProtobufStruct(artwork),
+    };
   }
 
   private toProtobufStruct(value: Record<string, unknown>): ProtobufStruct {
@@ -657,7 +670,9 @@ export class SongsService {
     if (typeof value === 'number') return { numberValue: value };
     if (typeof value === 'boolean') return { boolValue: value };
     if (Array.isArray(value)) {
-      return { listValue: { values: value.map((item) => this.toProtobufValue(item)) } };
+      return {
+        listValue: { values: value.map((item) => this.toProtobufValue(item)) },
+      };
     }
     if (typeof value === 'object') {
       return {
@@ -673,7 +688,7 @@ export class SongsService {
     if (
       !request.userId ||
       !request.resourceId ||
-      !['albums', 'playlists'].includes(request.resourceType)
+      !['songs', 'albums', 'playlists'].includes(request.resourceType)
     ) {
       this.throwInvalidArgument('LIBRARY_RESOURCE_INVALID');
     }
@@ -722,6 +737,120 @@ export class SongsService {
         pinnedAt: resource.pinnedAt?.getTime() ?? 0,
       })),
     };
+  }
+
+  async listLibrarySongs(
+    request: ListLibrarySongsRequest,
+  ): Promise<ListLibrarySongsResponse> {
+    if (!request.userId) this.throwInvalidArgument('USER_ID_REQUIRED');
+
+    const limit = Math.min(Math.max(request.limit || 40, 1), 100);
+    const isTitleSort = request.sortBy === 'title';
+    const direction = request.direction === 'ascending' ? 'asc' : 'desc';
+    const songIds = [...new Set(request.songIds.filter(Boolean))];
+    const baseWhere: Prisma.UserLibraryResourceWhereInput = {
+      userId: request.userId,
+      resourceType: 'songs',
+      ...(songIds.length ? { resourceId: { in: songIds } } : {}),
+    };
+    const cursorWhere = this.librarySongsCursorFilter(
+      request.cursor,
+      isTitleSort,
+      direction,
+    );
+    const rows = await this.prisma.userLibraryResource.findMany({
+      where: cursorWhere ? { AND: [baseWhere, cursorWhere] } : baseWhere,
+      orderBy: isTitleSort
+        ? [{ title: direction }, { resourceId: direction }]
+        : [{ createdAt: direction }, { resourceId: direction }],
+      take: limit + 1,
+    });
+    const hasMore = rows.length > limit;
+    const resources = rows.slice(0, limit);
+    const lastResource = resources.at(-1);
+
+    return {
+      resources: resources.map((resource) => ({
+        resourceType: resource.resourceType,
+        resourceId: resource.resourceId,
+        title: resource.title,
+        subtitle: resource.subtitle,
+        artworkUrl: resource.artworkUrl,
+        createdAt: resource.createdAt.getTime(),
+        isPinned: resource.isPinned,
+        pinnedAt: resource.pinnedAt?.getTime() ?? 0,
+      })),
+      nextCursor:
+        hasMore && lastResource
+          ? this.buildLibrarySongsCursor(lastResource, isTitleSort)
+          : '',
+      hasMore,
+    };
+  }
+
+  private librarySongsCursorFilter(
+    cursor: string | undefined,
+    isTitleSort: boolean,
+    direction: 'asc' | 'desc',
+  ): Prisma.UserLibraryResourceWhereInput | undefined {
+    if (!cursor) return undefined;
+
+    let payload: { key?: unknown; resourceId?: unknown };
+    try {
+      payload = JSON.parse(
+        Buffer.from(cursor, 'base64url').toString('utf8'),
+      ) as { key?: unknown; resourceId?: unknown };
+    } catch {
+      this.throwInvalidArgument('CURSOR_INVALID');
+    }
+    if (typeof payload!.resourceId !== 'string') {
+      this.throwInvalidArgument('CURSOR_INVALID');
+    }
+
+    const comparison = direction === 'asc' ? 'gt' : 'lt';
+    if (isTitleSort) {
+      if (typeof payload!.key !== 'string') {
+        this.throwInvalidArgument('CURSOR_INVALID');
+      }
+      return {
+        OR: [
+          { title: { [comparison]: payload!.key } },
+          {
+            title: payload!.key,
+            resourceId: { [comparison]: payload!.resourceId },
+          },
+        ],
+      };
+    }
+
+    if (typeof payload!.key !== 'number') {
+      this.throwInvalidArgument('CURSOR_INVALID');
+    }
+    const createdAt = new Date(payload!.key);
+    if (Number.isNaN(createdAt.getTime())) {
+      this.throwInvalidArgument('CURSOR_INVALID');
+    }
+    return {
+      OR: [
+        { createdAt: { [comparison]: createdAt } },
+        {
+          createdAt,
+          resourceId: { [comparison]: payload!.resourceId },
+        },
+      ],
+    };
+  }
+
+  private buildLibrarySongsCursor(
+    resource: { title: string; createdAt: Date; resourceId: string },
+    isTitleSort: boolean,
+  ) {
+    return Buffer.from(
+      JSON.stringify({
+        key: isTitleSort ? resource.title : resource.createdAt.getTime(),
+        resourceId: resource.resourceId,
+      }),
+    ).toString('base64url');
   }
 
   async removeLibraryResource(
@@ -882,6 +1011,7 @@ export class SongsService {
       where: { id: request.playlistId },
       include: {
         tracks: {
+          take: request.includeSongs ? undefined : 0,
           include: {
             song: {
               select: songSummarySelect,
@@ -901,16 +1031,67 @@ export class SongsService {
 
     return {
       playlist: {
-      id: playlist.id,
-      name: playlist.name,
-      description: playlist.description,
-      ownerId: playlist.userId,
+        id: playlist.id,
+        name: playlist.name,
+        description: playlist.description,
+        artworkUrl: playlist.coverUrl,
+        ownerId: playlist.userId,
         songs: playlist.tracks.map(({ song }) =>
           this.mapEntityToSummary(song, requesterUserId, true),
         ),
         createdAt: playlist.createdAt.getTime(),
         updatedAt: playlist.updatedAt.getTime(),
       },
+    };
+  }
+
+  async listPlaylistTracks(
+    request: ListPlaylistTracksRequest,
+  ): Promise<ListPlaylistTracksResponse> {
+    if (!request.playlistId) this.throwInvalidArgument('PLAYLIST_ID_REQUIRED');
+
+    const playlist = await this.prisma.userPlaylist.findUnique({
+      where: { id: request.playlistId },
+      select: { userId: true, isPublic: true },
+    });
+    if (!playlist) this.throwNotFound('PLAYLIST_NOT_FOUND');
+
+    const requesterUserId = request.requesterUserId?.trim() || '';
+    if (!playlist.isPublic && playlist.userId !== requesterUserId) {
+      this.throwPermissionDenied('PLAYLIST_ACCESS_DENIED');
+    }
+
+    const requestedLimit = request.limit || 40;
+    const limit = Math.min(Math.max(requestedLimit, 1), MAX_LIST_LIMIT);
+    const cursor = request.cursor?.trim();
+    const cursorPosition = cursor ? Number(cursor) : undefined;
+    if (
+      cursor &&
+      (!Number.isSafeInteger(cursorPosition) || (cursorPosition ?? -1) < 0)
+    ) {
+      this.throwInvalidArgument('CURSOR_INVALID');
+    }
+
+    const tracks = await this.prisma.userPlaylistTrack.findMany({
+      where: {
+        playlistId: request.playlistId,
+        ...(cursorPosition === undefined
+          ? {}
+          : { position: { gt: cursorPosition } }),
+      },
+      orderBy: { position: 'asc' },
+      take: limit + 1,
+      select: { position: true, song: { select: songSummarySelect } },
+    });
+    const hasMore = tracks.length > limit;
+    const page = hasMore ? tracks.slice(0, limit) : tracks;
+
+    return {
+      songs: page.map(({ song }) =>
+        this.mapEntityToSummary(song, requesterUserId, true),
+      ),
+      nextCursor: hasMore ? String(page[page.length - 1].position) : '',
+      hasMore,
     };
   }
 
@@ -954,13 +1135,19 @@ export class SongsService {
       isPublic: playlist.isPublic,
       createdAt: playlist.createdAt.getTime(),
       updatedAt: playlist.updatedAt.getTime(),
+      artworkUrl: playlist.coverUrl,
     };
   }
 
   async updateUserPlaylist(
     userId: string,
     playlistId: string,
-    data: { name?: string; description?: string; isPublic?: boolean },
+    data: {
+      name?: string;
+      description?: string;
+      isPublic?: boolean;
+      coverUrl?: string;
+    },
   ) {
     if (!playlistId) this.throwInvalidArgument('PLAYLIST_ID_REQUIRED');
 
@@ -977,10 +1164,24 @@ export class SongsService {
     if (data.description !== undefined)
       updateData.description = data.description.trim();
     if (data.isPublic !== undefined) updateData.isPublic = data.isPublic;
+    if (data.coverUrl !== undefined) updateData.coverUrl = data.coverUrl;
 
-    const playlist = await this.prisma.userPlaylist.update({
-      where: { id: playlistId },
-      data: updateData,
+    const playlist = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.userPlaylist.update({
+        where: { id: playlistId },
+        data: updateData,
+      });
+      if (data.coverUrl !== undefined) {
+        await tx.userLibraryResource.updateMany({
+          where: {
+            userId,
+            resourceType: 'playlists',
+            resourceId: playlistId,
+          },
+          data: { artworkUrl: data.coverUrl },
+        });
+      }
+      return updated;
     });
 
     return {
@@ -990,6 +1191,7 @@ export class SongsService {
       isPublic: playlist.isPublic,
       createdAt: playlist.createdAt.getTime(),
       updatedAt: playlist.updatedAt.getTime(),
+      artworkUrl: playlist.coverUrl,
     };
   }
 
@@ -1071,15 +1273,48 @@ export class SongsService {
         trackCount: pl._count.tracks,
         createdAt: pl.createdAt.getTime(),
         updatedAt: pl.updatedAt.getTime(),
-        artworkUrl: pl.tracks[0]
-          ? this.mapEntityToSummary(pl.tracks[0].song, requesterUserId, !isSelf)
-              .coverUrl
-          : '',
+        artworkUrl:
+          pl.coverUrl ||
+          (pl.tracks[0]
+            ? this.mapEntityToSummary(
+                pl.tracks[0].song,
+                requesterUserId,
+                !isSelf,
+              ).coverUrl
+            : ''),
       })),
       nextCursor: hasMore
         ? `${result[result.length - 1].createdAt.getTime()}:${result[result.length - 1].id}`
         : '',
       hasMore,
+    };
+  }
+
+  async getPlaylistSourceMembership(userId: string, songIds: string[]) {
+    if (!userId) this.throwInvalidArgument('USER_ID_REQUIRED');
+
+    const uniqueSongIds = [...new Set(songIds.filter(Boolean))];
+    if (!uniqueSongIds.length) return { playlistIds: [] };
+
+    const playlists = await this.prisma.userPlaylist.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        tracks: {
+          where: { songId: { in: uniqueSongIds } },
+          select: { songId: true },
+        },
+      },
+    });
+
+    return {
+      playlistIds: playlists
+        .filter(
+          (playlist) =>
+            new Set(playlist.tracks.map((track) => track.songId)).size ===
+            uniqueSongIds.length,
+        )
+        .map((playlist) => playlist.id),
     };
   }
 
@@ -1212,6 +1447,10 @@ export class SongsService {
       artist: ownerProfile?.artist || entity.artistName,
       album: ownerProfile?.album || entity.albumName,
       coverUrl: ownerProfile?.coverUrl || this.artworkUrl(entity.artwork),
+      thumbnailCoverSrcSet:
+        getArtworkRenditionSrcSet(entity.artwork, [40, 80]) ||
+        ownerProfile?.coverUrl ||
+        this.artworkUrl(entity.artwork),
       isPublic: ownerProfile?.isPublic ?? false,
       status: entity.status,
       contentRating: entity.contentRating,
