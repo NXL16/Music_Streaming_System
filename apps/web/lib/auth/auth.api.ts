@@ -120,7 +120,8 @@ export async function regenerateTwoFactorRecoveryCodes(
 export async function getProfile() {
   return getCachedQuery(
     PROFILE_KEY,
-    async () => (await http.get<ApiResponse<UserProfile>>("/auth/me")).data,
+    async (signal) =>
+      (await http.get<ApiResponse<UserProfile>>("/auth/me", { signal })).data,
     PROFILE_TTL_MS,
   );
 }

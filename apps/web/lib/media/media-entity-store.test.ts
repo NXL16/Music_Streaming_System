@@ -24,8 +24,7 @@ function card(overrides: Partial<MediaCardProps> = {}): MediaCardProps {
 describe("media entity store", () => {
   afterEach(invalidateAllMediaEntities);
 
-  it("keeps Catalog metadata over a lower-priority recommendation snapshot", () => {
-    hydrateMediaEntity(card({ contentRating: "clean" }), "recommendation");
+  it("uses the latest defined metadata instead of a fixed source priority", () => {
     hydrateMediaEntity(
       card({
         title: "Catalog title",
@@ -34,11 +33,34 @@ describe("media entity store", () => {
       }),
       "catalog",
     );
+    hydrateMediaEntity(
+      card({ title: "Recommendation title", contentRating: "clean" }),
+      "recommendation",
+    );
 
     expect(getMediaEntity(card())).toMatchObject({
-      title: "Catalog title",
-      contentRating: "explicit",
+      title: "Recommendation title",
+      contentRating: "clean",
     });
+  });
+
+  it("isolates user-library playlist metadata from catalog metadata with the same id", () => {
+    const catalogPlaylist = card({
+      resourceType: "playlists",
+      title: "Catalog playlist",
+    });
+    const userPlaylist = card({
+      resourceType: "playlists",
+      title: "My private playlist",
+      isUserPlaylist: true,
+      playlistKind: "user",
+    });
+
+    hydrateMediaEntity(catalogPlaylist, "catalog");
+    hydrateMediaEntity(userPlaylist, "library");
+
+    expect(getMediaEntity(catalogPlaylist)?.title).toBe("Catalog playlist");
+    expect(getMediaEntity(userPlaylist)?.title).toBe("My private playlist");
   });
 
   it("does not share artwork renditions across card presentations", () => {

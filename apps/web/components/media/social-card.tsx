@@ -11,8 +11,10 @@ type SocialCardProps = MediaCardProps & {
 };
 
 export default function SocialCard(props: SocialCardProps) {
+  const cardId = props.resourceId || props.id;
+
   return (
-    <MediaCardShell artworkColor={props.artworkColors.main}>
+    <MediaCardShell id={cardId} artworkColor={props.artworkColors.main}>
       <div className="flex flex-row gap-3 items-start">
         <div className="media-card-artwork w-20 shrink-0 rounded-(--global-border-radius-medium,7px) shadow-[0_1px_1px_rgba(0,0,0,0.01),0_2px_2px_rgba(0,0,0,0.02),0_8px_8px_rgba(0,0,0,0.03),0_14px_14px_rgba(0,0,0,0.03)] relative z-(--z-default) after:content-[''] after:absolute after:inset-0 after:rounded-[inherit] after:bg-[#333333]/30 after:opacity-(--scrimOpacity,0) after:transition-opacity after:duration-100 after:ease-in after:z-1">
           <CardArtwork

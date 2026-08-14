@@ -111,6 +111,7 @@ export function useMsePlayback(
 
     const nextSongId = extractSongId(nextSong.playbackUrl);
     preloadCache.preload(nextSongId).catch(() => {});
+    return () => preloadCache.cancelPreload(nextSongId);
   }, [currentIndex, queue, isMseActive]);
 
   return { isMseActive };

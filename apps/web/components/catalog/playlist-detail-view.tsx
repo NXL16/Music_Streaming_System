@@ -1,61 +1,75 @@
 "use client";
 
-import { CSSProperties, useEffect, useState } from "react";
-import { type DailyMix, loadDailyMix } from "@/lib/recommendations/daily-mix";
-import { usePlayerStore } from "@/lib/player/use-player-store";
+import { CSSProperties, type ReactNode, useMemo } from "react";
+import Link from "next/link";
+import { usePlayerStore, type PlayerSong } from "@/lib/player/use-player-store";
 import CardArtwork from "../media/common/card-artwork";
 import ResponsiveArtwork from "../media/common/responsive-artwork";
 import AmpContextMenuButton from "../custom-elements/AmpContextMenuButton";
-import Link from "next/link";
-import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
+import { ArtistLinks } from "../media/artist-links";
 import { getArtworkRenditionUrl, getArtworkSrcSet } from "@/lib/media/artwork";
+import { PLAYLIST_ARTWORK_WIDTHS } from "@/lib/media/artwork-slots";
 import { formatDuration, formatSummaryDuration } from "@/lib/format/duration";
-import CatalogPageLoading from "../loading/catalog-page-loading";
-import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
 import { AddToLibraryButton } from "../songs/add-to-library-button";
+import { AddSongToLibraryButton } from "../songs/add-song-to-library-button";
 import { FavoriteSongButton } from "../songs/favorite-song-button";
 import { PlaybackWaveform } from "../songs/playback-waveform";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useAppScrollToTop } from "@/lib/layout/use-app-scroll-to-top";
 import { useTrackRowSelection } from "@/lib/player/use-track-row-selection";
+import { useAuthStore } from "@/lib/auth/auth-store";
+import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
+import { withPlaylistPlaybackSource } from "@/lib/player/playlist-playback-source";
+import { ExplicitBadgeIcon } from "../icons/explicit-badge-icon";
 
-type DailyMixPageProps = {
-  playlistId: string;
+export type GenericArtwork = {
+  bgColor?: string;
+  textColor1?: string;
+  textColor2?: string;
+  textColor3?: string;
+  textColor4?: string;
+  url?: string;
+  width?: number;
+  height?: number;
+  [key: string]: unknown;
 };
 
-function DailyMixArtistLinks({
-  artists,
-  fallbackText,
-}: {
+export type GenericTrack = PlayerSong & {
+  artworkSrcSet?: string;
+  thumbnailArtworkSrcSet?: string;
   artists?: { id?: string; name: string; url?: string }[];
-  fallbackText: string;
+};
+
+export type GenericPlaylist = {
+  id: string;
+  title: string;
+  curatorName: string;
+  description?: string;
+  artwork?: GenericArtwork;
+  sourcePlaylistHref?: string;
+  /** Separates visual/playback identity from mutation permissions. */
+  playlistKind?: "catalog" | "favorite" | "user";
+  /** @deprecated Use playlistKind. Retained for existing callers. */
+  isUserPlaylist?: boolean;
+  tracks: GenericTrack[];
+};
+
+export default function PlaylistDetailView({
+  playlist,
+  afterTracks,
+  showMetadata = true,
+}: {
+  playlist: GenericPlaylist;
+  /** Content rendered directly below the track list, before playlist metadata. */
+  afterTracks?: ReactNode;
+  /** Lets paginated user playlists defer their footer until loading completes. */
+  showMetadata?: boolean;
 }) {
-  const formattedArtists = useFormattedArtists({ artists, fallbackText });
-
-  return (
-    <>
-      {formattedArtists.map((artist, index) => (
-        <span key={`${artist.id}-${index}`}>
-          {artist.url ? (
-            <Link
-              href={artist.url}
-              className="overflow-hidden text-ellipsis whitespace-nowrap text-left"
-            >
-              {artist.name}
-            </Link>
-          ) : (
-            <span>{artist.name}</span>
-          )}
-          {index < formattedArtists.length - 1 && ", "}
-        </span>
-      ))}
-    </>
-  );
-}
-
-export default function DailyMixPage({ playlistId }: DailyMixPageProps) {
-  const [mix, setMix] = useState<DailyMix | null>(null);
-  const [error, setError] = useState(false);
+  const playlistKind =
+    playlist.playlistKind ?? (playlist.isUserPlaylist ? "user" : "catalog");
+  const isUserPlaylist = playlistKind === "user";
+  const userId = useAuthStore((state) => state.user?.userId);
+  const favoriteSongs = useFavoriteStore((state) => state.songs);
   const setQueue = usePlayerStore((state) => state.setQueue);
   const playShuffledQueue = usePlayerStore((state) => state.playShuffledQueue);
   const currentSong = usePlayerStore((state) => state.currentSong);
@@ -69,64 +83,57 @@ export default function DailyMixPage({ playlistId }: DailyMixPageProps) {
     selectTrack,
     selectedTrackId,
   } = useTrackRowSelection<HTMLDivElement>();
-  useAppScrollToTop(playlistId);
 
-  useEffect(() => {
-    let active = true;
+  useAppScrollToTop(playlist.id);
 
-    loadDailyMix(playlistId)
-      .then((nextMix) => {
-        if (!active) return;
-        setMix(nextMix);
-        setError(nextMix === null);
-      })
-      .catch(() => {
-        if (active) setError(true);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [playlistId]);
-
-  const showLoading = useMinimumLoadingDuration(!mix && !error);
-
-  if (showLoading) {
-    return <CatalogPageLoading />;
-  }
-
-  if (!mix || error) {
-    return (
-      <p className="mx-(--bodyGutter) pt-8 text-red-500">
-        Daily Mix chưa sẵn sàng. Vui lòng thử lại sau
-      </p>
-    );
-  }
-
-  const artworkImageUrl = getArtworkRenditionUrl(mix.artwork, 316);
+  const artworkImageUrl = getArtworkRenditionUrl(playlist.artwork, 316);
   const artworkProps = artworkImageUrl
     ? {
-        title: mix.title,
-        altText: mix.title,
+        title: playlist.title,
+        altText: playlist.title,
         imageSrcSet: getArtworkSrcSet(
-          mix.artwork,
+          playlist.artwork,
           maxWidth739 ? [450, 600, 900, 1200] : [296, 316, 592, 632],
           maxWidth739 ? "hero" : "default",
         ),
         artworkColors: {
-          bg: `#${mix.artwork?.bgColor?.replace(/^#/, "") || "2c2c2e"}`,
-          main: `#${mix.artwork?.bgColor?.replace(/^#/, "") || "2c2c2e"}`,
+          bg: `#${playlist.artwork?.bgColor?.replace(/^#/, "") || "2c2c2e"}`,
+          main: `#${playlist.artwork?.bgColor?.replace(/^#/, "") || "2c2c2e"}`,
         },
       }
     : null;
-  const totalDurationSec = mix.tracks.reduce(
+
+  const totalDurationSec = playlist.tracks.reduce(
     (total, track) => total + track.durationSec,
     0,
   );
-  const hasPlayableTrack = mix.tracks.some((track) => track.playbackUrl);
-  const playableTrackCount = mix.tracks.reduce(
+  const hasPlayableTrack = playlist.tracks.some((track) => track.playbackUrl);
+  const playableTrackCount = playlist.tracks.reduce(
     (count, track) => count + Number(Boolean(track.playbackUrl)),
     0,
+  );
+  const favoriteSongIds = useMemo(
+    () => new Set(favoriteSongs.map((song) => song.id)),
+    [favoriteSongs],
+  );
+  const playlistQueue = useMemo(
+    () =>
+      withPlaylistPlaybackSource(playlist.tracks, {
+        id: playlist.id,
+        name: playlist.title,
+        playlistKind,
+        isUserPlaylist: isUserPlaylist,
+        curatorName: playlist.curatorName,
+        href: playlist.sourcePlaylistHref,
+        artworkUrl: artworkImageUrl || playlist.tracks[0]?.artworkUrl || "",
+        artworkSrcSet: artworkImageUrl
+          ? getArtworkSrcSet(playlist.artwork, [...PLAYLIST_ARTWORK_WIDTHS])
+          : playlist.tracks[0]?.artworkSrcSet,
+        artworkBgColor: playlist.artwork?.bgColor
+          ? `#${playlist.artwork.bgColor.replace(/^#/, "")}`
+          : playlist.tracks[0]?.artworkBgColor,
+      }),
+    [artworkImageUrl, isUserPlaylist, playlist, playlistKind],
   );
 
   return (
@@ -135,7 +142,7 @@ export default function DailyMixPage({ playlistId }: DailyMixPageProps) {
         <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
           <div className="[view-timeline-name:--header-view] [view-timeline-axis:block] after:content-[''] after:bg-(--joe-color) after:block after:inset-0 after:absolute after:z-[calc(var(--z-default)-2)] min-[484px]:after:-inset-s-(--web-navigation-width)">
             <div
-              className={`group grid [grid-template-areas:var(--containerDetailHeaderGridAreas,'secondary-actions'_'artwork'_'headings'_'primary-actions'_'description')] [justify-items:var(--containerDetailHeaderAlign,center)] mx-(--bodyGutter) mb-(--containerDetailHeaderSpacer,32px) pt-3.75 min-[1000px]:grid-cols-[auto_1fr_auto] min-[1000px]:justify-items-start min-[1000px]:mb-(--containerDetailHeaderSpacer,40px) min-[1000px]:pt-2 ${mix.description ? "min-[1000px]:[grid-template-areas:'secondary-actions_secondary-actions_secondary-actions'_'artwork_headings_headings'_'artwork_description_description'_'artwork_primary-actions_primary-actions'] min-[1000px]:grid-rows-[auto_1fr_auto_auto]" : "min-[1000px]:[grid-template-areas:'secondary-actions_secondary-actions_secondary-actions'_'artwork_headings_headings'_'artwork_headings_headings'_'artwork_primary-actions_primary-actions'] min-[1000px]:grid-rows-[auto_1fr_1fr_36px]"} ${maxWidth739 ? "header--tall-artwork" : ""}`}
+              className={`group grid [grid-template-areas:var(--containerDetailHeaderGridAreas,'secondary-actions'_'artwork'_'headings'_'primary-actions'_'description')] [justify-items:var(--containerDetailHeaderAlign,center)] mx-(--bodyGutter) mb-(--containerDetailHeaderSpacer,32px) pt-3.75 min-[1000px]:grid-cols-[auto_1fr_auto] min-[1000px]:justify-items-start min-[1000px]:mb-(--containerDetailHeaderSpacer,40px) min-[1000px]:pt-2 ${playlist.description ? "min-[1000px]:[grid-template-areas:'secondary-actions_secondary-actions_secondary-actions'_'artwork_headings_headings'_'artwork_description_description'_'artwork_primary-actions_primary-actions'] min-[1000px]:grid-rows-[auto_1fr_auto_auto]" : "min-[1000px]:[grid-template-areas:'secondary-actions_secondary-actions_secondary-actions'_'artwork_headings_headings'_'artwork_headings_headings'_'artwork_primary-actions_primary-actions'] min-[1000px]:grid-rows-[auto_1fr_1fr_36px]"} ${maxWidth739 ? "header--tall-artwork" : ""}`}
             >
               <div
                 slot="artwork"
@@ -192,20 +199,20 @@ export default function DailyMixPage({ playlistId }: DailyMixPageProps) {
               >
                 <div className="empty:hidden text-(--systemSecondary) [font:var(--subhead-emphasized)] mt-2.25"></div>
                 <h1 className="text-(--systemPrimary) cursor-text [font:var(--large-title-emphasized-short)] mb-[0.5px] wrap-break-word [text-align:var(--containerDetailHeaderAlign,center)] text-balance select-text line-clamp-2 min-[1000px]:[text-align:unset] max-[999px]:[font:var(--title-1-emphasized)] max-[999px]:mb-1">
-                  <span dir="auto">{mix.title}</span>
+                  <span dir="auto">{playlist.title}</span>
                 </h1>
                 <div className="[--linkColor:var(--keyColor)] text-(--keyColor) [font:var(--large-title-short)] -m-1.25 overflow-hidden p-1.25 [text-align:var(--containerDetailHeaderAlign,center)] text-ellipsis whitespace-nowrap w-full min-[1000px]:[text-align:unset] max-[999px]:[font:var(--title-1)] max-[999px]:text-[20px]!">
-                  {mix.curatorName}
+                  {playlist.curatorName}
                 </div>
                 <div className="text-(--systemSecondary) [font:var(--callout-emphasized)] mt-1 text-center">
                   Updated Today
                 </div>
               </div>
 
-              {mix.description && (
+              {playlist.description && (
                 <div className="[--truncate-font:var(--body-tall)] [grid-area:description] mt-4.5 max-w-110 min-[1000]:self-end min-[1000]:min-h-13.5 min-[1000]:mb-3.75 min-[1000]:mt-0">
                   <div className="relative z-(--z-default) text-(--systemSecondary)">
-                    <p>{mix.description}</p>
+                    <p>{playlist.description}</p>
                   </div>
                 </div>
               )}
@@ -216,7 +223,7 @@ export default function DailyMixPage({ playlistId }: DailyMixPageProps) {
                     <button
                       type="button"
                       disabled={!hasPlayableTrack}
-                      onClick={() => setQueue(mix.tracks)}
+                      onClick={() => setQueue(playlistQueue)}
                       className="[--button-action-min-width:130px] [--button-action-height:36px] bg-(--button-pill-background-color,#000) rounded-(--button-action-border-radius,24px) text-(--button-pill-color,#fff) [font:var(--title-3-semibold)] px-3 items-center flex h-(--button-action-height,36px) justify-center min-w-(--button-action-min-width-override,var(--button-action-min-width,none)) w-(--button-action-width,100%) disabled:opacity-50 pointer-coarse:[--button-action-height:48px] pointer-coarse:[--button-action-min-width:160px] pointer-coarse:[font:var(--title-2-semibold)]"
                     >
                       <span className="block">
@@ -238,7 +245,7 @@ export default function DailyMixPage({ playlistId }: DailyMixPageProps) {
                   <div className="w-full">
                     <button
                       disabled={playableTrackCount < 2}
-                      onClick={() => playShuffledQueue(mix.tracks)}
+                      onClick={() => playShuffledQueue(playlistQueue)}
                       title={
                         playableTrackCount < 2
                           ? "Need 2 songs to shuffle"
@@ -264,10 +271,15 @@ export default function DailyMixPage({ playlistId }: DailyMixPageProps) {
                   <div className="[--add-to-library-button-width:36px] [--add-to-library-icon-width:12px] pointer-coarse:[--add-to-library-button-width:48px] pointer-coarse:[--add-to-library-icon-width:16px]">
                     <AddToLibraryButton
                       resourceType="playlists"
-                      resourceId={mix.id}
-                      title={mix.title}
-                      subtitle={mix.curatorName}
+                      resourceId={playlist.id}
+                      title={playlist.title}
+                      subtitle={playlist.curatorName}
                       artworkUrl={artworkImageUrl || ""}
+                      readOnlySaved={playlistKind === "favorite"}
+                      sourceOrigin={
+                        playlistKind === "user" ? "user-playlist" : "catalog"
+                      }
+                      songIds={playlist.tracks.map((track) => track.id)}
                     />
                   </div>
                 </div>
@@ -275,7 +287,7 @@ export default function DailyMixPage({ playlistId }: DailyMixPageProps) {
 
               <div className="flex gap-2.5 [grid-area:secondary-actions] [justify-self:var(--containerDetailHeaderAlign,end)] relative min-[1000px]:[align-self:var(--containerDetailHeaderSecondaryActionsAlignSelf,end)]">
                 <div className="flex gap-2 me-[calc(var(--bodyGutter)*-1+15px)] min-[484px]:me-[calc(var(--bodyGutter)*-1+8px)]">
-                  <div className="[--share-button-bg-color:transparent] [--share-button-icon-size:18px] [--share-button-icon-color:var(--systemPrimary)] items-center rounded-[1000px] gap-1 h-9 px-1 relative z-(--z-default) flex shrink-0 before:[backdrop-filter:saturate(220%)_blur(16px)] before:bg-(--glassMaterialBackground) before:rounded-[inherit] before:[box-shadow:0_10px_40px_var(--glassMaterialShadowColor)] before:content-[''] before:inset-0 before:absolute after:inset-0 after:[--containerInnerStroke:var(--glassMaterialInnerStroke)] after:[--containerInnerStrokeAlpha:var(--glassMaterialInnerStrokeAlpha)] after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:content-[''] after:block after:h-0 after:max-h-full after:max-w-full after:min-h-full after:min-w-full after:opacity-(--containerInnerStrokeAlpha,0.1) after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)] after:dark:opacity-(--containerInnerStrokeAlpha,0.25) [--ctxmenu-trigger-backdrop-blur:0]">
+                  <div className="cloud-buttons cloud-buttons--with-platter">
                     <div>
                       <button
                         className="items-center bg-(--share-button-bg-color,var(--systemQuinary)) rounded-full flex h-7 justify-center relative w-7 z-[calc(var(--z-default)+1)]"
@@ -297,7 +309,60 @@ export default function DailyMixPage({ playlistId }: DailyMixPageProps) {
                       </button>
                     </div>
 
-                    <AmpContextMenuButton />
+                    <AmpContextMenuButton
+                      id={`playlist-${playlist.id}`}
+                      context={
+                        isUserPlaylist
+                          ? {
+                              kind: "collection",
+                              resourceId: playlist.id,
+                              resourceType: "playlists",
+                              sourceOrigin: "user-playlist",
+                              isUserPlaylist: true,
+                              title: playlist.title,
+                              subtitle: playlist.curatorName,
+                              description: playlist.description,
+                              artworkUrl: artworkImageUrl,
+                              href: playlist.sourcePlaylistHref,
+                              songIds: playlist.tracks.map((track) => track.id),
+                              userId,
+                              inLibrary: false,
+                            }
+                          : playlistKind === "favorite"
+                            ? {
+                                kind: "collection",
+                                resourceId: playlist.id,
+                                resourceType: "playlists",
+                                sourceOrigin: "favorite",
+                                title: playlist.title,
+                                subtitle: playlist.curatorName,
+                                description: playlist.description,
+                                artworkUrl: artworkImageUrl,
+                                href: playlist.sourcePlaylistHref,
+                                songIds: playlist.tracks.map(
+                                  (track) => track.id,
+                                ),
+                                userId,
+                                inLibrary: true,
+                              }
+                            : {
+                                kind: "collection",
+                                resourceId: playlist.id,
+                                resourceType: "playlists",
+                                sourceOrigin: "catalog",
+                                title: playlist.title,
+                                subtitle: playlist.curatorName,
+                                description: playlist.description,
+                                artworkUrl: artworkImageUrl,
+                                href: playlist.sourcePlaylistHref,
+                                songIds: playlist.tracks.map(
+                                  (track) => track.id,
+                                ),
+                                userId,
+                                inLibrary: false,
+                              }
+                      }
+                    />
                   </div>
                 </div>
               </div>
@@ -342,7 +407,7 @@ export default function DailyMixPage({ playlistId }: DailyMixPageProps) {
               </div>
             </div>
 
-            {mix.tracks.map((track, index) => {
+            {playlist.tracks.map((track, index) => {
               const isCurrentTrack = currentSong?.id === track.id;
               const isTrackPlaying = isCurrentTrack && playing;
 
@@ -423,7 +488,7 @@ export default function DailyMixPage({ playlistId }: DailyMixPageProps) {
                                 if (isCurrentTrack) {
                                   togglePlayback();
                                 } else {
-                                  setQueue(mix.tracks, index);
+                                  setQueue(playlistQueue, index);
                                 }
                               }}
                               className="[--nonPlatterIconFill:var(--playButtonIconColor,#fff)] [--playingBarColor:var(--nonPlatterIconFill,#fff)] leading-0 pointer-events-auto relative z-(--z-default) h-full align-top w-full"
@@ -505,7 +570,14 @@ export default function DailyMixPage({ playlistId }: DailyMixPageProps) {
                             </div>
                           )}
 
-                          <div className=""></div>
+                          {track.contentRating === "explicit" && (
+                            <span
+                              className="ms-1 [--explicitBadgeSize:10px] relative top-[0.7px]"
+                              aria-label="Explicit"
+                            >
+                              <ExplicitBadgeIcon />
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -513,9 +585,10 @@ export default function DailyMixPage({ playlistId }: DailyMixPageProps) {
 
                   <div className="hidden [font:var(--body)] pb-0 pt-0 align-middle pe-2.5 relative overflow-hidden text-ellipsis whitespace-nowrap min-[1000px]:table-cell after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
                     <div className="overflow-hidden text-ellipsis whitespace-nowrap -mb-1 -mt-1 -ms-1 -me-1 pb-1 pt-1 pe-1 ps-1 text-left">
-                      <DailyMixArtistLinks
+                      <ArtistLinks
                         artists={track.artists}
                         fallbackText={track.artist}
+                        linkClassName="overflow-hidden text-ellipsis whitespace-nowrap text-left"
                       />
                     </div>
                   </div>
@@ -541,28 +614,12 @@ export default function DailyMixPage({ playlistId }: DailyMixPageProps) {
                   <div className="table-cell [font:var(--body)] pb-0 pt-0 align-middle overflow-visible relative text-end z-(--z-default) rounded-ee-(--songs-list-row-border-radius,6px) rounded-es-none rounded-se-(--songs-list-row-border-radius,6px) rounded-ss-none pe-4.5 after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
                     <div className="items-center inline-grid [grid-template-areas:'song-controls-add_song-controls-length_song-controls-context'] relative">
                       <div className="pointer-coarse:hidden max-[578px]:hidden [grid-area:song-controls-add] opacity-(--addToLibraryOpacity,0) me-1.75">
-                        <button
-                          onClick={(e) => e.stopPropagation()}
-                          className="items-center text-(--keyColor) cursor-pointer inline-flex justify-center [transition:var(--global-transition)] h-(--add-to-library-button-width,25px) leading-0 w-(--add-to-library-button-width,25px) me-(--addToLibraryMarginEnd,4px)"
-                        >
-                          <svg
-                            width="10"
-                            height="10"
-                            viewBox="0 0 10 10"
-                            xmlns="http://www.w3.org/2000/svg"
-                            fillRule="evenodd"
-                            clipRule="evenodd"
-                            strokeLinejoin="round"
-                            strokeMiterlimit="2"
-                            className="h-(--add-to-library-icon-width,12px) w-(--add-to-library-icon-width,12px) fill-(--addToLibraryFillOverride,var(--keyColor))"
-                            aria-hidden="true"
-                          >
-                            <path
-                              d="M.784 5.784h3.432v3.432c0 .43.354.784.784.784.43 0 .784-.354.784-.784V5.784h3.432a.784.784 0 1 0 0-1.568H5.784V.784A.788.788 0 0 0 5 0a.788.788 0 0 0-.784.784v3.432H.784a.784.784 0 1 0 0 1.568z"
-                              fillRule="nonzero"
-                            ></path>
-                          </svg>
-                        </button>
+                        <AddSongToLibraryButton
+                          songId={track.id}
+                          title={track.title}
+                          artist={track.artist}
+                          artworkUrl={track.artworkUrl}
+                        />
                       </div>
 
                       <time
@@ -575,7 +632,19 @@ export default function DailyMixPage({ playlistId }: DailyMixPageProps) {
                       <div
                         className={`[grid-area:song-controls-context] ms-1.75 [--contextMenuButtonSize:28px] ${selectedTrackId === track.id ? "[--contextMenuEllipsisFillOverride:#fff]" : "[--contextMenuEllipsisFillOverride:var(--systemSecondary)] hover:[--contextMenuEllipsisFillOverride:var(--keyColor)]"}`}
                       >
-                        <AmpContextMenuButton />
+                        <AmpContextMenuButton
+                          id={`song-${track.id}`}
+                          context={{
+                            kind: "song",
+                            songId: track.id,
+                            title: track.title,
+                            userId,
+                            isFavorite: favoriteSongIds.has(track.id),
+                            playlistId: isUserPlaylist
+                              ? playlist.id
+                              : undefined,
+                          }}
+                        />
                       </div>
                     </div>
                   </div>
@@ -586,15 +655,19 @@ export default function DailyMixPage({ playlistId }: DailyMixPageProps) {
         </div>
       </div>
 
-      <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) pt-3 [--songs-list-row-border-radius:12px] relative z-(--z-default)">
-        <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
-          <div className="m-[0_var(--bodyGutter)] pb-10.75 ps-3 -mt-3 min-[1000px]:flex min-[1000px]:flex-row min-[1000px]:justify-between min-[1000px]:pb-13.25">
-            <div className="text-(--systemSecondary) max-w-110 relative [font:var(--body-tall)] mt-11 min-[1260px]:max-w-135 min-[1000px]:mt-8.5">
-              <p className="whitespace-pre-wrap">{`${mix.curatorName}\n${mix.tracks.length} songs, ${formatSummaryDuration(totalDurationSec)}`}</p>
+      {afterTracks}
+
+      {showMetadata && (
+        <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) pt-3 [--songs-list-row-border-radius:12px] relative z-(--z-default)">
+          <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
+            <div className="m-[0_var(--bodyGutter)] pb-10.75 ps-3 -mt-3 min-[1000px]:flex min-[1000px]:flex-row min-[1000px]:justify-between min-[1000px]:pb-13.25">
+              <div className="text-(--systemSecondary) max-w-110 relative [font:var(--body-tall)] mt-11 min-[1260px]:max-w-135 min-[1000px]:mt-8.5">
+                <p className="whitespace-pre-wrap">{`${playlist.curatorName}\n${playlist.tracks.length} songs, ${formatSummaryDuration(totalDurationSec)}`}</p>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
     </>
   );
 }

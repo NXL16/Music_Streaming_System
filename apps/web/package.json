@@ -15,10 +15,10 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@musical/shared-constants": "workspace:*",
     "@pixi/filter-adjustment": "5.1.1",
     "@pixi/filter-kawase-blur": "5.1.1",
     "@pixi/filter-twist": "5.1.1",
-    "@musical/shared-constants": "workspace:*",
     "axios": "1.18.1",
     "hls.js": "1.6.16",
     "lucide-react": "^1.26.0",
@@ -28,6 +28,7 @@
     "qrcode": "^1.5.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "sonner": "^2.0.8",
     "zustand": "^5.0.13"
   },
   "devDependencies": {

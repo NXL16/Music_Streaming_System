@@ -1,6 +1,12 @@
 import axios, { type InternalAxiosRequestConfig } from "axios";
 import { getAccessToken } from "@/lib/auth/access-token-store";
 import { refreshAccessToken } from "@/lib/auth/session-refresh";
+import {
+  getReadRetryDelay,
+  type RetryAbortSignal,
+  shouldRetryReadRequest,
+  waitForReadRetry,
+} from "./http-retry";
 
 export const http = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL,
@@ -20,6 +26,7 @@ http.interceptors.request.use((config) => {
 
 type RetryableRequestConfig = InternalAxiosRequestConfig & {
   _retry?: boolean;
+  _readRetryCount?: number;
 };
 
 const PUBLIC_AUTH_PATHS = [
@@ -39,30 +46,43 @@ function canRefreshRequest(config: RetryableRequestConfig) {
 http.interceptors.response.use(
   (response) => response,
   async (error: unknown) => {
-    if (!axios.isAxiosError(error) || error.response?.status !== 401) {
+    if (!axios.isAxiosError(error)) {
       return Promise.reject(error);
     }
 
-    const originalRequest = error.config as
-      | RetryableRequestConfig
-      | undefined;
+    const originalRequest = error.config as RetryableRequestConfig | undefined;
+
+    if (!originalRequest) {
+      return Promise.reject(error);
+    }
 
     if (
-      !originalRequest ||
-      originalRequest._retry ||
-      !canRefreshRequest(originalRequest)
+      error.response?.status === 401 &&
+      !originalRequest._retry &&
+      canRefreshRequest(originalRequest)
     ) {
-      return Promise.reject(error);
+      originalRequest._retry = true;
+
+      try {
+        const session = await refreshAccessToken();
+        originalRequest.headers.Authorization = `Bearer ${session.accessToken}`;
+        return http.request(originalRequest);
+      } catch {
+        return Promise.reject(error);
+      }
     }
 
-    originalRequest._retry = true;
-
-    try {
-      const session = await refreshAccessToken();
-      originalRequest.headers.Authorization = `Bearer ${session.accessToken}`;
-      return http.request(originalRequest);
-    } catch {
+    const retryCount = originalRequest._readRetryCount ?? 0;
+    if (!shouldRetryReadRequest(error, retryCount))
       return Promise.reject(error);
-    }
+
+    originalRequest._readRetryCount = retryCount + 1;
+    const shouldContinue = await waitForReadRetry(
+      getReadRetryDelay(retryCount),
+      originalRequest.signal as RetryAbortSignal | undefined,
+    );
+    return shouldContinue
+      ? http.request(originalRequest)
+      : Promise.reject(error);
   },
 );

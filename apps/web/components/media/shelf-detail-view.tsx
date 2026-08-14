@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
+import { useInfiniteScrollLoadMore } from "@/lib/pagination/use-infinite-scroll-sentinel";
 import MediaCardRenderer from "./media-card-renderer";
 import type { MediaCardProps } from "./media-card.types";
 import Loading from "@/app/loading";
+
+const NOOP = () => undefined;
 
 type ShelfDetailViewProps = {
   shelf: { title: string; items: MediaCardProps[] };
@@ -21,25 +22,12 @@ export function ShelfDetailView({
   loadingMore = false,
   onLoadMore,
 }: ShelfDetailViewProps) {
-  const [loadMoreElement, setLoadMoreElement] = useState<HTMLDivElement | null>(
-    null,
-  );
-  const showLoadingMore = useMinimumLoadingDuration(loadingMore);
-
-  useEffect(() => {
-    if (!loadMoreElement || !hasMore || loadingMore || !onLoadMore) return;
-    const scrollContainer = document.querySelector<HTMLElement>(
-      "[data-app-scroll-container]",
-    );
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) onLoadMore();
-      },
-      { root: scrollContainer, rootMargin: "0px" },
-    );
-    observer.observe(loadMoreElement);
-    return () => observer.disconnect();
-  }, [hasMore, loadMoreElement, loadingMore, onLoadMore]);
+  const { sentinelRef: loadMoreSentinelRef, showLoadingMore } =
+    useInfiniteScrollLoadMore({
+      enabled: hasMore && Boolean(onLoadMore),
+      loading: loadingMore,
+      onLoadMore: onLoadMore ?? NOOP,
+    });
 
   return (
     <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-8">
@@ -72,7 +60,11 @@ export function ShelfDetailView({
         </ul>
         {showLoadingMore && <Loading fullScreen={false} size={29} />}
         {hasMore && (
-          <div aria-hidden="true" ref={setLoadMoreElement} style={{ height: 1 }} />
+          <div
+            aria-hidden="true"
+            ref={loadMoreSentinelRef}
+            style={{ height: 1 }}
+          />
         )}
       </div>
     </div>

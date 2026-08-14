@@ -15,19 +15,15 @@ export function useMinimumLoadingDuration(
   isLoading: boolean,
   minimumDurationMs = DEFAULT_MINIMUM_LOADING_MS,
 ) {
-  const [isVisible, setIsVisible] = useState(false);
+  const [isVisible, setIsVisible] = useState(isLoading);
   const visibleSinceRef = useRef(0);
 
   useEffect(() => {
     if (isLoading) {
+      if (!visibleSinceRef.current) visibleSinceRef.current = Date.now();
       if (isVisible) return;
 
-      // Let the current render show the spinner immediately, then latch its
-      // visibility asynchronously so it remains on screen for the minimum.
-      const timer = window.setTimeout(() => {
-        visibleSinceRef.current = Date.now();
-        setIsVisible(true);
-      }, 0);
+      const timer = window.setTimeout(() => setIsVisible(true), 0);
       return () => window.clearTimeout(timer);
     }
 
@@ -35,7 +31,10 @@ export function useMinimumLoadingDuration(
 
     const elapsed = Date.now() - visibleSinceRef.current;
     const remaining = Math.max(0, minimumDurationMs - elapsed);
-    const timer = window.setTimeout(() => setIsVisible(false), remaining);
+    const timer = window.setTimeout(() => {
+      visibleSinceRef.current = 0;
+      setIsVisible(false);
+    }, remaining);
 
     return () => window.clearTimeout(timer);
   }, [isLoading, isVisible, minimumDurationMs]);

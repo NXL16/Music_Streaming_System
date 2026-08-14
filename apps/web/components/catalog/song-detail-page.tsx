@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePlayerStore } from "@/lib/player/use-player-store";
 import { useCatalogSong } from "@/lib/catalog/use-catalog-song";
 import { formatDuration } from "@/lib/format/duration";
-import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
+import { ArtistLinks } from "../media/artist-links";
 import ResponsiveArtwork from "../media/common/responsive-artwork";
 import CatalogPageLoading from "../loading/catalog-page-loading";
 import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
@@ -14,33 +14,6 @@ import { AddSongToPlaylistButton } from "../songs/add-song-to-playlist-button";
 type SongDetailPageProps = {
   songId: string;
 };
-
-function SongArtists({
-  artists,
-  fallbackText,
-}: {
-  artists?: { id?: string; name: string; url?: string }[];
-  fallbackText: string;
-}) {
-  const formattedArtists = useFormattedArtists({ artists, fallbackText });
-
-  return (
-    <span>
-      {formattedArtists.map((artist, index) => (
-        <span key={`${artist.id}-${index}`}>
-          {artist.url ? (
-            <Link className="hover:underline" href={artist.url}>
-              {artist.name}
-            </Link>
-          ) : (
-            artist.name
-          )}
-          {index < formattedArtists.length - 1 && ", "}
-        </span>
-      ))}
-    </span>
-  );
-}
 
 export function SongDetailPage({ songId }: SongDetailPageProps) {
   const { song, loading, error, reload } = useCatalogSong(songId);
@@ -96,7 +69,11 @@ export function SongDetailPage({ songId }: SongDetailPageProps) {
             {song.title}
           </h1>
           <p className="mt-2 text-(--systemSecondary)">
-            <SongArtists artists={song.artists} fallbackText={song.artist} />
+            <ArtistLinks
+              artists={song.artists}
+              fallbackText={song.artist}
+              linkClassName="hover:underline"
+            />
           </p>
           <p className="mt-1 text-(--systemSecondary)">
             {song.albumUrl ? (

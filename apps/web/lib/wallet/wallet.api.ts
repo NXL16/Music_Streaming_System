@@ -22,7 +22,9 @@ export type CreateDepositPayload = {
 export async function getWalletBalance() {
   return getCachedQuery(
     WALLET_BALANCE_KEY,
-    async () => (await http.get<WalletBalanceResponse>("/wallet/balance")).data,
+    async (signal) =>
+      (await http.get<WalletBalanceResponse>("/wallet/balance", { signal }))
+        .data,
     WALLET_BALANCE_TTL_MS,
   );
 }

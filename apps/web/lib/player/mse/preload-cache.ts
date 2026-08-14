@@ -4,6 +4,7 @@ import { fetchRange } from "./fetcher";
 import type { PreloadedSong } from "./types";
 
 const MAX_CACHE_SIZE = 2;
+const MAX_PENDING_PRELOADS = 2;
 const PRELOAD_SEGMENTS_COUNT = 3;
 
 class PreloadCacheStore {
@@ -13,14 +14,20 @@ class PreloadCacheStore {
   async preload(songId: string): Promise<void> {
     if (this.cache.has(songId) || this.pending.has(songId)) return;
 
+    while (this.pending.size >= MAX_PENDING_PRELOADS) {
+      const oldestSongId = this.pending.keys().next().value;
+      if (!oldestSongId) break;
+      this.cancelPreload(oldestSongId);
+    }
+
     const controller = new AbortController();
     this.pending.set(songId, controller);
 
     try {
       const signal = controller.signal;
       const [streamInfo, metadata] = await Promise.all([
-        getStreamInfo(songId),
-        getStreamMetadata(songId),
+        getStreamInfo(songId, signal),
+        getStreamMetadata(songId, signal),
       ]);
 
       if (signal.aborted) return;
@@ -40,7 +47,12 @@ class PreloadCacheStore {
         fetchEnd = initEnd;
       }
 
-      const cipher = await fetchRange(streamInfo.streamUrl, 0, fetchEnd, signal);
+      const cipher = await fetchRange(
+        streamInfo.streamUrl,
+        0,
+        fetchEnd,
+        signal,
+      );
       if (signal.aborted) return;
 
       const plain = await decryptChunk(cryptoKey, ivBytes, cipher, 0);

@@ -2,6 +2,7 @@
 
 import { type MouseEvent, useEffect, useState } from "react";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
+import { toggleSongFavorite } from "@/lib/favorites/toggle-song-favorite";
 
 type FavoriteSongButtonProps = {
   songId: string;
@@ -21,7 +22,6 @@ export function FavoriteSongButton({
 }: FavoriteSongButtonProps) {
   const songs = useFavoriteStore((state) => state.songs);
   const hydrate = useFavoriteStore((state) => state.hydrate);
-  const toggle = useFavoriteStore((state) => state.toggle);
   const [saving, setSaving] = useState(false);
   const isFavorite = songs.some((song) => song.id === songId);
 
@@ -33,10 +33,7 @@ export function FavoriteSongButton({
     if (saving) return;
     setSaving(true);
     try {
-      await toggle(songId);
-    } catch {
-      // Keep the visual state unchanged if the request fails. The shared store
-      // only mutates after the API confirms the favorite change.
+      await toggleSongFavorite(songId);
     } finally {
       setSaving(false);
     }
@@ -46,6 +43,7 @@ export function FavoriteSongButton({
     <button
       aria-pressed={isFavorite}
       aria-label={ariaLabel}
+      data-testid={`favorite-song-${songId}`}
       className={`group/star items-center bg-(--favoriteButtonBackground,transparent) flex h-(--favoriteButtonSize,100%) justify-center leading-0 w-(--favoriteButtonSize,100%) [--favoriteIconStarOutline:var(--favoriteIconStarOutlineOverride,var(--favoriteButtonStarOutline,transparent))] ${isFavorite ? "[--favoriteIconStarFill:var(--favoriteButtonStarFill,var(--keyColor))]" : "[--favoriteIconStarFill:var(--favoriteButtonStarFill,transparent)]"} hover:[--favoriteIconStarOutline:var(--keyColor)] ${className ?? ""}`}
       onClick={(event) => {
         onClick?.(event);

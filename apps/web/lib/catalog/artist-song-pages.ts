@@ -8,6 +8,7 @@ export const ARTIST_SONGS_PAGE_SIZE = 20;
 type ArtistSongPage = {
   songs: PlayerSong[];
   nextCursor?: string;
+  hasMore: boolean;
 };
 
 type CacheEntry = {
@@ -65,6 +66,7 @@ export function getCatalogArtistSongPage(
     .then((response) => ({
       songs: mapCatalogTracks(response),
       nextCursor: response.nextCursor,
+      hasMore: Boolean(response.nextCursor),
     }))
     .then((page) => {
       writeCache(key, page);

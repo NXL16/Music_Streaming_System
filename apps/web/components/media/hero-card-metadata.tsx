@@ -12,7 +12,7 @@ export default function HeroCardMetadata({
   subtitle,
 }: HeroCardMetadataProps) {
   return (
-    <div className="items-end rounded-[inherit] bottom-0 flex inset-e-0 inset-s-0 justify-center absolute pb-0 z-auto [anchor-name:--powerswoosh-chin]">
+    <div className="items-end rounded-[inherit] bottom-0 flex inset-e-0 inset-s-0 justify-center absolute pb-0 z-4 [anchor-name:--powerswoosh-chin]">
       <div className="w-full wrap-break-word pt-0 relative [font:var(--callout)] pe-4 ps-4 z-auto">
         <div>
           <p className="text-(--metadata-secondary-color,var(--systemSecondary-vibrantOnDark)) [font:var(--subhead-emphasized)] mb-0.75 overflow-hidden text-ellipsis whitespace-nowrap">

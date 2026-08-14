@@ -14,34 +14,32 @@ type MediaEntityData = Pick<
   | "subtitle"
   | "description"
   | "contentRating"
-  | "slug"
   | "artists"
-  | "isUserPlaylist"
-  | "playlistKind"
   | "typeTag"
   | "artwork"
 >;
 
 type MediaEntity = {
   data: MediaEntityData;
-  priority: number;
   expiresAt: number;
 };
 
 const ENTITY_TTL_MS = 10 * 60 * 1000;
 const MAX_ENTITIES = 400;
-const sourcePriority: Record<MediaEntitySource, number> = {
-  catalog: 4,
-  library: 3,
-  recommendation: 2,
-  player: 1,
-  local: 0,
-};
 const entities = new Map<string, MediaEntity>();
 const listeners = new Map<string, Set<() => void>>();
 
-function entityKey(card: Pick<MediaCardProps, "resourceType" | "resourceId">) {
-  return `${card.resourceType}:${card.resourceId}`;
+function entityKey(
+  card: Pick<
+    MediaCardProps,
+    "resourceType" | "resourceId" | "isUserPlaylist" | "playlistKind"
+  >,
+) {
+  const isUserScoped =
+    card.isUserPlaylist ||
+    card.playlistKind === "favorite" ||
+    card.playlistKind === "user";
+  return `${isUserScoped ? "user-library" : "catalog"}:${card.resourceType}:${card.resourceId}`;
 }
 
 function pickEntityData(card: MediaCardProps): MediaEntityData {
@@ -50,10 +48,7 @@ function pickEntityData(card: MediaCardProps): MediaEntityData {
     subtitle: card.subtitle,
     description: card.description,
     contentRating: card.contentRating,
-    slug: card.slug,
     artists: card.artists,
-    isUserPlaylist: card.isUserPlaylist,
-    playlistKind: card.playlistKind,
     typeTag: card.typeTag,
     artwork: card.artwork,
   };
@@ -84,28 +79,28 @@ function trimEntities() {
 }
 
 /**
- * Stores canonical resource metadata. Renderers project the canonical artwork
- * into cover or hero renditions, so presentation never duplicates resource
- * data or overwrites a different layout's srcSet.
+ * Stores scoped resource metadata. A user-library playlist never shares a
+ * cache entry with a catalog playlist of the same id. The latest successful
+ * API/event boundary replaces only defined metadata; render payloads remain
+ * authoritative (see MediaCardRenderer).
  */
 export function hydrateMediaEntity(
   card: MediaCardProps,
-  source: MediaEntitySource,
+  _source: MediaEntitySource,
 ) {
+  void _source;
   if (developmentCacheDisabled) return;
   const key = entityKey(card);
   const existing = entities.get(key);
   const incoming = pickEntityData(card);
-  const priority = sourcePriority[source];
-  const data =
-    !existing || priority >= existing.priority
-      ? mergeDefined(existing?.data ?? ({} as MediaEntityData), incoming)
-      : mergeDefined(incoming, existing.data);
+  const data = mergeDefined(
+    existing?.data ?? ({} as MediaEntityData),
+    incoming,
+  );
 
   entities.delete(key);
   entities.set(key, {
     data,
-    priority: Math.max(priority, existing?.priority ?? priority),
     expiresAt: Date.now() + ENTITY_TTL_MS,
   });
   trimEntities();
@@ -140,8 +135,9 @@ export function subscribeMediaEntity(
 export function invalidateMediaEntity(
   resourceType: string,
   resourceId: string,
+  scope: "catalog" | "user-library" = "catalog",
 ) {
-  const key = `${resourceType}:${resourceId}`;
+  const key = `${scope}:${resourceType}:${resourceId}`;
   if (entities.delete(key)) notify(key);
 }
 

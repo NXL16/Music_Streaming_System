@@ -1,11 +1,9 @@
+import { getArtworkRenditionUrl, getArtworkSrcSet } from "@/lib/media/artwork";
 import {
-  getArtworkRenditionUrl,
-  getArtworkSrcSet,
-} from "@/lib/media/artwork";
+  COVER_ARTWORK_WIDTHS,
+  HERO_ARTWORK_WIDTHS,
+} from "@/lib/media/artwork-slots";
 import type { MediaCardProps } from "./media-card.types";
-
-const coverWidths = [296, 316, 592, 632];
-const heroWidths = [450, 600, 900, 1200];
 
 /** Projects one canonical artwork into the rendition set needed by this card. */
 export function projectMediaCardArtwork(card: MediaCardProps): MediaCardProps {
@@ -14,7 +12,7 @@ export function projectMediaCardArtwork(card: MediaCardProps): MediaCardProps {
 
   const isHero = card.cardType === "hero";
   const variant = isHero ? "hero" : "default";
-  const widths = isHero ? heroWidths : coverWidths;
+  const widths = isHero ? [...HERO_ARTWORK_WIDTHS] : [...COVER_ARTWORK_WIDTHS];
   const fallbackColor = artwork.bgColor?.replace(/^#/, "");
 
   return {

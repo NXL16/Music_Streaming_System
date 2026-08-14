@@ -13,7 +13,8 @@ interface AmpPlayPauseButtonProps {
   disabled?: boolean;
 }
 
-const AmpPlaybackControlsPlayTag = "amp-playback-controls-play" as React.ElementType;
+const AmpPlaybackControlsPlayTag =
+  "amp-playback-controls-play" as React.ElementType;
 const AmpIconTag = "amp-icon" as React.ElementType;
 const SlotFbTag = "slot-fb" as React.ElementType;
 
@@ -22,25 +23,12 @@ const AmpPlayPauseButton = React.memo(function AmpPlayPauseButton({
   onClick,
   disabled = false,
 }: AmpPlayPauseButtonProps) {
-  const buttonClassName = `
-    size-full relative m-0 p-0 inline-block border-0 bg-transparent outline-none cursor-pointer appearance-none font-inherit text-inherit leading-inherit bg-center bg-contain
-    text-(--playback-control-color,var(--white80,rgba(255,255,255,0.8)))
-    transition-colors duration-200 ease-out
-    hover:not-disabled:text-(--playback-control-color-hover,#fff)
-    disabled:opacity-40 disabled:cursor-default
-  `.trim();
-
-  const iconWrapperClassName = "w-(--playback-control-icon-width,32px) h-(--playback-control-icon-height,28px) block absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2";
-
   return (
-    <AmpPlaybackControlsPlayTag
-      className="w-(--playback-control-button-width,44px) h-(--playback-control-button-height,44px) flex flex-[0_0_auto] items-stretch justify-stretch relative"
-      hydrated=""
-    >
+    <AmpPlaybackControlsPlayTag className="playback-controls-play" hydrated="">
       {mode === "play" ? (
         <button
           type="button"
-          className={buttonClassName}
+          className="playback-play__play"
           disabled={disabled}
           onClick={onClick}
           aria-hidden={disabled ? "true" : undefined}
@@ -48,25 +36,27 @@ const AmpPlayPauseButton = React.memo(function AmpPlayPauseButton({
         >
           <SlotFbTag name="play">
             <AmpIconTag
-              className={iconWrapperClassName}
+              className="icon"
               role="presentation"
               aria-hidden="true"
               name="play"
               hydrated=""
             >
-              <svg viewBox="0 0 32 28" className="size-full block text-current pointer-events-none" xmlns="http://www.w3.org/2000/svg">
+              <svg
+                viewBox="0 0 32 28"
+                className="size-full block text-current pointer-events-none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
                 <path d={PLAY_PATH} fillRule="nonzero" fill="currentColor" />
               </svg>
             </AmpIconTag>
           </SlotFbTag>
-          <span className="absolute overflow-hidden h-px w-px p-0 border-0 clip-[rect(1px,1px,1px,1px)] clip-path-inset-[0_0_99.9%_99.9%]">
-            PLAY
-          </span>
+          <span className="button__label">PLAY</span>
         </button>
       ) : (
         <button
           type="button"
-          className={buttonClassName}
+          className="playback-play__pause"
           disabled={disabled}
           onClick={onClick}
           aria-hidden={disabled ? "true" : undefined}
@@ -74,20 +64,22 @@ const AmpPlayPauseButton = React.memo(function AmpPlayPauseButton({
         >
           <SlotFbTag name="pause">
             <AmpIconTag
-              className={iconWrapperClassName}
+              className="icon"
               role="presentation"
               aria-hidden="true"
               name="pause"
               hydrated=""
             >
-              <svg viewBox="0 0 32 28" className="size-full block text-current pointer-events-none" xmlns="http://www.w3.org/2000/svg">
+              <svg
+                viewBox="0 0 32 28"
+                className="size-full block text-current pointer-events-none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
                 <path d={PAUSE_PATH} fillRule="nonzero" fill="currentColor" />
               </svg>
             </AmpIconTag>
           </SlotFbTag>
-          <span className="absolute overflow-hidden h-px w-px p-0 border-0 clip-[rect(1px,1px,1px,1px)] clip-path-inset-[0_0_99.9%_99.9%]">
-            PAUSE
-          </span>
+          <span className="button__label">PAUSE</span>
         </button>
       )}
     </AmpPlaybackControlsPlayTag>

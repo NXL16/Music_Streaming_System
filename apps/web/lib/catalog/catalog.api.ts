@@ -19,6 +19,8 @@ type ResourceCacheEntry = {
 
 const resourceCache = new Map<string, ResourceCacheEntry>();
 const pendingResourceRequests = new Map<string, Promise<CatalogResponse>>();
+const detailCache = new Map<string, ResourceCacheEntry>();
+const pendingDetailRequests = new Map<string, Promise<CatalogResponse>>();
 
 function resourceCacheKey(
   resources: Array<Pick<CatalogReference, "id" | "type">>,
@@ -65,17 +67,65 @@ function getCachedCatalogResources(
   return request;
 }
 
+function getCachedCatalogDetail(
+  key: string,
+  request: () => Promise<CatalogResponse>,
+) {
+  const cached = detailCache.get(key);
+  if (!developmentCacheDisabled && cached && cached.expiresAt > Date.now()) {
+    return Promise.resolve(cached.value);
+  }
+
+  const pending = pendingDetailRequests.get(key);
+  if (pending) return pending;
+
+  const pendingRequest = request()
+    .then((response) => {
+      const hydrated = hydrateCatalogMediaEntities(response);
+      if (!developmentCacheDisabled) {
+        detailCache.set(key, {
+          value: hydrated,
+          expiresAt: Date.now() + RESOURCE_CACHE_TTL_MS,
+        });
+      }
+      return hydrated;
+    })
+    .finally(() => {
+      pendingDetailRequests.delete(key);
+    });
+  pendingDetailRequests.set(key, pendingRequest);
+  return pendingRequest;
+}
+
+function getCatalogDetail(
+  cacheKey: string,
+  path: string,
+  signal?: AbortSignal,
+) {
+  const request = () =>
+    http
+      .get<CatalogResponse>(path, { signal })
+      .then((response) => response.data);
+
+  // A caller that owns cancellation must never receive a shared request.
+  return signal
+    ? request().then(hydrateCatalogMediaEntities)
+    : getCachedCatalogDetail(cacheKey, request);
+}
+
 export function invalidateCatalogResourceCache() {
   resourceCache.clear();
+  detailCache.clear();
+  pendingDetailRequests.clear();
   invalidateAllMediaEntities();
 }
 
 export async function getCatalogAlbum(albumId: string, signal?: AbortSignal) {
-  const response = await http.get<CatalogResponse>(
+  return getCatalogDetail(
+    `albums:${albumId}`,
     `/catalog/${STOREFRONT}/albums/${encodeURIComponent(albumId)}`,
-    { signal },
+    signal,
   );
-  return hydrateCatalogMediaEntities(response.data);
 }
 
 export async function getCatalogAlbumRelated(
@@ -97,11 +147,11 @@ export async function getCatalogPlaylist(
   playlistId: string,
   signal?: AbortSignal,
 ) {
-  const response = await http.get<CatalogResponse>(
+  return getCatalogDetail(
+    `playlists:${playlistId}`,
     `/catalog/${STOREFRONT}/playlists/${encodeURIComponent(playlistId)}`,
-    { signal },
+    signal,
   );
-  return hydrateCatalogMediaEntities(response.data);
 }
 
 export async function getCatalogPlaylistTracks(
@@ -141,11 +191,11 @@ export async function searchCatalog(query: string, signal?: AbortSignal) {
 }
 
 export async function getCatalogArtist(artistId: string, signal?: AbortSignal) {
-  const response = await http.get<CatalogResponse>(
+  return getCatalogDetail(
+    `artists:${artistId}`,
     `/catalog/${STOREFRONT}/artists/${encodeURIComponent(artistId)}`,
-    { signal },
+    signal,
   );
-  return hydrateCatalogMediaEntities(response.data);
 }
 
 export async function getCatalogArtistAlbums(

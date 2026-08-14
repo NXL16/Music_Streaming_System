@@ -36,6 +36,8 @@ export interface MediaCardProps {
   id: string;
   resourceId: string;
   resourceType: string;
+  /** Track ids when this collection source already supplied them. */
+  songIds?: string[];
   /** True when this playlist comes from the authenticated user's library. */
   isUserPlaylist?: boolean;
   /** Distinguishes virtual system playlists from user-created playlists. */

@@ -67,4 +67,31 @@ describe("normalize-media-resource", () => {
     expect(card.imageSrcSet).toBe("hero-450.webp 450w, hero-1200.webp 1200w");
     expect(card.artworkColors.bg).toBe("#112233");
   });
+
+  it("derives one playlist kind and route across catalog, user, and favorite sources", () => {
+    const projectPlaylist = (id: string, isUserPlaylist?: boolean) =>
+      createMediaResourceCard(
+        {
+          id,
+          type: "playlists",
+          name: "Playlist",
+          url: isUserPlaylist ? undefined : "playlist",
+          isUserPlaylist,
+        },
+        { cardType: "collection" },
+      );
+
+    expect(projectPlaylist("catalog-1")).toMatchObject({
+      playlistKind: "catalog",
+      slug: "/playlist/playlist/catalog-1",
+    });
+    expect(projectPlaylist("user-1", true)).toMatchObject({
+      playlistKind: "user",
+      slug: "/library/playlist/user-1",
+    });
+    expect(projectPlaylist("favorite", true)).toMatchObject({
+      playlistKind: "favorite",
+      slug: "/library/playlist/favorite",
+    });
+  });
 });

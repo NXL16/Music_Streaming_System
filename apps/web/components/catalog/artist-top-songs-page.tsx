@@ -1,148 +1,33 @@
 "use client";
 
 import Link from "next/link";
-import {
-  type CSSProperties,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import { type CSSProperties, useMemo, useState } from "react";
 import AmpContextMenuButton from "../custom-elements/AmpContextMenuButton";
 import ResponsiveArtwork from "../media/common/responsive-artwork";
 import { formatDuration } from "@/lib/format/duration";
 import { useCatalogArtist } from "@/lib/catalog/use-catalog-artist";
 import { useCatalogArtistSongs } from "@/lib/catalog/use-catalog-artist-songs";
-import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
+import { ArtistLinks } from "../media/artist-links";
 import { usePlayerStore } from "@/lib/player/use-player-store";
 import Loading from "@/app/loading";
 import CatalogPageLoading from "../loading/catalog-page-loading";
 import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
+import { FavoriteSongButton } from "../songs/favorite-song-button";
+import { AddSongToLibraryButton } from "../songs/add-song-to-library-button";
+import { PlaybackWaveform } from "../songs/playback-waveform";
+import {
+  SONG_ROW_HEIGHT,
+  SongTableSpacer,
+  useVisibleSongRange,
+} from "@/lib/player/song-list-virtualization";
+import { useTrackRowSelection } from "@/lib/player/use-track-row-selection";
+import { useAuthStore } from "@/lib/auth/auth-store";
+import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
+import { useInfiniteScrollLoadMore } from "@/lib/pagination/use-infinite-scroll-sentinel";
 
 type ArtistTopSongsPageProps = {
   artistId: string;
 };
-
-const SONG_ROW_HEIGHT = 54;
-const SONG_ROW_OVERSCAN = 8;
-const SONG_RANGE_BLOCK_SIZE = 8;
-
-function SongTableSpacer({ height }: { height: number }) {
-  if (height <= 0) return null;
-
-  return (
-    <div aria-hidden="true" className="table-row">
-      <div className="table-cell p-0">
-        <div style={{ height }} />
-      </div>
-      <div className="table-cell p-0" />
-      <div className="hidden min-[1000px]:table-cell p-0" />
-      <div className="hidden min-[1260px]:table-cell p-0" />
-      <div className="table-cell p-0" />
-    </div>
-  );
-}
-
-function useVisibleSongRange(songCount: number, table: HTMLDivElement | null) {
-  const [range, setRange] = useState({ start: 0, end: SONG_ROW_OVERSCAN * 2 });
-  const rangeRef = useRef(range);
-
-  useLayoutEffect(() => {
-    const scrollContainer = document.querySelector<HTMLElement>(
-      "[data-app-scroll-container]",
-    );
-    if (!scrollContainer || !table) return;
-
-    let frame: number | undefined;
-    let tableTop = 0;
-    const measureTableTop = () => {
-      const containerRect = scrollContainer.getBoundingClientRect();
-      tableTop =
-        scrollContainer.scrollTop +
-        table.getBoundingClientRect().top -
-        containerRect.top;
-    };
-    const updateRange = () => {
-      frame = undefined;
-      const viewportStart = Math.max(0, scrollContainer.scrollTop - tableTop);
-      const viewportRowStart = Math.floor(viewportStart / SONG_ROW_HEIGHT);
-      const rangeBlockStart =
-        Math.floor(viewportRowStart / SONG_RANGE_BLOCK_SIZE) *
-        SONG_RANGE_BLOCK_SIZE;
-      const start = Math.max(0, rangeBlockStart - SONG_ROW_OVERSCAN);
-      const end = Math.min(
-        songCount,
-        rangeBlockStart +
-          Math.ceil(scrollContainer.clientHeight / SONG_ROW_HEIGHT) +
-          SONG_RANGE_BLOCK_SIZE +
-          SONG_ROW_OVERSCAN,
-      );
-
-      if (rangeRef.current.start === start && rangeRef.current.end === end) {
-        return;
-      }
-
-      const nextRange = { start, end };
-      rangeRef.current = nextRange;
-      setRange(nextRange);
-    };
-    const scheduleRangeUpdate = () => {
-      if (frame === undefined) frame = requestAnimationFrame(updateRange);
-    };
-
-    measureTableTop();
-    updateRange();
-    scrollContainer.addEventListener("scroll", scheduleRangeUpdate, {
-      passive: true,
-    });
-    const resizeObserver = new ResizeObserver(() => {
-      measureTableTop();
-      scheduleRangeUpdate();
-    });
-    resizeObserver.observe(scrollContainer);
-
-    return () => {
-      scrollContainer.removeEventListener("scroll", scheduleRangeUpdate);
-      resizeObserver.disconnect();
-      if (frame !== undefined) cancelAnimationFrame(frame);
-    };
-  }, [songCount, table]);
-
-  return {
-    start: Math.min(range.start, songCount),
-    end: Math.min(Math.max(range.end, range.start), songCount),
-  };
-}
-
-function ArtistLinks({
-  artists,
-  fallbackText,
-}: {
-  artists?: { id?: string; name: string; url?: string }[];
-  fallbackText: string;
-}) {
-  const formattedArtists = useFormattedArtists({ artists, fallbackText });
-
-  return (
-    <>
-      {formattedArtists.map((artist, index) => (
-        <span key={`${artist.id ?? artist.name}-${index}`}>
-          {artist.url ? (
-            <Link
-              href={artist.url}
-              className="overflow-hidden text-ellipsis whitespace-nowrap text-left"
-            >
-              {artist.name}
-            </Link>
-          ) : (
-            <span>{artist.name}</span>
-          )}
-          {index < formattedArtists.length - 1 && ", "}
-        </span>
-      ))}
-    </>
-  );
-}
 
 export function ArtistTopSongsPage({ artistId }: ArtistTopSongsPageProps) {
   return <ArtistTopSongsContent key={artistId} artistId={artistId} />;
@@ -160,16 +45,27 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
     hasMore,
     loadMore,
   } = useCatalogArtistSongs(artistId);
-  const [selectedSongId, setSelectedSongId] = useState<string | null>(null);
+
+  const {
+    activateTrack,
+    activeTrackId,
+    listRef,
+    selectTrack,
+    selectedTrackId,
+  } = useTrackRowSelection<HTMLDivElement>();
+
   const showInitialLoading = useMinimumLoadingDuration(
     artistLoading || songsLoading,
   );
-  const showLoadingMore = useMinimumLoadingDuration(loadingMore);
+
   const setQueue = usePlayerStore((state) => state.setQueue);
+  const currentSong = usePlayerStore((state) => state.currentSong);
+  const playing = usePlayerStore((state) => state.playing);
+  const togglePlayback = usePlayerStore((state) => state.togglePlayback);
+  const userId = useAuthStore((state) => state.user?.userId);
+  const favoriteSongs = useFavoriteStore((state) => state.songs);
+
   const artistName = artist?.attributes.name ?? "";
-  const [loadMoreElement, setLoadMoreElement] = useState<HTMLDivElement | null>(
-    null,
-  );
   const [songTableElement, setSongTableElement] =
     useState<HTMLDivElement | null>(null);
   const visibleSongRange = useVisibleSongRange(songs.length, songTableElement);
@@ -177,24 +73,16 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
     visibleSongRange.start,
     visibleSongRange.end,
   );
+  const favoriteSongIds = useMemo(
+    () => new Set(favoriteSongs.map((song) => song.id)),
+    [favoriteSongs],
+  );
 
-  useEffect(() => {
-    if (!loadMoreElement || !hasMore || loadingMore) return;
-    const scrollContainer = document.querySelector<HTMLElement>(
-      "[data-app-scroll-container]",
-    );
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (!entry.isIntersecting) return;
-        void loadMore();
-      },
-      { root: scrollContainer, rootMargin: "0px" },
-    );
-
-    observer.observe(loadMoreElement);
-    return () => observer.disconnect();
-  }, [hasMore, loadMore, loadingMore, loadMoreElement]);
+  const { sentinelRef: loadMoreSentinelRef, showLoadingMore } = useInfiniteScrollLoadMore({
+    enabled: hasMore,
+    loading: loadingMore,
+    onLoadMore: loadMore,
+  });
 
   if (showInitialLoading) {
     return <CatalogPageLoading />;
@@ -212,7 +100,10 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
         </div>
 
         <div
-          ref={setSongTableElement}
+          ref={(node) => {
+            listRef.current = node;
+            setSongTableElement(node);
+          }}
           className="[--linkColor:var(--systemSecondary)] border-collapse border-spacing-0 table [font:var(--callout)] table-fixed w-[calc(100%-var(--bodyGutter)*2)] ms-(--bodyGutter) me-(--bodyGutter) last:mb-5"
         >
           <div className="text-(--systemSecondary) table-row [font:var(--callout-emphasized)] [clip:rect(1px,1px,1px,1px)] [border:0px] [clip-path:inset(0px_0px_99.9%_99.9%)] h-px overflow-hidden p-0 static w-px">
@@ -247,60 +138,48 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
             const index = visibleSongRange.start + visibleIndex;
             const artworkColor =
               song.artworkBgColor ?? "var(--genericJoeColor)";
+            const isCurrentTrack = currentSong?.id === song.id;
+            const isTrackPlaying = isCurrentTrack && playing;
+
             return (
               <div
                 key={song.id}
-                onClick={(event) => {
-                  if (
-                    event.target instanceof Element &&
-                    event.target.closest(
-                      "a, button, input, select, textarea, [role='button'], [data-no-row-select]",
-                    )
-                  ) {
-                    return;
-                  }
-
-                  setSelectedSongId(song.id);
-                }}
-                className={`group ${selectedSongId === song.id ? "selected" : ""} table-row relative z-(--z-default) bg-(--rowBackgroundColor,transparent) h-13.5 ${
+                onClick={() => selectTrack(song.id)}
+                className={`group ${selectedTrackId === song.id ? "selected" : ""} text-(--systemSecondary) table-row relative z-(--z-default) [--platterBorderColor:var(--pageBG)] bg-(--rowBackgroundColor,transparent) h-13.5 hover:[--playButtonOpacity:1] hover:[--addToLibraryOpacity:1] ${
                   index === songs.length - 1
-                    ? "[&>div]:after:[border-bottom:.5px_solid_var(--labelDivider)] [&>div]:after:h-full"
+                    ? "[&>div]:after:[border-bottom:.5px_solid_var(--labelDivider)] [&>div]:after:h-full [&>div]:after:pointer-events-none"
                     : ""
                 } ${
-                  selectedSongId === song.id
-                    ? "[--rowBackgroundColor:var(--selectionColor)] [--platterBorderColor:var(--selectionColor)] [--linkColor:#fff] [--contextMenuEllipsisFillOverride:#fff] [&>div]:after:opacity-0 [&+_.group>div]:after:border-t-transparent hover:[--playButtonOpacity:1] hover:[--addToLibraryOpacity:1] outline-0 text-white"
-                    : "text-(--systemSecondary) [--platterBorderColor:var(--pageBG)] hover:[--playButtonOpacity:1] hover:[--addToLibraryOpacity:1] hover:[--rowBackgroundColor:var(--tracklistHoverColor)] hover:[--platterBorderColor:#f0f0f0] hover:[&+_.group>div]:after:border-t-transparent"
+                  selectedTrackId === song.id
+                    ? "[--rowBackgroundColor:var(--selectionColor)] [--platterBorderColor:var(--selectionColor)] [outline:0] [--linkColor:#fff] [--explicitFillOverride:#fff] [--contextMenuEllipsisFillOverride:#fff] [--addToLibraryFillOverride:#fff] text-white [&>div]:after:opacity-0 [&+_.group>div]:after:border-t-transparent"
+                    : "hover:[--rowBackgroundColor:var(--tracklistHoverColor)] hover:[--platterBorderColor:#f0f0f0] hover:[&+_.group>div]:after:border-t-transparent"
                 }`}
               >
                 <div className="table-cell [font:var(--body)] pb-0 pt-0 align-middle h-[inherit] inset-s-1.75 overflow-visible relative z-(--z-default) after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
                   <div className="grid [grid-template-areas:'favorite-or-popular'] h-full -inset-s-8.25 p-0 place-items-center absolute top-1/2 transform-[translateY(-50%)] w-6.5 z-(--z-default)">
                     <div className="[grid-area:favorite-or-popular] leading-0 place-self-stretch">
-                      <button
+                      <FavoriteSongButton
+                        ariaLabel="Favourite"
+                        className={`group-hover:[--favoriteIconStarOutline:var(--favoriteButtonStarOutline-hover,var(--keyColor))] ${
+                          activeTrackId === song.id
+                            ? "[--favoriteIconStarOutlineOverride:var(--favoriteButtonStarOutline-hover,var(--keyColor))]"
+                            : ""
+                        }`}
                         onClick={(event) => event.stopPropagation()}
-                        className="items-center bg-(--favoriteButtonBackground,transparent) flex h-(--favoriteButtonSize,100%) justify-center leading-0 w-(--favoriteButtonSize,100%) [--favoriteIconStarOutline:var(--favoriteButtonStarOutline,transparent)] [--favoriteIconStarFill:var(--favoriteButtonStarFill,transparent)] [--favoriteButtonBackground:transparent] group-hover:[--favoriteIconStarOutline:var(--favoriteButtonStarOutline-hover,var(--keyColor))]"
-                        aria-label="Favourite"
+                        songId={song.id}
                         title="Tells us more about the kind of music you like."
-                      >
-                        <svg
-                          width="64"
-                          height="64"
-                          viewBox="0 0 64 64"
-                          xmlns="http://www.w3.org/2000/svg"
-                          className="pointer-events-none h-(--favoriteIconSize,9px) w-(--favoriteIconSize,9px)"
-                        >
-                          <path
-                            className="fill-(--favoriteIconStarOutline,var(--keyColor))"
-                            d="M13.559 60.051c1.102.86 2.5.565 4.166-.645l14.218-10.455L46.19 59.406c1.666 1.21 3.037 1.505 4.166.645 1.102-.833 1.344-2.204.672-4.166l-5.618-16.718 14.353-10.32c1.666-1.183 2.338-2.42 1.908-3.764-.43-1.29-1.693-1.935-3.763-1.908l-17.605.108-5.348-16.8C34.308 4.496 33.34 3.5 31.944 3.5c-1.372 0-2.34.995-2.984 2.984L23.61 23.283l-17.605-.108c-2.07-.027-3.333.618-3.763 1.908-.457 1.344.242 2.58 1.909 3.763l14.352 10.321-5.617 16.718c-.672 1.962-.43 3.333.672 4.166Zm3.87-5.321c-.054-.054-.027-.081 0-.242l5.349-15.374c.376-1.049.161-1.882-.78-2.527L8.613 27.341c-.134-.08-.161-.134-.134-.215.027-.08.08-.08.242-.08l16.26.295c1.103.027 1.802-.43 2.151-1.532l4.677-15.562c.027-.162.08-.215.134-.215.08 0 .135.053.162.215l4.676 15.562c.35 1.102 1.048 1.559 2.15 1.532l16.261-.296c.162 0 .216 0 .243.081.027.08-.027.134-.135.215l-13.385 9.246c-.94.645-1.156 1.478-.78 2.527l5.35 15.374c.026.161.053.188 0 .242-.055.08-.135.026-.243-.054l-12.928-9.864c-.86-.672-1.855-.672-2.715 0l-12.928 9.864c-.107.08-.188.134-.242.054Z"
-                          ></path>
-                        </svg>
-                      </button>
+                      />
                     </div>
                   </div>
                 </div>
 
-                <div className="[font:var(--body)] pb-0 pt-0 table-cell align-middle ps-0 pe-0 text-(--systemPrimary) relative rounded-ee-none rounded-es-(--songs-list-row-border-radius,6px) rounded-se-none rounded-ss-(--songs-list-row-border-radius,6px) overflow-hidden text-ellipsis whitespace-nowrap after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0 group-[.selected]:text-white">
+                <div className="table-cell [font:var(--body)] pb-0 pt-0 align-middle ps-0 pe-0 text-(--systemPrimary) relative rounded-ee-none rounded-es-(--songs-list-row-border-radius,6px) rounded-se-none rounded-ss-(--songs-list-row-border-radius,6px) overflow-hidden text-ellipsis whitespace-nowrap after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0 group-[.selected]:text-white">
                   <div className="items-center grid [grid-template-areas:'song-artwork_song-rank_song-icon_song-name'] grid-cols-[auto_auto_auto_1fr] min-h-11.5 ps-1.75">
-                    <div className="text-(--systemSecondary) grid relative me-3">
+                    <div
+                      className={`text-(--systemSecondary) grid relative me-3 ${
+                        isCurrentTrack ? "[--playButtonOpacity:1]" : ""
+                      }`}
+                    >
                       <div className="grid [grid-area:song-artwork] [grid-template-areas:'song-index']">
                         <div className="rounded-[5px] [grid-area:song-index] [--songsListArtworkHeight:40px] h-10">
                           <div
@@ -333,25 +212,75 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
                       <div className="[grid-area:song-index] opacity-(--playButtonOpacity,0) [--playButtonIconHoverColor:#fff] items-center bg-[rgba(0,0,0,.45)] rounded-[5px] flex size-full inset-s-0 justify-center absolute top-0 z-(--transgray-scrim-z,var(--z-default))">
                         <div className="[--nonPlatterIconFill:var(--nonPlatterOverrideIconColor,var(--keyColor))] h-full align-top w-full">
                           <button
+                            disabled={!song.playbackUrl}
                             onClick={(event) => {
-                              event.stopPropagation();
-                              setQueue(songs, index);
+                              if (selectedTrackId !== null) {
+                                activateTrack(song.id);
+                                event.stopPropagation();
+                              }
+
+                              if (isCurrentTrack) {
+                                togglePlayback();
+                              } else {
+                                setQueue(songs, index);
+                              }
                             }}
                             className="[--nonPlatterIconFill:var(--playButtonIconColor,#fff)] [--playingBarColor:var(--nonPlatterIconFill,#fff)] leading-0 pointer-events-auto relative z-(--z-default) h-full align-top w-full"
                           >
-                            <svg
-                              width="16"
-                              height="16"
-                              viewBox="0 0 16 16"
-                              xmlns="http://www.w3.org/2000/svg"
-                              className="inline-block h-(--playButtonSize,16px) w-(--playButtonSize,16px) align-bottom"
-                              aria-hidden="true"
-                            >
-                              <path
-                                fill="var(--nonPlatterIconFill, var(--keyColor, black))"
-                                d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"
-                              ></path>
-                            </svg>
+                            {isCurrentTrack ? (
+                              <div className="bottom-0 inset-x-0 m-auto absolute top-0 z-1 h-3.75 pointer-events-none w-full">
+                                <PlaybackWaveform
+                                  isPlaying={isTrackPlaying}
+                                  seed={song.id}
+                                />
+
+                                <div className="bottom-0 inset-x-0 m-auto opacity-0 absolute top-0 z-1 group-hover:opacity-100">
+                                  {isTrackPlaying ? (
+                                    <svg
+                                      width="16"
+                                      height="16"
+                                      viewBox="0 0 16 16"
+                                      xmlns="http://www.w3.org/2000/svg"
+                                      className="inline-block align-bottom"
+                                      aria-hidden="true"
+                                    >
+                                      <path
+                                        fill="var(--nonPlatterIconFill, var(--keyColor, black))"
+                                        d="M9.918.464h2.672a.89.89 0 0 1 .89.89v13.291a.89.89 0 0 1-.89.891H9.918a.89.89 0 0 1-.89-.89V1.354a.89.89 0 0 1 .89-.891zm-6.371 0h2.398c.567 0 1.027.46 1.027 1.028v13.016c0 .568-.46 1.028-1.027 1.028H3.547c-.567 0-1.028-.46-1.028-1.028V1.492c0-.568.46-1.028 1.028-1.028z"
+                                      ></path>
+                                    </svg>
+                                  ) : (
+                                    <svg
+                                      width="16"
+                                      height="16"
+                                      viewBox="0 0 16 16"
+                                      xmlns="http://www.w3.org/2000/svg"
+                                      className="inline-block align-bottom"
+                                      aria-hidden="true"
+                                    >
+                                      <path
+                                        fill="var(--nonPlatterIconFill, var(--keyColor, black))"
+                                        d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"
+                                      ></path>
+                                    </svg>
+                                  )}
+                                </div>
+                              </div>
+                            ) : (
+                              <svg
+                                width="16"
+                                height="16"
+                                viewBox="0 0 16 16"
+                                xmlns="http://www.w3.org/2000/svg"
+                                className="pointer-events-none inline-block h-(--playButtonSize,16px) w-(--playButtonSize,16px) align-bottom"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  fill="var(--nonPlatterIconFill, var(--keyColor, black))"
+                                  d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"
+                                ></path>
+                              </svg>
+                            )}
                           </button>
                         </div>
                       </div>
@@ -362,7 +291,8 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
                         {song.url ? (
                           <Link
                             href={song.url}
-                            className="overflow-hidden [--linkColor:var(--systemPrimary)] group-[.selected]:[--linkColor:#fff]"
+                            onClick={(e) => e.stopPropagation()}
+                            className="overflow-hidden [--linkColor:var(--systemPrimary)] group-[.selected]:[--linkColor:#fff] hover:underline"
                           >
                             <div className="overflow-hidden text-ellipsis inline text-pretty whitespace-normal text-left">
                               {song.title}
@@ -378,6 +308,8 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
                           <ArtistLinks
                             artists={song.artists}
                             fallbackText={song.artist}
+                            linkClassName="overflow-hidden text-ellipsis whitespace-nowrap text-left"
+                            onArtistClick={(event) => event.stopPropagation()}
                           />
                         </div>
                       </div>
@@ -386,19 +318,25 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
                 </div>
 
                 <div className="hidden [font:var(--body)] pb-0 pt-0 align-middle pe-2.5 relative overflow-hidden text-ellipsis whitespace-nowrap min-[1000px]:table-cell after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
-                  <div className="overflow-hidden text-ellipsis whitespace-nowrap -mb-1-mt-1 -ms-1 -me-1 pb-1 pt-1 pe-1 ps-1 text-left">
+                  <div className="overflow-hidden text-ellipsis whitespace-nowrap -mb-1 -mt-1 -ms-1 -me-1 pb-1 pt-1 pe-1 ps-1 text-left">
                     <ArtistLinks
                       artists={song.artists}
                       fallbackText={song.artist}
+                      linkClassName="overflow-hidden text-ellipsis whitespace-nowrap text-left"
+                      onArtistClick={(event) => event.stopPropagation()}
                     />
                   </div>
                 </div>
 
                 <div className="hidden [font:var(--body)] pb-0 pt-0 align-middle pe-4 relative overflow-hidden text-ellipsis whitespace-nowrap min-[1260px]:table-cell after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
-                  <div className="overflow-hidden text-ellipsis whitespace-nowrap -mb-1-mt-1 -ms-1 -me-1 pb-1 pt-1 pe-1 ps-1 text-left">
+                  <div className="overflow-hidden text-ellipsis whitespace-nowrap -mb-1 -mt-1 -ms-1 -me-1 pb-1 pt-1 pe-1 ps-1 text-left">
                     <span className="overflow-hidden text-ellipsis whitespace-nowrap text-left">
                       {song.albumUrl ? (
-                        <Link href={song.albumUrl} className="hover:underline">
+                        <Link
+                          href={song.albumUrl}
+                          onClick={(e) => e.stopPropagation()}
+                          className="hover:underline"
+                        >
                           {song.album}
                         </Link>
                       ) : (
@@ -411,28 +349,12 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
                 <div className="table-cell [font:var(--body)] py-0 align-middle overflow-visible relative text-end z-(--z-default) rounded-ee-(--songs-list-row-border-radius,6px) rounded-es-none rounded-se-(--songs-list-row-border-radius,6px) rounded-ss-none pe-4.5 after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
                   <div className="items-center inline-grid [grid-template-areas:'song-controls-add_song-controls-length_song-controls-context'] relative">
                     <div className="[grid-area:song-controls-add] opacity-(--addToLibraryOpacity,0) me-1.75 pointer-coarse:hidden max-[578px]:hidden">
-                      <button
-                        onClick={(event) => event.stopPropagation()}
-                        className="items-center text-(--keyColor) cursor-pointer inline-flex justify-center [transition:var(--global-transition)] h-(--add-to-library-button-width,25px) leading-0 w-(--add-to-library-button-width,25px) me-(--addToLibraryMarginEnd,4px)"
-                      >
-                        <svg
-                          width="10"
-                          height="10"
-                          viewBox="0 0 10 10"
-                          xmlns="http://www.w3.org/2000/svg"
-                          fillRule="evenodd"
-                          clipRule="evenodd"
-                          strokeLinejoin="round"
-                          strokeMiterlimit="2"
-                          className="h-(--add-to-library-icon-width,12px) w-(--add-to-library-icon-width,12px) fill-(--keyColor)"
-                          aria-hidden="true"
-                        >
-                          <path
-                            d="M.784 5.784h3.432v3.432c0 .43.354.784.784.784.43 0 .784-.354.784-.784V5.784h3.432a.784.784 0 1 0 0-1.568H5.784V.784A.788.788 0 0 0 5 0a.788.788 0 0 0-.784.784v3.432H.784a.784.784 0 1 0 0 1.568z"
-                            fillRule="nonzero"
-                          ></path>
-                        </svg>
-                      </button>
+                      <AddSongToLibraryButton
+                        songId={song.id}
+                        title={song.title}
+                        artist={song.artist}
+                        artworkUrl={song.artworkUrl}
+                      />
                     </div>
 
                     <time
@@ -444,9 +366,22 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
 
                     <div
                       onClick={(event) => event.stopPropagation()}
-                      className={`[grid-area:song-controls-context] ms-1.75 [--contextMenuButtonSize:28px] ${selectedSongId === song.id ? "[--contextMenuEllipsisFillOverride:#fff]" : "[--contextMenuEllipsisFillOverride:var(--systemSecondary)] hover:[--contextMenuEllipsisFillOverride:var(--keyColor)]"}`}
+                      className={`[grid-area:song-controls-context] ms-1.75 [--contextMenuButtonSize:28px] ${
+                        selectedTrackId === song.id
+                          ? "[--contextMenuEllipsisFillOverride:#fff]"
+                          : "[--contextMenuEllipsisFillOverride:var(--systemSecondary)] hover:[--contextMenuEllipsisFillOverride:var(--keyColor)]"
+                      }`}
                     >
-                      <AmpContextMenuButton />
+                      <AmpContextMenuButton
+                        id={`song-${song.id}`}
+                        context={{
+                          kind: "song",
+                          songId: song.id,
+                          title: song.title,
+                          userId,
+                          isFavorite: favoriteSongIds.has(song.id),
+                        }}
+                      />
                     </div>
                   </div>
                 </div>
@@ -464,7 +399,7 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
         {hasMore && (
           <div
             aria-hidden="true"
-            ref={setLoadMoreElement}
+            ref={loadMoreSentinelRef}
             style={{ height: 1 }}
           />
         )}

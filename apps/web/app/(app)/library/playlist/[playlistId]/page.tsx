@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import PlaylistDetailView, {
   type GenericArtwork,
@@ -8,7 +8,6 @@ import PlaylistDetailView, {
   type GenericTrack,
 } from "@/components/catalog/playlist-detail-view";
 import CatalogPageLoading from "@/components/loading/catalog-page-loading";
-import { http } from "@/lib/api/http";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
@@ -19,7 +18,16 @@ import {
 import { subscribeLibraryResourcesChanged } from "@/lib/library/library-resources.api";
 import {
   PLAYLIST_CHANGED_EVENT,
+  type PlaylistChange,
 } from "@/lib/playlists/playlist-events";
+import { playlistArtworkVariants } from "@/lib/playlists/generated-playlist-cover";
+import {
+  getUserPlaylist,
+  listUserPlaylistTracks,
+} from "@/lib/playlists/user-playlists.api";
+import { useInfiniteScrollLoadMore } from "@/lib/pagination/use-infinite-scroll-sentinel";
+import { appendUniqueById, getSafeNextCursor } from "@/lib/pagination/cursor-page";
+import Loading from "@/app/loading";
 
 type Track = SongSummaryProjectionSource;
 
@@ -28,7 +36,7 @@ type PlaylistDetail = {
   name: string;
   description?: string;
   artwork?: GenericArtwork;
-  songs: Track[];
+  artworkUrl?: string;
 };
 
 function resolvePlaylistArtwork(
@@ -68,31 +76,47 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
   // ── State cho trường hợp 2: Playlist do user tạo ─────────────────────────
   const [playlist, setPlaylist] = useState<PlaylistDetail | null>(null);
   const [loading, setLoading] = useState(!isFavorites);
+  const [tracks, setTracks] = useState<Track[]>([]);
+  const [nextCursor, setNextCursor] = useState("");
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
+  const pageRequestVersionRef = useRef(0);
+  const seenCursorsRef = useRef(new Set<string>());
   const showLoading = useMinimumLoadingDuration(
     loading || (isFavorites && (!favoriteLoaded || favoriteLoading)),
   );
 
   useEffect(() => {
     let active = true;
+    const requestVersion = ++pageRequestVersionRef.current;
+    seenCursorsRef.current = new Set();
+    queueMicrotask(() => {
+      if (active) setLoadingMore(false);
+    });
 
     if (isFavorites) {
       void hydrateFavorites();
     } else {
-      http
-        .get(`/playlists/${playlistId}`)
-        .then((res) => {
-          if (!active) return;
-          setPlaylist(res.data.playlist ?? res.data);
+      Promise.all([
+        getUserPlaylist(playlistId),
+        listUserPlaylistTracks(playlistId),
+      ])
+        .then(([playlistDetail, firstPage]) => {
+          if (!active || requestVersion !== pageRequestVersionRef.current) return;
+          setPlaylist(playlistDetail);
+          setTracks(firstPage.songs ?? []);
+          setNextCursor(getSafeNextCursor(firstPage, seenCursorsRef.current));
           setError("");
         })
         .catch(() => {
-          if (!active) return;
+          if (!active || requestVersion !== pageRequestVersionRef.current) return;
           setError("Could not load playlist.");
         })
         .finally(() => {
-          if (active) setLoading(false);
+          if (active && requestVersion === pageRequestVersionRef.current) {
+            setLoading(false);
+          }
         });
     }
 
@@ -101,12 +125,34 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
     };
   }, [playlistId, isFavorites, hydrateFavorites, revision]);
 
+  const loadMore = useCallback(async () => {
+    if (!nextCursor || loadingMore || isFavorites) return;
+    const requestVersion = pageRequestVersionRef.current;
+    setLoadingMore(true);
+    try {
+      const page = await listUserPlaylistTracks(playlistId, {
+        cursor: nextCursor,
+      });
+      if (requestVersion !== pageRequestVersionRef.current) return;
+      setTracks((current) => appendUniqueById(current, page.songs));
+      setNextCursor(getSafeNextCursor(page, seenCursorsRef.current));
+    } finally {
+      if (requestVersion === pageRequestVersionRef.current) setLoadingMore(false);
+    }
+  }, [isFavorites, loadingMore, nextCursor, playlistId]);
+
+  const { sentinelRef: loadMoreSentinelRef, showLoadingMore } = useInfiniteScrollLoadMore({
+    enabled: !isFavorites && Boolean(nextCursor),
+    loading: loadingMore,
+    onLoadMore: loadMore,
+  });
+
   useEffect(() => {
     if (isFavorites) return;
 
     return subscribeLibraryResourcesChanged((change) => {
       if (
-        change?.operation === "remove" &&
+        (change?.operation === "pending-remove" || change?.operation === "remove") &&
         change.resourceType === "playlists" &&
         change.resourceId === playlistId
       ) {
@@ -119,7 +165,10 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
     if (isFavorites) return;
 
     const handlePlaylistChanged = (event: Event) => {
-      if ((event as CustomEvent<string>).detail === playlistId) {
+      if (
+        (event as CustomEvent<PlaylistChange>).detail?.playlistId ===
+        playlistId
+      ) {
         setRevision((current) => current + 1);
       }
     };
@@ -141,7 +190,7 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
   }
 
   // ── MAP DỮ LIỆU SANG CHUẨN GENERICPLAYLIST ──────────────────────────────
-  const rawTracks = isFavorites ? favoriteSongs : playlist?.songs || [];
+  const rawTracks = isFavorites ? favoriteSongs : tracks;
 
   const formattedTracks: GenericTrack[] = rawTracks.map(projectSongSummary);
   const playlistArtwork = isFavorites
@@ -149,7 +198,12 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
         bgColor: "2c2c2e",
       }
     : resolvePlaylistArtwork(
-        playlist?.artwork,
+        playlist?.artworkUrl
+          ? {
+              url: playlist.artworkUrl,
+              variants: playlistArtworkVariants(playlist.artworkUrl),
+            }
+          : playlist?.artwork,
         formattedTracks[0]?.artworkUrl,
         "2c2c2e",
       );
@@ -172,5 +226,24 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
     tracks: formattedTracks,
   };
 
-  return <PlaylistDetailView playlist={formattedPlaylist} />;
+  return (
+    <PlaylistDetailView
+      playlist={formattedPlaylist}
+      showMetadata={!showLoadingMore}
+      afterTracks={
+        !isFavorites && (showLoadingMore || nextCursor) ? (
+          <>
+            {showLoadingMore && <Loading fullScreen={false} size={26} />}
+            {nextCursor && (
+              <div
+                aria-hidden="true"
+                ref={loadMoreSentinelRef}
+                style={{ height: 1 }}
+              />
+            )}
+          </>
+        ) : null
+      }
+    />
+  );
 }

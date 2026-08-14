@@ -1,14 +1,22 @@
+import Link from "next/link";
 import type { MediaCardProps } from "./media-card.types";
 
-type StationCardMetadataProps = Pick<MediaCardProps, "title" | "description">;
+type StationCardMetadataProps = Pick<
+  MediaCardProps,
+  "slug" | "title" | "description"
+>;
 
 export default function StationCardMetadata({
+  slug,
   title,
   description,
 }: StationCardMetadataProps) {
   return (
     <div className="mt-1">
-      <div className="text-start hover:[--linkHoverTextDecoration:underline]">
+      <Link
+        href={String(slug)}
+        className="text-start hover:[--linkHoverTextDecoration:underline]"
+      >
         <div className="text-(--systemPrimary) grid [font:var(--callout)] grid-cols-[minmax(0,1fr)_auto] [text-decoration:var(--linkHoverTextDecoration)]">
           <div className="[--mc-lineClamp:var(--defaultClampOverride,2)] pe-(--mc-overflowBleedSize) relative z-(--z-default) [--mc-overflowBleedSize:var(--overflowBleedSize,4px)] [--mc-badgeSpacing:calc(var(--mc-badgeSize)+var(--mc-overflowBleedSize))] [clip-path:inset(var(--mc-overflowBleedSize))] -mb-(--mc-overflowBleedSize) -mt-(--mc-overflowBleedSize) -me-(--mc-overflowBleedSize) -ms-(--mc-overflowBleedSize) pb-(--mc-overflowBleedSize) pt-(--mc-overflowBleedSize) ps-(--mc-overflowBleedSize) scroll-p-(--mc-overflowBleedSize) line-clamp-(--mc-lineClamp,1) wrap-break-word overflow-hidden [--mc-badgeSize:var(--badgeSize,8px)]">
             <span className="pe-(--mc-badgeSpacing)">{title}</span>
@@ -22,7 +30,7 @@ export default function StationCardMetadata({
             </div>
           </div>
         )}
-      </div>
+      </Link>
     </div>
   );
 }

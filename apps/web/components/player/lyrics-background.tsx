@@ -1,11 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { LyricsScene } from "@/lib/player/lyrics-scene";
+import { LyricsScene, type ArtworkTone } from "@/lib/player/lyrics-scene";
 
 type LyricsBackgroundProps = {
   artworkSrcSet?: string;
   artworkUrl?: string;
+};
+
+type LoadedArtwork = {
+  image: HTMLImageElement;
+  tone: ArtworkTone;
 };
 
 const FALLBACK_ARTWORK = "/assets/artwork/1x1.gif";
@@ -37,6 +42,37 @@ function getPixiArtworkUrl(artworkUrl: string) {
   return `/api/artwork?url=${encodeURIComponent(artworkUrl)}`;
 }
 
+function getArtworkTone(image: HTMLImageElement): ArtworkTone {
+  try {
+    const size = 32;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return "balanced";
+
+    context.drawImage(image, 0, 0, size, size);
+    const pixels = context.getImageData(0, 0, size, size).data;
+    let luminance = 0;
+
+    for (let index = 0; index < pixels.length; index += 4) {
+      luminance +=
+        (0.2126 * pixels[index] +
+          0.7152 * pixels[index + 1] +
+          0.0722 * pixels[index + 2]) /
+        255;
+    }
+
+    const averageLuminance = luminance / (pixels.length / 4);
+    if (averageLuminance < 0.32) return "dark";
+    if (averageLuminance > 0.7) return "bright";
+  } catch {
+    // Cross-origin artwork may not allow canvas readback; use the safe preset.
+  }
+
+  return "balanced";
+}
+
 export function LyricsBackground({
   artworkSrcSet,
   artworkUrl,
@@ -44,69 +80,106 @@ export function LyricsBackground({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<LyricsScene | null>(null);
   const [isVisible, setIsVisible] = useState(false);
+  const [initialArtwork, setInitialArtwork] = useState<LoadedArtwork | null>(
+    null,
+  );
   const sourceArtworkUrl =
     getBackgroundArtworkUrl(artworkSrcSet) ?? artworkUrl ?? FALLBACK_ARTWORK;
   const backgroundArtworkUrl = getPixiArtworkUrl(sourceArtworkUrl);
-  const artworkUrlRef = useRef(backgroundArtworkUrl);
 
   useEffect(() => {
-    artworkUrlRef.current = backgroundArtworkUrl;
-    const scene = sceneRef.current;
-    if (!scene) return;
-
     let cancelled = false;
-    let transitioned = false;
+    let handled = false;
     const artwork = new Image();
-    const transition = () => {
-      if (cancelled || transitioned) return;
+    artwork.decoding = "async";
+    const handleLoad = () => {
+      if (cancelled || handled) return;
 
-      transitioned = true;
-      sceneRef.current?.transitionToArtwork(artwork);
+      handled = true;
+      const scene = sceneRef.current;
+      const tone = getArtworkTone(artwork);
+      if (scene) {
+        scene.transitionToArtwork(artwork, tone);
+      } else {
+        setInitialArtwork({ image: artwork, tone });
+      }
     };
 
-    artwork.addEventListener("load", transition, { once: true });
+    artwork.addEventListener("load", handleLoad, { once: true });
     artwork.src = backgroundArtworkUrl;
 
-    if (artwork.complete && artwork.naturalWidth > 0) transition();
+    if (artwork.complete && artwork.naturalWidth > 0) handleLoad();
 
     return () => {
       cancelled = true;
-      artwork.removeEventListener("load", transition);
+      artwork.removeEventListener("load", handleLoad);
     };
   }, [backgroundArtworkUrl]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !initialArtwork) return;
+    const viewport = canvas.parentElement;
+    if (!viewport) return;
+
+    let revealFrame: number | null = null;
+    let resizeFrame: number | null = null;
+
+    const getViewportSize = () => ({
+      width: Math.round(viewport.clientWidth),
+      height: Math.round(viewport.clientHeight),
+    });
 
     const createScene = () => {
-      if (sceneRef.current || !canvas.clientWidth || !canvas.clientHeight)
-        return;
+      const { width, height } = getViewportSize();
+      if (sceneRef.current || !width || !height) return;
 
-      const scene = new LyricsScene(canvas, artworkUrlRef.current);
+      // Do not reveal the canvas until its first artwork is decoded. Otherwise
+      // Pixi initially renders transparent and exposes the grey CSS fallback.
+      const scene = new LyricsScene(
+        canvas,
+        initialArtwork.image,
+        initialArtwork.tone,
+      );
       sceneRef.current = scene;
-      requestAnimationFrame(() => setIsVisible(true));
+      revealFrame = requestAnimationFrame(() => {
+        revealFrame = requestAnimationFrame(() => setIsVisible(true));
+      });
     };
 
-    const observer = new ResizeObserver(() => {
+    const resizeScene = () => {
+      resizeFrame = null;
+      const { width, height } = getViewportSize();
+      if (!width || !height) return;
+
       if (!sceneRef.current) {
         createScene();
         return;
       }
 
-      sceneRef.current.resize(canvas.clientWidth, canvas.clientHeight);
+      sceneRef.current.resize(width, height);
+    };
+
+    const observer = new ResizeObserver(() => {
+      if (resizeFrame === null) {
+        resizeFrame = requestAnimationFrame(resizeScene);
+      }
     });
 
-    observer.observe(canvas);
+    // Observe the viewport wrapper, never the Pixi canvas: changing a canvas
+    // backing buffer would otherwise recursively trigger this observer.
+    observer.observe(viewport);
     const frame = requestAnimationFrame(createScene);
 
     return () => {
       cancelAnimationFrame(frame);
+      if (revealFrame !== null) cancelAnimationFrame(revealFrame);
+      if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
       observer.disconnect();
       sceneRef.current?.destroy();
       sceneRef.current = null;
     };
-  }, []);
+  }, [initialArtwork]);
 
   return (
     <canvas

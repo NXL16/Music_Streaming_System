@@ -5,8 +5,8 @@ import {
   PlayerBarMarquee,
   useMarqueeTrackState,
 } from "@/components/layout/player-bar-marquee";
-import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
 import { type PlayerSong } from "@/lib/player/use-player-store";
+import { ArtistLinks } from "../media/artist-links";
 
 const AmpCustomElement = "amp-marquee-text" as ElementType;
 
@@ -16,44 +16,6 @@ type AmpMarqueeTextProps = {
   isPlaying?: boolean;
   onCloseModal?: () => void;
 };
-
-function DetailMarqueeArtistLinks({
-  artists,
-  fallbackText,
-  onCloseModal,
-}: {
-  artists?: { id?: string; name: string; url?: string }[];
-  fallbackText: string;
-  onCloseModal?: () => void;
-}) {
-  const formattedArtists = useFormattedArtists({ artists, fallbackText });
-
-  return (
-    <>
-      {formattedArtists.map((artist, index) => (
-        <span key={`${artist.id ?? artist.name}-${index}`}>
-          {artist.url ? (
-            <Link
-              href={artist.url}
-              onClick={(e) => {
-                e.stopPropagation();
-                onCloseModal?.();
-              }}
-              className="text-inherit [text-decoration:none] hover:underline"
-            >
-              {artist.name}
-            </Link>
-          ) : (
-            <span className="text-inherit [text-decoration:none]">
-              {artist.name}
-            </span>
-          )}
-          {index < formattedArtists.length - 1 && ", "}
-        </span>
-      ))}
-    </>
-  );
-}
 
 export default function AmpMarqueeText({
   isPrimary = false,
@@ -122,10 +84,15 @@ export default function AmpMarqueeText({
                 onAnimatingChange={marqueeState.handleAnimatingChange}
               >
                 <span className="flex items-center gap-[0.333em]">
-                  <DetailMarqueeArtistLinks
+                  <ArtistLinks
                     artists={currentSong.artists}
                     fallbackText={currentSong.artist}
-                    onCloseModal={onCloseModal}
+                    linkClassName="text-inherit [text-decoration:none] hover:underline"
+                    textClassName="text-inherit [text-decoration:none]"
+                    onArtistClick={(event) => {
+                      event.stopPropagation();
+                      onCloseModal?.();
+                    }}
                   />
                   {currentSong.album && (
                     <>

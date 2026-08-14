@@ -12,8 +12,11 @@ type HeroCardProps = MediaCardProps & {
 };
 
 export default function HeroCard(props: HeroCardProps) {
+  const cardId = props.resourceId || props.id;
+
   return (
     <MediaCardShell
+      id={cardId}
       isHero
       artworkColor={props.artworkColors.main}
       metadataTextPrimary={props.artworkColors.textPrimary}

@@ -10,8 +10,10 @@ type CircleCardProps = MediaCardProps & {
 };
 
 export default function CircleCard(props: CircleCardProps) {
+  const cardId = props.resourceId || props.id;
+
   return (
-    <MediaCardShell artworkColor={props.artworkColors.main}>
+    <MediaCardShell id={cardId} artworkColor={props.artworkColors.main}>
       <>
         <div className="media-card-artwork rounded-full shadow-[0_1px_1px_rgba(0,0,0,0.01),0_2px_2px_rgba(0,0,0,0.01),0_4px_4px_rgba(0,0,0,0.02),0_8px_8px_rgba(0,0,0,0.03),0_14px_14px_rgba(0,0,0,0.03)] relative z-(--z-default) overflow-hidden after:content-[''] after:absolute after:inset-0 after:rounded-full after:bg-[#333333]/30 after:opacity-(--scrimOpacity,0) after:transition-opacity after:duration-100 after:ease-in after:z-1">
           <div className="rounded-full overflow-hidden">

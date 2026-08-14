@@ -1,4 +1,3 @@
-import Link from "next/link";
 import type { MediaCardProps } from "./media-card.types";
 import MediaCardShell from "./common/media-card-shell";
 import CardArtwork from "./common/card-artwork";
@@ -6,6 +5,7 @@ import CardPlayButton from "./common/card-play-button";
 import CardContextMenu from "./common/card-context-menu";
 import StationCardMetadata from "./station-card-metadata";
 import { playSystemStation } from "@/lib/recommendations/stations-for-you";
+import { useAuthStore } from "@/lib/auth/auth-store";
 
 type StationCardProps = MediaCardProps & {
   cardType: "station";
@@ -17,55 +17,38 @@ export default function StationCard(props: StationCardProps) {
     void playSystemStation(props.resourceId);
   };
 
+  const userId = useAuthStore((state) => state.user?.userId);
+  const cardId = props.resourceId || props.id;
+
   return (
-    <MediaCardShell artworkColor={props.artworkColors.main}>
-      <>
-        <div className="media-card-artwork rounded-(--global-border-radius-medium,7px) shadow-[0_1px_1px_rgba(0,0,0,0.01),0_2px_2px_rgba(0,0,0,0.01),0_4px_4px_rgba(0,0,0,0.02),0_8px_8px_rgba(0,0,0,0.03),0_14px_14px_rgba(0,0,0,0.03)] relative z-(--z-default) after:content-[''] after:absolute after:inset-0 after:rounded-[inherit] after:bg-[#333333]/30 after:opacity-(--scrimOpacity,0) after:transition-opacity after:duration-100 after:ease-in after:z-1">
-          <CardArtwork
-            variant="cover"
-            title={props.title}
-            altText={props.altText}
-            imageSrcSet={props.imageSrcSet}
-            artworkColors={props.artworkColors}
-            containerClassName="w-full [--override-placeholder-bg-color:var(--artwork-bg-color)] [anchor-name:--shelf-first-artwork]"
+    <MediaCardShell id={cardId} artworkColor={props.artworkColors.main}>
+      <div className="media-card-artwork rounded-(--global-border-radius-medium,7px) shadow-[0_1px_1px_rgba(0,0,0,0.01),0_2px_2px_rgba(0,0,0,0.01),0_4px_4px_rgba(0,0,0,0.02),0_8px_8px_rgba(0,0,0,0.03),0_14px_14px_rgba(0,0,0,0.03)] relative z-(--z-default) after:content-[''] after:absolute after:inset-0 after:rounded-[inherit] after:bg-[#333333]/30 after:opacity-(--scrimOpacity,0) after:transition-opacity after:duration-100 after:ease-in after:z-1">
+        <CardArtwork
+          variant="cover"
+          title={props.title}
+          altText={props.altText}
+          imageSrcSet={props.imageSrcSet}
+          artworkColors={props.artworkColors}
+          containerClassName="w-full [--override-placeholder-bg-color:var(--artwork-bg-color)] [anchor-name:--shelf-first-artwork]"
+        />
+        <div className="media-card-interaction rounded-[inherit] size-full opacity-(--scrimOpacity,0) absolute top-0 transition-(--global-transition) z-[calc(var(--z-default)+1)]">
+          <CardPlayButton
+            ariaLabel={`Play ${props.title}`}
+            variant="station"
+            onPlay={handlePlay}
           />
-
-          <div className="media-card-interaction rounded-[inherit] size-full opacity-(--scrimOpacity,0) absolute top-0 transition-(--global-transition) z-[calc(var(--z-default)+1)]">
-            {props.slug && (
-              <Link
-                className="text-transparent block size-full absolute z-(--z-default)"
-                href={props.slug}
-                onPointerDown={(event) => {
-                  if (event.button === 0) props.onOpen?.();
-                }}
-                onClick={(event) => {
-                  if (event.detail === 0) props.onOpen?.();
-                }}
-              >
-                {props.title}
-              </Link>
-            )}
-
-            {!props.slug && (
-              <button
-                aria-label={`Play ${props.title}`}
-                className="text-transparent block size-full absolute z-(--z-default)"
-                onClick={handlePlay}
-                type="button"
-              />
-            )}
-
-            <CardPlayButton
-              ariaLabel={`Play ${props.title}`}
-              variant="station"
-              onPlay={handlePlay}
-            />
-            <CardContextMenu />
-          </div>
+          <CardContextMenu
+            id={cardId}
+            context={{
+              kind: "station",
+              stationId: cardId,
+              title: props.title,
+              userId,
+            }}
+          />
         </div>
-
-        <StationCardMetadata {...props} />
-      </>
+      </div>
+      <StationCardMetadata {...props} />
     </MediaCardShell>
   );
 }

@@ -10,6 +10,7 @@ export type SongSummary = {
   durationSec: number;
   createdAt: number;
   coverUrl: string;
+  thumbnailCoverSrcSet?: string;
   artistId?: string;
   artistUrl?: string;
   artists?: Array<{ id: string; name: string; url: string }>;

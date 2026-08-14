@@ -1,4 +1,6 @@
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
+import type { MediaArtwork } from "@/lib/media/media-card.types";
+import { getCoverArtwork } from "@/lib/media/artwork-slots";
 import { withPlaylistPlaybackSource } from "@/lib/player/playlist-playback-source";
 import { usePlayerStore } from "@/lib/player/use-player-store";
 import { projectSongSummary } from "@/lib/songs/project-song-summary";
@@ -16,7 +18,13 @@ export async function playFavoritePlaylist(
 ): Promise<boolean> {
   await useFavoriteStore.getState().hydrate();
 
-  const tracks = useFavoriteStore.getState().songs.map(projectSongSummary);
+  const { collection, songs } = useFavoriteStore.getState();
+  const artwork = collection?.artwork as MediaArtwork | undefined;
+  const { imageUrl: artworkUrl, imageSrcSet: artworkSrcSet } = getCoverArtwork(
+    artwork,
+    context.artworkUrl,
+  );
+  const tracks = songs.map(projectSongSummary);
   if (!tracks.some((track) => track.playbackUrl)) return false;
 
   usePlayerStore.getState().setQueue(
@@ -26,8 +34,8 @@ export async function playFavoritePlaylist(
       playlistKind: "favorite",
       curatorName: context.curatorName,
       href: "/library/playlist/favorite",
-      artworkUrl: context.artworkUrl || "",
-      artworkSrcSet: context.artworkUrl || undefined,
+      artworkUrl,
+      artworkSrcSet: artworkSrcSet || undefined,
       artworkBgColor: context.artworkBgColor,
     }),
   );

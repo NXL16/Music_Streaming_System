@@ -5,10 +5,7 @@ import { motion, useReducedMotion, AnimatePresence } from "motion/react";
 import { Music2 } from "lucide-react";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { useRouter } from "next/navigation";
-import {
-  getHomeRecommendations,
-  handoffHomeRecommendations,
-} from "@/lib/recommendations/recommendation.api";
+import { getHomeRecommendations } from "@/lib/recommendations/recommendation.api";
 import type { RecommendationResponse } from "@/lib/recommendations/recommendation.types";
 
 const EXIT_DURATION_MS = 500;
@@ -165,7 +162,6 @@ export default function SplashScreen() {
       .then((data) => {
         if (cancelled) return;
         setHomeData(data);
-        handoffHomeRecommendations(data);
         setSyncedAt(new Date());
       })
       .catch(() => {

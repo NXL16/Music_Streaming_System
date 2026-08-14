@@ -1,232 +1,29 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { http } from "@/lib/api/http";
 import { useWalletBalance } from "@/lib/wallet/use-wallet-balance";
-import {
-  Coins,
-  MessageCircle,
-  Plus,
-  Settings,
-  ShieldCheck,
-} from "lucide-react";
+import { Coins, Plus, Settings } from "lucide-react";
 import Image from "next/image";
-
-type SidebarItem = {
-  key: string;
-  label: string;
-  href: string;
-  icon: ReactNode;
-  external?: boolean;
-};
-
-type UserPlaylist = {
-  id: string;
-  name: string;
-};
-
-const primaryNavigationItems: SidebarItem[] = [
-  {
-    key: "search",
-    label: "Search",
-    href: "/search",
-    icon: (
-      <svg height="24" viewBox="0 0 24 24" width="24" aria-hidden="true">
-        <path
-          d="M17.979 18.553c.476 0 .813-.366.813-.835a.807.807 0 0 0-.235-.586l-3.45-3.457a5.61 5.61 0 0 0 1.158-3.413c0-3.098-2.535-5.633-5.633-5.633C7.542 4.63 5 7.156 5 10.262c0 3.098 2.534 5.632 5.632 5.632a5.614 5.614 0 0 0 3.274-1.055l3.472 3.472a.835.835 0 0 0 .6.242zm-7.347-3.875c-2.417 0-4.416-2-4.416-4.416 0-2.417 2-4.417 4.416-4.417 2.417 0 4.417 2 4.417 4.417s-2 4.416-4.417 4.416z"
-          fillOpacity=".95"
-        />
-      </svg>
-    ),
-  },
-  {
-    key: "home",
-    label: "Home",
-    href: "/home",
-    icon: (
-      <svg
-        width="24"
-        height="24"
-        viewBox="0 0 24 24"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
-      >
-        <path d="M5.93 20.16a1.94 1.94 0 0 1-1.43-.502c-.334-.335-.502-.794-.502-1.393v-7.142c0-.362.062-.688.177-.953.123-.264.326-.529.6-.75l6.145-5.157c.176-.141.344-.247.52-.318.176-.07.362-.105.564-.105.194 0 .388.035.565.105.176.07.352.177.52.318l6.146 5.158c.273.23.467.476.59.75.124.264.177.59.177.96v7.134c0 .59-.159 1.058-.503 1.393-.335.335-.811.503-1.428.503H5.929Zm12.14-1.172c.221 0 .406-.07.547-.212a.688.688 0 0 0 .22-.511v-7.142c0-.177-.026-.344-.087-.459a.97.97 0 0 0-.265-.353l-6.154-5.149a.756.756 0 0 0-.177-.115.37.37 0 0 0-.15-.035.37.37 0 0 0-.158.035l-.177.115-6.145 5.15a.982.982 0 0 0-.274.352 1.13 1.13 0 0 0-.088.468v7.133c0 .203.08.379.23.511a.744.744 0 0 0 .546.212h12.133Zm-8.323-4.7c0-.176.062-.326.177-.432a.6.6 0 0 1 .423-.159h3.315c.176 0 .326.053.432.16s.159.255.159.431v4.973H9.756v-4.973Z" />
-      </svg>
-    ),
-  },
-  {
-    key: "new",
-    label: "New",
-    href: "/#",
-    icon: (
-      <svg height="24" viewBox="0 0 24 24" width="24" aria-hidden="true">
-        <path
-          d="M9.92 11.354c.966 0 1.453-.487 1.453-1.49v-3.4c0-1.004-.487-1.483-1.453-1.483H6.452C5.487 4.981 5 5.46 5 6.464v3.4c0 1.003.487 1.49 1.452 1.49zm7.628 0c.965 0 1.452-.487 1.452-1.49v-3.4c0-1.004-.487-1.483-1.452-1.483h-3.46c-.974 0-1.46.479-1.46 1.483v3.4c0 1.003.486 1.49 1.46 1.49zm-7.65-1.073h-3.43c-.266 0-.396-.137-.396-.418v-3.4c0-.273.13-.41.396-.41h3.43c.265 0 .402.137.402.41v3.4c0 .281-.137.418-.403.418zm7.634 0h-3.43c-.273 0-.402-.137-.402-.418v-3.4c0-.273.129-.41.403-.41h3.43c.265 0 .395.137.395.41v3.4c0 .281-.13.418-.396.418zm-7.612 8.7c.966 0 1.453-.48 1.453-1.483v-3.407c0-.996-.487-1.483-1.453-1.483H6.452c-.965 0-1.452.487-1.452 1.483v3.407c0 1.004.487 1.483 1.452 1.483zm7.628 0c.965 0 1.452-.48 1.452-1.483v-3.407c0-.996-.487-1.483-1.452-1.483h-3.46c-.974 0-1.46.487-1.46 1.483v3.407c0 1.004.486 1.483 1.46 1.483zm-7.65-1.072h-3.43c-.266 0-.396-.137-.396-.41v-3.4c0-.282.13-.418.396-.418h3.43c.265 0 .402.136.402.418v3.4c0 .273-.137.41-.403.41zm7.634 0h-3.43c-.273 0-.402-.137-.402-.41v-3.4c0-.282.129-.418.403-.418h3.43c.265 0 .395.136.395.418v3.4c0 .273-.13.41-.396.41z"
-          fillOpacity=".95"
-        />
-      </svg>
-    ),
-  },
-];
-
-const roomUrl = process.env.NEXT_PUBLIC_ROOM_URL?.trim();
-
-const roomNavigationItems: SidebarItem[] = roomUrl
-  ? [
-      {
-        key: "room",
-        label: "Room",
-        href: roomUrl,
-        icon: <MessageCircle className="h-5 w-5" aria-hidden="true" />,
-        external: true,
-      },
-    ]
-  : [];
-
-const libraryItems: SidebarItem[] = [
-  {
-    key: "recently-added",
-    label: "Recently Added",
-    href: "/#",
-    icon: (
-      <svg
-        width="24"
-        height="24"
-        viewBox="0 0 24 24"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
-      >
-        <path d="M12 20c4.376 0 8-3.631 8-8 0-4.376-3.631-8-8.008-8C7.624 4 4 7.624 4 12c0 4.369 3.631 8 8 8zm0-1.333A6.634 6.634 0 0 1 5.341 12a6.628 6.628 0 0 1 6.651-6.667A6.653 6.653 0 0 1 18.667 12 6.636 6.636 0 0 1 12 18.667zm-.008-5.82a.54.54 0 0 0 .55-.549V7.012a.54.54 0 0 0-.55-.541.532.532 0 0 0-.541.54v4.746H7.898a.534.534 0 0 0-.549.541c0 .314.235.55.549.55h4.094z"></path>
-      </svg>
-    ),
-  },
-  {
-    key: "artists",
-    label: "Artists",
-    href: "/#",
-    icon: (
-      <svg
-        width="24"
-        height="24"
-        viewBox="0 0 24 24"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
-      >
-        <path d="M18.39 9.42c1.289-1.282 1.34-2.908.102-4.139-1.23-1.216-2.85-1.186-4.138.103l4.036 4.035zm-6.08 9.858a.66.66 0 0 0 .667-.667v-4.328l-.051-1.048 2.234-2.072c.842.11 1.728-.235 2.49-1.004l-4.03-4.035c-.776.761-1.098 1.633-.988 2.475l-6.805 7.332c-.278.3-.322.717.022 1.062L4.913 18.2a.31.31 0 0 0 .037.418l.212.22a.309.309 0 0 0 .425.029l1.208-.945c.33.344.755.3 1.048.022l3.8-3.516v4.182a.66.66 0 0 0 .667.667zm-5.053-2.073-.674-.674 6.453-6.84c.124.205.278.402.461.593.183.183.373.344.571.476l-6.811 6.445z"></path>
-      </svg>
-    ),
-  },
-  {
-    key: "albums",
-    label: "Albums",
-    href: "/#",
-    icon: (
-      <svg
-        width="24"
-        height="24"
-        viewBox="0 0 24 24"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
-      >
-        <path d="M15.477 3.937c-.044-.61-.396-.937-1.07-.937H9.431c-.675 0-1.027.327-1.07.937h7.115zm1.24 2.013c-.11-.654-.425-1.025-1.159-1.025H8.222c-.741 0-1.057.37-1.167 1.025h9.662zm-.3 14.05c1.313 0 2.083-.756 2.083-2.252v-8.37c0-1.496-.778-2.252-2.304-2.252H7.804C6.27 7.126 5.5 7.875 5.5 9.38v8.369C5.5 19.244 6.27 20 7.804 20h8.612zm-.023-1.17H7.818c-.733 0-1.137-.392-1.137-1.148V9.437c0-.756.404-1.14 1.137-1.14h8.356c.727 0 1.145.384 1.145 1.14v8.245c0 .756-.418 1.148-.925 1.148z"></path>
-      </svg>
-    ),
-  },
-  {
-    key: "songs",
-    label: "Songs",
-    href: "/#",
-    icon: (
-      <svg
-        width="24"
-        height="24"
-        viewBox="0 0 24 24"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
-      >
-        <path d="M9.732 19.241c1.077 0 2.688-.79 2.688-2.922V9.617c0-.388.074-.469.418-.542l3.347-.732a.48.48 0 0 0 .403-.484V5.105c0-.388-.315-.637-.689-.563l-3.764.82c-.47.102-.725.359-.725.769l.014 8.144c.037.36-.132.594-.454.66l-1.164.241c-1.465.308-2.154 1.055-2.154 2.16 0 1.122.864 1.905 2.08 1.905z"></path>
-      </svg>
-    ),
-  },
-  {
-    key: "made-for-you",
-    label: "Made for You",
-    href: "/#",
-    icon: (
-      <svg
-        width="24"
-        height="24"
-        viewBox="0 0 24 24"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
-      >
-        <path d="M6.729 20.011H17.27c1.825 0 2.729-.903 2.729-2.694V6.706c0-1.79-.904-2.695-2.729-2.695H6.73C4.913 4.011 4 4.906 4 6.706v10.611c0 1.8.913 2.694 2.729 2.694zm5.275-5.101c-3.085 0-5.31 1.486-6.24 3.372-.243-.235-.365-.574-.365-1.034V6.775c0-.904.478-1.365 1.347-1.365h10.508c.86 0 1.347.461 1.347 1.365v10.473c0 .451-.122.8-.356 1.025-.93-1.886-3.086-3.363-6.24-3.363zm0-1.452c1.66.018 2.964-1.399 2.964-3.259 0-1.747-1.304-3.19-2.964-3.19s-2.98 1.443-2.972 3.19c.009 1.86 1.312 3.233 2.972 3.26z"></path>
-      </svg>
-    ),
-  },
-];
-
-const playlistItems: SidebarItem[] = [
-  {
-    key: "all-playlists",
-    label: "All Playlists",
-    href: "/library/all-playlists/",
-    icon: (
-      <svg
-        width="24"
-        height="24"
-        viewBox="0 0 24 24"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
-      >
-        <path
-          d="M5.55 8.73H7.4c.45 0 .8-.13 1.06-.38.25-.26.37-.62.37-1.1V5.5c0-.46-.12-.83-.37-1.08-.26-.26-.6-.39-1.06-.39H5.55c-.45 0-.8.13-1.06.39-.25.25-.37.62-.37 1.08v1.77c0 .47.12.83.37 1.09.26.25.6.38 1.06.38Zm.16-1.14c-.15 0-.26-.04-.34-.12-.07-.07-.1-.2-.1-.35V5.63c0-.15.03-.27.1-.35.08-.07.2-.11.34-.11h1.52c.14 0 .25.04.34.11.08.08.12.2.12.35v1.49c0 .16-.04.28-.12.35a.46.46 0 0 1-.34.12H5.7Zm5.62 1.14h1.84c.46 0 .8-.13 1.06-.38.25-.26.37-.62.37-1.1V5.5c0-.46-.12-.83-.37-1.08a1.4 1.4 0 0 0-1.06-.39h-1.84c-.45 0-.8.13-1.05.39A1.5 1.5 0 0 0 9.9 5.5v1.77c0 .47.13.83.38 1.09.25.25.6.38 1.05.38Zm.16-1.14c-.15 0-.26-.04-.34-.12-.07-.07-.11-.2-.11-.35V5.63c0-.15.04-.27.11-.35.08-.07.19-.11.34-.11h1.53c.14 0 .25.04.33.11.08.08.11.2.11.35v1.49c0 .16-.04.28-.11.35-.08.08-.2.12-.33.12h-1.53Zm5.63 1.14h1.84c.45 0 .8-.13 1.06-.38.25-.26.38-.62.38-1.1V5.5c0-.46-.13-.83-.38-1.08-.25-.26-.6-.39-1.06-.39h-1.84c-.45 0-.8.13-1.05.39-.26.25-.38.62-.38 1.08v1.77c0 .47.12.83.38 1.09.25.25.6.38 1.05.38Zm.16-1.14c-.15 0-.26-.04-.34-.12-.08-.07-.12-.2-.12-.35V5.63c0-.15.04-.27.12-.35.08-.07.2-.11.34-.11h1.52c.14 0 .25.04.33.11.08.08.12.2.12.35v1.49c0 .16-.04.28-.12.35-.07.08-.18.12-.33.12h-1.52ZM5.55 14.35H7.4c.45 0 .8-.13 1.06-.38.25-.26.37-.62.37-1.08V11.1c0-.47-.12-.83-.37-1.09-.26-.25-.6-.38-1.06-.38H5.55c-.45 0-.8.13-1.06.38-.25.26-.37.62-.37 1.09v1.78c0 .46.12.82.37 1.08.26.25.6.38 1.06.38Zm.16-1.14c-.15 0-.26-.04-.34-.12-.07-.08-.1-.2-.1-.35v-1.5c0-.15.03-.26.1-.34.08-.08.2-.12.34-.12h1.52c.14 0 .25.04.34.12.08.08.12.2.12.34v1.5c0 .15-.04.27-.12.35a.45.45 0 0 1-.34.12H5.7Zm5.62 1.14h1.84c.46 0 .8-.13 1.06-.38.25-.26.37-.62.37-1.08V11.1c0-.47-.12-.83-.37-1.09a1.4 1.4 0 0 0-1.06-.38h-1.84c-.45 0-.8.13-1.05.38-.25.26-.38.62-.38 1.09v1.78c0 .46.13.82.38 1.08.25.25.6.38 1.05.38Zm.16-1.14c-.15 0-.26-.04-.34-.12a.523.523 0 0 1-.11-.35v-1.5c0-.15.04-.26.11-.34.08-.08.19-.12.34-.12h1.53c.14 0 .25.04.33.12.08.08.11.2.11.34v1.5c0 .15-.04.27-.11.35-.08.08-.2.12-.33.12h-1.53Zm5.63 1.14h1.84c.45 0 .8-.13 1.06-.38.25-.26.38-.62.38-1.08V11.1c0-.47-.13-.83-.38-1.09-.25-.25-.6-.38-1.06-.38h-1.84c-.45 0-.8.13-1.05.38-.26.26-.38.62-.38 1.09v1.78c0 .46.12.82.38 1.08.25.25.6.38 1.05.38Zm.16-1.14c-.15 0-.26-.04-.34-.12-.08-.08-.12-.2-.12-.35v-1.5c0-.15.04-.26.12-.34.08-.08.2-.12.34-.12h1.52c.14 0 .25.04.33.12.08.08.12.2.12.34v1.5c0 .15-.04.27-.12.35-.07.08-.18.12-.33.12h-1.52ZM5.55 19.97H7.4c.45 0 .8-.13 1.06-.38.25-.26.37-.62.37-1.1v-1.76c0-.47-.12-.83-.37-1.09-.26-.25-.6-.38-1.06-.38H5.55c-.45 0-.8.13-1.06.38-.25.26-.37.62-.37 1.09v1.77c0 .47.12.83.37 1.09.26.25.6.38 1.06.38Zm.16-1.15c-.15 0-.26-.04-.34-.11-.07-.08-.1-.2-.1-.35v-1.49c0-.16.03-.28.1-.36.08-.07.2-.11.34-.11h1.52c.14 0 .25.04.34.11.08.08.12.2.12.36v1.49c0 .15-.04.27-.12.35a.46.46 0 0 1-.34.11H5.7Zm5.62 1.15h1.84c.46 0 .8-.13 1.06-.38.25-.26.37-.62.37-1.1v-1.76c0-.47-.12-.83-.37-1.09a1.4 1.4 0 0 0-1.06-.38h-1.84c-.45 0-.8.13-1.05.38-.25.26-.38.62-.38 1.09v1.77c0 .47.13.83.38 1.09.25.25.6.38 1.05.38Zm.16-1.15c-.15 0-.26-.04-.34-.11a.523.523 0 0 1-.11-.35v-1.49c0-.16.04-.28.11-.36.08-.07.19-.11.34-.11h1.53c.14 0 .25.04.33.11.08.08.11.2.11.36v1.49c0 .15-.04.27-.11.35-.08.07-.2.11-.33.11h-1.53Zm5.63 1.15h1.84c.45 0 .8-.13 1.06-.38.25-.26.38-.62.38-1.1v-1.76c0-.47-.13-.83-.38-1.09-.25-.25-.6-.38-1.06-.38h-1.84c-.45 0-.8.13-1.05.38-.26.26-.38.62-.38 1.09v1.77c0 .47.12.83.38 1.09.25.25.6.38 1.05.38Zm.16-1.15c-.15 0-.26-.04-.34-.11-.08-.08-.12-.2-.12-.35v-1.49c0-.16.04-.28.12-.36.08-.07.2-.11.34-.11h1.52c.14 0 .25.04.33.11.08.08.12.2.12.36v1.49c0 .15-.04.27-.12.35-.07.07-.18.11-.33.11h-1.52Z"
-          transform="translate(.7 .94) scale(.92237)"
-          style={{ fillRule: "nonzero" }}
-        ></path>
-      </svg>
-    ),
-  },
-  {
-    key: "favourite-songs",
-    label: "Favourite Songs",
-    href: "/library#favourite-songs",
-    icon: (
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        viewBox="0 0 24 24"
-        width="24"
-        height="24"
-        style={{ overflow: "visible" }}
-        aria-hidden="true"
-      >
-        <path d="M6.7 20h10.5c1.8 0 2.7-.9 2.7-2.7V6.7C20 4.9 19.1 4 17.3 4H6.7C4.9 4 4 4.9 4 6.7v10.6c0 1.8.9 2.7 2.7 2.7zm0-1.4c-.9 0-1.4-.5-1.4-1.4V6.8c0-.9.5-1.4 1.4-1.4h10.5c.9 0 1.4.5 1.4 1.4v10.5c0 .9-.5 1.4-1.4 1.4l-10.5-.1z"></path>
-        <path d="m9.5 16.5 2.5-1.8 2.5 1.8c.5.4 1 0 .8-.6l-1-3 2.5-1.8c.5-.3.3-1-.3-1h-3.1l-.9-3c-.2-.6-.9-.6-1 0l-.9 3H7.5c-.6 0-.8.7-.3 1l2.5 1.8-1 3c-.2.6.3 1 .8.6z"></path>
-      </svg>
-    ),
-  },
-];
-
-function PlaylistIcon() {
-  return (
-    <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M13.079 19.712c1.076 0 2.688-.79 2.688-2.922v-6.702c0-.388.073-.468.417-.542l3.347-.732a.48.48 0 0 0 .403-.483V5.577c0-.388-.315-.637-.688-.564l-3.765.82c-.469.103-.725.359-.725.77l.015 8.144c.036.359-.132.593-.455.659l-1.164.242c-1.465.307-2.153 1.054-2.153 2.16 0 1.12.864 1.904 2.08 1.904zM12.046 8.675a.503.503 0 0 0 .498-.498.497.497 0 0 0-.498-.49H5.498a.492.492 0 0 0-.498.49.5.5 0 0 0 .498.498h6.548zm0 2.607a.5.5 0 0 0 .498-.505.49.49 0 0 0-.498-.483H5.498a.486.486 0 0 0-.498.483c0 .278.212.505.498.505h6.548zm0 2.608a.494.494 0 1 0 0-.989H5.498a.492.492 0 0 0-.498.49.49.49 0 0 0 .498.499h6.548z" />
-    </svg>
-  );
-}
-
-const identityAdminItems: SidebarItem[] = [
-  {
-    key: "admin",
-    label: "Admin",
-    href: "/admin",
-    icon: <ShieldCheck className="h-5 w-5" aria-hidden="true" />,
-  },
-];
+import { useIsMobile } from "./sidebar/use-is-mobile";
+import { useUserPlaylists } from "./sidebar/use-user-playlists";
+import { usePinnedLibraryResources } from "./sidebar/use-pinned-library-resources";
+import { ensureFavoriteLibraryResource } from "@/lib/favorites/ensure-favorite-library-resource";
+import { PlaylistIcon } from "./sidebar/playlist-icon";
+import { albumRoute } from "@/lib/catalog/album-route";
+import { songRoute } from "@/lib/catalog/song-route";
+import {
+  identityAdminItems,
+  libraryItems,
+  playlistItems,
+  primaryNavigationItems,
+  roomNavigationItems,
+} from "./sidebar/sidebar-data";
+import { SidebarSection } from "./sidebar/sidebar-section";
+import type { SidebarItem } from "./sidebar/sidebar-types";
 
 function AppleMusicLogo() {
   return (
@@ -243,127 +40,19 @@ function AppleMusicLogo() {
   );
 }
 
-function isActiveRoute(pathname: string, href: string) {
-  return pathname === href || pathname.startsWith(`${href}/`);
-}
-
-function SidebarSection({
-  title,
-  items,
-  pathname,
-  onNavigate,
-  onExternalNavigate,
-}: {
-  title?: string;
-  items: SidebarItem[];
-  pathname: string;
-  onNavigate: () => void;
-  onExternalNavigate?: () => void;
-}) {
-  return (
-    <div className="pt-0 in-[.app-container]:[--navigation-item-height:44px] min-[484px]:in-[.app-container]:[--navigation-item-height:36px]">
-      {title && (
-        <div className="text-(--systemSecondary) flex [font:var(--body-emphasized)] justify-between p-[15px_26px_3px] in-[.app-container]:items-end h-(--navigation-item-height) px-1.5 py-2 min-[484px]:[font:var(--callout-emphasized)] min-[484px]:m-[0_0_4px] min-[484px]:p-[4px_8px] min-[484px]:rounded-md">
-          <span>{title}</span>
-        </div>
-      )}
-
-      <ul className="p-0 [font:var(--title-navigation)]">
-        {items.map((item) => {
-          const isSelected =
-            !item.external && isActiveRoute(pathname, item.href);
-
-          return (
-            <li
-              key={item.key}
-              className={[
-                "[--linkHoverTextDecoration:none] rounded-md mb-0.5 p-1 relative in-[.app-container]:rounded-lg in-[.app-container]:h-(--navigation-item-height) in-[.app-container]:mb-1 min-[484px]:in-[.app-container]:list-item ",
-                isSelected ? "bg-(--navSidebarSelectedState)" : "",
-              ].join(" ")}
-            >
-              {item.external ? (
-                <a
-                  href={item.href}
-                  onClick={(event) => {
-                    if (!onExternalNavigate) {
-                      onNavigate();
-                      return;
-                    }
-
-                    event.preventDefault();
-                    onExternalNavigate();
-                  }}
-                  className="rounded-[inherit] box-content block h-full -m-0.75 p-0.75"
-                >
-                  <SidebarItemContent item={item} isSelected={false} />
-                </a>
-              ) : (
-                <Link
-                  href={item.href}
-                  onClick={onNavigate}
-                  className="rounded-[inherit] box-content block h-full -m-0.75 p-0.75"
-                  aria-current={isSelected ? "page" : undefined}
-                >
-                  <SidebarItemContent item={item} isSelected={isSelected} />
-                </Link>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
-
-function SidebarItemContent({
-  item,
-  isSelected,
-}: {
-  item: SidebarItem;
-  isSelected: boolean;
-}) {
-  return (
-    <div
-      className={[
-        "items-center rounded-[inherit] flex gap-2 size-full in-[.app-container]:gap-1.5 min-[484px]:in-[.app-container]:gap-0.5",
-        isSelected
-          ? "text-(--keyColor)"
-          : "text-(--navigation-item-text-color,var(--systemPrimary))",
-      ].join(" ")}
-    >
-      <span
-        className={`max-[483px]:basis-(--navigation-item-icon-size,28px) flex-[0_0] basis-(--navigation-item-icon-size,32px) leading-0 in-[.app-container]:mx-0.5 min-[484px]:basis-(--navigation-item-icon-size,24px) [&>svg]:h-full [&>svg]:w-full ${isSelected ? "[&>svg]:fill-(--keyColor)" : "[&>svg]:fill-(--navigation-item-icon-color,var(--systemPrimary))"}`}
-      >
-        {item.icon}
-      </span>
-
-      <span className="flex-1 -m-1 overflow-hidden p-1 text-ellipsis whitespace-nowrap text-left">
-        {item.label}
-      </span>
-    </div>
-  );
-}
-
-function useIsMobile() {
-  const [isMobile, setIsMobile] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia("(max-width: 483px)");
-    const update = () => setIsMobile(mediaQuery.matches);
-
-    update();
-    mediaQuery.addEventListener("change", update);
-
-    return () => mediaQuery.removeEventListener("change", update);
-  }, []);
-
-  return isMobile;
-}
-
 export default function AppSidebar() {
   const pathname = usePathname();
   const user = useAuthStore((state) => state.user);
-  const [userPlaylists, setUserPlaylists] = useState<UserPlaylist[]>([]);
+  const userPlaylists = useUserPlaylists(user?.userId);
+  const pinnedResources = usePinnedLibraryResources(user?.userId);
+
+  useEffect(() => {
+    if (user?.userId) {
+      // This is a background bootstrap; page-level callers handle visible
+      // errors themselves, so do not leave a global unhandled rejection here.
+      void ensureFavoriteLibraryResource().catch(() => undefined);
+    }
+  }, [user?.userId]);
   const canManageIdentity = [
     "SUPER_ADMIN",
     "ADMIN_USER_OPS",
@@ -371,44 +60,51 @@ export default function AppSidebar() {
   ].includes(user?.role ?? "");
   const { balance } = useWalletBalance();
 
-  useEffect(() => {
-    if (!user?.userId) {
-      return;
-    }
-
-    let active = true;
-    const loadPlaylists = async () => {
-      try {
-        const response = await http.get(
-          `/playlists/user/${encodeURIComponent(user.userId)}`,
-          { params: { limit: 50 } },
-        );
-        if (!active) return;
-        setUserPlaylists(
-          response.data.playlists ?? response.data.data?.playlists ?? [],
-        );
-      } catch {
-        if (active) setUserPlaylists([]);
-      }
-    };
-
-    void loadPlaylists();
-    window.addEventListener("library:playlists-changed", loadPlaylists);
-    return () => {
-      active = false;
-      window.removeEventListener("library:playlists-changed", loadPlaylists);
-    };
-  }, [user?.userId]);
-
   const visiblePlaylistItems: SidebarItem[] = [
     ...playlistItems.slice(0, 2),
     ...(user?.userId ? userPlaylists : []).map((playlist) => ({
       key: `user-playlist-${playlist.id}`,
       label: playlist.name,
-      href: `/playlist/${playlist.id}`,
+      href: `/library/playlist/${playlist.id}`,
       icon: <PlaylistIcon />,
     })),
   ];
+
+  const visibleLibraryItems: SidebarItem[] = libraryItems
+    .map((item): SidebarItem | null => {
+      if (item.variant !== "pin") return item;
+      if (!pinnedResources.length) return null;
+
+      return {
+        ...item,
+        children: pinnedResources.map((resource) => ({
+          key: `pinned-${resource.resourceType}-${resource.resourceId}`,
+          label: resource.title || resource.resourceId,
+          subtitle: resource.subtitle,
+          href:
+            resource.resourceType === "songs"
+              ? songRoute(resource.resourceId)
+              : resource.resourceType === "albums"
+                ? resource.catalogUrl
+                  ? albumRoute(resource.catalogUrl, resource.resourceId)
+                  : albumRoute("album", resource.resourceId)
+                : resource.catalogUrl ||
+                  `/library/playlist/${encodeURIComponent(resource.resourceId)}`,
+          icon: <PlaylistIcon />,
+          artworkUrl: resource.artworkUrl,
+          artworkSrcSet: resource.artworkSrcSet,
+          isExplicit: resource.contentRating === "explicit",
+          playbackSong: resource.playbackSong,
+          resourceType: resource.resourceType,
+          resourceId: resource.resourceId,
+          isUserPlaylist:
+            resource.resourceType === "playlists" &&
+            (resource.resourceId === "favorite" ||
+              resource.catalogUrl?.startsWith("/library/playlist/")),
+        })),
+      };
+    })
+    .filter((item): item is SidebarItem => item !== null);
 
   const [isExpanded, setIsExpanded] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
@@ -521,7 +217,7 @@ export default function AppSidebar() {
           id="navigation"
           className="flex flex-col overflow-hidden min-[484px]:flex-1 min-[484px]:w-(--web-navigation-width) min-[484px]:in-[.app-container]:[--navigation-scroll-container-offset:36px] min-[484px]:in-[.app-container]:[--navigation-mask-height:36px] min-[484px]:in-[.app-container]:[--navigation-scrollbar-width:12px] min-[484px]:in-[.app-container]:-mt-(--navigation-scroll-container-offset) min-[484px]:in-[.app-container]:mask-[linear-gradient(transparent,#000_var(--navigation-mask-height)),linear-gradient(var(--navigation-scroll-mask-direction,to_left),#000_var(--navigation-scrollbar-width),transparent_var(--navigation-scrollbar-width))] min-[484px]:in-[.app-container]:w-[unset]"
         >
-          <div className="overflow-y-auto scroll-smooth min-[484px]:flex-1 min-[484px]:in-[.app-container]:px-3 min-[484px]:in-[.app-container]:pt-(--navigation-scroll-container-offset) min-[484px]:in-[.app-container]:scrollbar-thin max-[483px]:pt-5.75 max-[483px]:in-[.app-container]:p-4">
+          <div className="overflow-y-auto scroll-smooth min-[484px]:flex-1 min-[484px]:in-[.app-container]:px-3 min-[484px]:in-[.app-container]:pt-(--navigation-scroll-container-offset) max-[483px]:pt-5.75 max-[483px]:in-[.app-container]:p-4">
             <SidebarSection
               items={primaryNavigationItems}
               pathname={pathname}
@@ -534,8 +230,9 @@ export default function AppSidebar() {
               onExternalNavigate={openRoom}
             />
             <SidebarSection
+              key={`library-pins-${pinnedResources.length}`}
               title="Library"
-              items={libraryItems}
+              items={visibleLibraryItems}
               pathname={pathname}
               onNavigate={closeNavigation}
             />

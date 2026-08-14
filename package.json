@@ -2,7 +2,6 @@
   "name": "01-musical",
   "version": "1.0.0",
   "private": true,
-  "main": "index.js",
   "scripts": {
     "predev": "pnpm --filter @musical/shared-constants build && pnpm proto:gen",
     "dev": "node tools/scripts/dev.mjs development",

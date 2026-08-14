@@ -1,6 +1,6 @@
 "use client";
 
-import { CSSProperties, useState } from "react";
+import { CSSProperties, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import AmpContextMenuButton from "../custom-elements/AmpContextMenuButton";
 import AmbientVideo from "../custom-elements/AmpVideo";
@@ -17,6 +17,10 @@ import CardContextMenu from "../media/common/card-context-menu";
 import CardPlayButton from "../media/common/card-play-button";
 import CatalogPageLoading from "../loading/catalog-page-loading";
 import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
+import { ExplicitBadgeIcon } from "../icons/explicit-badge-icon";
+import { useAuthStore } from "@/lib/auth/auth-store";
+import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
+import { AddSongToLibraryButton } from "../songs/add-song-to-library-button";
 
 type ArtistDetailPageProps = {
   artistId: string;
@@ -45,7 +49,13 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
   const showLoading = useMinimumLoadingDuration(loading);
   const setQueue = usePlayerStore((state) => state.setQueue);
   const startStation = usePlayerStore((state) => state.startStation);
+  const userId = useAuthStore((state) => state.user?.userId);
+  const favoriteSongs = useFavoriteStore((state) => state.songs);
   const [startingStation, setStartingStation] = useState(false);
+  const favoriteSongIds = useMemo(
+    () => new Set(favoriteSongs.map((song) => song.id)),
+    [favoriteSongs],
+  );
 
   if (showLoading) {
     return <CatalogPageLoading />;
@@ -163,8 +173,11 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
                 </button>
               </span>
 
-              <span className="[--contextMenuButtonSize:28px] leading-0 z-[calc(var(--z-default)+1)] rounded-full [grid-area:menu] ms-2 bg-[#28282880]">
-                <AmpContextMenuButton />
+              <span className="artist-header__context-menu">
+                <AmpContextMenuButton
+                  hasPlatter
+                  className="more-button--material"
+                />
               </span>
             </div>
           </div>
@@ -239,16 +252,11 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
                     </Link>
 
                     {latestReleaseIsExplicit && (
-                      <span className="-mt-px" aria-label="Explicit">
-                        <svg
-                          viewBox="0 0 9 9"
-                          width="9"
-                          height="9"
-                          className="h-(--explicitBadgeSize,11px) w-(--explicitBadgeSize,11px) fill-(--explicitFillOverride,var(--systemSecondary))"
-                          aria-hidden="true"
-                        >
-                          <path d="M3.9 7h1.9c.4 0 .7-.2.7-.5s-.3-.4-.7-.4H4.1V4.9h1.5c.4 0 .7-.1.7-.4 0-.3-.3-.5-.7-.5H4.1V2.9h1.7c.4 0 .7-.2.7-.5 0-.2-.3-.4-.7-.4H3.9c-.6 0-.9.3-.9.7v3.7c0 .3.3.6.9.6zM1.6 0h5.8C8.5 0 9 .5 9 1.6v5.9C9 8.5 8.5 9 7.4 9H1.6C.5 9 0 8.5 0 7.4V1.6C0 .5.5 0 1.6 0z"></path>
-                        </svg>
+                      <span
+                        aria-label="Explicit"
+                        className="-mt-px [--explicitBadgeSize:11px]"
+                      >
+                        <ExplicitBadgeIcon />
                       </span>
                     )}
                   </li>
@@ -418,15 +426,7 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
 
                               {song.contentRating === "explicit" && (
                                 <span className="ms-1" aria-label="Explicit">
-                                  <svg
-                                    viewBox="0 0 9 9"
-                                    width="9"
-                                    height="9"
-                                    className="h-(--explicitBadgeSize,auto) w-(--explicitBadgeSize,auto) fill-(--explicitFillOverride,var(--systemSecondary))"
-                                    aria-hidden="true"
-                                  >
-                                    <path d="M3.9 7h1.9c.4 0 .7-.2.7-.5s-.3-.4-.7-.4H4.1V4.9h1.5c.4 0 .7-.1.7-.4 0-.3-.3-.5-.7-.5H4.1V2.9h1.7c.4 0 .7-.2.7-.5 0-.2-.3-.4-.7-.4H3.9c-.6 0-.9.3-.9.7v3.7c0 .3.3.6.9.6zM1.6 0h5.8C8.5 0 9 .5 9 1.6v5.9C9 8.5 8.5 9 7.4 9H1.6C.5 9 0 8.5 0 7.4V1.6C0 .5.5 0 1.6 0z"></path>
-                                  </svg>
+                                  <ExplicitBadgeIcon />
                                 </span>
                               )}
                             </li>
@@ -445,27 +445,24 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
                             onClick={(event) => event.stopPropagation()}
                           >
                             <div className="items-center flex justify-end shrink-0 h-7 [--contextMenuEllipsisFillOverride:var(--systemSecondary)]">
-                              <button className="items-center text-(--keyColor) cursor-pointer inline-flex justify-center transition-(--global-transition) h-(--add-to-library-button-width,25px) leading-0 w-0 group-hover:w-(--add-to-library-button-width,25px) me-(--addToLibraryMarginEnd,4px)">
-                                <svg
-                                  width="10"
-                                  height="10"
-                                  viewBox="0 0 10 10"
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  fillRule="evenodd"
-                                  clipRule="evenodd"
-                                  strokeLinejoin="round"
-                                  strokeMiterlimit="2"
-                                  className="h-(--add-to-library-icon-width,12px) w-(--add-to-library-icon-width,12px) fill-(--keyColor)"
-                                  aria-hidden="true"
-                                >
-                                  <path
-                                    d="M.784 5.784h3.432v3.432c0 .43.354.784.784.784.43 0 .784-.354.784-.784V5.784h3.432a.784.784 0 1 0 0-1.568H5.784V.784A.788.788 0 0 0 5 0a.788.788 0 0 0-.784.784v3.432H.784a.784.784 0 1 0 0 1.568z"
-                                    fillRule="nonzero"
-                                  ></path>
-                                </svg>
-                              </button>
+                              <AddSongToLibraryButton
+                                songId={song.id}
+                                title={song.title}
+                                artist={song.artist}
+                                artworkUrl={song.artworkUrl}
+                                showOnParentHover
+                              />
 
-                              <AmpContextMenuButton />
+                              <AmpContextMenuButton
+                                id={`song-${song.id}`}
+                                context={{
+                                  kind: "song",
+                                  songId: song.id,
+                                  title: song.title,
+                                  userId,
+                                  isFavorite: favoriteSongIds.has(song.id),
+                                }}
+                              />
                             </div>
                           </div>
                         </div>

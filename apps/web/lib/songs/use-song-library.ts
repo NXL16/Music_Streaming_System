@@ -6,12 +6,18 @@ import { deleteMySong, listMySongs } from "@/lib/songs/song.api";
 import { subscribeSongLibraryChanged } from "@/lib/songs/song-library-events";
 import type { SongSummary } from "@/lib/songs/song.types";
 import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
+import {
+  appendUniqueById,
+  getSafeNextCursor,
+} from "@/lib/pagination/cursor-page";
 
 const POLLING_INTERVAL_MS = 5000;
 const ACTIVE_PROCESSING_STATUSES = new Set([1, 2]);
 
 function hasActiveProcessingSongs(songs: SongSummary[] | undefined) {
-  return songs?.some((song) => ACTIVE_PROCESSING_STATUSES.has(song.status)) ?? false;
+  return (
+    songs?.some((song) => ACTIVE_PROCESSING_STATUSES.has(song.status)) ?? false
+  );
 }
 
 export function useSongLibrary(refreshKey = 0) {
@@ -23,38 +29,51 @@ export function useSongLibrary(refreshKey = 0) {
   const [deletingSongId, setDeletingSongId] = useState("");
   const [error, setError] = useState("");
   const hasProcessingRef = useRef(false);
+  const requestVersionRef = useRef(0);
+  const loadingMoreRef = useRef(false);
+  const seenCursorsRef = useRef(new Set<string>());
 
-  const loadSongs = useCallback(async (options?: { silent?: boolean }) => {
-    setError("");
+  const loadSongs = useCallback(
+    async (options?: { silent?: boolean }) => {
+      const requestVersion = ++requestVersionRef.current;
+      loadingMoreRef.current = false;
+      seenCursorsRef.current = new Set();
+      setError("");
 
-    if (!options?.silent) {
-      setLoading(true);
-    }
-
-    try {
-      const result = await listMySongs({ limit: 20 });
-      const nextSongs = result.songs ?? [];
-
-      setSongs(nextSongs);
-      setNextCursor(result.nextCursor ?? "");
-      setHasMore(Boolean(result.hasMore));
-      hasProcessingRef.current = hasActiveProcessingSongs(nextSongs);
-    } catch (error) {
       if (!options?.silent) {
-        setError(getApiErrorMessage(error, "Cannot load your song library."));
+        setLoading(true);
       }
-    } finally {
-      if (!options?.silent) {
-        setLoading(false);
+
+      try {
+        const result = await listMySongs({ limit: 20 });
+        const nextSongs = result.songs ?? [];
+        if (requestVersion !== requestVersionRef.current) return;
+
+        setSongs(nextSongs);
+        const cursor = getSafeNextCursor(result, seenCursorsRef.current);
+        setNextCursor(cursor);
+        setHasMore(Boolean(cursor));
+        hasProcessingRef.current = hasActiveProcessingSongs(nextSongs);
+      } catch (error) {
+        if (requestVersion === requestVersionRef.current && !options?.silent) {
+          setError(getApiErrorMessage(error, "Cannot load your song library."));
+        }
+      } finally {
+        if (requestVersion === requestVersionRef.current && !options?.silent) {
+          setLoading(false);
+        }
       }
-    }
-  }, [setLoading]);
+    },
+    [setLoading],
+  );
 
   const loadMore = useCallback(async () => {
-    if (!hasMore || !nextCursor || loadingMore) {
+    if (!hasMore || !nextCursor || loadingMoreRef.current) {
       return;
     }
 
+    const requestVersion = requestVersionRef.current;
+    loadingMoreRef.current = true;
     setError("");
     setLoadingMore(true);
 
@@ -63,16 +82,23 @@ export function useSongLibrary(refreshKey = 0) {
         limit: 20,
         cursor: nextCursor,
       });
+      if (requestVersion !== requestVersionRef.current) return;
 
-      setSongs((current) => [...current, ...(result.songs ?? [])]);
-      setNextCursor(result.nextCursor ?? "");
-      setHasMore(Boolean(result.hasMore));
+      setSongs((current) => appendUniqueById(current, result.songs));
+      const cursor = getSafeNextCursor(result, seenCursorsRef.current);
+      setNextCursor(cursor);
+      setHasMore(Boolean(cursor));
     } catch (error) {
-      setError(getApiErrorMessage(error, "Cannot load more songs."));
+      if (requestVersion === requestVersionRef.current) {
+        setError(getApiErrorMessage(error, "Cannot load more songs."));
+      }
     } finally {
-      setLoadingMore(false);
+      if (requestVersion === requestVersionRef.current) {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      }
     }
-  }, [hasMore, loadingMore, nextCursor, setLoadingMore]);
+  }, [hasMore, nextCursor, setLoadingMore]);
 
   const removeSong = useCallback(async (songId: string) => {
     setError("");

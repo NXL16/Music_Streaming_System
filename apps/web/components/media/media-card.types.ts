@@ -1,40 +1,7 @@
-export type MediaCardType =
-  | "hero"
-  | "collection"
-  | "station"
-  | "circle"
-  | "social";
-
-export interface MediaCardArtist {
-  id: string;
-  name: string;
-  url: string;
-}
-
-export interface MediaCardProps {
-  id: string;
-  resourceId: string;
-  resourceType: string;
-  cardType: MediaCardType;
-  title: string;
-  subtitle: string;
-  imageUrl: string;
-  imageSrcSet: string;
-  artworkColors: {
-    bg: string;
-    main: string;
-    textPrimary?: string;
-    textSecondary?: string;
-    textTertiary?: string;
-    textScrimColor?: string;
-    textScrimOpacity?: number;
-  };
-  typeTag?: string;
-  description?: string;
-  slug?: string;
-  videoSrc?: string;
-  altText?: string;
-  artists?: MediaCardArtist[];
-  onOpen?: () => void;
-  onPlay?: () => void;
-}
+// Compatibility re-export: new code should import from @/lib/media/media-card.types.
+export type {
+  ContentRating,
+  MediaCardArtist,
+  MediaCardProps,
+  MediaCardType,
+} from "@/lib/media/media-card.types";

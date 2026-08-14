@@ -3,11 +3,13 @@
 import {
   type CSSProperties,
   type RefObject,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import dynamic from "next/dynamic";
 import { createPortal } from "react-dom";
 import {
   closestCenter,
@@ -44,10 +46,21 @@ import {
   type PlayerSong,
   type RepeatMode,
 } from "@/lib/player/use-player-store";
-import type { FormattedArtist } from "@/lib/media/use-formatted-artists";
+import { ArtistLinks } from "@/components/media/artist-links";
 import { formatDuration } from "@/lib/format/duration";
 import { useTrackRowSelection } from "@/lib/player/use-track-row-selection";
-import { ContextMenu } from "@/components/ui/context-menu";
+import { ExplicitBadgeIcon } from "@/components/icons/explicit-badge-icon";
+import VolumeControl from "@/components/custom-elements/VolumeControl";
+import { useAuthStore } from "@/lib/auth/auth-store";
+import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
+import { getSongLyrics } from "@/lib/lyrics/song-lyrics.api";
+
+// The detail modal owns the Pixi lyrics scene. It is only needed after the
+// listener opens the expanded player, so keep it out of the desktop controls
+// chunk used on every authenticated route.
+const MusicPlayDetail = dynamic(() => import("./music-played-detail"), {
+  ssr: false,
+});
 
 const restrictQueueToVerticalAxis: Modifier = ({ transform }) => ({
   ...transform,
@@ -83,22 +96,68 @@ function PlayerSongArtwork({ song }: { song: PlayerSong }) {
 
 type SortableQueueSongProps = {
   song: PlayerSong;
+  userId?: string;
+  isFavorite: boolean;
   draggable: boolean;
   selected: boolean;
   active: boolean;
   selectedRowRef: RefObject<HTMLLIElement | null>;
   onSelect: (songId: string) => void;
-  onRemove: (songId: string) => void;
 };
+
+type MarqueeTrackState = {
+  songId: string | null;
+  active: boolean;
+  animating: boolean;
+};
+
+function useMarqueeTrackState(currentSongId: string | null) {
+  const [state, setState] = useState<MarqueeTrackState>({
+    songId: null,
+    active: false,
+    animating: false,
+  });
+
+  const handleOverflowChange = useCallback(
+    (active: boolean) => {
+      setState({
+        songId: currentSongId,
+        active,
+        animating: false,
+      });
+    },
+    [currentSongId],
+  );
+
+  const handleAnimatingChange = useCallback(
+    (animating: boolean) => {
+      setState((previousState) => ({
+        songId: currentSongId,
+        active:
+          previousState.songId === currentSongId ? previousState.active : false,
+        animating,
+      }));
+    },
+    [currentSongId],
+  );
+
+  return {
+    isActive: state.songId === currentSongId && state.active,
+    isAnimating: state.songId === currentSongId && state.animating,
+    handleOverflowChange,
+    handleAnimatingChange,
+  };
+}
 
 function SortableQueueSong({
   song,
+  userId,
+  isFavorite,
   draggable,
   selected,
   active,
   selectedRowRef,
   onSelect,
-  onRemove,
 }: SortableQueueSongProps) {
   const {
     attributes,
@@ -142,23 +201,18 @@ function SortableQueueSong({
           {formatDuration(song.durationSec)}
         </div>
 
-        <div className="[--contextMenuEllipsisFillOverride:var(--systemPrimary)] [--contextMenuButtonSize:28] [grid-area:time-and-controls] opacity-(--controlsOpacity,0) z-[calc(var(--z-default)+2)]">
-          {!draggable ? (
-            <AmpContextMenuButton />
-          ) : (
-            <ContextMenu
-              items={[
-                {
-                  id: "remove-from-up-next",
-                  label: "Remove from Up Next",
-                  tone: "destructive",
-                  onSelect: () => onRemove(song.id),
-                },
-              ]}
-            >
-              <AmpContextMenuButton />
-            </ContextMenu>
-          )}
+        <div className="controls">
+          <AmpContextMenuButton
+            id={`up-next-song-${song.id}`}
+            context={{
+              kind: "song",
+              songId: song.id,
+              title: song.title,
+              userId,
+              isFavorite,
+              queueItemId: song.id,
+            }}
+          />
         </div>
       </div>
     </li>
@@ -168,7 +222,6 @@ function SortableQueueSong({
 type DesktopPlayerBarProps = {
   audioRef: RefObject<HTMLAudioElement | null>;
   currentSong: PlayerSong | null;
-  currentArtists: FormattedArtist[];
   queue: PlayerSong[];
   currentIndex: number;
   isPlaying: boolean;
@@ -181,8 +234,6 @@ type DesktopPlayerBarProps = {
   setIsExpanded: (expanded: boolean) => void;
   isProgressExpanded: boolean;
   setIsProgressExpanded: (expanded: boolean) => void;
-  isSecondaryMarqueeActive: boolean;
-  setIsSecondaryMarqueeActive: (active: boolean) => void;
   volume: number;
   onSetVolume: (volume: number) => void;
   onToggleMute: () => void;
@@ -197,7 +248,6 @@ type DesktopPlayerBarProps = {
 export function DesktopPlayerBar({
   audioRef,
   currentSong,
-  currentArtists,
   queue,
   currentIndex,
   isPlaying,
@@ -210,8 +260,6 @@ export function DesktopPlayerBar({
   setIsExpanded,
   isProgressExpanded,
   setIsProgressExpanded,
-  isSecondaryMarqueeActive,
-  setIsSecondaryMarqueeActive,
   volume,
   onSetVolume,
   onToggleMute,
@@ -222,10 +270,36 @@ export function DesktopPlayerBar({
   onPrevious,
   onDrawerOpenChange,
 }: DesktopPlayerBarProps) {
+  const userId = useAuthStore((state) => state.user?.userId);
+  const favoriteSongs = useFavoriteStore((state) => state.songs);
+  const favoriteSongIds = useMemo(
+    () => new Set(favoriteSongs.map((song) => song.id)),
+    [favoriteSongs],
+  );
   const [showLyrics, setShowLyrics] = useState(false);
   const [lyricsMounted, setLyricsMounted] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
   const [queueMounted, setQueueMounted] = useState(false);
+  const [isOpenMusicPlayer, setIsOpenMusicPlayer] = useState(false);
+  const [openMusicPlayerWithLyrics, setOpenMusicPlayerWithLyrics] =
+    useState(false);
+
+  const openMusicPlayer = async () => {
+    const songId = currentSong?.id;
+    let hasLyrics = false;
+
+    if (songId) {
+      try {
+        hasLyrics = (await getSongLyrics(songId)).length > 0;
+      } catch {
+        hasLyrics = false;
+      }
+    }
+
+    if (usePlayerStore.getState().currentSong?.id !== songId) return;
+    setOpenMusicPlayerWithLyrics(hasLyrics);
+    setIsOpenMusicPlayer(true);
+  };
   const {
     activeTrackId: activeQueueSongId,
     clearActiveTrack: clearActiveQueueSong,
@@ -248,9 +322,6 @@ export function DesktopPlayerBar({
   const setDrawerOpen = usePlayerStore((state) => state.setDrawerOpen);
   const reorderUpcomingQueue = usePlayerStore(
     (state) => state.reorderUpcomingQueue,
-  );
-  const removeUpcomingSong = usePlayerStore(
-    (state) => state.removeUpcomingSong,
   );
   const clearUpcomingQueue = usePlayerStore(
     (state) => state.clearUpcomingQueue,
@@ -332,7 +403,9 @@ export function DesktopPlayerBar({
   }, [currentIndex, queue, stationMode]);
 
   const upcomingSongs = useMemo(() => {
-    if (currentIndex < 0) return [];
+    // Play Next/Last may build a queue before the listener starts playback.
+    // In that state every queued track is upcoming and must remain visible.
+    if (currentIndex < 0) return stationMode ? [] : queue;
 
     const remainingSongs = queue.slice(currentIndex + 1);
     if (!stationMode) return remainingSongs;
@@ -429,6 +502,11 @@ export function DesktopPlayerBar({
     }
   };
 
+  const isExplicit = currentSong?.contentRating === "explicit";
+  const currentSongId = currentSong?.id ?? null;
+  const titleMarquee = useMarqueeTrackState(currentSongId);
+  const secondaryMarquee = useMarqueeTrackState(currentSongId);
+
   const handleQueueDragEnd = ({ active, over }: DragEndEvent) => {
     if (stationMode || !over || active.id === over.id) return;
     reorderUpcomingQueue(String(active.id), String(over.id));
@@ -449,19 +527,26 @@ export function DesktopPlayerBar({
               <AmpSkipButton
                 direction="previous"
                 onClick={onPrevious}
-                disabled={!currentSong}
+                disabled={
+                  !currentSong && !queue.some((song) => song.playbackUrl)
+                }
               />
 
               <AmpPlayPauseButton
                 mode={!isPlaying ? "play" : "pause"}
                 onClick={onTogglePlayback}
-                disabled={!currentSong?.playbackUrl}
+                disabled={
+                  !currentSong?.playbackUrl &&
+                  !queue.some((song) => song.playbackUrl)
+                }
               />
 
               <AmpSkipButton
                 direction="next"
                 onClick={onNext}
-                disabled={!currentSong}
+                disabled={
+                  !currentSong && !queue.some((song) => song.playbackUrl)
+                }
               />
             </div>
 
@@ -473,7 +558,7 @@ export function DesktopPlayerBar({
           </div>
         </div>
 
-        <div className="z-[calc(var(--z-default)+1)] [--lcd-marquee-offset:0px] [--marquee-line-padding:28px] px-4 justify-self-stretch self-center">
+        <div className="[--lcd-marquee-offset:0px] [--marquee-line-padding:28px] px-4 [place-self:center_stretch] z-[calc(var(--z-default)+1)]">
           <div slot="lcd">
             <div
               className={`grid [grid-template-areas:'artwork_metadata_after-metadata''progress_progress_progress'] grid-rows-[34px_auto] h-14 place-content-center relative z-(--z-default) ${!currentSong ? "text-(--systemTertiary) gap-0 grid-cols-1 pt-0 place-items-center" : "gap-x-2 grid-cols-[auto_minmax(0,1fr)_auto] pt-2"}`}
@@ -485,34 +570,68 @@ export function DesktopPlayerBar({
                   >
                     <PlayerSongArtwork song={currentSong} />
 
-                    <button className="bg-[rgba(51,51,51,0.3)] rounded-[inherit] text-white grid inset-0 opacity-0 place-items-center absolute transition-opacity duration-150 ease-out z-(--z-default) hover:opacity-100">
+                    <button
+                      type="button"
+                      onClick={() => void openMusicPlayer()}
+                      className="bg-[rgba(51,51,51,0.3)] rounded-[inherit] text-white grid inset-0 opacity-0 place-items-center absolute transition-opacity duration-150 ease-out z-(--z-default) hover:opacity-100"
+                    >
                       <ExpansionButton />
                     </button>
+
+                    {isOpenMusicPlayer && (
+                      <MusicPlayDetail
+                        audioRef={audioRef}
+                        currentSong={currentSong}
+                        initialLyricOpen={openMusicPlayerWithLyrics}
+                        onClose={setIsOpenMusicPlayer}
+                        volume={volume}
+                        onSetVolume={onSetVolume}
+                      />
+                    )}
                   </div>
 
                   <div
                     className={`[--lcd-height:100%] [--lcd-justify-text:start] [--lcd-line-padding:0] self-center [grid-area:metadata] group/metadata ${isProgressExpanded ? "opacity-50" : ""} ${isCurrentSongFavorite ? "[--favoriteButtonStarOutline:var(--keyColor)]" : "hover:[--favoriteButtonStarOutline:var(--systemTertiary)]"}`}
                   >
                     <div className="[--favoriteIconSize:11px] [--favoriteButtonSize:16px] [--menu-position-shift:0px]">
-                      <div className="items-[var(--lcd-justify-text,center)] grid-flow-row flex flex-col grow h-[calc(var(--lcd-height,44px)-3px)] justify-center max-w-full overflow-hidden relative">
+                      <div className="[align-items:var(--lcd-justify-text,center)] flex flex-col grow h-[calc(var(--lcd-height,44px)-3px)] justify-center max-w-full overflow-hidden relative">
                         <div className="max-w-full w-full">
-                          <div className="w-full text-(--systemPrimary) [--paddle-controls-offset-inline-end:52px] [font:var(--body-emphasized)]">
+                          <div className="w-full text-(--lcd-primary-text-color,var(--systemPrimary)) [--paddle-controls-offset-inline-end:52px] [font:var(--body-emphasized)]">
                             <div>
-                              <div className="items-center flex flex-row justify-[var(--lcd-justify-text,center)] overflow-clip relative [text-align:var(--lcd-justify-text,center)] [text-overflow:none] whitespace-nowrap w-full">
-                                <div className="w-auto min-w-0 relative pe-0">
+                              <div
+                                className={`items-center box-border flex flex-row [justify-content:var(--lcd-justify-text,center)] overflow-clip relative [text-align:var(--lcd-justify-text,center)] [text-overflow:none] whitespace-nowrap w-full ${titleMarquee.isActive ? "active grow shrink pe-1" : "inactive"} ${titleMarquee.isAnimating ? "is-animating" : ""}`}
+                              >
+                                <div className="w-auto min-w-0 in-[.inactive]:relative in-[.inactive]:pe-0 in-[.active]:p-(--lcd-line-padding,0_10px)">
                                   <PlayerBarMarquee
                                     key={`title-${currentSong.id}`}
-                                    className="h-3.75 w-full"
+                                    className="w-full h-[calc(var(--body-line-height)*1em)] in-[.active]:[mask:var(--primary-paddle-controls-mask-hover,var(--stopped-marquee-mask,linear-gradient(270deg,transparent_var(--lcd-marquee-offset,35px),#000_calc(var(--lcd-marquee-offset,35px)+15px))))] in-[.active.is-animating]:[mask:var(--primary-paddle-controls-mask-hover,var(--animated-marquee-mask,linear-gradient(90deg,transparent_0,#000_var(--lcd-fade-length-start,15px),#000_calc(100%-15px-var(--lcd-marquee-offset,35px)),transparent_calc(100%-var(--lcd-marquee-offset,35px)))))]"
                                     isPlaybackActive={isPlaying}
+                                    onOverflowChange={
+                                      titleMarquee.handleOverflowChange
+                                    }
+                                    onAnimatingChange={
+                                      titleMarquee.handleAnimatingChange
+                                    }
                                   >
                                     <span className="flex items-center gap-[0.333em]">
-                                      <span className="no-underline text-inherit">
+                                      <span
+                                        className={`[text-decoration:none] text-inherit ${isExplicit ? "" : "pr-0.75"}`}
+                                      >
                                         {currentSong.title}
                                       </span>
+
+                                      {isExplicit && (
+                                        <span
+                                          aria-label="Explicit"
+                                          className="text-inherit [text-decoration:none] items-center flex [--explicitBadgeSize:12px] pr-0.75"
+                                        >
+                                          <ExplicitBadgeIcon />
+                                        </span>
+                                      )}
                                     </span>
                                   </PlayerBarMarquee>
 
-                                  <div className="absolute max-h-4 top-[-1.21px] ml-1 inset-s-[calc(100%+4px)]">
+                                  <div className="max-h-4 absolute -top-px in-[.inactive]:inset-s-[calc(100%+4px)] in-[.active]:inset-e-(--menu-position-shift,26px)">
                                     <div
                                       className={`-ms-1 relative z-[calc(var(--z-default)+1)] transition-opacity duration-120 ${isCurrentSongFavorite ? "opacity-100" : "opacity-0 group-hover/metadata:opacity-100"}`}
                                     >
@@ -528,65 +647,50 @@ export function DesktopPlayerBar({
                           </div>
                         </div>
 
-                        <div className="min-h-3.25 relative transition-colors duration-100 ease-in w-(--lcd-secondary-width,100%) text-(--lcd-secondary-text-color,var(--systemSecondary)) [font:var(--callout-medium)] mt-0.5">
+                        <div className="text-(--lcd-secondary-text-color,var(--systemSecondary)) min-h-3.25 relative [transition:color_.1s_ease-in] w-(--lcd-secondary-width,100%) [font:var(--callout-medium)] mt-0.5">
                           <div className="h-5.25 absolute -top-1.25 w-full">
                             <div
-                              className={`flex flex-row items-center ${isSecondaryMarqueeActive ? "justify-end" : "[justify-content:var(--lcd-justify-text,center)]"} box-border overflow-clip relative [text-align:var(--lcd-justify-text,center)] whitespace-nowrap w-full grow shrink ${isSecondaryMarqueeActive ? "pe-1" : ""}`}
+                              className={`items-center box-border flex flex-row [justify-content:var(--lcd-justify-text,center)] overflow-clip relative [text-align:var(--lcd-justify-text,center)] [text-overflow:none] whitespace-nowrap w-full ${secondaryMarquee.isActive ? "active grow shrink pe-1 justify-end" : "inactive"} ${secondaryMarquee.isAnimating ? "is-animating" : ""}`}
                             >
-                              <div className="min-w-0 w-auto p-(--lcd-line-padding,0_10px)">
-                                <div className="w-full box-border h-5.25 pt-0.75 pb-0.5 [mask:var(--secondary-mask-hover,var(--stopped-marquee-mask,linear-gradient(270deg,transparent_var(--lcd-marquee-offset,35px),#000_calc(var(--lcd-marquee-offset,35px)+15px))))]">
-                                  <PlayerBarMarquee
-                                    key={`metadata-${currentSong.id}`}
-                                    className="h-3.75 w-full"
-                                    isPlaybackActive={isPlaying}
-                                    onOverflowChange={
-                                      setIsSecondaryMarqueeActive
-                                    }
-                                  >
-                                    <span className="flex items-center gap-[.333em]">
-                                      <span className="text-inherit no-underline">
-                                        {currentArtists.map((artist, index) => (
-                                          <span
-                                            key={
-                                              artist.id ??
-                                              `${artist.name}-${index}`
-                                            }
-                                          >
-                                            {artist.url ? (
-                                              <Link
-                                                href={artist.url}
-                                                className="hover:text-(--keyColor) hover:underline"
-                                              >
-                                                {artist.name}
-                                              </Link>
-                                            ) : (
-                                              <span>{artist.name}</span>
-                                            )}
-                                            {index <
-                                              currentArtists.length - 1 && ", "}
-                                          </span>
-                                        ))}
-                                      </span>
-                                      <span className="text-inherit no-underline">
-                                        —
-                                      </span>
-                                      <span className="text-inherit no-underline">
-                                        {currentSong.albumUrl ? (
-                                          <Link
-                                            href={currentSong.albumUrl}
-                                            className="hover:text-(--keyColor) hover:underline"
-                                          >
-                                            {currentSong.album}
-                                          </Link>
-                                        ) : (
-                                          <span>{currentSong.album}</span>
-                                        )}
-                                      </span>
+                              <div className="min-w-0 w-auto in-[.active]:p-(--lcd-line-padding,0_10px) in-[.inactive]:pe-0 in-[.inactive]:relative">
+                                <PlayerBarMarquee
+                                  key={`metadata-${currentSong.id}`}
+                                  className="w-full box-border h-5.25 p-[3px_0_2px] in-[.active]:[mask:var(--secondary-mask-hover,var(--stopped-marquee-mask,linear-gradient(270deg,transparent_var(--lcd-marquee-offset,35px),#000_calc(var(--lcd-marquee-offset,35px)+15px))))] in-[.active.is-animating]:[mask:var(--secondary-mask-hover,var(--animated-marquee-mask-small,linear-gradient(90deg,transparent_0,#000_var(--lcd-fade-length-start,15px),#000_calc(100%-15px-var(--lcd-marquee-offset,35px)),transparent_calc(100%-var(--lcd-marquee-offset,35px)))))]"
+                                  isPlaybackActive={isPlaying}
+                                  onOverflowChange={
+                                    secondaryMarquee.handleOverflowChange
+                                  }
+                                  onAnimatingChange={
+                                    secondaryMarquee.handleAnimatingChange
+                                  }
+                                >
+                                  <span className="flex items-center gap-[.333em]">
+                                    <span className="text-inherit no-underline">
+                                      <ArtistLinks
+                                        artists={currentSong.artists}
+                                        fallbackText={currentSong.artist}
+                                        linkClassName="hover:text-(--keyColor) hover:underline"
+                                      />
                                     </span>
-                                  </PlayerBarMarquee>
-                                </div>
-                                <div className="absolute top-0 max-h-4 inset-e-(--menu-position-shift,26px)"></div>
+                                    <span className="text-inherit no-underline">
+                                      —
+                                    </span>
+                                    <span className="text-inherit no-underline">
+                                      {currentSong.albumUrl ? (
+                                        <Link
+                                          href={currentSong.albumUrl}
+                                          className="hover:text-(--keyColor) hover:underline"
+                                        >
+                                          {currentSong.album}
+                                        </Link>
+                                      ) : (
+                                        <span>{currentSong.album}</span>
+                                      )}
+                                    </span>
+                                  </span>
+                                </PlayerBarMarquee>
                               </div>
+                              <div className="absolute top-0 max-h-4 inset-e-(--menu-position-shift,26px)"></div>
                             </div>
                           </div>
                         </div>
@@ -598,7 +702,16 @@ export function DesktopPlayerBar({
                     className={`self-center [grid-area:after-metadata] ${isProgressExpanded ? "opacity-50" : ""}`}
                   >
                     <div className="[--contextMenuEllipsisFillOverride:var(--systemPrimary)] [--contextMenuButtonSize:32px] flex items-center gap-1 pe-1">
-                      <AmpContextMenuButton />
+                      <AmpContextMenuButton
+                        id={`song-${currentSong.id}`}
+                        context={{
+                          kind: "song",
+                          songId: currentSong.id,
+                          title: currentSong.title,
+                          userId,
+                          isFavorite: isCurrentSongFavorite,
+                        }}
+                      />
                     </div>
                   </div>
 
@@ -656,9 +769,13 @@ export function DesktopPlayerBar({
                     className={`min-[1000px]:backdrop-saturate-220 min-[1000px]:backdrop-blur-lg min-[1000px]:bg-(--glassMaterialBackground) min-[1000px]:shadow-[0_10px_40px_var(--glassMaterialShadowColor)] min-[1000px]:h-screen min-[1000px]:overflow-y-hidden min-[1000px]:top-0 border-s-[0.5px] border-s-(--systemQuaternary) bottom-0 inset-e-0 overflow-x-hidden fixed scroll-pt-14.5 top-13.5 w-75 z-[calc(var(--z-web-chrome)+1)] [--side-panel-horizontal-padding:20px] transition-transform duration-300 ease-[cubic-bezier(.215,.61,.355,1)] ${showLyrics ? "translate-x-0" : "translate-x-full"}`}
                   >
                     <div className="h-[calc(100dvh-58px)] overflow-y-auto">
-                      <div className="[--lyrics-linear-gradient:linear-gradient(180deg,#000,transparent)]">
-                        <div className="[--lyrics-toggle-button-size:26px] bg-(--lyrics-bg) text-[0] my-2.5 mx-4 opacity-0 p-1.25 absolute right-0 align-top z-(--z-default)">
-                          <button className="backdrop-blur-[60px] bg-(--systemQuaternary) rounded-lg p-1 relative z-(--z-default)">
+                      <div className="group [--lyrics-linear-gradient:linear-gradient(180deg,#000,transparent)]">
+                        <div className="group-hover:opacity-100 [--lyrics-toggle-button-size:26px] bg-(--lyrics-bg) text-[0] my-2.5 mx-4 opacity-0 p-1.25 absolute right-0 align-top z-(--z-default)">
+                          <button
+                            type="button"
+                            onClick={() => void openMusicPlayer()}
+                            className="backdrop-blur-[60px] bg-(--systemQuaternary) rounded-lg p-1 relative z-(--z-default)"
+                          >
                             <svg
                               className="block h-5 w-5 fill-(--systemSecondary)"
                               xmlns="http://www.w3.org/2000/svg"
@@ -739,12 +856,13 @@ export function DesktopPlayerBar({
                                   <SortableQueueSong
                                     key={song.id}
                                     song={song}
+                                    userId={userId}
+                                    isFavorite={favoriteSongIds.has(song.id)}
                                     draggable={!stationMode}
                                     selected={selectedQueueSongId === song.id}
                                     active={activeQueueSongId === song.id}
                                     selectedRowRef={selectedQueueRowRef}
                                     onSelect={selectQueueSong}
-                                    onRemove={removeUpcomingSong}
                                   />
                                 ))}
                               </ul>
@@ -766,64 +884,13 @@ export function DesktopPlayerBar({
                   document.body,
                 )}
 
-              <div
-                onMouseLeave={() => setIsExpanded(false)}
-                className={`chrome-volume svelte-13xdpwq ${isExpanded ? "chrome-volume--expanded" : ""}`}
-              >
-                <div className="chrome-volume__slider svelte-13xdpwq">
-                  {isExpanded && (
-                    <div className="volume-control svelte-knrh2y">
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.01"
-                        value={volume}
-                        onChange={(e) => onSetVolume(Number(e.target.value))}
-                        style={
-                          {
-                            "--progress": `${volume * 100}%`,
-                          } as CSSProperties
-                        }
-                        className="volume-control__range svelte-knrh2y"
-                      />
-                    </div>
-                  )}
-                </div>
-
-                <div className="[--chromeVolumeIconFill:var(--systemPrimary)] flex h-full relative z-[calc(var(--z-default)+1)]">
-                  <button onClick={onToggleMute} className="flex items-center">
-                    <svg
-                      className="h-6 w-6"
-                      fill="currentColor"
-                      role="presentation"
-                      version="1.1"
-                      viewBox="0 0 64 64"
-                    >
-                      <path
-                        transform="translate(2,11.149)"
-                        d="m23.477 39.911c1.4129 0 2.431-1.0389 2.431-2.431v-33.141c0-1.3921-1.0181-2.5349-2.4726-2.5349-1.0181 0-1.7038 0.43634-2.805 1.4752l-9.2046 8.6644c-0.14545 0.12464-0.31166 0.18698-0.51945 0.18698h-6.2126c-2.9297 0-4.5088 1.5999-4.5088 4.7374v8.0411c0 3.1167 1.5791 4.7166 4.5088 4.7166h6.2126c0.20779 0 0.374 0.06234 0.51945 0.18698l9.2046 8.7475c0.99732 0.93501 1.8285 1.3506 2.8466 1.3506z"
-                      ></path>
-                      <path
-                        className={`transition-opacity duration-120 ease-linear ${volume > 0 ? "opacity-100" : "opacity-0"}`}
-                        transform="translate(2,11.149)"
-                        d="m34.864 29.959c0.70647 0.49868 1.7246 0.35323 2.3271-0.47787 1.6205-2.1817 2.5971-5.3815 2.5971-8.6436 0-3.2621-0.9766-6.4411-2.5971-8.6436-0.60255-0.83111-1.5999-0.97655-2.3271-0.49868-0.89345 0.62336-1.0181 1.683-0.35319 2.5765 1.2051 1.6207 1.9323 4.0932 1.9323 6.5658 0 2.4726-0.76881 4.9451-1.9531 6.5866-0.62332 0.89345-0.51945 1.9116 0.374 2.5349z"
-                      ></path>
-                      <path
-                        className={`transition-opacity duration-120 ease-linear ${volume > 0.3 ? "opacity-100" : "opacity-0"}`}
-                        transform="translate(2,11.149)"
-                        d="m43.154 35.569c0.81021 0.54023 1.8077 0.33245 2.3894-0.49867 2.7426-3.8231 4.3426-8.9137 4.3426-14.233 0-5.3399-1.5583-10.451-4.3426-14.254-0.60255-0.81034-1.5791-1.0181-2.3894-0.47787-0.78979 0.54021-0.91447 1.5583-0.29106 2.4518 2.2647 3.3245 3.6779 7.6878 3.6779 12.28s-1.3923 8.9969-3.6779 12.28c-0.60255 0.89345-0.49872 1.9116 0.29106 2.4518z"
-                      ></path>
-                      <path
-                        className={`transition-opacity duration-120 ease-linear ${volume > 0.7 ? "opacity-100" : "opacity-0"}`}
-                        transform="translate(2,11.149)"
-                        d="m51.527 41.241c0.76894 0.51945 1.7872 0.31166 2.3898-0.54021 3.8438-5.423 6.0255-12.446 6.0255-19.864s-2.2443-14.42-6.0255-19.864c-0.60255-0.87268-1.6209-1.0805-2.3898-0.54021-0.78936 0.56098-0.91404 1.5791-0.31149 2.4518 3.3451 4.9244 5.423 11.241 5.423 17.952 0 6.7113-1.9945 13.132-5.423 17.952-0.60255 0.87268-0.47787 1.8908 0.31149 2.4518z"
-                      ></path>
-                    </svg>
-                    <span className="sr-only">Mute</span>
-                  </button>
-                </div>
-              </div>
+              <VolumeControl
+                volume={volume}
+                isExpanded={isExpanded}
+                setIsExpanded={setIsExpanded}
+                onSetVolume={onSetVolume}
+                onToggleMute={onToggleMute}
+              />
             </div>
           </div>
         </div>

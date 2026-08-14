@@ -33,6 +33,7 @@ export type MediaResourceSource = {
   contentRating?: unknown;
   isUserPlaylist?: boolean;
   playlistKind?: MediaCardProps["playlistKind"];
+  songIds?: string[];
 };
 
 export type MediaResourceProjection = {
@@ -93,6 +94,17 @@ export function normalizeArtworkColor(artwork: MediaArtwork | undefined) {
     : "#2c2c2e";
 }
 
+function resolvePlaylistKind(
+  resource: MediaResourceSource,
+): MediaCardProps["playlistKind"] {
+  if (resource.type !== "playlists") return resource.playlistKind;
+  if (resource.playlistKind) return resource.playlistKind;
+  if (resource.isUserPlaylist && resource.id === "favorite") {
+    return "favorite";
+  }
+  return resource.isUserPlaylist ? "user" : "catalog";
+}
+
 /**
  * Projects source-specific API data into the one card model every renderer
  * consumes. Layout controls cardType; metadata, URLs, colors, and srcSet are
@@ -105,23 +117,29 @@ export function createMediaResourceCard(
   const artwork = projection.artwork ?? resource.artwork;
   const isHero = projection.cardType === "hero";
   const color = normalizeArtworkColor(artwork);
+  const playlistKind = resolvePlaylistKind(resource);
 
   return createMediaCard({
     id: `${resource.type}-${resource.id}`,
     resourceId: resource.id,
     resourceType: resource.type,
+    songIds: resource.songIds,
     isUserPlaylist: resource.isUserPlaylist,
-    playlistKind: resource.playlistKind,
+    playlistKind,
     cardType: projection.cardType,
     title: resource.name,
     subtitle:
       projection.subtitle ?? resource.artistName ?? resource.curatorName ?? "",
-    slug: projection.slug ?? mediaResourceRoute(resource),
+    slug: projection.slug ?? mediaResourceRoute({ ...resource, playlistKind }),
     contentRating: resource.contentRating,
     artists: projection.artists,
     imageUrl:
       projection.imageUrl ??
-      getArtworkRenditionUrl(artwork, isHero ? 600 : 316, isHero ? "hero" : "default"),
+      getArtworkRenditionUrl(
+        artwork,
+        isHero ? 600 : 316,
+        isHero ? "hero" : "default",
+      ),
     imageSrcSet:
       projection.imageSrcSet ??
       getArtworkSrcSet(

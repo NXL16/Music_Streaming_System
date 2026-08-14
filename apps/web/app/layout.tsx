@@ -2,6 +2,11 @@ import type { Metadata } from "next";
 import { AuthProvider } from "@/components/auth/auth-provider";
 import "./fonts.css";
 import "./globals.css";
+import M404ContextualMenu from "@/components/custom-elements/m404-contextual-menu";
+import { CreatePlaylistDialog } from "@/components/songs/create-playlist-dialog";
+import { EditPlaylistDialog } from "@/components/songs/edit-playlist-dialog";
+import { Toaster } from "sonner";
+import { DeleteLibraryConfirmationDialog } from "@/components/songs/delete-library-confirmation-dialog";
 
 export const metadata: Metadata = {
   title: "Musical App",
@@ -52,6 +57,33 @@ export default function RootLayout({
         </svg>
 
         <AuthProvider>{children}</AuthProvider>
+        <M404ContextualMenu />
+        <CreatePlaylistDialog />
+        <EditPlaylistDialog />
+        <DeleteLibraryConfirmationDialog />
+        <Toaster
+          position="bottom-right"
+          toastOptions={{
+            actionButtonStyle: {
+              background: "var(--button-pill-background-color, #000)",
+              borderRadius: "6px",
+              color: "var(--button-pill-color, #fff)",
+              fontWeight: 600,
+              height: "28px",
+              padding: "0 12px",
+            },
+            style: {
+              bottom: "-6px",
+              right: "-5px",
+              background: "var(--systemStandardThickMaterialSover)",
+              color: "var(--systemPrimary)",
+              border: "none",
+              boxShadow:
+                "inset 0 0 0 1px #fff3, 0 8px 40px var(--dialogShadowColor)",
+              backdropFilter: "blur(60px) saturate(220%)",
+            },
+          }}
+        />
       </body>
     </html>
   );

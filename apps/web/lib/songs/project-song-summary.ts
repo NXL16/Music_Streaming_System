@@ -1,7 +1,7 @@
 import { albumRoute } from "@/lib/catalog/album-route";
 import { artistRoute } from "@/lib/catalog/artist-route";
 import { songRoute } from "@/lib/catalog/song-route";
-import type { PlayerSong } from "@/lib/player/use-player-store";
+import type { PlayerArtist, PlayerSong } from "@/lib/player/use-player-store";
 import { projectLinkedArtists } from "@/lib/media/project-linked-artists";
 
 /**
@@ -22,12 +22,67 @@ export type SongSummaryProjectionSource = {
   contentRating?: string;
   durationSec?: number;
   coverUrl?: string;
+  thumbnailCoverSrcSet?: string;
 };
+
+/**
+ * The one projection from normalized song metadata to the player contract.
+ * Source adapters may add their own playback context before calling this
+ * function, but routes, fallbacks and the `mse:` transport stay identical.
+ */
+export type PlayerSongProjectionSource = {
+  id: string;
+  title: string;
+  artist?: string;
+  artists?: PlayerArtist[];
+  album?: string;
+  albumId?: string;
+  albumUrl?: string;
+  durationSec?: number;
+  artworkUrl?: string;
+  artworkSrcSet?: string;
+  thumbnailArtworkSrcSet?: string;
+  artworkBgColor?: string;
+  releaseDate?: string;
+  contentRating?: string;
+};
+
+export function projectPlayerSong(
+  song: PlayerSongProjectionSource,
+): PlayerSong {
+  const artworkUrl = song.artworkUrl || "";
+  const artist =
+    song.artist ||
+    song.artists?.map((item) => item.name).join(", ") ||
+    "Unknown Artist";
+
+  return {
+    id: song.id,
+    title: song.title,
+    url: songRoute(song.id),
+    artist,
+    artists: song.artists,
+    album: song.album || "",
+    albumId: song.albumId,
+    albumUrl:
+      song.albumId && song.albumUrl
+        ? albumRoute(song.albumUrl, song.albumId)
+        : undefined,
+    durationSec: song.durationSec || 0,
+    artworkUrl,
+    artworkSrcSet: song.artworkSrcSet || artworkUrl || undefined,
+    thumbnailArtworkSrcSet:
+      song.thumbnailArtworkSrcSet || artworkUrl || undefined,
+    artworkBgColor: song.artworkBgColor,
+    releaseDate: song.releaseDate,
+    contentRating: song.contentRating,
+    playbackUrl: `mse:${song.id}`,
+  };
+}
 
 export function projectSongSummary(
   song: SongSummaryProjectionSource,
 ): PlayerSong {
-  const artworkUrl = song.coverUrl || "";
   const artists = song.artists?.length
     ? projectLinkedArtists(song.artists)
     : song.artist
@@ -43,23 +98,17 @@ export function projectSongSummary(
         ]
       : undefined;
 
-  return {
+  return projectPlayerSong({
     id: song.id,
     title: song.title,
-    url: songRoute(song.id),
-    artist: song.artist || artists?.map((artist) => artist.name).join(", ") || "Unknown Artist",
+    artist: song.artist,
     artists,
     album: song.album || "",
     albumId: song.albumId,
-    albumUrl:
-      song.albumId && song.albumUrl
-        ? albumRoute(song.albumUrl, song.albumId)
-        : undefined,
-    durationSec: song.durationSec || 0,
-    artworkUrl,
-    artworkSrcSet: artworkUrl || undefined,
-    thumbnailArtworkSrcSet: artworkUrl || undefined,
+    albumUrl: song.albumUrl,
+    durationSec: song.durationSec,
+    artworkUrl: song.coverUrl,
+    thumbnailArtworkSrcSet: song.thumbnailCoverSrcSet,
     contentRating: song.contentRating,
-    playbackUrl: `mse:${song.id}`,
-  };
+  });
 }

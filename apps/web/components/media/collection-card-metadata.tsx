@@ -1,20 +1,18 @@
 import Link from "next/link";
-import { Fragment } from "react";
 import type { MediaCardProps } from "./media-card.types";
-import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
+import { ExplicitBadgeIcon } from "../icons/explicit-badge-icon";
+import { ArtistLinks } from "./artist-links";
 
 type CollectionCardMetadataProps = Pick<
   MediaCardProps,
-  "title" | "subtitle" | "slug" | "artists"
+  "title" | "subtitle" | "slug" | "artists" | "resourceType" | "contentRating"
 >;
 
 export default function CollectionCardMetadata(
   props: CollectionCardMetadataProps,
 ) {
-  const artists = useFormattedArtists({
-    artists: props.artists,
-    fallbackText: props.subtitle,
-  });
+  const isExplicitAlbum =
+    props.resourceType === "albums" && props.contentRating === "explicit";
 
   return (
     <div className="mt-1">
@@ -31,28 +29,23 @@ export default function CollectionCardMetadata(
               )}
             </span>
           </div>
+
+          {isExplicitAlbum && (
+            <div className="[--explicitBadgeSize:11px] flex gap-1.25 ms-2.5">
+              <span aria-label="Explicit">
+                <ExplicitBadgeIcon />
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="[--overflowBleedSize:0] text-(--systemSecondary) [font:var(--callout)] mt-px">
           <div className="line-clamp-(--mc-lineClamp,1) wrap-break-word overflow-hidden [--mc-overflowBleedSize:var(--overflowBleedSize,4px)] [--mc-badgeSpacing:calc(var(--mc-badgeSize)+var(--mc-overflowBleedSize))] [clip-path:inset(var(--mc-overflowBleedSize))] -mb-(--mc-overflowBleedSize) -mt-(--mc-overflowBleedSize) -me-(--mc-overflowBleedSize) -ms-(--mc-overflowBleedSize) pb-(--mc-overflowBleedSize) pe-(--mc-overflowBleedSize) pt-(--mc-overflowBleedSize) ps-(--mc-overflowBleedSize) scroll-p-(--mc-overflowBleedSize)">
-            <span>
-              {artists.map((artist, index) => (
-                <Fragment key={`${artist.id}-${index}`}>
-                  {artist.url ? (
-                    <Link
-                      href={artist.url}
-                      className="inline text-start hover:underline focus:outline-none"
-                    >
-                      <span>{artist.name}</span>
-                    </Link>
-                  ) : (
-                    <span>{artist.name}</span>
-                  )}
-
-                  {index < artists.length - 1 && ", "}
-                </Fragment>
-              ))}
-            </span>
+            <ArtistLinks
+              artists={props.artists}
+              fallbackText={props.subtitle}
+              linkClassName="inline text-start hover:underline focus:outline-none"
+            />
           </div>
         </div>
       </div>

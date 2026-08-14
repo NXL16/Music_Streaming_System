@@ -36,7 +36,7 @@ export function AuthenticatedAppShell({
             className="flex flex-col [grid-area:structure-main-section] h-auto overflow-x-hidden overflow-y-auto w-full will-change-scroll transition-[margin,width] duration-100 ease-linear z-(--z-default) min-[484px]:mt-0 min-[484px]:ps-(--web-navigation-width) min-[484px]:col-span-full in-[.has-theme-override]:bg-(--joe-color) max-[483px]:in-[.has-theme-override]:-mt-14 max-[483px]:in-[.has-theme-override]:pt-14"
           >
             <main className="grow">
-              <div className="mx-auto min-h-full relative w-full z-(--z-default)">
+              <div className="m-[0_auto] min-h-full relative w-full z-(--z-default)">
                 {children}
               </div>
             </main>

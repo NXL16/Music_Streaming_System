@@ -8,8 +8,10 @@ import {
 } from "./artist-song-pages";
 import type { PlayerSong } from "@/lib/player/use-player-store";
 import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
-
-const LOAD_MORE_DELAY_MS = 300;
+import {
+  appendUniqueById,
+  getSafeNextCursor,
+} from "@/lib/pagination/cursor-page";
 
 export function useCatalogArtistSongs(artistId: string) {
   const [songs, setSongs] = useState<PlayerSong[]>([]);
@@ -19,6 +21,7 @@ export function useCatalogArtistSongs(artistId: string) {
   const [error, setError] = useState("");
   const isMountedRef = useRef(true);
   const loadMoreRequestIdRef = useRef(0);
+  const seenCursorsRef = useRef(new Set<string>());
 
   const fetchFirstPage = useCallback(
     (force = false) => getCatalogArtistSongPage(artistId, { force }),
@@ -41,12 +44,15 @@ export function useCatalogArtistSongs(artistId: string) {
       setLoading(true);
       setLoadingMore(false);
       setError("");
+      seenCursorsRef.current = new Set();
 
       fetchFirstPage()
         .then((page) => {
           if (!active) return;
           setSongs(page.songs);
-          setNextCursor(page.nextCursor);
+          setNextCursor(
+            getSafeNextCursor(page, seenCursorsRef.current) || undefined,
+          );
         })
         .catch((requestError: unknown) => {
           if (active) {
@@ -75,10 +81,6 @@ export function useCatalogArtistSongs(artistId: string) {
     setLoadingMore(true);
     setError("");
     try {
-      // Keep the loading state visible before fetching the next cursor page.
-      await new Promise<void>((resolve) => {
-        window.setTimeout(resolve, LOAD_MORE_DELAY_MS);
-      });
       if (!isMountedRef.current || requestId !== loadMoreRequestIdRef.current) {
         return;
       }
@@ -89,14 +91,10 @@ export function useCatalogArtistSongs(artistId: string) {
       if (!isMountedRef.current || requestId !== loadMoreRequestIdRef.current) {
         return;
       }
-      setSongs((current) => {
-        const existingIds = new Set(current.map((song) => song.id));
-        return [
-          ...current,
-          ...page.songs.filter((song) => !existingIds.has(song.id)),
-        ];
-      });
-      setNextCursor(page.nextCursor);
+      setSongs((current) => appendUniqueById(current, page.songs));
+      setNextCursor(
+        getSafeNextCursor(page, seenCursorsRef.current) || undefined,
+      );
     } catch (requestError) {
       if (isMountedRef.current && requestId === loadMoreRequestIdRef.current) {
         setError(
@@ -115,13 +113,16 @@ export function useCatalogArtistSongs(artistId: string) {
 
   const reload = useCallback(async () => {
     invalidateCatalogArtistSongPages(artistId);
+    seenCursorsRef.current = new Set();
     setLoading(true);
     setError("");
     try {
       const page = await fetchFirstPage(true);
       if (!isMountedRef.current) return;
       setSongs(page.songs);
-      setNextCursor(page.nextCursor);
+      setNextCursor(
+        getSafeNextCursor(page, seenCursorsRef.current) || undefined,
+      );
     } catch (requestError) {
       if (isMountedRef.current) {
         setError(

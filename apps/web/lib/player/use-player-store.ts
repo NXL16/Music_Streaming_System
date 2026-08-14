@@ -45,6 +45,7 @@ export type PlayerSong = {
 };
 
 export type RepeatMode = 0 | 1 | 2;
+export type QueueInsertionPosition = "next" | "last";
 
 type PlayerState = {
   currentSong: PlayerSong | null;
@@ -63,6 +64,7 @@ type PlayerState = {
   setPlaybackRate: (rate: number) => void;
   setSong: (song: PlayerSong) => void;
   setQueue: (songs: PlayerSong[], startIndex?: number) => void;
+  enqueue: (songs: PlayerSong[], position: QueueInsertionPosition) => void;
   reorderUpcomingQueue: (activeSongId: string, overSongId: string) => void;
   removeUpcomingSong: (songId: string) => void;
   removePlaylistSong: (playlistId: string, songId: string) => void;
@@ -179,17 +181,97 @@ export const usePlayerStore = create<PlayerState>((set) => ({
         repeatMode: 0,
       };
     }),
+  enqueue: (songs, position) =>
+    set((state) => {
+      const activeSongId = state.currentSong?.id ?? null;
+      const hasActiveSong = activeSongId !== null && state.currentIndex >= 0;
+      const requestedSongIds = new Set<string>();
+      const queuedSongs: PlayerSong[] = [];
+
+      for (const song of songs) {
+        // Keep the actively playing track fixed. Every other existing queue
+        // entry is removed then inserted at the requested position below.
+        if (
+          !song.playbackUrl ||
+          song.id === activeSongId ||
+          requestedSongIds.has(song.id)
+        ) {
+          continue;
+        }
+        requestedSongIds.add(song.id);
+        queuedSongs.push(song);
+      }
+      if (!queuedSongs.length) return state;
+
+      // Queue rows and drag-and-drop identify a track by song id. Removing
+      // existing targets first both prevents duplicate keys and lets repeated
+      // Play Next/Last calls reposition already queued tracks.
+      const withoutRequestedSongs = (queue: PlayerSong[]) =>
+        queue.filter((song) => !requestedSongIds.has(song.id));
+      const queueWithoutRequested = withoutRequestedSongs(state.queue);
+      const originalQueueWithoutRequested = withoutRequestedSongs(
+        state.originalQueue,
+      );
+
+      // A queue can be prepared before playback begins. The first queued song
+      // is selected only when the listener presses Play.
+      if (!hasActiveSong) {
+        const queue =
+          position === "next"
+            ? [...queuedSongs, ...queueWithoutRequested]
+            : [...queueWithoutRequested, ...queuedSongs];
+        const originalQueue =
+          position === "next"
+            ? [...queuedSongs, ...originalQueueWithoutRequested]
+            : [...originalQueueWithoutRequested, ...queuedSongs];
+
+        return {
+          queue,
+          originalQueue,
+          currentSong: null,
+          currentIndex: -1,
+          playing: false,
+          shuffleEnabled: false,
+          stationMode: false,
+          repeatMode: 0,
+        };
+      }
+
+      const currentIndex = queueWithoutRequested.findIndex(
+        (song) => song.id === activeSongId,
+      );
+      const queueInsertionIndex =
+        position === "next" && currentIndex >= 0
+          ? currentIndex + 1
+          : queueWithoutRequested.length;
+      const queue = [...queueWithoutRequested];
+      queue.splice(queueInsertionIndex, 0, ...queuedSongs);
+
+      const originalQueue = [...originalQueueWithoutRequested];
+      const originalCurrentIndex = originalQueue.findIndex(
+        (song) => song.id === activeSongId,
+      );
+      const originalInsertionIndex =
+        position === "next" && originalCurrentIndex >= 0
+          ? originalCurrentIndex + 1
+          : originalQueue.length;
+      originalQueue.splice(originalInsertionIndex, 0, ...queuedSongs);
+
+      return {
+        queue,
+        originalQueue,
+        currentIndex,
+        stationMode: false,
+      };
+    }),
   reorderUpcomingQueue: (activeSongId, overSongId) =>
     set((state) => {
-      if (
-        state.stationMode ||
-        state.currentIndex < 0 ||
-        activeSongId === overSongId
-      ) {
+      if (state.stationMode || activeSongId === overSongId) {
         return state;
       }
 
-      const upcomingSongs = state.queue.slice(state.currentIndex + 1);
+      const upcomingStartIndex = Math.max(0, state.currentIndex + 1);
+      const upcomingSongs = state.queue.slice(upcomingStartIndex);
       const activeIndex = upcomingSongs.findIndex(
         (song) => song.id === activeSongId,
       );
@@ -215,7 +297,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       };
 
       const queue = [
-        ...state.queue.slice(0, state.currentIndex + 1),
+        ...state.queue.slice(0, upcomingStartIndex),
         ...reorderedUpcomingSongs,
       ];
 
@@ -228,7 +310,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
     }),
   removeUpcomingSong: (songId) =>
     set((state) => {
-      if (state.stationMode || state.currentIndex < 0) return state;
+      if (state.stationMode) return state;
 
       const songIndex = state.queue.findIndex((song) => song.id === songId);
       if (songIndex <= state.currentIndex) return state;
@@ -265,7 +347,9 @@ export const usePlayerStore = create<PlayerState>((set) => ({
 
       const nextSong = state.queue
         .slice(state.currentIndex + 1)
-        .find((song) => song.sourcePlaylist?.id === playlistId && song.playbackUrl);
+        .find(
+          (song) => song.sourcePlaylist?.id === playlistId && song.playbackUrl,
+        );
 
       if (!nextSong) {
         return {
@@ -289,7 +373,18 @@ export const usePlayerStore = create<PlayerState>((set) => ({
     }),
   clearUpcomingQueue: () =>
     set((state) => {
-      if (state.stationMode || state.currentIndex < 0) return state;
+      if (state.stationMode) return state;
+
+      if (state.currentIndex < 0) {
+        if (!state.queue.length) return state;
+        return {
+          queue: [],
+          originalQueue: [],
+          currentSong: null,
+          currentIndex: -1,
+          playing: false,
+        };
+      }
 
       const queue = state.queue.slice(0, state.currentIndex + 1);
       if (queue.length === state.queue.length) return state;
@@ -343,7 +438,19 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       };
     }),
   togglePlayback: () =>
-    set((state) => ({ playing: state.currentSong ? !state.playing : false })),
+    set((state) => {
+      if (state.currentSong) return { playing: !state.playing };
+
+      const firstPlayableIndex = findPlayableIndex(state.queue, 0, 1);
+      if (firstPlayableIndex < 0) return state;
+
+      return {
+        currentSong: state.queue[firstPlayableIndex],
+        currentIndex: firstPlayableIndex,
+        playbackTimeMs: 0,
+        playing: true,
+      };
+    }),
   toggleShuffle: () =>
     set((state) => {
       if (state.stationMode) return state;
@@ -397,7 +504,11 @@ export const usePlayerStore = create<PlayerState>((set) => ({
         };
       }
 
-      let nextIndex = findPlayableIndex(state.queue, state.currentIndex + 1, 1);
+      let nextIndex = findPlayableIndex(
+        state.queue,
+        state.currentIndex < 0 ? 0 : state.currentIndex + 1,
+        1,
+      );
 
       if (nextIndex < 0 && state.repeatMode === 2)
         nextIndex = findPlayableIndex(state.queue, 0, 1);
@@ -440,7 +551,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
 
       let previousIndex = findPlayableIndex(
         state.queue,
-        state.currentIndex - 1,
+        state.currentIndex < 0 ? 0 : state.currentIndex - 1,
         -1,
       );
 

@@ -18,6 +18,7 @@ export class AmpLyricsDisplaySyncedLine extends HTMLElement {
   private isCurrent = false;
   private isPlaying = false;
   private currentTimeMs = 0;
+  private instrumentalHeightFrame?: number;
 
   connectedCallback() {
     if (this.root) {
@@ -42,6 +43,10 @@ export class AmpLyricsDisplaySyncedLine extends HTMLElement {
   }
 
   disconnectedCallback() {
+    if (this.instrumentalHeightFrame) {
+      cancelAnimationFrame(this.instrumentalHeightFrame);
+      this.instrumentalHeightFrame = undefined;
+    }
     this.button?.removeEventListener("click", this.handleSeek);
   }
 
@@ -54,6 +59,7 @@ export class AmpLyricsDisplaySyncedLine extends HTMLElement {
     this.isCurrent = value;
     this.toggleAttribute("is-current", value);
     this.root?.classList.toggle("is-current", value);
+    this.syncInstrumentalHeight();
     this.root?.classList.toggle("is-animating", value);
     this.button?.setAttribute("aria-current", value ? "true" : "false");
     this.syncInstrumentalCurrent();
@@ -79,8 +85,6 @@ export class AmpLyricsDisplaySyncedLine extends HTMLElement {
   private render() {
     if (!this.line || !this.button) return;
 
-    // Apple collapses only instrumental placeholders after they hand off to
-    // the next lyric. The CSS selector targets `.line` through this wrapper.
     this.root?.classList.toggle(
       "collapsible",
       this.line.kind === "INSTRUMENTAL",
@@ -119,8 +123,6 @@ export class AmpLyricsDisplaySyncedLine extends HTMLElement {
   private handleSeek = (event: MouseEvent) => {
     if (!this.line) return;
 
-    // A pointer click should seek without leaving this older line in its
-    // persistent :focus visual state. Keyboard activation keeps focus.
     if (event.detail > 0) this.button?.blur();
 
     this.dispatchEvent(
@@ -139,6 +141,27 @@ export class AmpLyricsDisplaySyncedLine extends HTMLElement {
     this.button
       ?.querySelector<HTMLElement>("amp-lyrics-display-instrumental-line")
       ?.classList.toggle("is-current", this.isCurrent && this.isPlaying);
+  }
+
+  private syncInstrumentalHeight() {
+    if (this.line?.kind !== "INSTRUMENTAL" || !this.root) return;
+
+    if (this.instrumentalHeightFrame) {
+      cancelAnimationFrame(this.instrumentalHeightFrame);
+      this.instrumentalHeightFrame = undefined;
+    }
+    if (!this.isCurrent) return;
+
+    this.root.style.setProperty("--instrumental-line-height", "0px");
+    this.instrumentalHeightFrame = requestAnimationFrame(() => {
+      this.instrumentalHeightFrame = undefined;
+      if (!this.isCurrent || !this.root) return;
+
+      this.root.style.setProperty(
+        "--instrumental-line-height",
+        `${this.root.scrollHeight}px`,
+      );
+    });
   }
 }
 

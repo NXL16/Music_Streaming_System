@@ -16,6 +16,8 @@ export type MediaShelfProps = {
   title: string;
   displayKind: MediaShelfDisplayKind;
   items: MediaCardProps[];
+  /** Applies a shelf-specific presentation rule without coupling this generic shelf to a data source. */
+  normalizeItem?: (item: MediaCardProps) => MediaCardProps;
   containerClassName?: string;
   shelfId?: string;
   prioritizeFirstCard?: boolean;
@@ -223,6 +225,7 @@ function MediaShelf({
   title,
   displayKind,
   items,
+  normalizeItem,
   containerClassName,
   shelfId,
   prioritizeFirstCard = false,
@@ -729,17 +732,21 @@ function MediaShelf({
                 style={undefined}
               >
                 {isNearViewport &&
-                  items.map((card, index) => (
-                    <MediaCardRenderer
-                      key={card.id}
-                      {...card}
-                      priority={
-                        (prioritizeFirstCard || isHeroShelf) && index === 0
-                      }
-                      onOpen={() => onCardInteraction?.("open", card, index)}
-                      onPlay={() => onCardInteraction?.("play", card, index)}
-                    />
-                  ))}
+                  items.map((item, index) => {
+                    const card = normalizeItem?.(item) ?? item;
+
+                    return (
+                      <MediaCardRenderer
+                        key={card.id}
+                        {...card}
+                        priority={
+                          (prioritizeFirstCard || isHeroShelf) && index === 0
+                        }
+                        onOpen={() => onCardInteraction?.("open", card, index)}
+                        onPlay={() => onCardInteraction?.("play", card, index)}
+                      />
+                    );
+                  })}
               </ul>
             </div>
           </section>

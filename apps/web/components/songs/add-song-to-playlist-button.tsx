@@ -1,8 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { http } from "@/lib/api/http";
 import { useAuthStore } from "@/lib/auth/auth-store";
+import {
+  addSongToUserPlaylist,
+  getUserPlaylists,
+} from "@/lib/playlists/user-playlists.api";
 
 type Playlist = { id: string; name: string };
 
@@ -17,11 +20,7 @@ export function AddSongToPlaylistButton({ songId }: { songId: string }) {
     setOpen(true);
     setMessage("");
     try {
-      const response = await http.get(
-        `/playlists/user/${encodeURIComponent(user.userId)}`,
-        { params: { limit: 50 } },
-      );
-      setPlaylists(response.data.playlists ?? []);
+      setPlaylists(await getUserPlaylists(user.userId));
     } catch {
       setMessage("Could not load your playlists.");
     }
@@ -29,9 +28,7 @@ export function AddSongToPlaylistButton({ songId }: { songId: string }) {
 
   async function addToPlaylist(playlistId: string) {
     try {
-      await http.post(`/playlists/${encodeURIComponent(playlistId)}/tracks`, {
-        songId,
-      });
+      await addSongToUserPlaylist(playlistId, songId, user?.userId);
       setMessage("Added to playlist.");
     } catch {
       setMessage("Could not add this song to the playlist.");

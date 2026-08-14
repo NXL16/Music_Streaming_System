@@ -7,11 +7,25 @@ import { useShallow } from "zustand/react/shallow";
 import { useMsePlayback } from "@/lib/player/use-mse-playback";
 import { usePersistentVolume } from "@/lib/player/use-persistent-volume";
 import { sendListeningEvent } from "@/lib/recommendations/listening-events";
-import type { MediaCardProps } from "@/components/media/media-card.types";
-import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
-import { DesktopPlayerBar } from "./player-bar/desktop-player-bar";
+import type {
+  MediaArtwork,
+  MediaCardProps,
+} from "@/lib/media/media-card.types";
+import { getCoverArtwork } from "@/lib/media/artwork-slots";
 import { CompactPlayerBar } from "./player-bar/compact-player-bar";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { createAndHydrateMediaResourceCard } from "@/lib/media/normalize-media-resource";
+import dynamic from "next/dynamic";
+
+// Desktop-only queue drag/drop and the expanded player are substantial. Keep
+// the audio/session shell interactive while this client chunk loads.
+const DesktopPlayerBar = dynamic(
+  () =>
+    import("./player-bar/desktop-player-bar").then(
+      (module) => module.DesktopPlayerBar,
+    ),
+  { ssr: false },
+);
 
 const LISTENING_QUALIFY_SECONDS = 3;
 const LOCK_SCREEN_SEEK_SECONDS = 10;
@@ -27,68 +41,90 @@ function getAbsoluteArtworkUrl(artworkUrl: string): string {
 function recentlyPlayedCard(song: PlayerSong): MediaCardProps {
   if (song.sourceStation) {
     const station = song.sourceStation;
-    return {
-      id: `stations-${station.id}`,
-      resourceId: station.id,
-      resourceType: "stations",
-      cardType: "station",
-      title: station.name,
-      subtitle: station.description || "Musical Station",
-      description: station.description || "Musical Station",
-      imageUrl: station.artworkUrl,
-      imageSrcSet: station.artworkSrcSet || station.artworkUrl,
-      artworkColors: {
-        bg: station.artworkBgColor || "#2c2c2e",
-        main: station.artworkBgColor || "#2c2c2e",
+    return createAndHydrateMediaResourceCard(
+      {
+        id: station.id,
+        type: "stations",
+        name: station.name,
+        artwork: { url: station.artworkUrl, bgColor: station.artworkBgColor },
       },
-      altText: station.name,
-    };
+      {
+        cardType: "station",
+        subtitle: station.description || "Musical Station",
+        description: station.description || "Musical Station",
+        imageUrl: station.artworkUrl,
+        imageSrcSet: station.artworkSrcSet || station.artworkUrl,
+      },
+      "player",
+    );
   }
 
   if (song.sourcePlaylist) {
     const playlist = song.sourcePlaylist;
-    return {
-      id: `playlists-${playlist.id}`,
-      resourceId: playlist.id,
-      resourceType: "playlists",
-      cardType: "collection",
-      title: playlist.name,
-      subtitle: "Musical",
-      imageUrl: playlist.artworkUrl,
-      imageSrcSet: playlist.artworkSrcSet || playlist.artworkUrl,
-      artworkColors: {
-        bg: playlist.artworkBgColor || "#2c2c2e",
-        main: playlist.artworkBgColor || "#2c2c2e",
+    const favoriteArtwork =
+      playlist.playlistKind === "favorite"
+        ? (useFavoriteStore.getState().collection?.artwork as
+            | MediaArtwork
+            | undefined)
+        : undefined;
+    const favoriteCover = favoriteArtwork
+      ? getCoverArtwork(favoriteArtwork, playlist.artworkUrl)
+      : undefined;
+    const imageUrl = favoriteCover?.imageUrl ?? playlist.artworkUrl;
+    const imageSrcSet =
+      favoriteCover?.imageSrcSet ??
+      playlist.artworkSrcSet ??
+      playlist.artworkUrl;
+
+    return createAndHydrateMediaResourceCard(
+      {
+        id: playlist.id,
+        type: "playlists",
+        name: playlist.name,
+        playlistKind: playlist.playlistKind,
+        isUserPlaylist: playlist.isUserPlaylist,
+        artwork: favoriteArtwork ?? {
+          url: playlist.artworkUrl,
+          bgColor: playlist.artworkBgColor,
+        },
       },
-      slug: `/playlist/${encodeURIComponent(playlist.id)}`,
-      altText: playlist.name,
-    };
+      {
+        cardType: "collection",
+        subtitle: playlist.curatorName || "Musical",
+        slug: playlist.href,
+        imageUrl,
+        imageSrcSet,
+      },
+      "player",
+    );
   }
 
   const resourceType = song.albumId ? "albums" : "songs";
   const resourceId = song.albumId ?? song.id;
+  const title = song.albumId ? song.album || song.title : song.title;
 
-  return {
-    id: `${resourceType}-${resourceId}`,
-    resourceId,
-    resourceType,
-    cardType: "collection",
-    title: song.albumId ? song.album || song.title : song.title,
-    subtitle: song.artist,
-    imageUrl: song.artworkUrl,
-    imageSrcSet: song.artworkSrcSet || song.artworkUrl,
-    artworkColors: {
-      bg: "#2c2c2e",
-      main: "#2c2c2e",
+  return createAndHydrateMediaResourceCard(
+    {
+      id: resourceId,
+      type: resourceType,
+      name: title,
+      artistName: song.artist,
+      artwork: { url: song.artworkUrl },
+      contentRating: song.albumId ? song.contentRating : undefined,
     },
-    slug: song.albumUrl,
-    altText: song.albumId ? song.album || song.title : song.title,
-    artists: song.artists?.flatMap((artist) =>
-      artist.id && artist.url
-        ? [{ id: artist.id, name: artist.name, url: artist.url }]
-        : [],
-    ),
-  };
+    {
+      cardType: "collection",
+      slug: song.albumId ? song.albumUrl : song.url,
+      imageUrl: song.artworkUrl,
+      imageSrcSet: song.artworkSrcSet || song.artworkUrl,
+      artists: song.artists?.flatMap((artist) =>
+        artist.id && artist.url
+          ? [{ id: artist.id, name: artist.name, url: artist.url }]
+          : [],
+      ),
+    },
+    "player",
+  );
 }
 
 export function AppPlayerBar() {
@@ -136,10 +172,6 @@ export function AppPlayerBar() {
     () => queue.filter((song) => song.playbackUrl).length,
     [queue],
   );
-  const currentArtists = useFormattedArtists({
-    artists: currentSong?.artists,
-    fallbackText: currentSong?.artist,
-  });
   const favoriteSongs = useFavoriteStore((state) => state.songs);
   const isCurrentSongFavorite = Boolean(
     currentSong && favoriteSongs.some((song) => song.id === currentSong.id),
@@ -147,8 +179,6 @@ export function AppPlayerBar() {
 
   const [isExpanded, setIsExpanded] = useState(false);
   const [isProgressExpanded, setIsProgressExpanded] = useState(false);
-  const [isSecondaryMarqueeActive, setIsSecondaryMarqueeActive] =
-    useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const useCompactPlayer = useMediaQuery("(max-width: 739px)");
   const { volume, lastAudibleVolume, setVolume } = usePersistentVolume();
@@ -171,6 +201,7 @@ export function AppPlayerBar() {
         albumId: song.albumId,
         playlistId: song.sourcePlaylist?.id,
         playlistName: song.sourcePlaylist?.name,
+        playlistCuratorName: song.sourcePlaylist?.curatorName,
         playlistArtworkUrl: song.sourcePlaylist?.artworkUrl,
         playlistArtworkBgColor: song.sourcePlaylist?.artworkBgColor,
         stationId: song.sourceStation?.id,
@@ -269,12 +300,10 @@ export function AppPlayerBar() {
   };
 
   const handleNext = useCallback(() => {
-    if (!currentSong) return;
-
     const didChangeTrack = next();
     if (!didChangeTrack) return;
 
-    if (trackedSongRef.current === currentSong.id) {
+    if (currentSong && trackedSongRef.current === currentSong.id) {
       emitEvent(currentSong, "SKIP", audioRef.current?.currentTime);
     }
 
@@ -282,12 +311,10 @@ export function AppPlayerBar() {
   }, [currentSong, emitEvent, next]);
 
   const handlePrevious = useCallback(() => {
-    if (!currentSong) return;
-
     const didChangeTrack = previous();
     if (!didChangeTrack) return;
 
-    if (trackedSongRef.current === currentSong.id) {
+    if (currentSong && trackedSongRef.current === currentSong.id) {
       emitEvent(currentSong, "SKIP", audioRef.current?.currentTime);
     }
 
@@ -451,7 +478,6 @@ export function AppPlayerBar() {
         <DesktopPlayerBar
           audioRef={audioRef}
           currentSong={currentSong}
-          currentArtists={currentArtists}
           queue={queue}
           currentIndex={currentIndex}
           isPlaying={isPlaying}
@@ -464,8 +490,6 @@ export function AppPlayerBar() {
           setIsExpanded={setIsExpanded}
           isProgressExpanded={isProgressExpanded}
           setIsProgressExpanded={setIsProgressExpanded}
-          isSecondaryMarqueeActive={isSecondaryMarqueeActive}
-          setIsSecondaryMarqueeActive={setIsSecondaryMarqueeActive}
           volume={volume}
           onSetVolume={setVolume}
           onToggleMute={toggleMute}

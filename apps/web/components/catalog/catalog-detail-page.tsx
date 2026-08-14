@@ -23,11 +23,12 @@ import CardArtwork from "../media/common/card-artwork";
 import AmpContextMenuButton from "../custom-elements/AmpContextMenuButton";
 import Link from "next/link";
 import { formatDuration, formatSummaryDuration } from "@/lib/format/duration";
-import { artistRoute } from "@/lib/catalog/artist-route";
-import { useFormattedArtists } from "@/lib/media/use-formatted-artists";
+import { catalogArtists } from "@/lib/catalog/catalog-artists";
+import { ArtistLinks } from "../media/artist-links";
 import CatalogPageLoading from "../loading/catalog-page-loading";
 import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
 import { AddToLibraryButton } from "../songs/add-to-library-button";
+import { AddSongToLibraryButton } from "../songs/add-song-to-library-button";
 import { FavoriteSongButton } from "../songs/favorite-song-button";
 import { PlaybackWaveform } from "../songs/playback-waveform";
 import { AlbumRelatedShelves } from "./album-related-shelves";
@@ -42,6 +43,14 @@ import {
   mapCatalogAlbums,
   mapCatalogPlaylists,
 } from "@/lib/catalog/search.mapper";
+import { ExplicitBadgeIcon } from "../icons/explicit-badge-icon";
+import { useAuthStore } from "@/lib/auth/auth-store";
+import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
+import PlaylistDetailView, {
+  type GenericPlaylist,
+} from "./playlist-detail-view";
+import { playlistRoute } from "@/lib/catalog/playlist-route";
+import { albumRoute } from "@/lib/catalog/album-route";
 
 type CatalogDetailPageProps = {
   resourceType: CatalogDetailType;
@@ -102,6 +111,8 @@ export function CatalogDetailPage({
   const currentSong = usePlayerStore((state) => state.currentSong);
   const playing = usePlayerStore((state) => state.playing);
   const togglePlayback = usePlayerStore((state) => state.togglePlayback);
+  const userId = useAuthStore((state) => state.user?.userId);
+  const favoriteSongs = useFavoriteStore((state) => state.songs);
   const [relatedShelvesAvailability, setRelatedShelvesAvailability] = useState({
     albumId: "",
     hasShelves: false,
@@ -121,6 +132,10 @@ export function CatalogDetailPage({
       : null,
   );
   const tracks = useMemo(() => (data ? mapCatalogTracks(data) : []), [data]);
+  const favoriteSongIds = useMemo(
+    () => new Set(favoriteSongs.map((song) => song.id)),
+    [favoriteSongs],
+  );
   const hasRelatedShelves =
     resourceType === "albums" &&
     relatedShelvesAvailability.albumId === resourceId &&
@@ -199,34 +214,39 @@ export function CatalogDetailPage({
   const resource = albumResource ?? playlistResource;
   const title = resource?.attributes.name ?? "";
 
-  const albumArtists = Object.values(data?.resources.artists ?? {}).flatMap(
-    (artist) => {
-      if (!artist.attributes.name || !artist.attributes.url) return [];
+  const albumArtists = data
+    ? catalogArtists(data, albumResource?.relationships.artists?.data)
+    : [];
 
-      return [
-        {
-          id: artist.id,
-          name: artist.attributes.name,
-          url: artistRoute(artist.attributes.url, artist.id),
-        },
-      ];
-    },
-  );
-
-  const albumArtistCredits = useFormattedArtists({
-    artists: albumArtists,
-    fallbackText: albumResource?.attributes.artistName,
-  });
   const playlistSubtitle = playlistResource?.attributes.curatorName;
 
   const description =
     playlistResource?.attributes.descriptionStandard ??
     playlistResource?.attributes.descriptionShort;
+  const catalogPlaylist = useMemo<GenericPlaylist | null>(() => {
+    if (!playlistResource) return null;
+
+    return {
+      id: playlistResource.id,
+      title: playlistResource.attributes.name,
+      curatorName: playlistResource.attributes.curatorName,
+      description:
+        playlistResource.attributes.descriptionStandard ||
+        playlistResource.attributes.descriptionShort ||
+        undefined,
+      artwork: playlistResource.attributes.artwork,
+      sourcePlaylistHref: playlistRoute(
+        playlistResource.attributes.url,
+        playlistResource.id,
+      ),
+      tracks,
+    };
+  }, [playlistResource, tracks]);
 
   const artworkData = resource?.attributes.artwork;
+  const artworkUrl = catalogArtworkUrl(artworkData, 632);
   const artworkProps = useMemo(() => {
-    const artwork = catalogArtworkUrl(artworkData, 632);
-    if (!artwork) return null;
+    if (!artworkUrl) return null;
 
     const artworkColor = `#${artworkData?.bgColor?.replace(/^#/, "") || "2c2c2e"}`;
     return {
@@ -238,7 +258,7 @@ export function CatalogDetailPage({
         main: artworkColor,
       },
     };
-  }, [artworkData, title]);
+  }, [artworkData, artworkUrl, title]);
   const headerIsExplicit =
     albumResource?.attributes.contentRating === "explicit";
   const totalDurationSec = useMemo(
@@ -369,6 +389,10 @@ export function CatalogDetailPage({
     );
   }
 
+  if (catalogPlaylist) {
+    return <PlaylistDetailView playlist={catalogPlaylist} />;
+  }
+
   return (
     <>
       {showInitialLoading && <CatalogPageLoading />}
@@ -437,33 +461,20 @@ export function CatalogDetailPage({
                         <span className="inline-flex items-center gap-1 ms-1 [--explicitBadgeSize:19px] [--favoriteBadgeSize:14px] [--favoriteBadgeMarginInlineStart:1px] has-[.explicit-wrapper]:ms-[6.5px] max-[999px]:[--explicitBadgeSize:16px]">
                           <span className="explicit-wrapper">
                             <span>
-                              <svg
-                                className="h-(--explicitBadgeSize,11px) w-(--explicitBadgeSize,11px) fill-(--explicitFillOverride,var(--systemSecondary))"
-                                viewBox="0 0 9 9"
-                                width="9"
-                                height="9"
-                                aria-hidden="true"
-                              >
-                                <path d="M3.9 7h1.9c.4 0 .7-.2.7-.5s-.3-.4-.7-.4H4.1V4.9h1.5c.4 0 .7-.1.7-.4 0-.3-.3-.5-.7-.5H4.1V2.9h1.7c.4 0 .7-.2.7-.5 0-.2-.3-.4-.7-.4H3.9c-.6 0-.9.3-.9.7v3.7c0 .3.3.6.9.6zM1.6 0h5.8C8.5 0 9 .5 9 1.6v5.9C9 8.5 8.5 9 7.4 9H1.6C.5 9 0 8.5 0 7.4V1.6C0 .5.5 0 1.6 0z"></path>
-                              </svg>
+                              <ExplicitBadgeIcon />
                             </span>
                           </span>
                         </span>
                       )}
                     </h1>
 
-                    {albumArtistCredits.length > 0 ? (
+                    {albumArtists.length > 0 ||
+                    albumResource?.attributes.artistName ? (
                       <div className="[--linkColor:var(--keyColor)] text-(--keyColor) [font:var(--large-title-short)] -m-1.25 overflow-hidden p-1.25 [text-align:var(--containerDetailHeaderAlign,center)] text-ellipsis whitespace-nowrap w-full min-[1000px]:[text-align:unset] max-[999px]:[font:var(--title-1)] max-[999px]:text-[20px]!">
-                        {albumArtistCredits.map((credit, index) => (
-                          <span key={`${credit.id}-${index}`}>
-                            {credit.url ? (
-                              <Link href={credit.url}>{credit.name}</Link>
-                            ) : (
-                              credit.name
-                            )}
-                            {index < albumArtistCredits.length - 1 && ", "}
-                          </span>
-                        ))}
+                        <ArtistLinks
+                          artists={albumArtists}
+                          fallbackText={albumResource?.attributes.artistName}
+                        />
                       </div>
                     ) : playlistSubtitle ? (
                       <div className="[--linkColor:var(--keyColor)] text-(--keyColor) [font:var(--large-title-short)] -m-1.25 overflow-hidden p-1.25 [text-align:var(--containerDetailHeaderAlign,center)] text-ellipsis whitespace-nowrap w-full min-[1000px]:[text-align:unset]">
@@ -548,6 +559,8 @@ export function CatalogDetailPage({
                             ""
                           }
                           artworkUrl={catalogArtworkUrl(artworkData, 300) || ""}
+                          sourceOrigin="catalog"
+                          songIds={tracks.map((track) => track.id)}
                         />
                       </div>
                     </div>
@@ -555,7 +568,7 @@ export function CatalogDetailPage({
 
                   <div className="flex gap-2.5 [grid-area:secondary-actions] [justify-self:var(--containerDetailHeaderAlign,end)] relative min-[1000px]:[align-self:var(--containerDetailHeaderSecondaryActionsAlignSelf,end)]">
                     <div className="flex gap-2 me-[calc(var(--bodyGutter)*-1+15px)] min-[484px]:me-[calc(var(--bodyGutter)*-1+8px)]">
-                      <div className="[--share-button-bg-color:transparent] [--share-button-icon-size:18px] [--share-button-icon-color:var(--systemPrimary)] items-center rounded-[1000px] gap-1 h-9 px-1 relative z-(--z-default) flex shrink-0 before:[backdrop-filter:saturate(220%)_blur(16px)] before:bg-(--glassMaterialBackground) before:rounded-[inherit] before:[box-shadow:0_10px_40px_var(--glassMaterialShadowColor)] before:content-[''] before:inset-0 before:absolute after:inset-0 after:[--containerInnerStroke:var(--glassMaterialInnerStroke)] after:[--containerInnerStrokeAlpha:var(--glassMaterialInnerStrokeAlpha)] after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:content-[''] after:block after:h-0 after:max-h-full after:max-w-full after:min-h-full after:min-w-full after:opacity-(--containerInnerStrokeAlpha,0.1) after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)] after:dark:opacity-(--containerInnerStrokeAlpha,0.25) [--ctxmenu-trigger-backdrop-blur:0]">
+                      <div className="cloud-buttons cloud-buttons--with-platter">
                         <div>
                           <button
                             className="items-center bg-(--share-button-bg-color,var(--systemQuinary)) rounded-full flex h-7 justify-center relative w-7 z-[calc(var(--z-default)+1)]"
@@ -577,7 +590,30 @@ export function CatalogDetailPage({
                           </button>
                         </div>
 
-                        <AmpContextMenuButton />
+                        <AmpContextMenuButton
+                          id={`${resourceType}-${resourceId}`}
+                          context={{
+                            kind: "collection",
+                            resourceId,
+                            resourceType,
+                            sourceOrigin: "catalog",
+                            title,
+                            href: albumResource
+                              ? albumRoute(
+                                  albumResource.attributes.url,
+                                  albumResource.id,
+                                )
+                              : undefined,
+                            subtitle:
+                              albumResource?.attributes.artistName ??
+                              playlistSubtitle ??
+                              "",
+                            artworkUrl,
+                            songIds: tracks.map((track) => track.id),
+                            userId,
+                            inLibrary: false,
+                          }}
+                        />
                       </div>
                     </div>
                   </div>
@@ -744,24 +780,14 @@ export function CatalogDetailPage({
                           <div className="items-center inline-flex [grid-area:song-name] leading-4 overflow-hidden w-full -my-1 -mx-1 py-1 px-1">
                             <div className="block cursor-default flex-1 overflow-hidden -my-1 -mx-1 py-1 px-1 text-left">
                               {track.contentRating === "explicit" ? (
-                                <div className="block [--explicitBadgeSize:9.2px] items-baseline max-w-full overflow-hidden text-ellipsis whitespace-nowrap">
+                                <div className="block [--explicitBadgeSize:10px] items-baseline max-w-full overflow-hidden text-ellipsis whitespace-nowrap">
                                   <CatalogTrackTitle
                                     title={track.title}
                                     url={track.url}
                                   />
 
-                                  <span>
-                                    <span className="inline-flex ms-1">
-                                      <svg
-                                        viewBox="0 0 9 9"
-                                        width="9"
-                                        height="9"
-                                        className="h-(--explicitBadgeSize,11px) w-(--explicitBadgeSize,11px) fill-(--explicitFillOverride,var(--systemSecondary))"
-                                        aria-hidden="true"
-                                      >
-                                        <path d="M3.9 7h1.9c.4 0 .7-.2.7-.5s-.3-.4-.7-.4H4.1V4.9h1.5c.4 0 .7-.1.7-.4 0-.3-.3-.5-.7-.5H4.1V2.9h1.7c.4 0 .7-.2.7-.5 0-.2-.3-.4-.7-.4H3.9c-.6 0-.9.3-.9.7v3.7c0 .3.3.6.9.6zM1.6 0h5.8C8.5 0 9 .5 9 1.6v5.9C9 8.5 8.5 9 7.4 9H1.6C.5 9 0 8.5 0 7.4V1.6C0 .5.5 0 1.6 0z"></path>
-                                      </svg>
-                                    </span>
+                                  <span className="ms-1">
+                                    <ExplicitBadgeIcon />
                                   </span>
                                 </div>
                               ) : (
@@ -778,28 +804,12 @@ export function CatalogDetailPage({
                       <div className="table-cell [font:var(--body)] py-0 align-middle overflow-visible relative text-end z-(--z-default) rounded-ee-(--songs-list-row-border-radius,6px) rounded-es-none rounded-se-(--songs-list-row-border-radius,6px) rounded-ss-none pe-4.5 after:[border-top:0.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0 group-[.selected]:after:opacity-0">
                         <div className="items-center inline-grid [grid-template-areas:'song-controls-add_song-controls-length_song-controls-context'] relative">
                           <div className="pointer-coarse:hidden max-[578px]:hidden [grid-area:song-controls-add] opacity-(--addToLibraryOpacity,0) me-1.75">
-                            <button
-                              onClick={(e) => e.stopPropagation()}
-                              className="items-center text-(--keyColor) cursor-pointer inline-flex justify-center [transition:var(--global-transition)] h-(--add-to-library-button-width,25px) leading-0 w-(--add-to-library-button-width,25px) me-(--addToLibraryMarginEnd,4px)"
-                            >
-                              <svg
-                                width="10"
-                                height="10"
-                                viewBox="0 0 10 10"
-                                xmlns="http://www.w3.org/2000/svg"
-                                fillRule="evenodd"
-                                clipRule="evenodd"
-                                strokeLinejoin="round"
-                                strokeMiterlimit="2"
-                                className="h-(--add-to-library-icon-width,12px) w-(--add-to-library-icon-width,12px) fill-(--addToLibraryFillOverride,var(--keyColor))"
-                                aria-hidden="true"
-                              >
-                                <path
-                                  d="M.784 5.784h3.432v3.432c0 .43.354.784.784.784.43 0 .784-.354.784-.784V5.784h3.432a.784.784 0 1 0 0-1.568H5.784V.784A.788.788 0 0 0 5 0a.788.788 0 0 0-.784.784v3.432H.784a.784.784 0 1 0 0 1.568z"
-                                  fillRule="nonzero"
-                                ></path>
-                              </svg>
-                            </button>
+                            <AddSongToLibraryButton
+                              songId={track.id}
+                              title={track.title}
+                              artist={track.artist}
+                              artworkUrl={track.artworkUrl}
+                            />
                           </div>
                           <time
                             dateTime="PT1M27S"
@@ -811,7 +821,16 @@ export function CatalogDetailPage({
                           <div
                             className={`[grid-area:song-controls-context] ms-1.75 [--contextMenuButtonSize:28px] ${selectedTrackId === track.id ? "[--contextMenuEllipsisFillOverride:#fff]" : "[--contextMenuEllipsisFillOverride:var(--systemSecondary)] hover:[--contextMenuEllipsisFillOverride:var(--keyColor)]"}`}
                           >
-                            <AmpContextMenuButton />
+                            <AmpContextMenuButton
+                              id={`song-${track.id}`}
+                              context={{
+                                kind: "song",
+                                songId: track.id,
+                                title: track.title,
+                                userId,
+                                isFavorite: favoriteSongIds.has(track.id),
+                              }}
+                            />
                           </div>
                         </div>
                       </div>

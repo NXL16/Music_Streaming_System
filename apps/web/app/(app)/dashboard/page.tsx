@@ -14,6 +14,7 @@ import {
 } from "@/lib/admin/admin.api";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { useSongLibrary } from "@/lib/songs/use-song-library";
+import { songRoute } from "@/lib/catalog/song-route";
 
 const ADMIN_ROLES = new Set([
   "SUPER_ADMIN",
@@ -500,7 +501,7 @@ function ArtistAnalytics() {
           {visibleSongs.slice(0, 8).map((song) => (
             <Link
               key={song.id}
-              href={`/song/${encodeURIComponent(song.id)}`}
+              href={songRoute(song.id)}
               className="flex items-center justify-between gap-4 py-3 transition hover:opacity-70"
             >
               <span className="min-w-0">

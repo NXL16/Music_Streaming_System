@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getCachedHomeRecommendations,
   getHomeRecommendations,
@@ -18,23 +18,27 @@ export function useHomeRecommendations() {
   // a network call, while stale data refreshes in the background.
   const [needsInitialRequest] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestVersion = useRef(0);
 
   const refresh = useCallback(
     async (showLoading = false, signal?: AbortSignal, force = false) => {
       if (signal?.aborted) return;
+      const version = ++requestVersion.current;
       if (force) invalidateHomeRecommendationsCache();
       if (showLoading) setLoading(true);
 
       try {
         const nextData = await getHomeRecommendations();
-        if (signal?.aborted) return;
+        if (signal?.aborted || requestVersion.current !== version) return;
         setData(nextData);
         setError(null);
       } catch {
-        if (signal?.aborted) return;
+        if (signal?.aborted || requestVersion.current !== version) return;
         setError("Không thể tải nội dung đề xuất.");
       } finally {
-        if (!signal?.aborted) setLoading(false);
+        if (!signal?.aborted && requestVersion.current === version) {
+          setLoading(false);
+        }
       }
     },
     [setLoading],
@@ -46,6 +50,7 @@ export function useHomeRecommendations() {
     queueMicrotask(() => void refresh(false, controller.signal));
 
     return () => {
+      requestVersion.current += 1;
       controller.abort();
     };
   }, [needsInitialRequest, refresh]);

@@ -3,6 +3,8 @@ import {
   clearCachedQueries,
   getCachedQuery,
   invalidateCachedQuery,
+  MAX_QUERY_CACHE_ENTRIES,
+  setCachedQuery,
 } from "./query-cache";
 
 describe("query cache", () => {
@@ -62,5 +64,32 @@ describe("query cache", () => {
     resolveFresh?.("fresh");
     await expect(freshRequest).resolves.toBe("fresh");
     await expect(duplicateFreshRequest).resolves.toBe("fresh");
+  });
+
+  it("evicts the least recently used entry when the cache reaches its limit", async () => {
+    for (let index = 0; index <= MAX_QUERY_CACHE_ENTRIES; index += 1) {
+      setCachedQuery(`test:lru:${index}`, index, 60_000);
+    }
+    const load = vi.fn(async () => "refetched");
+
+    await expect(getCachedQuery("test:lru:0", load, 60_000)).resolves.toBe(
+      "refetched",
+    );
+    expect(load).toHaveBeenCalledOnce();
+  });
+
+  it("aborts a pending loader when its key is invalidated", () => {
+    let signal: AbortSignal | undefined;
+    void getCachedQuery(
+      "test:abort",
+      (nextSignal) => {
+        signal = nextSignal;
+        return new Promise<string>(() => undefined);
+      },
+      60_000,
+    );
+
+    invalidateCachedQuery("test:abort");
+    expect(signal?.aborted).toBe(true);
   });
 });

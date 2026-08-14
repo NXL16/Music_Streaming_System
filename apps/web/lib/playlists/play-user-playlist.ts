@@ -1,19 +1,10 @@
-import { http } from "@/lib/api/http";
+import {
+  getAllUserPlaylistTracks,
+  getUserPlaylist,
+} from "@/lib/playlists/user-playlists.api";
 import { withPlaylistPlaybackSource } from "@/lib/player/playlist-playback-source";
 import { usePlayerStore } from "@/lib/player/use-player-store";
-import {
-  projectSongSummary,
-  type SongSummaryProjectionSource,
-} from "@/lib/songs/project-song-summary";
-
-type UserPlaylistTrack = SongSummaryProjectionSource;
-
-type UserPlaylist = {
-  id: string;
-  name: string;
-  artwork?: { url?: string; bgColor?: string };
-  songs: UserPlaylistTrack[];
-};
+import { projectSongSummary } from "@/lib/songs/project-song-summary";
 
 export type UserPlaylistPlaybackContext = {
   id: string;
@@ -36,16 +27,15 @@ export function playUserPlaylist(
   const existing = pendingRequests.get(playlistId);
   if (existing) return existing;
 
-  const request = http
-    .get<{ playlist: UserPlaylist }>(
-      `/playlists/${encodeURIComponent(playlistId)}`,
-    )
-    .then(({ data }) => {
-      const playlist = data.playlist;
-      const tracks = playlist.songs.map(projectSongSummary);
+  const request = Promise.all([
+    getUserPlaylist(playlistId),
+    getAllUserPlaylistTracks(playlistId),
+  ])
+    .then(([playlist, songs]) => {
+      const tracks = songs.map(projectSongSummary);
       if (!tracks.some((track) => track.playbackUrl)) return false;
 
-      const artworkUrl = context.artworkUrl || playlist.artwork?.url || "";
+      const artworkUrl = context.artworkUrl || playlist.artworkUrl || "";
       usePlayerStore.getState().setQueue(
         withPlaylistPlaybackSource(tracks, {
           id: playlist.id,
@@ -58,8 +48,7 @@ export function playUserPlaylist(
             `/library/playlist/${encodeURIComponent(playlist.id)}`,
           artworkUrl,
           artworkSrcSet: artworkUrl || undefined,
-          artworkBgColor:
-            context.artworkBgColor || playlist.artwork?.bgColor,
+          artworkBgColor: context.artworkBgColor,
         }),
       );
       return true;

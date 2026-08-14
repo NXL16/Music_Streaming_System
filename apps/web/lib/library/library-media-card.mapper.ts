@@ -4,6 +4,7 @@ import type {
 } from "@/lib/media/media-card.types";
 import { createMediaResourceCard } from "@/lib/media/normalize-media-resource";
 import { projectLinkedArtists } from "@/lib/media/project-linked-artists";
+import { playlistArtworkVariants } from "@/lib/playlists/generated-playlist-cover";
 
 export type LibraryMediaResource = {
   resourceType: "albums" | "playlists";
@@ -15,6 +16,7 @@ export type LibraryMediaResource = {
   contentRating: string;
   artists: Array<{ id: string; name: string; url: string }>;
   artwork?: MediaArtwork;
+  songIds?: string[];
   createdAt?: string;
 };
 
@@ -24,7 +26,8 @@ export type UserPlaylistSummary = {
   playlistKind?: "favorite" | "user";
   description?: string;
   trackCount?: number;
-  createdAt?: string;
+  createdAt?: number;
+  artworkUrl?: string;
 };
 
 const LIBRARY_ARTWORK_COLOR = "34343b";
@@ -48,11 +51,12 @@ export function projectLibraryMediaCard(
       artistName: resource.subtitle,
       isUserPlaylist: isFavoritePlaylist,
       playlistKind: isFavoritePlaylist ? "favorite" : undefined,
-      artwork:
-        resource.artwork ?? {
-          url: resource.artworkUrl,
-          bgColor: LIBRARY_ARTWORK_COLOR,
-        },
+      songIds: resource.songIds,
+      artwork: resource.artwork ?? {
+        url: resource.artworkUrl,
+        variants: playlistArtworkVariants(resource.artworkUrl),
+        bgColor: LIBRARY_ARTWORK_COLOR,
+      },
       contentRating: resource.contentRating,
     },
     {
@@ -75,7 +79,12 @@ export function projectUserPlaylistCard(
       url: `/library/playlist/${encodeURIComponent(playlist.id)}`,
       isUserPlaylist: true,
       playlistKind: playlist.playlistKind ?? "user",
-      artwork: { bgColor: PERSONAL_PLAYLIST_ARTWORK_COLOR },
+      artwork: playlist.artworkUrl
+        ? {
+            url: playlist.artworkUrl,
+            variants: playlistArtworkVariants(playlist.artworkUrl),
+          }
+        : { bgColor: PERSONAL_PLAYLIST_ARTWORK_COLOR },
     },
     {
       cardType: "collection",

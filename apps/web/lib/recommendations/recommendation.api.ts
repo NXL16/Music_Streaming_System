@@ -13,6 +13,10 @@ const pendingRecommendationSections = new Map<
   string,
   Promise<RecommendationResponse>
 >();
+const cachedRecommendationSections = new Map<
+  string,
+  { value: RecommendationResponse; expiresAt: number }
+>();
 let cachedResponse: RecommendationResponse | null = null;
 let cacheExpiresAt = 0;
 let cacheGeneration = 0;
@@ -115,6 +119,8 @@ export function invalidateHomeRecommendationsCache() {
   // Do not reuse a request started before a playback event. It can resolve
   // after invalidation and otherwise make Recently Played appear unchanged.
   pendingHomeRecommendations = null;
+  pendingRecommendationSections.clear();
+  cachedRecommendationSections.clear();
 }
 
 export async function getHomeRecommendations() {
@@ -163,9 +169,15 @@ export async function getHomeRecommendations() {
 }
 
 export function getRecommendationSection(sectionId: string) {
+  const cached = cachedRecommendationSections.get(sectionId);
+  if (!HOME_CACHE_DISABLED && cached && cached.expiresAt > Date.now()) {
+    return Promise.resolve(cached.value);
+  }
+
   const pending = pendingRecommendationSections.get(sectionId);
   if (pending) return pending;
 
+  const requestGeneration = cacheGeneration;
   const request = http
     .get<RecommendationResponse>(
       `/me/recommendations/${encodeURIComponent(sectionId)}`,
@@ -186,9 +198,19 @@ export function getRecommendationSection(sectionId: string) {
           : {}),
       },
     )
-    .then((response) => response.data)
+    .then((response) => {
+      if (!HOME_CACHE_DISABLED && requestGeneration === cacheGeneration) {
+        cachedRecommendationSections.set(sectionId, {
+          value: response.data,
+          expiresAt: Date.now() + CACHE_TTL_MS,
+        });
+      }
+      return response.data;
+    })
     .finally(() => {
-      pendingRecommendationSections.delete(sectionId);
+      if (pendingRecommendationSections.get(sectionId) === request) {
+        pendingRecommendationSections.delete(sectionId);
+      }
     });
 
   pendingRecommendationSections.set(sectionId, request);

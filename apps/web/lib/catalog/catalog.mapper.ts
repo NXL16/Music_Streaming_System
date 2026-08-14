@@ -1,14 +1,7 @@
 import type { PlayerSong } from "@/lib/player/use-player-store";
-import type {
-  CatalogArtwork,
-  CatalogResponse,
-} from "./catalog.types";
-import {
-  getArtworkRenditionUrl,
-  getArtworkSrcSet,
-} from "@/lib/media/artwork";
-import { albumRoute } from "./album-route";
-import { songRoute } from "./song-route";
+import { projectPlayerSong } from "@/lib/songs/project-song-summary";
+import type { CatalogArtwork, CatalogResponse } from "./catalog.types";
+import { getArtworkRenditionUrl, getArtworkSrcSet } from "@/lib/media/artwork";
 import { catalogArtists } from "./catalog-artists";
 
 export function catalogArtworkUrl(
@@ -70,34 +63,27 @@ export function mapCatalogTracks(response: CatalogResponse): PlayerSong[] {
       song.attributes.artwork;
 
     return [
-      {
+      projectPlayerSong({
         id: song.id,
         title: song.attributes.name,
-        url: songRoute(song.id),
         artist: song.attributes.artistName,
         artists,
         album: playbackAlbum?.attributes.name ?? song.attributes.albumName,
         albumId: playbackAlbumId,
-        albumUrl:
-          playbackAlbumId && playbackAlbumUrl
-            ? albumRoute(playbackAlbumUrl, playbackAlbumId)
-            : undefined,
+        albumUrl: playbackAlbumUrl,
         durationSec: Math.round(song.attributes.durationInMillis / 1000),
         artworkUrl: catalogArtworkUrl(playbackArtwork, 316),
-        artworkSrcSet: catalogArtworkSrcSet(playbackArtwork, [
-          296,
-          316,
-          592,
-          632,
-        ]),
+        artworkSrcSet: catalogArtworkSrcSet(
+          playbackArtwork,
+          [296, 316, 592, 632],
+        ),
         thumbnailArtworkSrcSet: catalogArtworkSrcSet(playbackArtwork, [40, 80]),
         artworkBgColor: playbackArtwork?.bgColor
           ? `#${playbackArtwork.bgColor.replace(/^#/, "")}`
           : undefined,
         releaseDate: song.attributes.releaseDate,
         contentRating: song.attributes.contentRating,
-        playbackUrl: `mse:${song.id}`,
-      },
+      }),
     ];
   });
 }

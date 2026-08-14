@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import MediaShelf from "@/components/media/media-shelf";
 import {
   ShelfDetailLoading,
@@ -18,9 +18,13 @@ import {
 import MediaShelfSkeleton from "@/components/loading/media-shelf-skeleton";
 import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
 import { useRecentlyPlayedSection } from "@/lib/recommendations/use-recently-played-section";
+import {
+  normalizeRecentlyPlayedCard,
+  RECENTLY_PLAYED_SHELF_ID,
+} from "@/lib/recommendations/recently-played-presentation";
 import { HOME_SHELF_PREVIEW_LIMIT } from "@musical/shared-constants";
+import { useAppScrollToTop } from "@/lib/layout/use-app-scroll-to-top";
 
-const RECENTLY_PLAYED_SHELF_ID = "user-recently-played";
 const DAILY_MIX_SHELF_ID = "user-daily-mix";
 const STATIONS_FOR_YOU_SHELF_ID = "user-stations-for-you";
 const FEATURED_ARTISTS_SHELF_ID = "global-top-artists";
@@ -142,13 +146,7 @@ export default function HomePage() {
     return recentlyPlayedShelf ?? selectedShelf;
   }, [recentlyPlayedShelf, selectedShelf]);
 
-  useLayoutEffect(() => {
-    if (!selectedShelfId) return;
-
-    document
-      .querySelector<HTMLElement>("[data-app-scroll-container]")
-      ?.scrollTo({ top: 0, left: 0, behavior: "auto" });
-  }, [selectedShelfId]);
+  useAppScrollToTop(selectedShelfId);
 
   return (
     <>
@@ -217,6 +215,11 @@ export default function HomePage() {
                   title={shelf.title}
                   displayKind={shelf.displayKind}
                   items={shelf.items}
+                  normalizeItem={
+                    shelf.id === RECENTLY_PLAYED_SHELF_ID
+                      ? normalizeRecentlyPlayedCard
+                      : undefined
+                  }
                   prioritizeFirstCard={index === 0}
                   shelfId={shelf.id}
                   scrollToStartKey={

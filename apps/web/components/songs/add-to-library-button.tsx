@@ -1,53 +1,75 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { http } from "@/lib/api/http";
+import { useEffect, useId, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import {
+  addLibraryResource,
+  getLibraryResources,
+  isLibraryResource,
+  subscribeLibraryResourcesChanged,
+} from "@/lib/library/library-resources.api";
+import { ensureFavoriteLibraryResource } from "@/lib/favorites/ensure-favorite-library-resource";
+import {
+  confirmLibraryRemoval,
+  notifyMenuError,
+  notifyMenuSuccess,
+} from "@/lib/notifications/menu-toast";
+import { LibraryDeleteConfirmationDialog } from "./library-delete-confirmation-dialog";
 export function AddToLibraryButton({
   resourceType,
   resourceId,
   title,
   subtitle = "",
   artworkUrl = "",
+  readOnlySaved = false,
+  sourceOrigin,
+  songIds,
 }: {
   resourceType: "albums" | "playlists";
   resourceId: string;
   title: string;
   subtitle?: string;
   artworkUrl?: string;
+  /** Ensures the resource exists in Library but prevents user removal here. */
+  readOnlySaved?: boolean;
+  sourceOrigin?: "catalog" | "favorite" | "user-playlist";
+  songIds?: string[];
 }) {
+  const sourceId = useId();
+  const router = useRouter();
+  const pathname = usePathname();
   const [status, setStatus] = useState<
     "checking" | "idle" | "loading" | "saved"
   >("checking");
   const [confirming, setConfirming] = useState(false);
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const loadingDelay = () =>
     new Promise<void>((resolve) => window.setTimeout(resolve, 300));
 
   useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-
-    if (confirming && !dialog.open) dialog.showModal();
-    if (!confirming && dialog.open) dialog.close();
-  }, [confirming]);
-
-  useEffect(() => {
     let active = true;
-    void http
-      .get<{ resources: { resourceType: string; resourceId: string }[] }>(
-        "/songs/library/resources",
-      )
-      .then(({ data }) => {
-        if (active) {
-          setStatus(
-            data.resources.some(
-              (resource) =>
-                resource.resourceType === resourceType &&
-                resource.resourceId === resourceId,
-            )
-              ? "saved"
-              : "idle",
-          );
+
+    if (readOnlySaved) {
+      void ensureFavoriteLibraryResource()
+        .then(() => {
+          if (active) setStatus("saved");
+        })
+        .catch(() => {
+          if (active) setStatus("idle");
+        });
+      return () => {
+        active = false;
+      };
+    }
+
+    void getLibraryResources()
+      .then(() => {
+        if (!active) return;
+
+        if (isLibraryResource(resourceType, resourceId)) {
+          setStatus("saved");
+          return;
         }
+
+        setStatus("idle");
       })
       .catch(() => {
         if (active) setStatus("idle");
@@ -55,37 +77,80 @@ export function AddToLibraryButton({
     return () => {
       active = false;
     };
-  }, [resourceId, resourceType]);
+  }, [readOnlySaved, resourceId, resourceType]);
+
+  useEffect(() => {
+    if (readOnlySaved) return;
+
+    return subscribeLibraryResourcesChanged((change) => {
+      if (
+        change &&
+        (change.resourceType !== resourceType ||
+          change.resourceId !== resourceId)
+      ) {
+        return;
+      }
+
+      void getLibraryResources().then(() => {
+        setStatus((currentStatus) => {
+          if (currentStatus === "loading" && change?.sourceId === sourceId) {
+            return currentStatus;
+          }
+
+          return isLibraryResource(resourceType, resourceId) ? "saved" : "idle";
+        });
+      });
+    });
+  }, [readOnlySaved, resourceId, resourceType, sourceId]);
 
   async function addToLibrary() {
     if (status !== "idle") return;
     setStatus("loading");
     try {
       await Promise.all([
-        http.post("/songs/library/resources", {
-          resourceType,
-          resourceId,
-          title,
-          subtitle,
-          artworkUrl,
-        }),
+        addLibraryResource(
+          {
+            resourceType,
+            resourceId,
+            title,
+            subtitle,
+            artworkUrl,
+            sourceOrigin,
+            songIds,
+          },
+          sourceId,
+        ),
         loadingDelay(),
       ]);
       setStatus("saved");
+      notifyMenuSuccess("Added to Library");
     } catch {
       setStatus("idle");
+      notifyMenuError("Couldn't add to Library");
     }
   }
   async function removeFromLibrary() {
     setConfirming(false);
     try {
-      await Promise.all([
-        http.delete(`/songs/library/resources/${resourceType}/${resourceId}`),
-        loadingDelay(),
-      ]);
+      await confirmLibraryRemoval(
+        {
+          resourceType,
+          resourceId,
+          sourceOrigin,
+          songIds,
+        },
+        sourceId,
+      );
       setStatus("idle");
+      if (
+        sourceOrigin === "user-playlist" &&
+        pathname === `/library/playlist/${encodeURIComponent(resourceId)}`
+      ) {
+        router.replace("/home");
+      }
     } catch {
       setStatus("saved");
+      notifyMenuError("Couldn't delete from Library");
     }
   }
 
@@ -131,15 +196,26 @@ export function AddToLibraryButton({
 
       {status !== "loading" && (
         <button
-          className={`items-center text-(--keyColor) cursor-pointer inline-flex justify-center transition-(--global-transition) h-(--add-to-library-button-width,25px) leading-0 w-(--add-to-library-button-width,25px) me-(--addToLibraryMarginEnd,4px) bg-(--add-to-library-bg-color) [border:.75px_solid_var(--add-to-library-border-color)] rounded-full ${status === "saved" ? "[--add-to-library-icon-width:26px]" : ""}`}
-          title={status === "saved" ? "Delete from Library" : "Add to Library"}
+          className={`items-center text-(--keyColor) inline-flex justify-center transition-(--global-transition) h-(--add-to-library-button-width,25px) leading-0 w-(--add-to-library-button-width,25px) me-(--addToLibraryMarginEnd,4px) bg-(--add-to-library-bg-color) [border:.75px_solid_var(--add-to-library-border-color)] rounded-full ${readOnlySaved ? "cursor-default" : "cursor-pointer"} ${status === "saved" ? "[--add-to-library-icon-width:26px]" : ""}`}
+          title={
+            readOnlySaved
+              ? "Added to Library"
+              : status === "saved"
+                ? "Delete from Library"
+                : "Add to Library"
+          }
           type="button"
           aria-label={
             status === "saved" ? "Added to library" : "Add to library"
           }
           disabled={confirming}
-          onClick={() =>
-            status === "saved" ? openDeleteConfirmation() : void addToLibrary()
+          onClick={
+            readOnlySaved
+              ? undefined
+              : () =>
+                  status === "saved"
+                    ? openDeleteConfirmation()
+                    : void addToLibrary()
           }
         >
           {status === "idle" && (
@@ -173,35 +249,12 @@ export function AddToLibraryButton({
         </button>
       )}
 
-      <dialog
-        ref={dialogRef}
-        className="m-auto w-full max-w-80 rounded-xl border border-white/20 bg-[#242424] p-4 text-center text-white shadow-2xl backdrop:bg-black/40"
-        onCancel={(event) => {
-          event.preventDefault();
-          void cancelDeleteConfirmation();
-        }}
-      >
-        <h2 className="text-base font-bold">Delete from Library</h2>
-        <p className="mt-3 text-sm text-neutral-200">
-          Are you sure you want to delete this{" "}
-          {resourceType === "albums" ? "album" : "playlist"} from your
-          library?
-        </p>
-        <button
-          className="mt-4 w-full rounded-lg bg-[#e60018] py-2.5 font-bold"
-          onClick={() => void removeFromLibrary()}
-          type="button"
-        >
-          OK
-        </button>
-        <button
-          className="mt-2 w-full rounded-lg bg-neutral-400 py-2.5 font-bold"
-          onClick={() => void cancelDeleteConfirmation()}
-          type="button"
-        >
-          Cancel
-        </button>
-      </dialog>
+      <LibraryDeleteConfirmationDialog
+        open={confirming}
+        resourceType={resourceType}
+        onConfirm={() => void removeFromLibrary()}
+        onCancel={() => void cancelDeleteConfirmation()}
+      />
     </div>
   );
 }
