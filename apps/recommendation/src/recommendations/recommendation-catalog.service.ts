@@ -113,8 +113,25 @@ export class RecommendationCatalogService implements OnModuleInit {
     } catch {
       throw new RpcException({
         code: status.UNAVAILABLE,
-        message: 'Catalog system playlist publishing is temporarily unavailable',
+        message:
+          'Catalog system playlist publishing is temporarily unavailable',
       });
+    }
+  }
+
+  /** Resolves current metadata for an owned playlist outside the catalog. */
+  async getUserPlaylist(playlistId: string, requesterUserId: string) {
+    try {
+      const response = await firstValueFrom(
+        this.client.getPlaylist({
+          playlistId,
+          requesterUserId,
+          includeSongs: true,
+        }),
+      );
+      return response.playlist;
+    } catch {
+      return undefined;
     }
   }
 

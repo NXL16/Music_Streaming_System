@@ -1477,23 +1477,30 @@ export class RecommendationsService {
           ),
       )
       .map((context) => context.resourceId);
-    const playlistEvents = userPlaylistIds.length
-      ? await this.prisma.listeningEvent.findMany({
-          where: {
-            userId,
-            eventType: 'PLAY_START',
-            playlistId: { in: userPlaylistIds },
-          },
-          orderBy: { createdAt: 'desc' },
-          select: {
-            playlistId: true,
-            playlistName: true,
-            playlistCuratorName: true,
-            playlistArtworkUrl: true,
-            playlistArtworkBgColor: true,
-          },
-        })
-      : [];
+    const [playlistEvents, currentPlaylists] = userPlaylistIds.length
+      ? await Promise.all([
+          this.prisma.listeningEvent.findMany({
+            where: {
+              userId,
+              eventType: 'PLAY_START',
+              playlistId: { in: userPlaylistIds },
+            },
+            orderBy: { createdAt: 'desc' },
+            select: {
+              playlistId: true,
+              playlistName: true,
+              playlistCuratorName: true,
+              playlistArtworkUrl: true,
+              playlistArtworkBgColor: true,
+            },
+          }),
+          Promise.all(
+            userPlaylistIds.map((playlistId) =>
+              this.catalogService.getUserPlaylist(playlistId, userId),
+            ),
+          ),
+        ])
+      : [[], []];
     const playlistEventById = new Map<
       string,
       (typeof playlistEvents)[number]
@@ -1503,6 +1510,13 @@ export class RecommendationsService {
         playlistEventById.set(event.playlistId, event);
       }
     }
+    const currentPlaylistById = new Map(
+      currentPlaylists
+        .filter((playlist): playlist is NonNullable<typeof playlist> =>
+          Boolean(playlist),
+        )
+        .map((playlist) => [playlist.id, playlist]),
+    );
 
     const records = recentContexts.flatMap((context) => {
       const snapshot = snapshotByKey.get(
@@ -1540,7 +1554,13 @@ export class RecommendationsService {
       }
 
       const event = playlistEventById.get(context.resourceId);
-      if (!event?.playlistName || context.resourceType !== 'playlists') return [];
+      const currentPlaylist = currentPlaylistById.get(context.resourceId);
+      if (
+        context.resourceType !== 'playlists' ||
+        (!currentPlaylist?.name && !event?.playlistName)
+      ) {
+        return [];
+      }
 
       const href = `/library/playlist/${encodeURIComponent(context.resourceId)}`;
       resources.playlists[context.resourceId] = {
@@ -1548,13 +1568,13 @@ export class RecommendationsService {
         type: 'playlists',
         href,
         attributes: this.wrapStruct({
-          name: event.playlistName,
-          curatorName: event.playlistCuratorName || 'Musical',
+          name: currentPlaylist?.name || event?.playlistName || '',
+          curatorName: event?.playlistCuratorName || 'Musical',
           isUserPlaylist: true,
           url: href,
           artwork: {
-            url: event.playlistArtworkUrl,
-            bgColor: event.playlistArtworkBgColor || '2c2c2e',
+            url: event?.playlistArtworkUrl || '',
+            bgColor: event?.playlistArtworkBgColor || '2c2c2e',
           },
           playParams: { id: context.resourceId, kind: 'playlist' },
         }),
