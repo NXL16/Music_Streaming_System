@@ -9,6 +9,7 @@ const MAX_CONCURRENT_VIDEOS = 4;
 const MAX_WARM_VIDEOS = 4;
 const WARM_RETENTION_MS = 1_500;
 const SCROLL_IDLE_MS = 160;
+const HERO_QUALITY_SAMPLE_COUNT = 2;
 
 type PageScrollListener = (isScrolling: boolean) => void;
 
@@ -224,23 +225,6 @@ interface AmbientVideoProps {
 
 const AmpAmbientVideoTag = "amp-ambient-video" as ElementType;
 
-function getBestLevelIndex(levels: Hls["levels"]) {
-  return levels.reduce((bestIndex, level, index) => {
-    const bestLevel = levels[bestIndex];
-
-    if (level.height > bestLevel.height) return index;
-
-    if (
-      level.height === bestLevel.height &&
-      level.bitrate > bestLevel.bitrate
-    ) {
-      return index;
-    }
-
-    return bestIndex;
-  }, 0);
-}
-
 export default function AmbientVideo({
   src,
   variant = "home",
@@ -258,7 +242,9 @@ export default function AmbientVideo({
   const suspendPlaybackRef = useRef<() => void>(() => {});
 
   const [shouldMountMedia, setShouldMountMedia] = useState(false);
+  const [readyMediaSrc, setReadyMediaSrc] = useState<string>();
   const shouldRenderMedia = keepAlive || shouldMountMedia;
+  const isMediaReady = !keepAlive || readyMediaSrc === src;
 
   useEffect(() => {
     if (keepAlive) return;
@@ -422,14 +408,26 @@ export default function AmbientVideo({
       }
     };
 
-    const preferHighQuality = (hls: Hls) => {
-      if (!keepAlive || hls.levels.length === 0) return;
+    const replayKeepAliveVideo = () => {
+      if (!keepAlive || disposed) return;
 
-      const bestLevelIndex = getBestLevelIndex(hls.levels);
+      // Reuse the existing media source and its buffered rendition. Native
+      // video.loop restarts HLS adaptation from the lowest level on some
+      // browsers, making every new loop visibly soften before recovering.
+      video.currentTime = 0;
+      tryPlay();
+    };
 
-      hls.startLevel = bestLevelIndex;
-      hls.nextLevel = bestLevelIndex;
-      hls.loadLevel = bestLevelIndex;
+    const setupNativeHls = () => {
+      nativeCanPlayHandler = () => {
+        if (disposed) return;
+
+        setReadyMediaSrc(src);
+        tryPlay();
+      };
+
+      video.addEventListener("canplay", nativeCanPlayHandler);
+      video.src = src;
     };
 
     const setupHls = () => {
@@ -437,7 +435,6 @@ export default function AmbientVideo({
 
       if (hlsRef.current) {
         hlsRef.current.startLoad(-1);
-        preferHighQuality(hlsRef.current);
         tryPlay();
         return;
       }
@@ -447,14 +444,13 @@ export default function AmbientVideo({
         return;
       }
 
-      // Safari can play HLS itself, so it never needs to download hls.js.
-      if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        nativeCanPlayHandler = () => {
-          tryPlay();
-        };
-
-        video.addEventListener("canplay", nativeCanPlayHandler);
-        video.src = src;
+      // Lightweight cards keep Safari's native HLS path. A keep-alive hero
+      // uses hls.js where MSE is available so its rendition survives loops.
+      if (
+        !keepAlive &&
+        video.canPlayType("application/vnd.apple.mpegurl")
+      ) {
+        setupNativeHls();
         return;
       }
 
@@ -462,7 +458,13 @@ export default function AmbientVideo({
       // eligible to play. This keeps hls.js out of normal card/list routes.
       void import("hls.js").then(({ default: Hls }) => {
         if (disposed || hlsRef.current || video.currentSrc) return;
-        if (!Hls.isSupported()) return;
+
+        if (!Hls.isSupported()) {
+          if (video.canPlayType("application/vnd.apple.mpegurl")) {
+            setupNativeHls();
+          }
+          return;
+        }
 
         const hls = new Hls({
           enableWorker: true,
@@ -475,14 +477,33 @@ export default function AmbientVideo({
           lowLatencyMode: !keepAlive,
 
           capLevelToPlayerSize: !keepAlive,
-          abrEwmaDefaultEstimate: keepAlive ? 15_000_000 : 500_000,
+          abrEwmaDefaultEstimate: keepAlive ? 5_000_000 : 500_000,
         });
 
         hlsRef.current = hls;
 
+        let bufferedFragments = 0;
+        let qualityLocked = false;
+
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          preferHighQuality(hls);
           tryPlay();
+        });
+
+        hls.on(Hls.Events.FRAG_BUFFERED, () => {
+          if (disposed || !keepAlive || qualityLocked) return;
+
+          bufferedFragments += 1;
+          if (bufferedFragments < HERO_QUALITY_SAMPLE_COUNT) return;
+
+          // Let ABR measure the real connection during startup, then preserve
+          // that chosen rendition across every later loop of this hero video.
+          const selectedLevel = hls.nextAutoLevel;
+          if (selectedLevel < 0) return;
+
+          qualityLocked = true;
+          hls.loadLevel = selectedLevel;
+          hls.nextLevel = selectedLevel;
+          setReadyMediaSrc(src);
         });
 
         hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -550,8 +571,12 @@ export default function AmbientVideo({
 
     video.muted = true;
     video.defaultMuted = true;
-    video.loop = true;
+    video.loop = !keepAlive;
     video.playsInline = true;
+
+    if (keepAlive) {
+      video.addEventListener("ended", replayKeepAliveVideo);
+    }
 
     resumePlaybackRef.current = () => requestPlayback();
     suspendPlaybackRef.current = suspendPlayback;
@@ -574,6 +599,8 @@ export default function AmbientVideo({
       if (!keepAlive) {
         cardElement?.removeEventListener("pointerenter", handlePointerEnter);
         cardElement?.removeEventListener("pointerleave", handlePointerLeave);
+      } else {
+        video.removeEventListener("ended", replayKeepAliveVideo);
       }
 
       videoManager.release(id);
@@ -597,10 +624,10 @@ export default function AmbientVideo({
             variant === "artist"
               ? "absolute inset-0 size-full object-top"
               : "absolute bottom-[-9999px] left-[-9999px] m-auto right-[-9999px] top-[-9999px] h-(--editorialVideoHeight,100%) w-(--editorialVideoWidth,auto)"
-          }`}
+          } ${keepAlive && !isMediaReady ? "opacity-0" : "opacity-100"} transition-opacity duration-150`}
           preload={keepAlive ? "auto" : "none"}
           playsInline
-          loop
+          loop={!keepAlive}
           muted
           disableRemotePlayback
         />
