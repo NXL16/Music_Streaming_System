@@ -35,6 +35,7 @@ type MusicPlayDetailProps = {
   volume: number;
   onSetVolume: (volume: number) => void;
 };
+
 export default function MusicPlayDetail({
   audioRef,
   currentSong,
@@ -45,15 +46,29 @@ export default function MusicPlayDetail({
 }: MusicPlayDetailProps) {
   const [isOpenLyric, setIsOpenLyric] = useState(initialLyricOpen);
   const [isFavoriteSaving, setIsFavoriteSaving] = useState(false);
+  const [loadedArtworkSrcSet, setLoadedArtworkSrcSet] = useState<string>();
   const artworkSrcSet = currentSong.artworkSrcSet ?? currentSong.artworkUrl;
   const thumbnailArtworkSrcSet =
     currentSong.thumbnailArtworkSrcSet ?? artworkSrcSet;
+  const isArtworkLoading = loadedArtworkSrcSet !== artworkSrcSet;
   const artworkColor = currentSong.artworkBgColor ?? "var(--genericJoeColor)";
   const artworkColors = { bg: artworkColor, main: artworkColor };
   const playing = usePlayerStore((state) => state.playing);
   const userId = useAuthStore((state) => state.user?.userId);
   const isCurrentSongFavorite = useFavoriteStore((state) =>
     state.songs.some((song) => song.id === currentSong.id),
+  );
+  const markArtworkLoaded = () => setLoadedArtworkSrcSet(artworkSrcSet);
+  const mainArtwork = (
+    <CardArtwork
+      variant="cover"
+      sizes="(max-width:1319px) 450px,(min-width:1320px) and (max-width:1679px) 600px,600px"
+      title={currentSong.title}
+      imageSrcSet={artworkSrcSet}
+      artworkColors={artworkColors}
+      onArtworkError={markArtworkLoaded}
+      onArtworkLoad={markArtworkLoaded}
+    />
   );
 
   const handleFavoriteClick = async () => {
@@ -98,36 +113,42 @@ export default function MusicPlayDetail({
                     <path d="M1.2 18C.6 18 0 17.5 0 16.8c0-.4.1-.6.4-.8l7-7-7-7c-.3-.2-.4-.5-.4-.8C0 .5.6 0 1.2 0c.3 0 .6.1.8.3l7 7 7-7c.2-.2.5-.3.8-.3.6 0 1.2.5 1.2 1.2 0 .3-.1.6-.4.8l-7 7 7 7c.2.2.4.5.4.8 0 .7-.6 1.2-1.2 1.2-.3 0-.6-.1-.8-.3l-7-7-7 7c-.2.1-.5.3-.8.3z"></path>
                   </svg>
                 </button>
-                <div className="grid [grid-area:controls] [grid-template:'artwork'_auto_'metadata'_55px_'scrubber'_65px_'controls'_55px_'volume'_26px] h-fit mt-5 max-w-150 place-items-center place-self-center w-full z-[calc(var(--z-default)+1)]">
-                  <div className="[grid-area:artwork] aspect-square h-auto w-full transform-[scale(.92)] origin-[bottom_center] [--global-transition-duration:1s] [transition:var(--global-transition)] shadow-[0_20px_25px_rgba(0,0,0,.1),0_10px_25px_rgba(0,0,0,.1)] opacity-100">
-                    <div className="filter-[blur(20px)_saturate(2)] size-full opacity-40">
-                      <CardArtwork
-                        variant="cover"
-                        sizes="40px"
-                        title={currentSong.title}
-                        imageSrcSet={thumbnailArtworkSrcSet}
-                        artworkColors={artworkColors}
-                      />
-                    </div>
-                  </div>
-                  <div className="items-center rounded-lg flex [grid-area:artwork] size-full justify-center overflow-hidden relative [transition:var(--global-transition)] shadow-[0_4px_10px_rgba(0,0,0,.1)] min-[1320px]:rounded-[10px] min-[1680px]:rounded-xl">
-                    <CardArtwork
-                      variant="cover"
-                      sizes="(max-width:1319px) 450px,(min-width:1320px) and (max-width:1679px) 600px,600px"
-                      title={currentSong.title}
-                      imageSrcSet={artworkSrcSet}
-                      artworkColors={artworkColors}
-                      retainPreviousArtwork
-                    />
-
-                    {currentSong.albumVideoSrc && (
-                      <div className="rounded-[inherit] size-full pointer-events-none absolute top-0 z-(--z-default)">
-                        <AmbientVideo
-                          src={currentSong.albumVideoSrc}
-                          variant="artist"
-                          keepAlive
+                <div className="grid [grid-area:controls] grid-rows-[auto_55px_65px_55px_26px] grid-cols-none [grid-template-areas:'artwork'_'metadata'_'scrubber'_'controls'_'volume'] h-fit mt-5 max-w-150 place-items-center place-self-center w-full z-[calc(var(--z-default)+1)]">
+                  <div className="shadow-[0_20px_25px_rgba(0,0,0,.1),0_10px_25px_rgba(0,0,0,.1)] opacity-100 [grid-area:artwork] h-full transform-[scale(.92)] origin-[bottom_center] [--global-transition-duration:1s] [transition:var(--global-transition)]">
+                    {!isArtworkLoading && (
+                      <div className="filter-[blur(20px)_saturate(2)] size-full opacity-40">
+                        <CardArtwork
+                          variant="cover"
+                          sizes="40px"
+                          title={currentSong.title}
+                          imageSrcSet={thumbnailArtworkSrcSet}
+                          artworkColors={artworkColors}
                         />
                       </div>
+                    )}
+                  </div>
+                  <div
+                    className={`bg-(--artwork-bg-color) items-center rounded-lg flex [grid-area:artwork] aspect-[1] h-full justify-center w-full [transition:var(--global-transition)] min-[1320px]:rounded-[10px] min-[1680px]:rounded-xl ${isArtworkLoading ? "" : "shadow-[0_4px_10px_rgba(0,0,0,.1)]"}`}
+                    style={
+                      {
+                        "--artwork-bg-color": artworkColors.bg,
+                      } as CSSProperties
+                    }
+                  >
+                    {currentSong.albumVideoSrc ? (
+                      <div className="w-[inherit] rounded-[inherit] relative z-(--z-default)">
+                        {mainArtwork}
+
+                        <div className="rounded-[inherit] size-full pointer-events-none absolute top-0 z-(--z-default)">
+                          <AmbientVideo
+                            src={currentSong.albumVideoSrc}
+                            variant="artist"
+                            keepAlive
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      mainArtwork
                     )}
                   </div>
 

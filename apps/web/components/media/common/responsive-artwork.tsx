@@ -1,7 +1,8 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import OfflineArtworkFallback from "./offline-artwork-fallback";
 
 type ResponsiveArtworkProps = {
   alt: string;
@@ -9,8 +10,9 @@ type ResponsiveArtworkProps = {
   fetchPriority?: "auto" | "high" | "low";
   height: number;
   loading?: "eager" | "lazy";
+  onError?: () => void;
+  onLoad?: () => void;
   pictureClassName?: string;
-  retainPreviousArtwork?: boolean;
   role?: string;
   sizes?: string;
   src: string;
@@ -25,8 +27,9 @@ export default function ResponsiveArtwork({
   fetchPriority = "auto",
   height,
   loading = "lazy",
+  onError,
+  onLoad,
   pictureClassName,
-  retainPreviousArtwork = false,
   role,
   sizes,
   src,
@@ -34,41 +37,20 @@ export default function ResponsiveArtwork({
   style,
   width,
 }: ResponsiveArtworkProps) {
-  const [displayedSrcSet, setDisplayedSrcSet] = useState(srcSet);
   const [failedSrcSet, setFailedSrcSet] = useState<string>();
-  const activeSrcSet = retainPreviousArtwork ? displayedSrcSet : srcSet;
-  const hasFailed = failedSrcSet === activeSrcSet;
+  const [loadedArtworkKey, setLoadedArtworkKey] = useState<string>();
+  const activeArtworkKey = `${src}|${srcSet ?? ""}`;
+  const hasFailed = Boolean(srcSet) && failedSrcSet === srcSet;
+  const hasLoaded = loadedArtworkKey === activeArtworkKey;
 
-  useEffect(() => {
-    if (!retainPreviousArtwork) return;
-    if (srcSet === displayedSrcSet) return;
-
-    let cancelled = false;
-    const image = new Image();
-    const showArtwork = () => {
-      if (!cancelled) setDisplayedSrcSet(srcSet);
-    };
-
-    image.addEventListener("load", showArtwork, { once: true });
-    image.srcset = srcSet ?? "";
-    image.sizes = sizes ?? "";
-    image.src = src;
-
-    if (image.complete && image.naturalWidth > 0) showArtwork();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [displayedSrcSet, retainPreviousArtwork, sizes, src, srcSet]);
+  if (hasFailed) return <OfflineArtworkFallback />;
 
   return (
     <picture
-      key={`${src}|${activeSrcSet ?? ""}|${sizes ?? ""}`}
+      key={`${activeArtworkKey}|${sizes ?? ""}`}
       className={pictureClassName}
     >
-      {!hasFailed && activeSrcSet && (
-        <source sizes={sizes} srcSet={activeSrcSet} />
-      )}
+      {srcSet && <source sizes={sizes} srcSet={srcSet} />}
       <img
         alt={alt}
         className={`${className} align-baseline`}
@@ -76,10 +58,17 @@ export default function ResponsiveArtwork({
         fetchPriority={fetchPriority}
         height={height}
         loading={loading}
-        onError={() => setFailedSrcSet(activeSrcSet)}
+        onError={() => {
+          setFailedSrcSet(srcSet);
+          onError?.();
+        }}
+        onLoad={() => {
+          setLoadedArtworkKey(activeArtworkKey);
+          onLoad?.();
+        }}
         role={role}
         src={src}
-        style={style}
+        style={hasLoaded ? style : { ...style, opacity: 0 }}
         width={width}
       />
     </picture>

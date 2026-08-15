@@ -15,9 +15,10 @@ type SharedCardArtworkProps = Pick<
   containerClassName?: string;
   aspectRatio?: string;
   containerStyle?: CSSProperties;
+  onArtworkError?: () => void;
+  onArtworkLoad?: () => void;
   sizes?: string;
   priority?: boolean;
-  retainPreviousArtwork?: boolean;
 };
 
 type CardArtworkProps = SharedCardArtworkProps &
@@ -44,9 +45,10 @@ export default function CardArtwork({
   containerClassName,
   aspectRatio,
   containerStyle,
+  onArtworkError,
+  onArtworkLoad,
   sizes,
   priority = false,
-  retainPreviousArtwork = false,
 }: CardArtworkProps) {
   if (variant === "hero") {
     return (
@@ -68,8 +70,9 @@ export default function CardArtwork({
             fetchPriority={priority ? "high" : "auto"}
             height={800}
             loading={priority ? "eager" : "lazy"}
+            onError={onArtworkError}
+            onLoad={onArtworkLoad}
             pictureClassName="block size-full"
-            retainPreviousArtwork={retainPreviousArtwork}
             sizes={sizes || "(max-width: 1679px) 450px, 600px"}
             src={PLACEHOLDER_SRC}
             srcSet={imageSrcSet}
@@ -104,8 +107,9 @@ export default function CardArtwork({
         fetchPriority={priority ? "high" : "auto"}
         height={316}
         loading={priority ? "eager" : "lazy"}
+        onError={onArtworkError}
+        onLoad={onArtworkLoad}
         pictureClassName=""
-        retainPreviousArtwork={retainPreviousArtwork}
         sizes={
           sizes ||
           "(max-width:1319px) 296px,(min-width:1320px) and (max-width:1679px) 316px,316px"
