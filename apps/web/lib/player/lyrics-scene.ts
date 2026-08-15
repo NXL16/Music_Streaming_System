@@ -31,8 +31,8 @@ const TONE_FILTER_SETTINGS: Record<
     saturation: 2.36,
     contrast: 1.69,
     brightness: 0.36,
-    red: 0.92,
-    green: 1.2,
+    red: 0.94,
+    green: 1.22,
     blue: 1,
   },
   bright: {
