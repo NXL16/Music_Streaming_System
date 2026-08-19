@@ -270,18 +270,13 @@ export function DesktopPlayerBar({
   onDrawerOpenChange,
 }: DesktopPlayerBarProps) {
   const userId = useAuthStore((state) => state.user?.userId);
-  const favoriteSongs = useFavoriteStore((state) => state.songs);
-  const favoriteSongIds = useMemo(
-    () => new Set(favoriteSongs.map((song) => song.id)),
-    [favoriteSongs],
-  );
+  const favoriteSongIds = useFavoriteStore((state) => state.songIds);
   const [showLyrics, setShowLyrics] = useState(false);
   const [lyricsMounted, setLyricsMounted] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
   const [queueMounted, setQueueMounted] = useState(false);
   const [isOpenMusicPlayer, setIsOpenMusicPlayer] = useState(false);
-  const [isMusicPlayerLyricOpen, setIsMusicPlayerLyricOpen] =
-    useState(false);
+  const [isMusicPlayerLyricOpen, setIsMusicPlayerLyricOpen] = useState(false);
 
   const openMusicPlayer = (
     initialLyricOpen = currentSong?.hasLyrics ?? false,

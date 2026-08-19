@@ -180,9 +180,9 @@ export function AppPlayerBar() {
     () => queue.filter((song) => song.playbackUrl).length,
     [queue],
   );
-  const favoriteSongs = useFavoriteStore((state) => state.songs);
+  const favoriteSongIds = useFavoriteStore((state) => state.songIds);
   const isCurrentSongFavorite = Boolean(
-    currentSong && favoriteSongs.some((song) => song.id === currentSong.id),
+    currentSong && favoriteSongIds.has(currentSong.id),
   );
 
   const [isExpanded, setIsExpanded] = useState(false);

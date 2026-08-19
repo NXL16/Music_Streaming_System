@@ -118,7 +118,7 @@ export function CatalogDetailPage({
   const playing = usePlayerStore((state) => state.playing);
   const togglePlayback = usePlayerStore((state) => state.togglePlayback);
   const userId = useAuthStore((state) => state.user?.userId);
-  const favoriteSongs = useFavoriteStore((state) => state.songs);
+  const favoriteSongIds = useFavoriteStore((state) => state.songIds);
   const [relatedShelvesAvailability, setRelatedShelvesAvailability] = useState({
     albumId: "",
     hasShelves: false,
@@ -138,10 +138,6 @@ export function CatalogDetailPage({
       : null,
   );
   const tracks = useMemo(() => (data ? mapCatalogTracks(data) : []), [data]);
-  const favoriteSongIds = useMemo(
-    () => new Set(favoriteSongs.map((song) => song.id)),
-    [favoriteSongs],
-  );
   const hasRelatedShelves =
     resourceType === "albums" &&
     relatedShelvesAvailability.albumId === resourceId &&

@@ -19,6 +19,7 @@ let favoritesCacheExpiresAt = 0;
 
 type FavoriteState = {
   songs: SongSummary[];
+  songIds: Set<string>;
   collection?: FavoriteCollection;
   loading: boolean;
   loaded: boolean;
@@ -28,6 +29,7 @@ type FavoriteState = {
 
 export const useFavoriteStore = create<FavoriteState>((set, get) => ({
   songs: [],
+  songIds: new Set(),
   loading: false,
   loaded: false,
   async hydrate(force = false) {
@@ -75,6 +77,7 @@ export const useFavoriteStore = create<FavoriteState>((set, get) => ({
 
         set({
           songs,
+          songIds,
           collection,
           loaded: true,
         });
@@ -91,12 +94,17 @@ export const useFavoriteStore = create<FavoriteState>((set, get) => ({
   },
   async toggle(songId) {
     await get().hydrate();
-    const currentlyFavorite = get().songs.some((song) => song.id === songId);
+    const currentlyFavorite = get().songIds.has(songId);
     if (currentlyFavorite) {
       await removeFavoriteSong(songId);
-      set((state) => ({
-        songs: state.songs.filter((song) => song.id !== songId),
-      }));
+      set((state) => {
+        const songIds = new Set(state.songIds);
+        songIds.delete(songId);
+        return {
+          songs: state.songs.filter((song) => song.id !== songId),
+          songIds,
+        };
+      });
       favoritesCacheExpiresAt = Date.now() + FAVORITES_CACHE_TTL_MS;
       notifyFavoriteChanged(songId, false);
       return false;
@@ -129,6 +137,7 @@ export function clearFavoriteStore() {
   favoritesCacheExpiresAt = 0;
   useFavoriteStore.setState({
     songs: [],
+    songIds: new Set(),
     collection: undefined,
     loading: false,
     loaded: false,

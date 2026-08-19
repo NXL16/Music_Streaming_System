@@ -1,6 +1,6 @@
 "use client";
 
-import { CSSProperties, type ReactNode, useMemo, useState } from "react";
+import { CSSProperties, type ReactNode, useState } from "react";
 import Link from "next/link";
 import { usePlayerStore, type PlayerSong } from "@/lib/player/use-player-store";
 import CardArtwork from "../media/common/card-artwork";
@@ -77,7 +77,7 @@ export default function PlaylistDetailView({
     playlist.playlistKind ?? (playlist.isUserPlaylist ? "user" : "catalog");
   const isUserPlaylist = playlistKind === "user";
   const userId = useAuthStore((state) => state.user?.userId);
-  const favoriteSongs = useFavoriteStore((state) => state.songs);
+  const favoriteSongIds = useFavoriteStore((state) => state.songIds);
   const setQueue = usePlayerStore((state) => state.setQueue);
   const playShuffledQueue = usePlayerStore((state) => state.playShuffledQueue);
   const currentSong = usePlayerStore((state) => state.currentSong);
@@ -131,10 +131,6 @@ export default function PlaylistDetailView({
   const playableTrackCount = playlist.tracks.reduce(
     (count, track) => count + Number(Boolean(track.playbackUrl)),
     0,
-  );
-  const favoriteSongIds = useMemo(
-    () => new Set(favoriteSongs.map((song) => song.id)),
-    [favoriteSongs],
   );
   const startPlaylistPlayback = async (trackId?: string, shuffle = false) => {
     if (isPreparingPlayback) return;

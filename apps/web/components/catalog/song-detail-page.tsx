@@ -95,6 +95,11 @@ export function SongDetailPage({ songId }: SongDetailPageProps) {
             >
               Play
             </button>
+            {!song.playbackUrl && (
+              <p className="basis-full text-sm text-(--systemSecondary)" role="status">
+                Bài hát này hiện chưa có tệp phát.
+              </p>
+            )}
             <FavoriteSongButton songId={song.id} />
             <AddSongToPlaylistButton songId={song.id} />
           </div>

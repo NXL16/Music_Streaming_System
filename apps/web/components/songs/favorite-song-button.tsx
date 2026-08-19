@@ -20,10 +20,10 @@ export function FavoriteSongButton({
   ariaLabel,
   title,
 }: FavoriteSongButtonProps) {
-  const songs = useFavoriteStore((state) => state.songs);
+  const songIds = useFavoriteStore((state) => state.songIds);
   const hydrate = useFavoriteStore((state) => state.hydrate);
   const [saving, setSaving] = useState(false);
-  const isFavorite = songs.some((song) => song.id === songId);
+  const isFavorite = songIds.has(songId);
 
   useEffect(() => {
     void hydrate();

@@ -1,6 +1,6 @@
 "use client";
 
-import { CSSProperties, useMemo, useState } from "react";
+import { CSSProperties, useState } from "react";
 import { useRouter } from "next/navigation";
 import AmpContextMenuButton from "../custom-elements/AmpContextMenuButton";
 import AmbientVideo from "../custom-elements/AmpVideo";
@@ -50,12 +50,8 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
   const setQueue = usePlayerStore((state) => state.setQueue);
   const startStation = usePlayerStore((state) => state.startStation);
   const userId = useAuthStore((state) => state.user?.userId);
-  const favoriteSongs = useFavoriteStore((state) => state.songs);
+  const favoriteSongIds = useFavoriteStore((state) => state.songIds);
   const [startingStation, setStartingStation] = useState(false);
-  const favoriteSongIds = useMemo(
-    () => new Set(favoriteSongs.map((song) => song.id)),
-    [favoriteSongs],
-  );
 
   if (showLoading) {
     return <CatalogPageLoading />;
@@ -98,7 +94,7 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
   const latestReleaseIsExplicit =
     latestRelease?.attributes.contentRating === "explicit";
   const latestReleaseTrackCount = latestRelease?.attributes.trackCount;
-  const topSongPreview = songs.slice(0, 9);
+  const topSongPreview = songs.slice(0, 24);
 
   const playArtistStation = async () => {
     if (startingStation) return;
@@ -190,7 +186,7 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
         </div>
       </div>
 
-      <div className="flex pt-3 in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
+      <div className="max-[999px]:[display:unset] flex pt-3 in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
         <div>
           <div className="flex justify-end items-center m-[0_var(--bodyGutter)_13px]">
             <div className="flex-1">
@@ -202,8 +198,8 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
 
           <div>
             <div className="[--iconCircleFillBGOverride:transparent] items-center flex justify-start pb-8 ms-(--bodyGutter) w-[calc(100%-var(--bodyGutter))] min-[1000px]:w-[calc(50vw-var(--web-navigation-width,0)*2/4-50px)] min-[1260px]:w-[calc(40vw-var(--web-navigation-width,0)*2/5-44px)] min-[1580px]:w-[calc(25vw-var(--web-navigation-width,0)*2/8-35px)]">
-              <div className="rounded-[7px] shadow-[0_1px_1px_rgba(0,0,0,0.01),0_2px_2px_rgba(0,0,0,0.01),0_4px_4px_rgba(0,0,0,0.02),0_8px_8px_rgba(0,0,0,0.03),0_14px_14px_rgba(0,0,0,0.03)] cursor-pointer relative [--scrimOpacity:0] hover:[--scrimOpacity:1] after:content-[''] after:absolute after:inset-0 after:rounded-[inherit] after:bg-[#333333]/30 after:opacity-(--scrimOpacity,0) after:transition-opacity after:duration-100 after:ease-in after:z-1">
-                <div className="rounded-[7px]">
+              <div className="rounded-[7px] shadow-[0_1px_1px_rgba(0,0,0,0.01),0_2px_2px_rgba(0,0,0,0.01),0_4px_4px_rgba(0,0,0,0.02),0_8px_8px_rgba(0,0,0,0.03),0_14px_14px_rgba(0,0,0,0.03)] cursor-pointer relative [--scrimOpacity:0] hover:[--scrimOpacity:1]">
+                <div className="rounded-[7px] after:content-[''] after:absolute after:inset-0 after:rounded-[inherit] after:bg-[#333333]/30 after:opacity-(--scrimOpacity,0) after:transition-opacity after:duration-100 after:ease-in after:z-1">
                   <CardArtwork
                     altText={latestRelease?.attributes.name ?? ""}
                     artworkColors={{
@@ -219,7 +215,17 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
                 </div>
 
                 {latestRelease && (
-                  <div className="media-card-interaction rounded-[inherit] size-full opacity-(--scrimOpacity,0) absolute top-0 transition-(--global-transition) z-[calc(var(--z-default)+1)]">
+                  <div
+                    onClick={() =>
+                      router.push(
+                        albumRoute(
+                          latestRelease.attributes.url,
+                          latestRelease.id,
+                        ),
+                      )
+                    }
+                    className="media-card-interaction rounded-[inherit] size-full opacity-(--scrimOpacity,0) absolute top-0 transition-(--global-transition) z-[calc(var(--z-default)+1)]"
+                  >
                     <CardPlayButton
                       ariaLabel={`Play ${latestRelease.attributes.name}`}
                       variant="cover"
@@ -328,7 +334,7 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
 
           <div className="pb-8">
             <section
-              className="box-border p-[0_var(--shelfGridPaddingInline,var(--bodyGutter))] relative w-full z-(--z-default)"
+              className="box-border p-[0_var(--shelfGridPaddingInline,var(--bodyGutter))] relative w-full z-(--z-default) max-[999px]:pe-0 max-[999px]:ps-0"
               style={
                 {
                   "--grid-max-content-xsmall": "calc(100% - var(--bodyGutter))",
@@ -353,10 +359,11 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
               }
             >
               <div className="box-content -me-0.5 -ms-0.5 overflow-visible pe-0.5 ps-0.5 w-full">
-                <ul className="box-border grid grid-flow-col [list-style:none] m-0 overflow-x-auto overflow-y-hidden p-0 -mb-(--override-shelf-overflow-bleed-bottom,var(--overflowBleedBottom,15px)) -mt-(--override-shelf-overflow-bleed-top,var(--overflowBleedTop,15px)) overscroll-x-none pb-(--override-shelf-overflow-bleed-bottom,var(--overflowBleedBottom,15px)) pt-(--override-shelf-overflow-bleed-top,var(--overflowBleedTop,15px)) scroll-smooth [scroll-snap-type:x_mandatory] scrollbar-none items-stretch gap-x-(--grid-column-gap-xsmall) auto-cols-(--grid-max-content-xsmall,calc((100%-(var(--grid-xsmall)-1)*var(--grid-column-gap-xsmall))/var(--grid-xsmall))) grid-rows-[repeat(var(--grid-rows),max-content)] gap-y-(--grid-row-gap-xsmall) min-[1000px]:-me-(--standard-lockup-shadow-offset,15px) min-[1000px]:-ms-(--standard-lockup-shadow-offset,15px) min-[1000px]:[mask:linear-gradient(90deg,transparent_0,#000_var(--standard-lockup-shadow-offset,15px),#000_calc(100%-var(--standard-lockup-shadow-offset,15px)),transparent_100%)] min-[1000px]:pe-(--standard-lockup-shadow-offset,15px) min-[1000px]:ps-(--standard-lockup-shadow-offset,15px) min-[1000px]:w-[calc(100%+30px)] min-[1580px]:max-[1939px]:gap-x-(--grid-column-gap-large) min-[1580px]:max-[1939px]:auto-cols-(--grid-max-content-large,calc((100%-(var(--grid-large)-1)*var(--grid-column-gap-large))/var(--grid-large))) min-[1580px]:max-[1939px]:grid-rows-[repeat(var(--grid-rows),max-content)] min-[1580px]:max-[1939px]:gap-y-(--grid-row-gap-large) min-[1260px]:max-[1579px]:gap-x-(--grid-column-gap-medium) min-[1260px]:max-[1579px]:grid-cols-[repeat(auto-fill,var(--grid-max-content-medium,calc((100%-(var(--grid-medium)-1)*var(--grid-column-gap-medium))/var(--grid-medium))))] min-[1260px]:max-[1579px]:grid-rows-[repeat(var(--grid-rows),max-content)] min-[1260px]:max-[1579px]:gap-y-(--grid-row-gap-medium) min-[1000px]:max-[1259px]:gap-x-(--grid-column-gap-small) min-[1000px]:max-[1259px]:grid-cols-[repeat(auto-fill,var(--grid-max-content-small,calc((100%-(var(--grid-small)-1)*var(--grid-column-gap-small))/var(--grid-small))))] min-[1000px]:max-[1259px]:grid-rows-[repeat(var(--grid-rows),max-content)] min-[1000px]:max-[1259px]:gap-y-(--grid-row-gap-small) min-[1940px]:gap-x-(--grid-column-gap-xlarge) min-[1940px]:grid-cols-[repeat(auto-fill,var(--grid-max-content-xlarge,calc((100%-(var(--grid-xlarge)-1)*var(--grid-column-gap-xlarge))/var(--grid-xlarge))))] min-[1940px]:grid-rows-[repeat(var(--grid-rows),max-content)] min-[1940px]:gap-y-(--grid-row-gap-xlarge) in-[.is-drawer-open]:min-[1580px]:max-[1939px]:grid-cols-[repeat(auto-fill,var(--grid-max-content-large,calc((100%-(var(--grid-large)-2)*var(--grid-column-gap-large))/(var(--grid-large)-1))))] in-[.is-drawer-open]:min-[1260px]:max-[1579px]:grid-cols-[repeat(auto-fill,var(--grid-max-content-medium,calc((100%-(var(--grid-medium)-2)*var(--grid-column-gap-medium))/(var(--grid-medium)-1))))]">
+                <ul className="shelf-grid__list--artist">
                   {topSongPreview.map((song, index) => {
                     const artworkColor =
                       song.artworkBgColor ?? "var(--genericJoeColor)";
+
                     const songMeta = [song.album, song.releaseDate?.slice(0, 4)]
                       .filter(Boolean)
                       .join(" · ");
@@ -432,7 +439,7 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
                             </li>
 
                             {songMeta && (
-                              <li className="[--linkHoverColor:inherit] [--linkHoverTextDecoration:underline] text-(--systemSecondary) [font:var(--body)] max-w-full">
+                              <li className="[--linkHoverColor:inherit] [--linkHoverTextDecoration:underline] text-(--systemSecondary) [font:var(--callout)] max-w-full">
                                 <div className="-mb-1 -mt-1 overflow-hidden text-ellipsis whitespace-nowrap -ms-1 -me-1 pb-1 pt-1 pe-1 ps-1">
                                   <span>{songMeta}</span>
                                 </div>
@@ -487,6 +494,117 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
           </div>
 
           <div className="pb-8"></div>
+        </div>
+      </div>
+
+      <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-3 bg-(--opaqueShelfBG)">
+        <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
+          <div className="pt-4 w-full"></div>
+        </div>
+      </div>
+
+      <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-3 bg-(--opaqueShelfBG)">
+        <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
+          <div className="m-[0_var(--bodyGutter)_13px] items-center flex justify-end">
+            <div className="flex-1">
+              <h2 className="text-(--header-title-color,var(--systemPrimary,#000)) inline-block [font:var(--header-title-font,var(--title-2-emphasized))]">
+                <span dir="auto">About {artistName}</span>
+              </h2>
+            </div>
+          </div>
+
+          <div className="overflow-hidden pb-8 pt-3.25 relative px-(--bodyGutter) z-(--z-default)">
+            <div className="min-[484px]:gap-x-5 min-[484px]:grid min-[484px]:grid-cols-[3fr_1fr] min-[1260px]:grid-cols-[3fr_2fr] min-[1580px]:grid-cols-[3fr_3fr]">
+              <dl>
+                <dt className="text-(--systemSecondary) [font:var(--subhead)] mb-px mt-0.75">
+                  FROM
+                </dt>
+                <dd className="[font:var(--body-tall)]">Ha Noi, Vietnam</dd>
+                <dt className="text-(--systemSecondary) [font:var(--subhead)] mb-px mt-0.75">
+                  BORN
+                </dt>
+                <dd className="[font:var(--body-tall)]">2 March 1999</dd>
+                <dt className="text-(--systemSecondary) [font:var(--subhead)] mb-px mt-0.75">
+                  GENRE
+                </dt>
+                <dd className="[font:var(--body-tall)]">Hip-Hop/Rap</dd>
+              </dl>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-3 bg-(--opaqueShelfBG)">
+        <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
+          <div className="m-[0_var(--bodyGutter)_13px] items-center flex justify-end">
+            <div className="flex-1">
+              <h2 className="text-(--header-title-color,var(--systemPrimary,#000)) inline-block [font:var(--header-title-font,var(--title-2-emphasized))]">
+                <button
+                  className="flex items-center gap-x-2 appearance-none"
+                  type="button"
+                >
+                  <span dir="auto">Similar Artists</span>
+
+                  <svg
+                    className="h-(--header-title-chevron-size,12px) fill-(--header-title-chevron-color,var(--dropdownLightGrayIcon))"
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 64 64"
+                    aria-hidden="true"
+                  >
+                    <path d="M19.817 61.863c1.48 0 2.672-.515 3.702-1.546l24.243-23.63c1.352-1.385 1.996-2.737 2.028-4.443 0-1.674-.644-3.09-2.028-4.443L23.519 4.138c-1.03-.998-2.253-1.513-3.702-1.513-2.994 0-5.409 2.382-5.409 5.344 0 1.481.612 2.833 1.739 3.96l20.99 20.347-20.99 20.283c-1.127 1.126-1.739 2.478-1.739 3.96 0 2.93 2.415 5.344 5.409 5.344Z"></path>
+                  </svg>
+                </button>
+              </h2>
+            </div>
+          </div>
+
+          <div className="pb-8">
+            <section
+              className="box-border p-[0_var(--shelfGridPaddingInline,var(--bodyGutter))] relative w-full z-(--z-default) max-[999px]:pe-0 max-[999px]:ps-0"
+              style={
+                {
+                  "--grid-max-content-xsmall": "94px",
+                  "--grid-column-gap-xsmall": "10px",
+                  "--grid-row-gap-xsmall": "24px",
+                  "--grid-small": "6",
+                  "--grid-column-gap-small": "20px",
+                  "--grid-row-gap-small": "24px",
+                  "--grid-medium": "8",
+                  "--grid-column-gap-medium": "20px",
+                  "--grid-row-gap-medium": "24px",
+                  "--grid-large": "10",
+                  "--grid-column-gap-large": "20px",
+                  "--grid-row-gap-large": "24px",
+                  "--grid-xlarge": "10",
+                  "--grid-column-gap-xlarge": "20px",
+                  "--grid-row-gap-xlarge": "24px",
+                  "--grid-type": "H",
+                  "--grid-rows": "1",
+                  "--standard-lockup-shadow-offset": "15px",
+                } as CSSProperties
+              }
+            >
+              <div className="box-border -mx-0.5 overflow-visible px-0.5 w-full">
+                <ul className="shelf-grid__list--artist">
+                  <li className="shelf-grid__list-item">
+                    <div>
+                      <div className="[--linkHoverTextDecoration:none]">
+                        <Link href="#" className="block">
+                          <div className="text-center">
+                            <div className="rounded-[50%] overflow-hidden z-(--z-default) shadow-[0_1px_1px_rgba(0,0,0,.01),0_2px_2px_rgba(0,0,0,.01),0_4px_4px_rgba(0,0,0,.02),0_8px_8px_rgba(0,0,0,.03),0_14px_14px_rgba(0,0,0,.03)] relative before:rounded-[50%] before:shadow-[inset_0_0_0_1px_rgba(128,128,128,.1)] before:content-[''] before:block before:size-full before:max-h-full before:max-w-full before:pointer-events-none before:absolute before:top-0 before:z-(--z-default) after:bg-[rgba(51,51,51,.3)] after:rounded-[inherit] after:content-[''] after:size-full after:left-0 after:opacity-0 after:absolute after:top-0 after:[transition:opactiy_.1s_ease-in] after:z-1">
+                              <div className=""></div>
+                            </div>
+
+                            <div className="mt-2"></div>
+                          </div>
+                        </Link>
+                      </div>
+                    </div>
+                  </li>
+                </ul>
+              </div>
+            </section>
+          </div>
         </div>
       </div>
     </>

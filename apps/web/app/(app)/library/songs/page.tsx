@@ -66,7 +66,7 @@ export default function SongsPage() {
   const pageRequestIdRef = useRef(0);
   const loadingPageRef = useRef(false);
   const seenCursorsRef = useRef(new Set<string>());
-  const favoriteSongs = useFavoriteStore((state) => state.songs);
+  const favoriteSongIds = useFavoriteStore((state) => state.songIds);
   const currentSong = usePlayerStore((state) => state.currentSong);
   const playing = usePlayerStore((state) => state.playing);
   const togglePlayback = usePlayerStore((state) => state.togglePlayback);
@@ -78,10 +78,6 @@ export default function SongsPage() {
     selectTrack,
     selectedTrackId,
   } = useTrackRowSelection<HTMLDivElement>();
-  const favoriteSongIds = useMemo(
-    () => new Set(favoriteSongs.map((song) => song.id)),
-    [favoriteSongs],
-  );
   const sortedSongs = useMemo(
     () =>
       songs.filter(
