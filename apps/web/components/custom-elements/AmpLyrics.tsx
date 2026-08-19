@@ -59,6 +59,29 @@ function getLyricsContainer(host: HTMLElement): HTMLElement {
   return lyricsContainer;
 }
 
+function findActiveLineIndex(lines: LyricLine[], timeMs: number) {
+  let low = 0;
+  let high = lines.length - 1;
+  let candidate = -1;
+
+  while (low <= high) {
+    const middle = low + Math.floor((high - low) / 2);
+    if (lines[middle].startTimeMs <= timeMs) {
+      candidate = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+
+  for (let index = candidate; index >= 0; index -= 1) {
+    const line = lines[index];
+    if (line.endTimeMs > timeMs) return index;
+  }
+
+  return -1;
+}
+
 interface AmpLyricsProps {
   songId?: string;
   audioRef?: RefObject<HTMLAudioElement | null>;
@@ -203,6 +226,12 @@ export default function AmpLyrics({
       const setAutoScroll = (enabled: boolean, hidePastLines = enabled) => {
         autoFollowEnabled = enabled;
         lyricsContainer.classList.toggle("auto-scrolling", hidePastLines);
+        if (!inDetailView) {
+          lyricsContainer.style.setProperty(
+            "--lyrics-display-synced-line-opacity",
+            "1",
+          );
+        }
         display?.setAutoScroll(enabled);
       };
       const syncActiveLine = (shouldScroll = true) => {
@@ -212,9 +241,7 @@ export default function AmpLyrics({
           playerState.currentSong?.id === songId
             ? playerState.playbackTimeMs
             : 0;
-        const activeIndex = lines.findLastIndex(
-          (line) => line.startTimeMs <= timeMs && line.endTimeMs > timeMs,
-        );
+        const activeIndex = findActiveLineIndex(lines, timeMs);
         const lineChanged = activeIndex !== activeLineIndex;
         if (
           resumeAutoScrollOnNextLine &&
@@ -225,14 +252,16 @@ export default function AmpLyrics({
           setAutoScroll(true);
           resumeAutoScrollOnNextLine = false;
         }
-        display.setActiveIndex(
-          activeIndex,
-          shouldScroll &&
-            !isAudioSeeking &&
-            !isInitialSync &&
-            !audio.paused &&
-            autoFollowEnabled,
-        );
+        if (lineChanged) {
+          display.setActiveIndex(
+            activeIndex,
+            shouldScroll &&
+              !isAudioSeeking &&
+              !isInitialSync &&
+              !audio.paused &&
+              autoFollowEnabled,
+          );
+        }
         activeLineIndex = activeIndex;
         display.setPlaying?.(
           playerState.currentSong?.id === songId && playerState.playing,

@@ -20,6 +20,11 @@
     "docker:logs": "docker logs -f my-redis",
     "proto:gen": "pnpm --dir packages/shared-proto generate"
   },
+  "pnpm": {
+    "overrides": {
+      "@pixi/core": "7.2.4"
+    }
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",

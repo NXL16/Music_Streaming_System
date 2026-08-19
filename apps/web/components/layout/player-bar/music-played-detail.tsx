@@ -1,3 +1,5 @@
+"use client";
+
 import AmpChromeVolume from "@/components/custom-elements/AmpChromeVolume";
 import AmpContextMenuButton from "@/components/custom-elements/AmpContextMenuButton";
 import { M404ContextualMenuPortalHost } from "@/components/custom-elements/m404-contextual-menu";
@@ -10,7 +12,7 @@ import { useAuthStore } from "@/lib/auth/auth-store";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { toggleSongFavorite } from "@/lib/favorites/toggle-song-favorite";
 import { usePlayerStore, type PlayerSong } from "@/lib/player/use-player-store";
-import { CSSProperties, useState } from "react";
+import { CSSProperties, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 
@@ -44,30 +46,50 @@ export default function MusicPlayDetail({
   volume,
   onSetVolume,
 }: MusicPlayDetailProps) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [isOpenLyric, setIsOpenLyric] = useState(initialLyricOpen);
   const [isFavoriteSaving, setIsFavoriteSaving] = useState(false);
   const [loadedArtworkSrcSet, setLoadedArtworkSrcSet] = useState<string>();
+  const [visibleBlurArtworkSrcSet, setVisibleBlurArtworkSrcSet] =
+    useState<string>();
   const artworkSrcSet = currentSong.artworkSrcSet ?? currentSong.artworkUrl;
   const thumbnailArtworkSrcSet =
     currentSong.thumbnailArtworkSrcSet ?? artworkSrcSet;
   const isArtworkLoading = loadedArtworkSrcSet !== artworkSrcSet;
+  const isBlurArtworkVisible = visibleBlurArtworkSrcSet === artworkSrcSet;
   const artworkColor = currentSong.artworkBgColor ?? "var(--genericJoeColor)";
   const artworkColors = { bg: artworkColor, main: artworkColor };
   const playing = usePlayerStore((state) => state.playing);
   const userId = useAuthStore((state) => state.user?.userId);
   const isCurrentSongFavorite = useFavoriteStore((state) =>
-    state.songs.some((song) => song.id === currentSong.id),
+    state.songIds.has(currentSong.id),
   );
-  const markArtworkLoaded = () => setLoadedArtworkSrcSet(artworkSrcSet);
+  const markArtworkLoaded = (loadedArtworkSrcSet: string) => {
+    requestAnimationFrame(() => {
+      setLoadedArtworkSrcSet(loadedArtworkSrcSet);
+    });
+  };
+
+  useEffect(() => {
+    if (loadedArtworkSrcSet !== artworkSrcSet) return;
+
+    const timer = window.setTimeout(() => {
+      setVisibleBlurArtworkSrcSet(artworkSrcSet);
+    }, 5_000);
+
+    return () => window.clearTimeout(timer);
+  }, [artworkSrcSet, loadedArtworkSrcSet]);
+
   const mainArtwork = (
     <CardArtwork
+      key={artworkSrcSet}
       variant="cover"
       sizes="(max-width:1319px) 450px,(min-width:1320px) and (max-width:1679px) 600px,600px"
       title={currentSong.title}
       imageSrcSet={artworkSrcSet}
       artworkColors={artworkColors}
-      onArtworkError={markArtworkLoaded}
-      onArtworkLoad={markArtworkLoaded}
+      onArtworkLoad={() => markArtworkLoaded(artworkSrcSet)}
     />
   );
 
@@ -81,6 +103,52 @@ export default function MusicPlayDetail({
       setIsFavoriteSaving(false);
     }
   };
+
+  useEffect(() => {
+    const previouslyFocusedElement = document.activeElement;
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose(false);
+        return;
+      }
+
+      if (event.key !== "Tab") return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusableElements = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => !element.hasAttribute("hidden"));
+      const first = focusableElements[0];
+      const last = focusableElements.at(-1);
+      if (!first || !last) {
+        event.preventDefault();
+        dialog.focus();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+      if (previouslyFocusedElement instanceof HTMLElement) {
+        previouslyFocusedElement.focus();
+      }
+    };
+  }, [onClose]);
+
   return (
     <>
       {createPortal(
@@ -89,20 +157,24 @@ export default function MusicPlayDetail({
             <div className="bg-(--modalScrimColor) size-full absolute z-[calc(var(--z-modal)-1)]"></div>
             <div className="rounded-(--modalBorderRadius,10px) h-(--full-screen-modal-height,auto) max-h-(--full-screen-modal-max-height,none) max-w-(--full-screen-modal-max-width,none) overflow-hidden relative w-(--full-screen-modal-width,auto) z-(--z-modal) has-[.lyrics-container]:[--full-screen-modal-width:100%] has-[.lyrics-container]:[--full-screen-modal-height:100%] has-[.lyrics-container]:[--full-screen-modal-max-width:2560px] has-[.lyrics-container]:[--full-screen-modal-max-height:1440px] has-[.lyrics-container]:rounded-none">
               <article
+                ref={dialogRef}
+                aria-label="Trình phát nhạc"
+                aria-modal="true"
                 className={`lyrics-container ${isOpenLyric ? "" : "is-lyrics-off"}`}
+                role="dialog"
+                tabIndex={-1}
               >
                 <M404ContextualMenuPortalHost />
                 <div className="contents [--lyrics-border-radius:0]">
                   <div className="rounded-[inherit] h-full overflow-hidden pointer-events-none absolute w-full z-(--z-default)">
-                    <LyricsBackground
-                      artworkSrcSet={artworkSrcSet}
-                      artworkUrl={currentSong.artworkUrl}
-                    />
+                    <LyricsBackground artworkSrcSet={thumbnailArtworkSrcSet} />
                   </div>
                 </div>
                 <button
+                  ref={closeButtonRef}
                   onClick={() => onClose(false)}
                   className="self-start h-4.5 m-[16px_20px_10px] absolute top-0 w-4.5 fill-(--systemSecondary-onDark) z-(--z-default)"
+                  type="button"
                 >
                   <svg
                     width="18"
@@ -115,7 +187,7 @@ export default function MusicPlayDetail({
                 </button>
                 <div className="grid [grid-area:controls] grid-rows-[auto_55px_65px_55px_26px] grid-cols-none [grid-template-areas:'artwork'_'metadata'_'scrubber'_'controls'_'volume'] h-fit mt-5 max-w-150 place-items-center place-self-center w-full z-[calc(var(--z-default)+1)]">
                   <div className="shadow-[0_20px_25px_rgba(0,0,0,.1),0_10px_25px_rgba(0,0,0,.1)] opacity-100 [grid-area:artwork] h-full transform-[scale(.92)] origin-[bottom_center] [--global-transition-duration:1s] [transition:var(--global-transition)]">
-                    {!isArtworkLoading && (
+                    {isBlurArtworkVisible && (
                       <div className="filter-[blur(20px)_saturate(2)] size-full opacity-40">
                         <CardArtwork
                           variant="cover"
@@ -206,19 +278,17 @@ export default function MusicPlayDetail({
                         )}
                       </button>
 
-                      {currentSong && (
-                        <AmpContextMenuButton
-                          id={`song-${currentSong.id}`}
-                          context={{
-                            kind: "song",
-                            songId: currentSong.id,
-                            title: currentSong.title,
-                            userId,
-                            isFavorite: isCurrentSongFavorite,
-                          }}
-                          hasPlatter
-                        />
-                      )}
+                      <AmpContextMenuButton
+                        id={`song-${currentSong.id}`}
+                        context={{
+                          kind: "song",
+                          songId: currentSong.id,
+                          title: currentSong.title,
+                          userId,
+                          isFavorite: isCurrentSongFavorite,
+                        }}
+                        hasPlatter
+                      />
                     </div>
                   </div>
                   <div className="p-[20px_0_0] w-full">
@@ -240,40 +310,6 @@ export default function MusicPlayDetail({
                     />
                   </div>
                 )}
-                <div
-                  className="inset-e-5 absolute top-5 z-(--z-default) [--arrow-position:start_end] [--popover-inset-inline-end:calc(anchor(var(--anchor-name)_end)+12px)] [--popover-inset-block-start:calc(anchor(var(--anchor-name)_end)+16px)]"
-                  style={
-                    {
-                      "--anchor-name": "--popover-17",
-                    } as CSSProperties
-                  }
-                >
-                  <div
-                    popover="manual"
-                    id="popover-17"
-                    className="[background:none] [border:none] inset-be-(--popover-inset-block-end,auto) inset-bs-(--popover-inset-block-start,auto) inset-e-(--popover-inset-inline-end,auto) inset-s-(--popover-inset-inline-start,auto) m-0 overflow-visible p-0 [position:var(--popover-position,fixed)]"
-                  >
-                    <button className="self-start inset-bs-3.25 inset-e-3.25 -m-1.5 p-1.5 absolute z-[calc(var(--z-default)+1)]">
-                      <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 18 18"
-                        aria-hidden="true"
-                        className="size-3.5 fill-(--systemTertiary)"
-                      >
-                        <path d="M1.2 18C.6 18 0 17.5 0 16.8c0-.4.1-.6.4-.8l7-7-7-7c-.3-.2-.4-.5-.4-.8C0 .5.6 0 1.2 0c.3 0 .6.1.8.3l7 7 7-7c.2-.2.5-.3.8-.3.6 0 1.2.5 1.2 1.2 0 .3-.1.6-.4.8l-7 7 7 7c.2.2.4.5.4.8 0 .7-.6 1.2-1.2 1.2-.3 0-.6-.1-.8-.3l-7-7-7 7c-.2.1-.5.3-.8.3z"></path>
-                      </svg>
-                    </button>
-                    <div className="[border:none] rounded-ee-[10px] rounded-es-[10px] rounded-se-[10px] rounded-ss-[10px] box-border m-0 min-h-10 overflow-visible p-[11px_13px] relative w-(--bubble-tip-width,380px) supports-[backdrop-filter:blur(10px)]:bg-(--systemStandardUltrathickMaterialSover) supports-[backdrop-filter:blur(10px)]:[backdrop-filter:blur(60px)_saturate(220%)] supports-[backdrop-filter:blur(10px)]:dark:[backdrop-filter:blur(60px)_saturate(240%)]">
-                      <div>
-                        <p className="[font:var(--title-2-emphasized)] mb-0.75 max-w-[calc(100%-17px)]">
-                          undefined
-                        </p>
-                        <p className="[font:var(--title-3)]">undefined</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
                 <div
                   className="min-[1000px]:[--arrow-position:end_end] min-[1000px]:[--popover-inset-inline-end:calc(anchor(var(--anchor-name)_end)+12px)] min-[1000px]:[--popover-inset-block-end:calc(anchor(var(--anchor-name)_start)+16px)] bottom-5 inset-e-5 absolute z-(--z-default)"
                   style={

@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import OfflineArtworkFallback from "./offline-artwork-fallback";
 
 type ResponsiveArtworkProps = {
@@ -39,9 +39,18 @@ export default function ResponsiveArtwork({
 }: ResponsiveArtworkProps) {
   const [failedSrcSet, setFailedSrcSet] = useState<string>();
   const [loadedArtworkKey, setLoadedArtworkKey] = useState<string>();
+  const onLoadRef = useRef(onLoad);
   const activeArtworkKey = `${src}|${srcSet ?? ""}`;
   const hasFailed = Boolean(srcSet) && failedSrcSet === srcSet;
   const hasLoaded = loadedArtworkKey === activeArtworkKey;
+
+  useEffect(() => {
+    onLoadRef.current = onLoad;
+  }, [onLoad]);
+
+  useEffect(() => {
+    if (hasLoaded) onLoadRef.current?.();
+  }, [activeArtworkKey, hasLoaded]);
 
   if (hasFailed) return <OfflineArtworkFallback />;
 
@@ -64,7 +73,6 @@ export default function ResponsiveArtwork({
         }}
         onLoad={() => {
           setLoadedArtworkKey(activeArtworkKey);
-          onLoad?.();
         }}
         role={role}
         src={src}
