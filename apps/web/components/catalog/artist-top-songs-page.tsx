@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { type CSSProperties, useMemo, useState } from "react";
+import { type CSSProperties, useState } from "react";
 import AmpContextMenuButton from "../custom-elements/AmpContextMenuButton";
 import ResponsiveArtwork from "../media/common/responsive-artwork";
 import { formatDuration } from "@/lib/format/duration";
@@ -64,7 +64,7 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
   const playing = usePlayerStore((state) => state.playing);
   const togglePlayback = usePlayerStore((state) => state.togglePlayback);
   const userId = useAuthStore((state) => state.user?.userId);
-  const favoriteSongs = useFavoriteStore((state) => state.songs);
+  const favoriteSongIds = useFavoriteStore((state) => state.songIds);
 
   const artistName = artist?.attributes.name ?? "";
   const [songTableElement, setSongTableElement] =
@@ -73,10 +73,6 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
   const visibleSongs = songs.slice(
     visibleSongRange.start,
     visibleSongRange.end,
-  );
-  const favoriteSongIds = useMemo(
-    () => new Set(favoriteSongs.map((song) => song.id)),
-    [favoriteSongs],
   );
 
   const { sentinelRef: loadMoreSentinelRef, showLoadingMore } =

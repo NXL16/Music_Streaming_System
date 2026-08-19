@@ -1700,3 +1700,100 @@ m404-contextual-menu-item:first-child>li>button {
 .contextual-menu__group .contextual-menu__group-title+m404-contextual-menu-item>li>button {
   border-top: none;
 }
+
+
+/* ============== SHELF GRID LIST ARTIST =================== */
+.shelf-grid__list--artist {
+  box-sizing: border-box;
+  display: grid;
+  grid-auto-flow: column;
+  list-style: none;
+  margin: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: calc(var(--override-shelf-overflow-bleed-bottom, var(--overflowBleedBottom, 15px)) * -1);
+  margin-top: calc(var(--override-shelf-overflow-bleed-top, var(--overflowBleedTop, 15px)) * -1);
+  overscroll-behavior-x: none;
+  padding-bottom: var(--override-shelf-overflow-bleed-bottom, var(--overflowBleedBottom, 15px));
+  padding-top: var(--override-shelf-overflow-bleed-top, var(--overflowBleedTop, 15px));
+  scroll-behavior: smooth;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+
+.shelf-grid__list--artist {
+  align-items: stretch;
+  -moz-column-gap: var(--grid-column-gap-xsmall);
+  column-gap: var(--grid-column-gap-xsmall);
+  grid-auto-columns: var(--grid-max-content-xsmall, calc((100% - (var(--grid-xsmall) - 1) * var(--grid-column-gap-xsmall)) / var(--grid-xsmall)));
+  grid-template-rows: repeat(var(--grid-rows), max-content);
+  row-gap: var(--grid-row-gap-xsmall);
+}
+
+@media (max-width: 999px) {
+  .shelf-grid__list--artist {
+    margin-inline-end: 0;
+    margin-inline-start: 0;
+    padding-inline-end: var(--shelfGridGutterWidth, 25px);
+    padding-inline-start: var(--shelfGridGutterWidth, 25px);
+    scroll-padding-inline-start: 10px;
+    width: 100%;
+  }
+}
+
+@media (min-width: 1000px) {
+  .shelf-grid__list--artist {
+    margin-inline-end: calc(var(--standard-lockup-shadow-offset, 15px) * -1);
+    margin-inline-start: calc(var(--standard-lockup-shadow-offset, 15px) * -1);
+    -webkit-mask: linear-gradient(90deg, transparent 0, #000 var(--standard-lockup-shadow-offset, 15px), #000 calc(100% - var(--standard-lockup-shadow-offset, 15px)), transparent 100%);
+    mask: linear-gradient(90deg, transparent 0, #000 var(--standard-lockup-shadow-offset, 15px), #000 calc(100% - var(--standard-lockup-shadow-offset, 15px)), transparent 100%);
+    padding-inline-end: var(--standard-lockup-shadow-offset, 15px);
+    padding-inline-start: var(--standard-lockup-shadow-offset, 15px);
+    width: calc(100% + 30px);
+  }
+}
+
+@media (min-width: 1000px) and (max-width: 1259px) {
+  .shelf-grid__list--artist {
+    -moz-column-gap: var(--grid-column-gap-small);
+    column-gap: var(--grid-column-gap-small);
+    grid-auto-columns: var(--grid-max-content-small, calc((100% - (var(--grid-small) - 1) * var(--grid-column-gap-small)) / var(--grid-small)));
+    grid-template-rows: repeat(var(--grid-rows), max-content);
+    row-gap: var(--grid-row-gap-small);
+  }
+}
+
+@media (min-width: 1260px) and (max-width: 1579px) {
+  .shelf-grid__list--artist {
+    -moz-column-gap: var(--grid-column-gap-medium);
+    column-gap: var(--grid-column-gap-medium);
+    grid-auto-columns: var(--grid-max-content-medium, calc((100% - (var(--grid-medium) - 1) * var(--grid-column-gap-medium)) / var(--grid-medium)));
+    grid-template-rows: repeat(var(--grid-rows), max-content);
+    row-gap: var(--grid-row-gap-medium);
+  }
+}
+
+@media (min-width: 1580px) and (max-width: 1939px) {
+  .shelf-grid__list--artist {
+    -moz-column-gap: var(--grid-column-gap-large);
+    column-gap: var(--grid-column-gap-large);
+    grid-auto-columns: var(--grid-max-content-large, calc((100% - (var(--grid-large) - 1) * var(--grid-column-gap-large)) / var(--grid-large)));
+    grid-template-rows: repeat(var(--grid-rows), max-content);
+    row-gap: var(--grid-row-gap-large);
+  }
+}
+
+.shelf-grid__list-item {
+  contain: content;
+  margin-top: calc(var(--override-shelf-overflow-bleed-top, var(--standard-lockup-shadow-offset, 15px)) * -1);
+  margin-inline-end: calc(var(--standard-lockup-shadow-offset, 15px) * -1);
+  margin-bottom: calc(var(--override-shelf-overflow-bleed-bottom, var(--standard-lockup-shadow-offset, 15px)) * -1);
+  margin-inline-start: calc(var(--standard-lockup-shadow-offset, 15px) * -1);
+  padding-inline-end: var(--standard-lockup-shadow-offset, 15px);
+  padding-bottom: var(--override-shelf-overflow-bleed-bottom, var(--standard-lockup-shadow-offset, 15px));
+  padding-top: var(--override-shelf-overflow-bleed-top, var(--standard-lockup-shadow-offset, 15px));
+  padding-inline-start: var(--standard-lockup-shadow-offset, 15px);
+  scroll-snap-align: start;
+}
