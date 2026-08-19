@@ -10,8 +10,10 @@ type VerifyEmailStatus = "idle" | "loading" | "success" | "error";
 
 const MIN_LOADING_MS = 2000;
 const SUCCESS_REDIRECT_MS = 1200;
+const VERIFIED_EMAIL_TOKEN_TTL_MS = 5 * 60 * 1000;
+const MAX_VERIFIED_EMAIL_TOKENS = 8;
 const verifyEmailRequests = new Map<string, ReturnType<typeof verifyEmail>>();
-const verifiedEmailTokens = new Set<string>();
+const verifiedEmailTokens = new Map<string, number>();
 
 function getVerifyEmailRequest(token: string) {
   const existingRequest = verifyEmailRequests.get(token);
@@ -22,8 +24,44 @@ function getVerifyEmailRequest(token: string) {
 
   const request = verifyEmail({ token });
   verifyEmailRequests.set(token, request);
+  void request.then(
+    () => {
+      if (verifyEmailRequests.get(token) === request) {
+        verifyEmailRequests.delete(token);
+      }
+    },
+    () => {
+      if (verifyEmailRequests.get(token) === request) {
+        verifyEmailRequests.delete(token);
+      }
+    },
+  );
 
   return request;
+}
+
+function hasVerifiedEmailToken(token: string) {
+  const now = Date.now();
+  for (const [cachedToken, expiresAt] of verifiedEmailTokens) {
+    if (expiresAt <= now) verifiedEmailTokens.delete(cachedToken);
+  }
+
+  const expiresAt = verifiedEmailTokens.get(token);
+  if (!expiresAt) return false;
+  return expiresAt > now;
+}
+
+function rememberVerifiedEmailToken(token: string) {
+  verifiedEmailTokens.delete(token);
+  verifiedEmailTokens.set(token, Date.now() + VERIFIED_EMAIL_TOKEN_TTL_MS);
+
+  while (verifiedEmailTokens.size > MAX_VERIFIED_EMAIL_TOKENS) {
+    const oldestToken = verifiedEmailTokens.keys().next().value as
+      | string
+      | undefined;
+    if (oldestToken === undefined) break;
+    verifiedEmailTokens.delete(oldestToken);
+  }
 }
 
 function wait(ms: number) {
@@ -54,7 +92,7 @@ export function useVerifyEmail() {
       return;
     }
 
-    if (verifiedEmailTokens.has(token)) {
+    if (hasVerifiedEmailToken(token)) {
       queueMicrotask(() => {
         setStatus("success");
         setMessage("Email đã được xác thực.");
@@ -87,7 +125,7 @@ export function useVerifyEmail() {
           return;
         }
 
-        verifiedEmailTokens.add(token);
+        rememberVerifiedEmailToken(token);
 
         if (authStatus === "authenticated") {
           setUser(result.data);
@@ -108,7 +146,6 @@ export function useVerifyEmail() {
         setStatus("error");
         setMessage(getApiErrorMessage(error, "Không thể xác thực email."));
         setRedirecting(false);
-        verifyEmailRequests.delete(token);
       }
     }
 

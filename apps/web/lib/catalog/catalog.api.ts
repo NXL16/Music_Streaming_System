@@ -11,6 +11,8 @@ import type {
 
 const STOREFRONT = process.env.NEXT_PUBLIC_STOREFRONT || "vn";
 const RESOURCE_CACHE_TTL_MS = 2 * 60 * 1000;
+const MAX_RESOURCE_CACHE_ENTRIES = 100;
+const MAX_DETAIL_CACHE_ENTRIES = 100;
 
 type ResourceCacheEntry = {
   expiresAt: number;
@@ -21,6 +23,49 @@ const resourceCache = new Map<string, ResourceCacheEntry>();
 const pendingResourceRequests = new Map<string, Promise<CatalogResponse>>();
 const detailCache = new Map<string, ResourceCacheEntry>();
 const pendingDetailRequests = new Map<string, Promise<CatalogResponse>>();
+let cacheGeneration = 0;
+
+function pruneCatalogCache(
+  cache: Map<string, ResourceCacheEntry>,
+  now: number,
+) {
+  for (const [key, entry] of cache) {
+    if (entry.expiresAt <= now) cache.delete(key);
+  }
+}
+
+function getCatalogCacheEntry(
+  cache: Map<string, ResourceCacheEntry>,
+  key: string,
+  now: number,
+) {
+  pruneCatalogCache(cache, now);
+  const entry = cache.get(key);
+  if (!entry) return undefined;
+
+  // Map preserves insertion order, so re-inserting promotes this entry to MRU.
+  cache.delete(key);
+  cache.set(key, entry);
+  return entry.value;
+}
+
+function setCatalogCacheEntry(
+  cache: Map<string, ResourceCacheEntry>,
+  key: string,
+  value: CatalogResponse,
+  maxEntries: number,
+) {
+  const now = Date.now();
+  pruneCatalogCache(cache, now);
+  cache.delete(key);
+  cache.set(key, { value, expiresAt: now + RESOURCE_CACHE_TTL_MS });
+
+  while (cache.size > maxEntries) {
+    const oldestKey = cache.keys().next().value as string | undefined;
+    if (oldestKey === undefined) break;
+    cache.delete(oldestKey);
+  }
+}
 
 function resourceCacheKey(
   resources: Array<Pick<CatalogReference, "id" | "type">>,
@@ -40,27 +85,34 @@ function getCachedCatalogResources(
 ) {
   const key = resourceCacheKey(resources);
   const now = Date.now();
-  const cached = resourceCache.get(key);
-  if (!developmentCacheDisabled && cached && cached.expiresAt > now) {
-    return Promise.resolve(cached.value);
+  const cached = developmentCacheDisabled
+    ? undefined
+    : getCatalogCacheEntry(resourceCache, key, now);
+  if (cached) {
+    return Promise.resolve(cached);
   }
 
   const pending = pendingResourceRequests.get(key);
   if (pending) return pending;
 
+  const requestGeneration = cacheGeneration;
   const request = http
     .post<CatalogResponse>(`/catalog/${STOREFRONT}/resources`, { resources })
     .then((response) => {
-      if (!developmentCacheDisabled) {
-        resourceCache.set(key, {
-          value: response.data,
-          expiresAt: Date.now() + RESOURCE_CACHE_TTL_MS,
-        });
+      if (!developmentCacheDisabled && requestGeneration === cacheGeneration) {
+        setCatalogCacheEntry(
+          resourceCache,
+          key,
+          response.data,
+          MAX_RESOURCE_CACHE_ENTRIES,
+        );
       }
       return hydrateCatalogMediaEntities(response.data);
     })
     .finally(() => {
-      pendingResourceRequests.delete(key);
+      if (pendingResourceRequests.get(key) === request) {
+        pendingResourceRequests.delete(key);
+      }
     });
 
   pendingResourceRequests.set(key, request);
@@ -71,27 +123,34 @@ function getCachedCatalogDetail(
   key: string,
   request: () => Promise<CatalogResponse>,
 ) {
-  const cached = detailCache.get(key);
-  if (!developmentCacheDisabled && cached && cached.expiresAt > Date.now()) {
-    return Promise.resolve(cached.value);
+  const cached = developmentCacheDisabled
+    ? undefined
+    : getCatalogCacheEntry(detailCache, key, Date.now());
+  if (cached) {
+    return Promise.resolve(cached);
   }
 
   const pending = pendingDetailRequests.get(key);
   if (pending) return pending;
 
+  const requestGeneration = cacheGeneration;
   const pendingRequest = request()
     .then((response) => {
       const hydrated = hydrateCatalogMediaEntities(response);
-      if (!developmentCacheDisabled) {
-        detailCache.set(key, {
-          value: hydrated,
-          expiresAt: Date.now() + RESOURCE_CACHE_TTL_MS,
-        });
+      if (!developmentCacheDisabled && requestGeneration === cacheGeneration) {
+        setCatalogCacheEntry(
+          detailCache,
+          key,
+          hydrated,
+          MAX_DETAIL_CACHE_ENTRIES,
+        );
       }
       return hydrated;
     })
     .finally(() => {
-      pendingDetailRequests.delete(key);
+      if (pendingDetailRequests.get(key) === pendingRequest) {
+        pendingDetailRequests.delete(key);
+      }
     });
   pendingDetailRequests.set(key, pendingRequest);
   return pendingRequest;
@@ -114,8 +173,10 @@ function getCatalogDetail(
 }
 
 export function invalidateCatalogResourceCache() {
+  cacheGeneration += 1;
   resourceCache.clear();
   detailCache.clear();
+  pendingResourceRequests.clear();
   pendingDetailRequests.clear();
   invalidateAllMediaEntities();
 }

@@ -4,6 +4,7 @@ import type { RecommendationResponse } from "./recommendation.types";
 
 const RECOMMENDATION_LOCALE = "en-GB";
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const MAX_RECOMMENDATION_SECTION_CACHE_ENTRIES = 24;
 // Local development can opt out of every client-side Home cache so database
 // and recommendation changes are visible on the very next navigation.
 const HOME_CACHE_DISABLED = developmentCacheDisabled;
@@ -43,6 +44,47 @@ type RecommendationOpenContext = Omit<
 
 const pendingImpressions = new Map<string, RecommendationInteractionInput>();
 let impressionFlushTimer: ReturnType<typeof setTimeout> | undefined;
+
+function pruneRecommendationSectionCache(now: number) {
+  for (const [sectionId, entry] of cachedRecommendationSections) {
+    if (entry.expiresAt <= now) {
+      cachedRecommendationSections.delete(sectionId);
+    }
+  }
+}
+
+function getCachedRecommendationSection(sectionId: string, now: number) {
+  pruneRecommendationSectionCache(now);
+  const entry = cachedRecommendationSections.get(sectionId);
+  if (!entry) return undefined;
+
+  cachedRecommendationSections.delete(sectionId);
+  cachedRecommendationSections.set(sectionId, entry);
+  return entry.value;
+}
+
+function setCachedRecommendationSection(
+  sectionId: string,
+  value: RecommendationResponse,
+) {
+  const now = Date.now();
+  pruneRecommendationSectionCache(now);
+  cachedRecommendationSections.delete(sectionId);
+  cachedRecommendationSections.set(sectionId, {
+    value,
+    expiresAt: now + CACHE_TTL_MS,
+  });
+
+  while (
+    cachedRecommendationSections.size > MAX_RECOMMENDATION_SECTION_CACHE_ENTRIES
+  ) {
+    const oldestSectionId = cachedRecommendationSections.keys().next().value as
+      | string
+      | undefined;
+    if (oldestSectionId === undefined) break;
+    cachedRecommendationSections.delete(oldestSectionId);
+  }
+}
 
 function flushRecommendationImpressions() {
   if (impressionFlushTimer) {
@@ -169,9 +211,11 @@ export async function getHomeRecommendations() {
 }
 
 export function getRecommendationSection(sectionId: string) {
-  const cached = cachedRecommendationSections.get(sectionId);
-  if (!HOME_CACHE_DISABLED && cached && cached.expiresAt > Date.now()) {
-    return Promise.resolve(cached.value);
+  const cached = HOME_CACHE_DISABLED
+    ? undefined
+    : getCachedRecommendationSection(sectionId, Date.now());
+  if (cached) {
+    return Promise.resolve(cached);
   }
 
   const pending = pendingRecommendationSections.get(sectionId);
@@ -200,10 +244,7 @@ export function getRecommendationSection(sectionId: string) {
     )
     .then((response) => {
       if (!HOME_CACHE_DISABLED && requestGeneration === cacheGeneration) {
-        cachedRecommendationSections.set(sectionId, {
-          value: response.data,
-          expiresAt: Date.now() + CACHE_TTL_MS,
-        });
+        setCachedRecommendationSection(sectionId, response.data);
       }
       return response.data;
     })
