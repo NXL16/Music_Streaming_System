@@ -20,7 +20,6 @@
  *
  * Usage:
  *   node tools/scripts/seed-artist.mjs
- *   node tools/scripts/seed-artist.mjs --skip-transcode
  *   node tools/scripts/seed-artist.mjs --dry-run
  *   node tools/scripts/seed-artist.mjs --no-youtube      # tắt fallback YouTube
  *   node tools/scripts/seed-artist.mjs --no-soundcloud   # tắt fallback SoundCloud
@@ -50,14 +49,87 @@ function catalogIngestionKey(collectionId) {
     .update(`music-streaming-system:catalog-seed:v1:${STOREFRONT}:${collectionId}`)
     .digest('hex');
 }
-let INTERNAL_TOKEN = '12c80b4f2d2b93660210c2807607d824afc921d0c5fc372f99ea6ad38da6913cacbeac35fda0acb45511999321182f2f33247836c6a3e150fc020b06f4287150';
+let FINALIZER_INTERNAL_TOKEN = '';
 const STOREFRONT = 'vn';
 
 const args = process.argv.slice(2);
-const SKIP_TRANSCODE = args.includes('--skip-transcode');
+if (args.includes('--skip-transcode')) {
+  throw new Error(
+    '--skip-transcode was removed: seeded songs must use the real transcode and completion queues',
+  );
+}
 const DRY_RUN = args.includes('--dry-run');
 const NO_YOUTUBE = args.includes('--no-youtube');
 const NO_SOUNDCLOUD = args.includes('--no-soundcloud');
+
+function parsePositiveIntegerEnv(name, fallback, min, max) {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < min || value > max) {
+    throw new Error(`${name} must be an integer between ${min} and ${max}`);
+  }
+  return value;
+}
+
+// A normal queue can legitimately take longer than the old three-minute
+// polling window, especially while a worker is restarting or draining work.
+// Keep the wait bounded, but make it configurable for slower environments.
+const READY_WAIT_TIMEOUT_MS = parsePositiveIntegerEnv(
+  'SEED_READY_WAIT_TIMEOUT_MS',
+  20 * 60 * 1000,
+  60 * 1000,
+  2 * 60 * 60 * 1000,
+);
+const READY_WAIT_POLL_MS = parsePositiveIntegerEnv(
+  'SEED_READY_WAIT_POLL_MS',
+  3000,
+  1000,
+  60 * 1000,
+);
+const ASSET_READY_WAIT_TIMEOUT_MS = parsePositiveIntegerEnv(
+  'SEED_ASSET_READY_WAIT_TIMEOUT_MS',
+  10 * 60 * 1000,
+  60 * 1000,
+  60 * 60 * 1000,
+);
+const ASSET_READY_WAIT_POLL_MS = parsePositiveIntegerEnv(
+  'SEED_ASSET_READY_WAIT_POLL_MS',
+  3000,
+  1000,
+  60 * 1000,
+);
+const API_REQUEST_TIMEOUT_MS = parsePositiveIntegerEnv(
+  'SEED_API_REQUEST_TIMEOUT_MS',
+  30 * 1000,
+  5000,
+  2 * 60 * 1000,
+);
+function optionValue(name) {
+  const index = args.indexOf(name);
+  return index >= 0 ? String(args[index + 1] || '').trim() : '';
+}
+function firstPositionalArgument() {
+  const optionsWithValues = new Set(['--artist-id', '--album-ids', '--audio-mode']);
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (optionsWithValues.has(argument)) {
+      index += 1;
+      continue;
+    }
+    if (!argument.startsWith('--')) return argument;
+  }
+  return '';
+}
+const SELECTED_ARTIST_ID = optionValue('--artist-id');
+const SELECTED_ALBUM_IDS = new Set(
+  optionValue('--album-ids').split(',').map(value => value.trim()).filter(Boolean),
+);
+const AUDIO_MODE = (optionValue('--audio-mode') || 'STANDARD').toUpperCase();
+if (!['STANDARD', 'SING'].includes(AUDIO_MODE)) {
+  throw new Error('--audio-mode must be STANDARD or SING');
+}
 // Độ lệch độ dài tối đa (giây) giữa audio tải về và metadata iTunes trước khi coi là "sai bài".
 const DURATION_TOLERANCE_SEC = 15;
 const APPLE_MUSIC_HEADERS = {
@@ -447,9 +519,11 @@ async function apiCall(method, urlPath, body, extraHeaders = {}) {
   const url = `${BASE_URL}${urlPath}`;
   const headers = {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${ADMIN_TOKEN}`,
     ...extraHeaders,
   };
+  if (!Object.hasOwn(extraHeaders, 'Authorization')) {
+    headers.Authorization = `Bearer ${await getAdminToken()}`;
+  }
   for (const key of Object.keys(headers)) {
     if (headers[key] === undefined) delete headers[key];
   }
@@ -461,6 +535,7 @@ async function apiCall(method, urlPath, body, extraHeaders = {}) {
         method,
         headers,
         body: body ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(API_REQUEST_TIMEOUT_MS),
       });
 
       const text = await res.text();
@@ -485,6 +560,28 @@ async function apiCall(method, urlPath, body, extraHeaders = {}) {
     }
   }
   throw lastErr;
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function getAdminToken() {
+  const tokenUrl = process.env.SEED_STUDIO_TOKEN_URL?.trim();
+  if (!tokenUrl) return ADMIN_TOKEN;
+
+  const jobSecret = process.env.SEED_STUDIO_JOB_SECRET?.trim();
+  const response = await fetch(tokenUrl, {
+    headers: { 'x-seed-job-secret': jobSecret || '' },
+  });
+  if (!response.ok) {
+    throw new Error(`Seed Studio token unavailable: ${response.status}`);
+  }
+  const payload = await response.json();
+  if (!payload.accessToken || typeof payload.accessToken !== 'string') {
+    throw new Error('Seed Studio returned an invalid access token');
+  }
+  return payload.accessToken;
 }
 
 async function uploadBinary(presignedUrl, filePath, contentType) {
@@ -520,10 +617,26 @@ class State {
     this.data[key] = value;
     this.save();
   }
+  delete(key) {
+    delete this.data[key];
+    this.save();
+  }
   save() {
     const dir = path.dirname(this.file);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(this.file, JSON.stringify(this.data, null, 2));
+    // Never truncate the only resume state in place. A process crash while
+    // saving used to leave invalid JSON, which made the next run start from an
+    // empty state and could recreate catalog work unnecessarily.
+    const tempFile = `${this.file}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    try {
+      fs.writeFileSync(tempFile, JSON.stringify(this.data, null, 2), {
+        encoding: 'utf8',
+        flush: true,
+      });
+      fs.renameSync(tempFile, this.file);
+    } finally {
+      if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+    }
   }
 }
 
@@ -537,6 +650,14 @@ async function searchArtistITunes(query) {
   const res = await fetch(url);
   const data = await res.json();
   return data.results || [];
+}
+
+async function lookupArtistITunes(artistId) {
+  const url = `https://itunes.apple.com/lookup?id=${encodeURIComponent(artistId)}&country=${STOREFRONT}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`iTunes artist lookup failed: HTTP ${res.status}`);
+  const data = await res.json();
+  return (data.results || []).filter(result => result.wrapperType === 'artist');
 }
 
 async function lookupAlbumsITunes(artistId) {
@@ -1388,6 +1509,56 @@ async function downloadSongAudio(track, artist, audioDir, index) {
 // PHASE 3: Upload Artworks (local API)
 // ════════════════════════════════════════════════════════
 
+async function waitForAssetReady(assetId, label) {
+  logInfo(`Waiting for ${label} to become READY...`);
+  const startedAt = Date.now();
+  const deadline = startedAt + ASSET_READY_WAIT_TIMEOUT_MS;
+  let nextProgressLogAt = startedAt + 15_000;
+  let nextTransientErrorLogAt = startedAt;
+
+  while (Date.now() < deadline) {
+    const remainingMs = deadline - Date.now();
+    await sleep(Math.min(ASSET_READY_WAIT_POLL_MS, remainingMs));
+    try {
+      const assetRes = await apiCall('GET', `/admin/assets/${assetId}`);
+      const status = assetRes.asset?.status || assetRes.status;
+      if (status === 'READY' || status === 3) {
+        logOk(`${label} READY, assetId: ${assetId}`);
+        return;
+      }
+      if (status === 'FAILED' || status === 4) {
+        const reason =
+          assetRes.asset?.errorMessage ||
+          assetRes.errorMessage ||
+          'unknown processing error';
+        throw new Error(`${label} processing failed (${assetId}): ${reason}`);
+      }
+    } catch (error) {
+      const message = errorMessage(error);
+      if (message.includes('processing failed') || /^API 4\d\d:/.test(message)) {
+        throw error;
+      }
+
+      const now = Date.now();
+      if (now >= nextTransientErrorLogAt) {
+        logWarn(`Could not read ${label} status; retrying: ${message}`);
+        nextTransientErrorLogAt = now + 30_000;
+      }
+    }
+
+    const now = Date.now();
+    if (now >= nextProgressLogAt) {
+      const elapsedSec = Math.floor((now - startedAt) / 1000);
+      logInfo(`${label} still processing... (${elapsedSec}s)`);
+      nextProgressLogAt = now + 15_000;
+    }
+  }
+
+  throw new Error(
+    `${label} did not become READY within ${Math.round(ASSET_READY_WAIT_TIMEOUT_MS / 60_000)} min`,
+  );
+}
+
 async function uploadArtworkAsset(filePath, label) {
   const filename = path.basename(filePath);
   const contentType = requireSupportedArtwork(filePath, label);
@@ -1425,26 +1596,7 @@ async function uploadArtworkAsset(filePath, label) {
 
   await apiCall('POST', `/admin/assets/${assetId}/finalize`);
   logInfo(`${label} artwork finalize triggered`);
-
-  for (let i = 0; i < 30; i++) {
-    await sleep(2000);
-    try {
-      const assetRes = await apiCall('GET', `/admin/assets/${assetId}`);
-      const status = assetRes.asset?.status || assetRes.status;
-      if (status === 'READY' || status === 3) {
-        logOk(`${label} artwork READY, assetId: ${assetId}`);
-        return assetId;
-      }
-      if (status === 'FAILED' || status === 4) {
-        const reason = assetRes.asset?.errorMessage || assetRes.errorMessage || 'unknown processing error';
-        throw new Error(`Asset processing failed for ${label} (${assetId}): ${reason}`);
-      }
-    } catch (err) {
-      if (err.message.includes('processing failed')) throw err;
-    }
-  }
-
-  logWarn(`${label} artwork did not become READY within timeout — using assetId anyway`);
+  await waitForAssetReady(assetId, `${label} artwork`);
   return assetId;
 }
 
@@ -1491,26 +1643,7 @@ async function uploadVideoAsset(filePath, label) {
 
   await apiCall('POST', `/admin/assets/${assetId}/finalize`);
   logInfo(`${label} video finalize triggered`);
-
-  for (let i = 0; i < 60; i++) {
-    await sleep(3000);
-    try {
-      const assetRes = await apiCall('GET', `/admin/assets/${assetId}`);
-      const status = assetRes.asset?.status || assetRes.status;
-      if (status === 'READY' || status === 3) {
-        logOk(`${label} video READY, assetId: ${assetId}`);
-        return assetId;
-      }
-      if (status === 'FAILED' || status === 4) {
-        throw new Error(`Video processing failed for ${label}`);
-      }
-      if (i % 5 === 0) logInfo(`Video still processing... (${i * 3}s)`);
-    } catch (err) {
-      if (err.message.includes('processing failed')) throw err;
-    }
-  }
-
-  logWarn(`${label} video did not become READY within timeout — using assetId anyway`);
+  await waitForAssetReady(assetId, `${label} video`);
   return assetId;
 }
 
@@ -1561,6 +1694,57 @@ async function findSongInLibrary(title) {
   return null;
 }
 
+async function waitForSongReady(songId, title) {
+  logInfo(`Waiting for song "${title}" to become READY...`);
+  const startedAt = Date.now();
+  const deadline = startedAt + READY_WAIT_TIMEOUT_MS;
+  let nextProgressLogAt = startedAt + 15_000;
+  let nextTransientErrorLogAt = startedAt;
+
+  while (Date.now() < deadline) {
+    const remainingMs = deadline - Date.now();
+    await sleep(Math.min(READY_WAIT_POLL_MS, remainingMs));
+    try {
+      const songRes = await apiCall('GET', `/songs/${songId}`);
+      const status = songRes.status || songRes.song?.status;
+      if (status === 'READY' || status === 3) {
+        logOk(`Song "${title}" READY — songId: ${songId}`);
+        return;
+      }
+      if (status === 'FAILED' || status === 4) {
+        throw new Error(`Song processing failed for "${title}"`);
+      }
+    } catch (error) {
+      const message = errorMessage(error);
+      // An authentication, validation, or visibility error will never become
+      // healthy by polling again. Surface it immediately instead of masking a
+      // bad finalizer token as a generic timeout.
+      if (message.includes('processing failed') || /^API 4\d\d:/.test(message)) {
+        throw error;
+      }
+
+      const now = Date.now();
+      if (now >= nextTransientErrorLogAt) {
+        logWarn(
+          `Could not read processing status for "${title}"; retrying: ${message}`,
+        );
+        nextTransientErrorLogAt = now + 30_000;
+      }
+    }
+
+    const now = Date.now();
+    if (now >= nextProgressLogAt) {
+      const elapsedSec = Math.floor((now - startedAt) / 1000);
+      logInfo(`Still processing "${title}"... (${elapsedSec}s)`);
+      nextProgressLogAt = now + 15_000;
+    }
+  }
+
+  throw new Error(
+    `Song "${title}" did not become READY within ${Math.round(READY_WAIT_TIMEOUT_MS / 60_000)} min`,
+  );
+}
+
 async function uploadSongThroughPipeline(audioFile, title) {
   const checksum = await sha256File(audioFile.path);
   const size = fs.statSync(audioFile.path).size;
@@ -1573,6 +1757,7 @@ async function uploadSongThroughPipeline(audioFile, title) {
       title,
       checksum,
       size,
+      audioMode: AUDIO_MODE,
     });
   } catch (err) {
     if (err.message.includes('SONG_ALREADY_IN_LIBRARY') || err.message.includes('409')) {
@@ -1580,6 +1765,7 @@ async function uploadSongThroughPipeline(audioFile, title) {
       const existingId = await findSongInLibrary(title);
       if (existingId) {
         logOk(`Found existing song "${title}" — songId: ${existingId}`);
+        await waitForSongReady(existingId, title);
         return existingId;
       }
       throw new Error(`Song "${title}" already in library but could not find songId — clear state or check manually`);
@@ -1595,6 +1781,7 @@ async function uploadSongThroughPipeline(audioFile, title) {
 
   if (instant) {
     logOk(`Song "${title}" dedup — songId: ${songId}`);
+    await waitForSongReady(songId, title);
     return songId;
   }
 
@@ -1606,58 +1793,15 @@ async function uploadSongThroughPipeline(audioFile, title) {
   }
 
   logInfo(`Calling finalize for song "${title}"...`);
-  try {
-    await apiCall('POST', '/songs/internal/finalize-upload', { songId }, {
-      'x-internal-token': INTERNAL_TOKEN,
-      Authorization: undefined,
-    });
-  } catch (err) {
-    logWarn(`Finalize call note: ${err.message}`);
-  }
+  // Finalize creates the durable outbox record. Do not continue when it
+  // fails: waiting for READY after an unauthorized or failed finalize only
+  // obscures the real issue and leaves the song permanently pending.
+  await apiCall('POST', '/songs/internal/finalize-upload', { songId }, {
+    'x-internal-token': FINALIZER_INTERNAL_TOKEN,
+    Authorization: undefined,
+  });
 
-  if (SKIP_TRANSCODE) {
-    logInfo(`--skip-transcode: Setting song READY directly...`);
-    const durationSec = Math.round(size / (128 * 1024 / 8));
-    try {
-      await apiCall('PATCH', '/songs/internal/processing-result', {
-        songId,
-        status: 3,
-        encryptedFilePath: `production/${checksum}/output.fmp4`,
-        durationSec,
-        bitrateKbps: 128,
-        codec: 'aac',
-        format: 'fmp4',
-      }, {
-        'x-internal-token': INTERNAL_TOKEN,
-        Authorization: undefined,
-      });
-      logOk(`Song "${title}" set to READY (skip-transcode) — songId: ${songId}`);
-      return songId;
-    } catch (err) {
-      logErr(`Failed to set READY: ${err.message}`);
-    }
-  }
-
-  logInfo(`Waiting for song "${title}" to become READY...`);
-  for (let i = 0; i < 60; i++) {
-    await sleep(3000);
-    try {
-      const songRes = await apiCall('GET', `/songs/${songId}`);
-      const status = songRes.status || songRes.song?.status;
-      if (status === 'READY' || status === 3) {
-        logOk(`Song "${title}" READY — songId: ${songId}`);
-        return songId;
-      }
-      if (status === 'FAILED' || status === 4) {
-        throw new Error(`Song processing failed for "${title}"`);
-      }
-      if (i % 5 === 0) logInfo(`Still processing... (${i * 3}s)`);
-    } catch (err) {
-      if (err.message.includes('processing failed')) throw err;
-    }
-  }
-
-  logWarn(`Song "${title}" did not become READY within 3 min — songId: ${songId}`);
+  await waitForSongReady(songId, title);
   return songId;
 }
 
@@ -1804,32 +1948,37 @@ async function main() {
   console.log(`${c.bold}${c.magenta}╚══════════════════════════════════════╝${c.reset}\n`);
 
   if (DRY_RUN) logWarn('DRY RUN mode — will crawl & download only, no API calls');
-  if (SKIP_TRANSCODE) logWarn('SKIP TRANSCODE mode — will set songs READY directly');
+  logInfo(`Audio mode: ${AUDIO_MODE}`);
 
   // ── Interactive Setup ───────────────────────────────
 
   if (!DRY_RUN) {
+    const managedBySeedStudio = Boolean(process.env.SEED_STUDIO_TOKEN_URL);
     ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
-    if (!ADMIN_TOKEN) {
+    if (!managedBySeedStudio && !ADMIN_TOKEN) {
       ADMIN_TOKEN = await promptUser(`  ${c.bold}ADMIN_TOKEN${c.reset} (JWT access token SUPER_ADMIN): `);
     }
-    if (!ADMIN_TOKEN) {
+    if (!managedBySeedStudio && !ADMIN_TOKEN) {
       logErr('ADMIN_TOKEN is required');
       process.exit(1);
     }
-    logOk('ADMIN_TOKEN set');
+    logOk(managedBySeedStudio ? 'Seed Studio managed session connected' : 'ADMIN_TOKEN set');
 
-    INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || INTERNAL_TOKEN;
-    if (!INTERNAL_TOKEN) {
-      logErr('INTERNAL_TOKEN is required');
+    FINALIZER_INTERNAL_TOKEN =
+      process.env.FINALIZER_INTERNAL_TOKEN || process.env.INTERNAL_TOKEN || '';
+    if (!FINALIZER_INTERNAL_TOKEN) {
+      logErr('FINALIZER_INTERNAL_TOKEN is required');
       process.exit(1);
     }
-    logOk('INTERNAL_TOKEN set');
+    if (!process.env.FINALIZER_INTERNAL_TOKEN && process.env.INTERNAL_TOKEN) {
+      logWarn('INTERNAL_TOKEN is deprecated; rename it to FINALIZER_INTERNAL_TOKEN');
+    }
+    logOk('FINALIZER_INTERNAL_TOKEN set');
 
     console.log();
   }
 
-  const artistQuery = args.find(a => !a.startsWith('--'))
+  const artistQuery = firstPositionalArgument()
     || await promptUser(`  ${c.bold}Tên nghệ sĩ${c.reset} cần tìm: `);
 
   if (!artistQuery) {
@@ -1839,9 +1988,19 @@ async function main() {
 
   // ── PHASE 1: Discovery ──────────────────────────────
 
-  logStep('Phase 1/5', 'Searching Apple Music...');
+  logStep(
+    'Phase 1/5',
+    SELECTED_ARTIST_ID
+      ? 'Looking up selected Apple Music artist...'
+      : 'Searching Apple Music...',
+  );
 
-  const artists = await searchArtistITunes(artistQuery);
+  // Seed Studio has already selected a concrete iTunes artist ID. Looking it
+  // up directly keeps song-search results (including names with "&") from
+  // being reinterpreted as a new fuzzy artist search.
+  const artists = SELECTED_ARTIST_ID
+    ? await lookupArtistITunes(SELECTED_ARTIST_ID)
+    : await searchArtistITunes(artistQuery);
   if (artists.length === 0) {
     logErr(`No artists found for "${artistQuery}"`);
     process.exit(1);
@@ -1853,7 +2012,14 @@ async function main() {
   });
 
   let selectedArtist;
-  if (artists.length === 1) {
+  if (SELECTED_ARTIST_ID) {
+    selectedArtist = artists.find(artist => String(artist.artistId) === SELECTED_ARTIST_ID);
+    if (!selectedArtist) {
+      logErr(`Selected artist ID ${SELECTED_ARTIST_ID} is not in the search results`);
+      process.exit(1);
+    }
+    logOk(`Selected by Seed Studio: ${selectedArtist.artistName}`);
+  } else if (artists.length === 1) {
     selectedArtist = artists[0];
     logOk(`Auto-selected: ${selectedArtist.artistName}`);
   } else {
@@ -1887,9 +2053,17 @@ async function main() {
     console.log(`  ${c.bold}[${i + 1}]${c.reset} ${a.collectionName} (${a.trackCount} tracks, ${type}, ${a.releaseDate?.split('T')[0] || '?'})`);
   });
 
-  const albumChoice = await promptUser(`\n  Pick albums to import (e.g. "1,3,5" or "all"): `);
+  const albumChoice = SELECTED_ALBUM_IDS.size
+    ? [...SELECTED_ALBUM_IDS].join(',')
+    : await promptUser(`\n  Pick albums to import (e.g. "1,3,5" or "all"): `);
   let selectedAlbums;
-  if (albumChoice.toLowerCase() === 'all') {
+  if (SELECTED_ALBUM_IDS.size) {
+    selectedAlbums = albums.filter(album => SELECTED_ALBUM_IDS.has(String(album.collectionId)));
+    if (selectedAlbums.length !== SELECTED_ALBUM_IDS.size) {
+      logErr('One or more selected album IDs are not available for this artist');
+      process.exit(1);
+    }
+  } else if (albumChoice.toLowerCase() === 'all') {
     selectedAlbums = albums;
   } else {
     const indices = albumChoice.split(',').map(s => parseInt(s.trim(), 10) - 1);
@@ -1927,6 +2101,7 @@ async function main() {
       `Selected ${albumsWithTracks.length} release(s) after Standard/Deluxe resolution`,
     );
   }
+
 
   // ── PHASE 2: Download ───────────────────────────────
 
@@ -2116,33 +2291,52 @@ async function main() {
   // tới ĐÚNG MỘT songId, dù xuất hiện ở nhiều album. Đây là lớp chống lặp chính —
   // không phụ thuộc checksum (bản re-encode từ mỗi nguồn cho checksum khác nhau).
   const recordingSongMap = state.get('recordingSongMap') || {};
+  const seedFailures = [];
 
   for (const { album, tracks } of albumsWithTracks) {
     logInfo(`\nProcessing songs for album "${album.collectionName}"...`);
 
     for (const track of tracks) {
-      const trackKey = `${album.collectionId}:${track.trackId}`;
-      if (songIdMap[trackKey]) {
-        logOk(`Song "${track.trackName}" already uploaded — songId: ${songIdMap[trackKey]}`);
-        continue;
-      }
-
       const recKey = recordingKey(
         track.trackName || track.title,
         track.artistName || selectedArtist.artistName,
       );
+      const trackKey = `${album.collectionId}:${track.trackId}`;
+      if (songIdMap[trackKey]) {
+        try {
+          await waitForSongReady(songIdMap[trackKey], track.trackName);
+          logOk(`Song "${track.trackName}" already uploaded — songId: ${songIdMap[trackKey]}`);
+          continue;
+        } catch (error) {
+          logWarn(`Cached song "${track.trackName}" is not READY; retrying pipeline`);
+          const cachedSongId = songIdMap[trackKey];
+          delete songIdMap[trackKey];
+          if (recordingSongMap[recKey] === cachedSongId) delete recordingSongMap[recKey];
+          state.set('songIdMap', songIdMap);
+          state.set('recordingSongMap', recordingSongMap);
+        }
+      }
 
       // ── Lớp 1: cùng bản thu đã có songId → tái sử dụng, KHÔNG upload lại ──
       if (recordingSongMap[recKey]) {
-        songIdMap[trackKey] = recordingSongMap[recKey];
-        state.set('songIdMap', songIdMap);
-        logOk(`Song "${track.trackName}" trùng bản thu — dùng lại songId: ${recordingSongMap[recKey]}`);
-        continue;
+        const existingSongId = recordingSongMap[recKey];
+        try {
+          await waitForSongReady(existingSongId, track.trackName);
+          songIdMap[trackKey] = existingSongId;
+          state.set('songIdMap', songIdMap);
+          logOk(`Song "${track.trackName}" trùng bản thu — dùng lại songId: ${existingSongId}`);
+          continue;
+        } catch (error) {
+          logWarn(`Cached recording "${track.trackName}" is not READY; retrying pipeline`);
+          delete recordingSongMap[recKey];
+          state.set('recordingSongMap', recordingSongMap);
+        }
       }
 
       const audioFile = audioFiles[track.trackId];
       if (!audioFile) {
         logWarn(`No audio for "${track.trackName}", skipping`);
+        seedFailures.push(`download ${track.trackName}: no verified audio source`);
         continue;
       }
 
@@ -2152,6 +2346,7 @@ async function main() {
         const existing = checksumMap[fileChecksum];
         if (typeof existing === 'string') {
           logWarn(`Skipping "${track.trackName}": checksum comes from legacy state without title metadata`);
+          seedFailures.push(`cache ${track.trackName}: legacy checksum entry must be reviewed`);
           continue;
         }
         const existingSongId = existing.songId;
@@ -2163,12 +2358,19 @@ async function main() {
           logWarn(`Skipping "${track.trackName}": audio checksum matches a different track ("${existingTitle}")`);
           continue;
         }
-        songIdMap[trackKey] = existingSongId;
-        recordingSongMap[recKey] = existingSongId;
-        state.set('songIdMap', songIdMap);
-        state.set('recordingSongMap', recordingSongMap);
-        logOk(`Song "${track.trackName}" matched by checksum — songId: ${existingSongId}`);
-        continue;
+        try {
+          await waitForSongReady(existingSongId, track.trackName);
+          songIdMap[trackKey] = existingSongId;
+          recordingSongMap[recKey] = existingSongId;
+          state.set('songIdMap', songIdMap);
+          state.set('recordingSongMap', recordingSongMap);
+          logOk(`Song "${track.trackName}" matched by checksum — songId: ${existingSongId}`);
+          continue;
+        } catch (error) {
+          logWarn(`Cached checksum for "${track.trackName}" is not READY; retrying pipeline`);
+          delete checksumMap[fileChecksum];
+          state.set('checksumMap', checksumMap);
+        }
       }
 
       try {
@@ -2181,6 +2383,7 @@ async function main() {
         state.set('checksumMap', checksumMap);
       } catch (err) {
         logErr(`Failed to upload "${track.trackName}": ${err.message}`);
+        seedFailures.push(`upload ${track.trackName}: ${err.message}`);
       }
     }
   }
@@ -2224,6 +2427,7 @@ async function main() {
           state.set('publishedSongIds', publishedSongIds);
         } catch (err) {
           logErr(`Failed to publish song draft "${track.trackName}": ${err.message}`);
+          seedFailures.push(`publish song ${track.trackName}: ${err.message}`);
           continue;
         }
       } else {
@@ -2262,6 +2466,7 @@ async function main() {
       }
     } catch (err) {
       logErr(`Failed to publish album "${albumName}": ${err.message}`);
+      seedFailures.push(`publish album ${albumName}: ${err.message}`);
     }
   }
 
@@ -2290,6 +2495,10 @@ async function main() {
     logOk(`Songs: ${songCount} found`);
   } catch (err) {
     logWarn(`Songs verify: ${err.message}`);
+  }
+
+  if (seedFailures.length > 0) {
+    throw new Error(`Seed incomplete (${seedFailures.length} failure(s)): ${seedFailures.join(' | ')}`);
   }
 
   console.log(`\n${c.bold}${c.green}Done!${c.reset} Artist "${selectedArtist.artistName}" seeded successfully.`);
