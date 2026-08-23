@@ -32,6 +32,7 @@ import {
   ListPlaylistTracksRequest,
   ListPlaylistTracksResponse,
   SongStatus,
+  AudioMode,
   SongSummary,
   SongDetail,
   SongIngestInfo,
@@ -39,10 +40,7 @@ import {
   GetSongIngestInfoResponse,
   ProtobufStruct,
 } from '@musical/shared-proto';
-import {
-  getArtworkRenditionSrcSet,
-  SONG_ASSET_CLEANUP_QUEUE,
-} from '@musical/shared-types';
+import { getArtworkRenditionSrcSet } from '@musical/shared-types';
 import { PrismaService } from '../database/prisma.service';
 import { Prisma, PrismaClient } from '../generated/prisma/client';
 import { CatalogAssetsService } from './catalog-assets.service';
@@ -50,6 +48,8 @@ import { CatalogAssetsService } from './catalog-assets.service';
 const songSummarySelect = {
   id: true,
   status: true,
+  isCatalog: true,
+  audioMode: true,
   contentRating: true,
   durationSec: true,
   artwork: true,
@@ -86,6 +86,7 @@ const songSummarySelect = {
 const songDetailSelect = {
   id: true,
   status: true,
+  audioMode: true,
   encryptedFilePath: true,
   durationSec: true,
   bitrateKbps: true,
@@ -112,6 +113,7 @@ const songDetailSelect = {
 const songIngestSelect = {
   id: true,
   status: true,
+  audioMode: true,
   sourceObjectPath: true,
   checksum: true,
   fileSizeBytes: true,
@@ -129,9 +131,11 @@ type SongIngestEntity = Prisma.SongGetPayload<{
 }>;
 
 const MAX_LIST_LIMIT = 50;
+const SONG_STATUS_READY = Number(SongStatus.SONG_STATUS_READY);
 
 type WorkerSongCompletionEvent = {
   song_id: string;
+  metadata_version: number;
   status: 'success' | 'error';
   duration_sec?: number | null;
   encrypted_file_path?: string | null;
@@ -142,23 +146,6 @@ type WorkerSongCompletionEvent = {
   mood_tags?: string[] | null;
   mood_analysis_version?: string | null;
   mood_analysis_scores?: Record<string, number> | null;
-};
-
-type AssetCleanupOutboxRepo = {
-  upsert(args: {
-    where: { songId: string };
-    update: {
-      sourceObjectPath: string;
-      encryptedFilePath: string;
-      lastError: string;
-    };
-    create: {
-      songId: string;
-      sourceObjectPath: string;
-      encryptedFilePath: string;
-      lastError: string;
-    };
-  }): Promise<unknown>;
 };
 
 @Injectable()
@@ -254,6 +241,10 @@ export class SongsService {
       const savedSong = await this.prisma.song.create({
         data: {
           sourceObjectPath: request.sourceObjectPath,
+          audioMode:
+            request.audioMode === AudioMode.AUDIO_MODE_SING
+              ? 'SING'
+              : 'STANDARD',
           checksum: request.checksum,
           fileSizeBytes: BigInt(request.fileSizeBytes ?? 0),
           status: SongStatus.SONG_STATUS_PENDING,
@@ -362,14 +353,54 @@ export class SongsService {
         updateData.format = request.format;
       }
 
-      const result = await this.prisma.song.updateMany({
-        where: { id: request.songId },
-        data: updateData,
-      });
+      await this.prisma.$transaction(async (tx) => {
+        const song = await tx.song.findUnique({
+          where: { id: request.songId },
+          select: {
+            id: true,
+            sourceObjectPath: true,
+            checksum: true,
+            audioMode: true,
+          },
+        });
+        if (!song) this.throwNotFound('SONG_NOT_FOUND');
 
-      if (result.count === 0) {
-        this.throwNotFound('SONG_NOT_FOUND');
-      }
+        const updatedSong = await tx.song.update({
+          where: { id: request.songId },
+          data:
+            request.status === SongStatus.SONG_STATUS_PROCESSING
+              ? {
+                  ...updateData,
+                  transcodeVersion: { increment: 1 },
+                }
+              : updateData,
+          select: { transcodeVersion: true },
+        });
+
+        if (request.status === SongStatus.SONG_STATUS_PROCESSING) {
+          if (!song.sourceObjectPath)
+            this.throwInvalidArgument('SONG_SOURCE_PATH_MISSING');
+          await tx.transcodeOutbox.upsert({
+            where: { songId: song.id },
+            update: {
+              sourceObjectPath: song.sourceObjectPath,
+              checksum: song.checksum || '',
+              audioMode: song.audioMode,
+              metadataVersion: updatedSong.transcodeVersion,
+              availableAt: new Date(),
+              lockedAt: null,
+              lastError: '',
+            },
+            create: {
+              songId: song.id,
+              sourceObjectPath: song.sourceObjectPath,
+              checksum: song.checksum || '',
+              audioMode: song.audioMode,
+              metadataVersion: updatedSong.transcodeVersion,
+            },
+          });
+        }
+      });
 
       return { success: true };
     } catch (error: unknown) {
@@ -384,11 +415,11 @@ export class SongsService {
     }
 
     const requesterUserId = request.requesterUserId?.trim() || '';
-    // getSong only needs a single owner row: the requester's own ownership
-    // profile when authenticated, otherwise any public profile. Scope the
-    // included `owners` relation so we don't load every owner of the song.
+    // A signed-in user can read their own private profile or any public one.
+    // Restrict the included relation to those candidates instead of loading
+    // every owner of a shared song.
     const ownersWhere: Prisma.SongOwnerWhereInput = requesterUserId
-      ? { userId: requesterUserId }
+      ? { OR: [{ userId: requesterUserId }, { isPublic: true }] }
       : { isPublic: true };
 
     const song = await this.prisma.song.findUnique({
@@ -398,7 +429,7 @@ export class SongsService {
         owners: {
           ...songDetailSelect.owners,
           where: ownersWhere,
-          take: 1,
+          take: requesterUserId ? 2 : 1,
         },
       },
     });
@@ -407,7 +438,8 @@ export class SongsService {
     }
 
     const ownerProfile = requesterUserId
-      ? song.owners.find((owner) => owner.userId === requesterUserId)
+      ? (song.owners.find((owner) => owner.userId === requesterUserId) ??
+        song.owners.find((owner) => owner.isPublic))
       : song.owners.find((owner) => owner.isPublic);
 
     if (!ownerProfile) {
@@ -920,15 +952,13 @@ export class SongsService {
       this.throwInvalidArgument('SONG_ID_REQUIRED');
     }
 
-    let cleanupPayload:
-      | {
-          song_id: string;
-          source_object_path: string;
-          encrypted_file_path: string;
-        }
-      | undefined;
-
     await this.prisma.$transaction(async (tx) => {
+      // Serialize concurrent owner removals for the same song. Without this
+      // row lock, two requests can each observe the other owner then both
+      // commit, leaving an unowned song with no cleanup intent.
+      await tx.$queryRaw(Prisma.sql`
+        SELECT "id" FROM "songs" WHERE "id" = ${request.songId} FOR UPDATE
+      `);
       await tx.songOwner.deleteMany({
         where: {
           songId: request.songId,
@@ -952,51 +982,33 @@ export class SongsService {
         });
 
         if (!song?.isCatalog) {
+          // The outbox has no foreign key so it must be cancelled explicitly;
+          // otherwise an already queued publisher can transcode a deleted song.
+          await tx.transcodeOutbox.deleteMany({
+            where: { songId: request.songId },
+          });
           await tx.song.deleteMany({
             where: { id: request.songId },
           });
         }
 
         if (song && !song.isCatalog) {
-          cleanupPayload = {
-            song_id: song.id,
-            source_object_path: song.sourceObjectPath || '',
-            encrypted_file_path: song.encryptedFilePath || '',
-          };
+          await tx.assetCleanupOutbox.upsert({
+            where: { songId: song.id },
+            update: {
+              sourceObjectPath: song.sourceObjectPath || '',
+              encryptedFilePath: song.encryptedFilePath || '',
+              lastError: '',
+            },
+            create: {
+              songId: song.id,
+              sourceObjectPath: song.sourceObjectPath || '',
+              encryptedFilePath: song.encryptedFilePath || '',
+            },
+          });
         }
       }
     });
-
-    if (cleanupPayload) {
-      try {
-        await this.redis.lpush(
-          SONG_ASSET_CLEANUP_QUEUE,
-          JSON.stringify(cleanupPayload),
-        );
-        this.logger.log(
-          `Queued asset cleanup for song ${cleanupPayload.song_id} source=${cleanupPayload.source_object_path || '<empty>'} encrypted=${cleanupPayload.encrypted_file_path || '<empty>'}`,
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        await this.outboxRepo().upsert({
-          where: { songId: cleanupPayload.song_id },
-          update: {
-            sourceObjectPath: cleanupPayload.source_object_path,
-            encryptedFilePath: cleanupPayload.encrypted_file_path,
-            lastError: message,
-          },
-          create: {
-            songId: cleanupPayload.song_id,
-            sourceObjectPath: cleanupPayload.source_object_path,
-            encryptedFilePath: cleanupPayload.encrypted_file_path,
-            lastError: message,
-          },
-        });
-        this.logger.warn(
-          `Stored asset cleanup outbox for song ${cleanupPayload.song_id} after queue failure: ${message}`,
-        );
-      }
-    }
 
     this.logger.log(
       `User ${request.userId} unlinked ownership for song ${request.songId}`,
@@ -1006,6 +1018,8 @@ export class SongsService {
 
   async getPlaylist(request: GetPlaylistRequest): Promise<GetPlaylistResponse> {
     if (!request.playlistId) this.throwInvalidArgument('PLAYLIST_ID_REQUIRED');
+
+    const requesterUserId = request.requesterUserId?.trim() || '';
 
     const playlist = await this.prisma.userPlaylist.findUnique({
       where: { id: request.playlistId },
@@ -1024,10 +1038,13 @@ export class SongsService {
 
     if (!playlist) this.throwNotFound('PLAYLIST_NOT_FOUND');
 
-    const requesterUserId = request.requesterUserId?.trim() || '';
     if (!playlist.isPublic && playlist.userId !== requesterUserId) {
       this.throwPermissionDenied('PLAYLIST_ACCESS_DENIED');
     }
+    const visibleTracks =
+      playlist.isPublic && playlist.userId !== requesterUserId
+        ? playlist.tracks.filter(({ song }) => this.isPubliclyPlayable(song))
+        : playlist.tracks;
 
     return {
       playlist: {
@@ -1036,7 +1053,7 @@ export class SongsService {
         description: playlist.description,
         artworkUrl: playlist.coverUrl,
         ownerId: playlist.userId,
-        songs: playlist.tracks.map(({ song }) =>
+        songs: visibleTracks.map(({ song }) =>
           this.mapEntityToSummary(song, requesterUserId, true),
         ),
         createdAt: playlist.createdAt.getTime(),
@@ -1075,6 +1092,9 @@ export class SongsService {
     const tracks = await this.prisma.userPlaylistTrack.findMany({
       where: {
         playlistId: request.playlistId,
+        ...(playlist.isPublic && playlist.userId !== requesterUserId
+          ? this.publicPlaylistTrackWhere()
+          : {}),
         ...(cursorPosition === undefined
           ? {}
           : { position: { gt: cursorPosition } }),
@@ -1247,15 +1267,23 @@ export class SongsService {
       });
     }
 
+    const visibleTrackWhere = isSelf
+      ? undefined
+      : this.publicPlaylistTrackWhere();
     const playlists = await this.prisma.userPlaylist.findMany({
       where: { AND: filters },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: take + 1,
       include: {
-        _count: { select: { tracks: true } },
+        _count: {
+          select: {
+            tracks: visibleTrackWhere ? { where: visibleTrackWhere } : true,
+          },
+        },
         tracks: {
           take: 1,
           orderBy: { position: 'asc' },
+          ...(visibleTrackWhere ? { where: visibleTrackWhere } : {}),
           select: { song: { select: songSummarySelect } },
         },
       },
@@ -1322,35 +1350,73 @@ export class SongsService {
     if (!playlistId) this.throwInvalidArgument('PLAYLIST_ID_REQUIRED');
     if (!songId) this.throwInvalidArgument('SONG_ID_REQUIRED');
 
-    const playlist = await this.prisma.userPlaylist.findUnique({
-      where: { id: playlistId },
-      select: { userId: true },
-    });
-    if (!playlist) this.throwNotFound('PLAYLIST_NOT_FOUND');
-    if (playlist.userId !== userId)
-      this.throwPermissionDenied('PLAYLIST_ACCESS_DENIED');
-
-    const song = await this.prisma.song.findUnique({
-      where: { id: songId },
-      select: { id: true },
-    });
-    if (!song) this.throwNotFound('SONG_NOT_FOUND');
-
-    const maxPosition = await this.prisma.userPlaylistTrack.aggregate({
-      where: { playlistId },
-      _max: { position: true },
-    });
-    const nextPosition = (maxPosition._max.position ?? -1) + 1;
-
     try {
-      await this.prisma.userPlaylistTrack.create({
-        data: {
-          playlistId,
-          songId,
-          position: nextPosition,
-        },
+      await this.prisma.$transaction(async (tx) => {
+        // A row lock serializes position allocation and prevents two callers
+        // from adding different tracks at the same max(position) + 1.
+        await tx.$queryRaw(Prisma.sql`
+          SELECT "id" FROM "user_playlists" WHERE "id" = ${playlistId} FOR UPDATE
+        `);
+        const playlist = await tx.userPlaylist.findUnique({
+          where: { id: playlistId },
+          select: { userId: true, isPublic: true },
+        });
+        if (!playlist) this.throwNotFound('PLAYLIST_NOT_FOUND');
+        if (playlist.userId !== userId)
+          this.throwPermissionDenied('PLAYLIST_ACCESS_DENIED');
+
+        const song = await tx.song.findUnique({
+          where: { id: songId },
+          select: {
+            id: true,
+            isCatalog: true,
+            status: true,
+            owners: {
+              where: { OR: [{ userId }, { isPublic: true }] },
+              select: { userId: true, isPublic: true },
+            },
+          },
+        });
+        if (!song) this.throwNotFound('SONG_NOT_FOUND');
+
+        const isOwner = song.owners.some((owner) => owner.userId === userId);
+        const isPubliclyPlayable =
+          song.status === SONG_STATUS_READY &&
+          (song.isCatalog || song.owners.some((owner) => owner.isPublic));
+        if (!isOwner && !isPubliclyPlayable) {
+          this.throwPermissionDenied('SONG_ACCESS_DENIED');
+        }
+        if (playlist.isPublic && !isPubliclyPlayable) {
+          this.throwPermissionDenied(
+            'PUBLIC_PLAYLIST_REQUIRES_PUBLIC_READY_SONG',
+          );
+        }
+
+        const existingTrack = await tx.userPlaylistTrack.findUnique({
+          where: { playlistId_songId: { playlistId, songId } },
+          select: { songId: true },
+        });
+        if (existingTrack) {
+          throw new RpcException({
+            code: status.ALREADY_EXISTS,
+            message: 'TRACK_ALREADY_IN_PLAYLIST',
+          });
+        }
+
+        const maxPosition = await tx.userPlaylistTrack.aggregate({
+          where: { playlistId },
+          _max: { position: true },
+        });
+        await tx.userPlaylistTrack.create({
+          data: {
+            playlistId,
+            songId,
+            position: (maxPosition._max.position ?? -1) + 1,
+          },
+        });
       });
     } catch (error: unknown) {
+      if (error instanceof RpcException) throw error;
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
@@ -1389,37 +1455,49 @@ export class SongsService {
     return { success: true };
   }
 
-  async applyWorkerCompletion(event: WorkerSongCompletionEvent): Promise<void> {
-    const succeeded = event.status === 'success';
+  async applyWorkerCompletion(
+    event: WorkerSongCompletionEvent,
+  ): Promise<boolean> {
+    if (
+      !Number.isSafeInteger(event.metadata_version) ||
+      event.metadata_version <= 0
+    ) {
+      this.throwInvalidArgument('METADATA_VERSION_INVALID');
+    }
 
-    await this.updateSongProcessingResult({
-      songId: event.song_id,
+    const succeeded = event.status === 'success';
+    const updateData: Prisma.SongUpdateManyMutationInput = {
       status: succeeded
         ? SongStatus.SONG_STATUS_READY
         : SongStatus.SONG_STATUS_FAILED,
-      encryptedFilePath:
+    };
+
+    if (succeeded) {
+      updateData.encryptedFilePath =
         event.encrypted_file_path ||
-        this.buildProcessedObjectPath(event.song_id),
-      durationSec: succeeded
-        ? Math.max(0, Math.round(event.duration_sec ?? 0))
-        : 0,
-      bitrateKbps: succeeded ? (event.bitrate_kbps ?? 128) : 0,
-      codec: succeeded ? (event.codec ?? 'aac') : '',
-      format: succeeded ? (event.format ?? 'fmp4') : '',
-      errorMessage: event.error_message ?? '',
-    });
+        this.buildProcessedObjectPath(event.song_id);
+      updateData.durationSec = Math.max(0, Math.round(event.duration_sec ?? 0));
+      updateData.bitrateKbps = event.bitrate_kbps ?? 128;
+      updateData.codec = event.codec ?? 'aac';
+      updateData.format = event.format ?? 'fmp4';
+    }
 
     if (succeeded && event.mood_tags?.length) {
-      await this.prisma.song.update({
-        where: { id: event.song_id },
-        data: {
-          moodTags: event.mood_tags,
-          moodAnalysisVersion: event.mood_analysis_version ?? '',
-          moodAnalysisScores: event.mood_analysis_scores ?? undefined,
-          moodAnalyzedAt: new Date(),
-        },
-      });
+      updateData.moodTags = event.mood_tags;
+      updateData.moodAnalysisVersion = event.mood_analysis_version ?? '';
+      updateData.moodAnalysisScores = event.mood_analysis_scores ?? undefined;
+      updateData.moodAnalyzedAt = new Date();
     }
+
+    const result = await this.prisma.song.updateMany({
+      where: {
+        id: event.song_id,
+        transcodeVersion: BigInt(event.metadata_version),
+      },
+      data: updateData,
+    });
+
+    return result.count === 1;
   }
 
   private mapEntityToSummary(
@@ -1453,6 +1531,10 @@ export class SongsService {
         this.artworkUrl(entity.artwork),
       isPublic: ownerProfile?.isPublic ?? false,
       status: entity.status,
+      audioMode:
+        entity.audioMode === 'SING'
+          ? AudioMode.AUDIO_MODE_SING
+          : AudioMode.AUDIO_MODE_STANDARD,
       contentRating: entity.contentRating,
       durationSec: entity.durationSec || 0,
       createdAt: entity.createdAt.getTime(),
@@ -1485,6 +1567,10 @@ export class SongsService {
       uploaderId: ownerProfile.userId,
       isPublic: ownerProfile.isPublic,
       status: entity.status,
+      audioMode:
+        entity.audioMode === 'SING'
+          ? AudioMode.AUDIO_MODE_SING
+          : AudioMode.AUDIO_MODE_STANDARD,
       encryptedFilePath: entity.encryptedFilePath || '',
       durationSec: entity.durationSec || 0,
       bitrateKbps: entity.bitrateKbps || 0,
@@ -1503,6 +1589,10 @@ export class SongsService {
       checksum: entity.checksum || '',
       fileSizeBytes: Number(entity.fileSizeBytes ?? 0),
       createdAt: entity.createdAt.getTime(),
+      audioMode:
+        entity.audioMode === 'SING'
+          ? AudioMode.AUDIO_MODE_SING
+          : AudioMode.AUDIO_MODE_STANDARD,
     };
   }
 
@@ -1524,10 +1614,20 @@ export class SongsService {
     return `processed/${songId}.m4a`;
   }
 
-  private outboxRepo(): AssetCleanupOutboxRepo {
+  private publicPlaylistTrackWhere(): Prisma.UserPlaylistTrackWhereInput {
+    return {
+      song: {
+        status: SongStatus.SONG_STATUS_READY,
+        OR: [{ isCatalog: true }, { owners: { some: { isPublic: true } } }],
+      },
+    };
+  }
+
+  private isPubliclyPlayable(song: SongSummaryEntity): boolean {
     return (
-      this.prisma as unknown as { assetCleanupOutbox: AssetCleanupOutboxRepo }
-    ).assetCleanupOutbox;
+      song.status === SONG_STATUS_READY &&
+      (song.isCatalog || song.owners.some((owner) => owner.isPublic))
+    );
   }
 
   private throwInvalidArgument(message: string): never {

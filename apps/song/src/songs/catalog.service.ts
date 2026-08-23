@@ -1450,14 +1450,6 @@ export class CatalogService {
     };
   }
 
-  private protobufStructList(value: Prisma.JsonValue | null): ProtobufStruct[] {
-    if (!Array.isArray(value)) return [];
-    return value.flatMap((item) => {
-      const struct = this.protobufStruct(item);
-      return struct ? [struct] : [];
-    });
-  }
-
   private protobufValue(value: unknown): Record<string, unknown> {
     if (value === null || value === undefined) {
       return {
@@ -1610,12 +1602,6 @@ export class CatalogService {
 
   private boolean(value: unknown, fallback = false): boolean {
     return typeof value === 'boolean' ? value : fallback;
-  }
-
-  private optionalDate(value: unknown): Date | null {
-    if (typeof value !== 'string' || !value) return null;
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? null : date;
   }
 
   private dateOnly(value: Date | null): string {

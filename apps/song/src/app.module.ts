@@ -5,7 +5,11 @@ import { validateEnv } from './common/configs/env.validation';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: [`.env.${process.env.APP_ENV ?? 'development'}`, '.env'],
+      validate: validateEnv,
+    }),
     SongsModule,
   ],
 })

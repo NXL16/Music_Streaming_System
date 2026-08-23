@@ -28,6 +28,11 @@ enum SongLyricLineKind {
   INSTRUMENTAL
 }
 
+enum SongAudioMode {
+  STANDARD
+  SING
+}
+
 model CatalogDraft {
   id           String             @id @default(uuid())
   resourceType String             @db.VarChar(32)
@@ -69,6 +74,10 @@ model Song {
   id                        String              @id @default(uuid())
   status                    Int                 @default(1)
   sourceObjectPath          String              @default("") @db.VarChar(500)
+  audioMode                 SongAudioMode       @default(STANDARD)
+  // Monotonic per-song generation assigned whenever processing is requested.
+  // It fences late worker completions and metadata writes from an older source.
+  transcodeVersion          BigInt              @default(0)
   checksum                  String?             @unique @db.VarChar(64)
   fileSizeBytes             BigInt              @default(0)
   encryptedFilePath         String              @default("") @db.VarChar(500)
@@ -391,17 +400,40 @@ model SongOwner {
 }
 
 model AssetCleanupOutbox {
-  id                String   @id @default(uuid())
-  songId            String   @unique @db.VarChar(128)
-  sourceObjectPath  String   @default("") @db.VarChar(500)
-  encryptedFilePath String   @default("") @db.VarChar(500)
-  attempts          Int      @default(0)
-  lastError         String   @default("") @db.VarChar(1000)
-  createdAt         DateTime @default(now()) @db.Timestamptz
-  updatedAt         DateTime @updatedAt @db.Timestamptz
+  id                String    @id @default(uuid())
+  songId            String    @unique @db.VarChar(128)
+  sourceObjectPath  String    @default("") @db.VarChar(500)
+  encryptedFilePath String    @default("") @db.VarChar(500)
+  attempts          Int       @default(0)
+  availableAt       DateTime  @default(now()) @db.Timestamptz
+  lockedAt          DateTime? @db.Timestamptz
+  lockedBy          String?   @db.VarChar(64)
+  lastError         String    @default("") @db.VarChar(1000)
+  createdAt         DateTime  @default(now()) @db.Timestamptz
+  updatedAt         DateTime  @updatedAt @db.Timestamptz
 
   @@index([createdAt])
+  @@index([availableAt, lockedAt])
   @@map("asset_cleanup_outbox")
+}
+
+model TranscodeOutbox {
+  id               String        @id @default(uuid())
+  songId           String        @unique @db.VarChar(128)
+  sourceObjectPath String        @db.VarChar(500)
+  checksum         String        @default("") @db.VarChar(64)
+  audioMode        SongAudioMode @default(STANDARD)
+  metadataVersion  BigInt        @default(0)
+  attempts         Int           @default(0)
+  availableAt      DateTime      @default(now()) @db.Timestamptz
+  lockedAt         DateTime?     @db.Timestamptz
+  lockedBy         String?       @db.VarChar(64)
+  lastError        String        @default("") @db.VarChar(2000)
+  createdAt        DateTime      @default(now()) @db.Timestamptz
+  updatedAt        DateTime      @updatedAt @db.Timestamptz
+
+  @@index([availableAt, lockedAt])
+  @@map("transcode_outbox")
 }
 
 model Favorite {
@@ -461,16 +493,16 @@ model UserPlaylistTrack {
 }
 
 model UserLibraryResource {
-  id           String   @id @default(uuid())
-  userId       String   @db.VarChar(128)
-  resourceType String   @db.VarChar(32)
-  resourceId   String   @db.VarChar(128)
-  title        String   @default("") @db.VarChar(255)
-  subtitle     String   @default("") @db.VarChar(255)
-  artworkUrl   String   @default("") @db.VarChar(1000)
-  isPinned     Boolean  @default(false)
+  id           String    @id @default(uuid())
+  userId       String    @db.VarChar(128)
+  resourceType String    @db.VarChar(32)
+  resourceId   String    @db.VarChar(128)
+  title        String    @default("") @db.VarChar(255)
+  subtitle     String    @default("") @db.VarChar(255)
+  artworkUrl   String    @default("") @db.VarChar(1000)
+  isPinned     Boolean   @default(false)
   pinnedAt     DateTime? @db.Timestamptz
-  createdAt    DateTime @default(now()) @db.Timestamptz
+  createdAt    DateTime  @default(now()) @db.Timestamptz
 
   @@unique([userId, resourceType, resourceId])
   @@index([userId, createdAt])

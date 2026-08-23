@@ -18,6 +18,7 @@ import { CatalogAuthoringService } from './catalog-authoring.service';
 import { CatalogAssetsService } from './catalog-assets.service';
 import { CatalogAssetUsageOutboxService } from './catalog-asset-usage-outbox.service';
 import { LyricsService } from './lyrics.service';
+import { TranscodeOutboxService } from './transcode-outbox.service';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { LyricsService } from './lyrics.service';
     CatalogAssetsService,
     CatalogAssetUsageOutboxService,
     LyricsService,
+    TranscodeOutboxService,
   ],
 })
 export class SongsModule {}

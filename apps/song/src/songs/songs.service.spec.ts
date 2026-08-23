@@ -3,13 +3,47 @@ import { RpcException } from '@nestjs/microservices';
 
 jest.mock('../database/prisma.service', () => ({ PrismaService: class {} }));
 jest.mock('../generated/prisma/client', () => ({
-  Prisma: { PrismaClientKnownRequestError: class {} },
+  Prisma: {
+    PrismaClientKnownRequestError: class {},
+    sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+      strings,
+      values,
+    }),
+  },
   PrismaClient: class {},
+}));
+jest.mock('@musical/shared-proto', () => ({
+  AudioMode: {
+    AUDIO_MODE_SING: 2,
+    AUDIO_MODE_STANDARD: 1,
+  },
+  SongStatus: {
+    SONG_STATUS_READY: 3,
+  },
+}));
+jest.mock('@musical/shared-types', () => ({
+  getArtworkRenditionSrcSet: jest.fn(),
 }));
 
 import { SongsService } from './songs.service';
 
 type Track = { position: number; song: { id: string } };
+type PlaylistAccessCase = [
+  label: string,
+  playlist: { userId: string; isPublic: boolean } | null,
+  requesterUserId: string,
+  code: number,
+];
+
+const playlistAccessCases: PlaylistAccessCase[] = [
+  ['missing playlist', null, 'owner', status.NOT_FOUND],
+  [
+    'private playlist owned by another user',
+    { userId: 'owner', isPublic: false },
+    'listener',
+    status.PERMISSION_DENIED,
+  ],
+];
 
 async function expectRpcCode(request: Promise<unknown>, code: number) {
   try {
@@ -44,6 +78,58 @@ function createService(options?: {
   });
 
   return { service, findUnique, findMany };
+}
+
+function createAddTrackService(options?: {
+  playlist?: { userId: string; isPublic: boolean } | null;
+  song?: {
+    id: string;
+    status: number;
+    isCatalog: boolean;
+    owners: { userId: string; isPublic: boolean }[];
+  } | null;
+  existingTrack?: { songId: string } | null;
+  maxPosition?: number | null;
+}) {
+  const create = jest.fn().mockResolvedValue({});
+  const tx = {
+    $queryRaw: jest.fn().mockResolvedValue([]),
+    userPlaylist: {
+      findUnique: jest
+        .fn()
+        .mockResolvedValue(
+          options?.playlist ?? { userId: 'owner', isPublic: false },
+        ),
+    },
+    song: {
+      findUnique: jest.fn().mockResolvedValue(
+        options?.song ?? {
+          id: 'song',
+          status: 3,
+          isCatalog: false,
+          owners: [{ userId: 'owner', isPublic: false }],
+        },
+      ),
+    },
+    userPlaylistTrack: {
+      findUnique: jest.fn().mockResolvedValue(options?.existingTrack ?? null),
+      aggregate: jest.fn().mockResolvedValue({
+        _max: { position: options?.maxPosition ?? null },
+      }),
+      create,
+    },
+  };
+  const service = Object.create(SongsService.prototype) as SongsService;
+  Object.assign(service as object, {
+    prisma: {
+      $transaction: jest.fn(
+        (callback: (transaction: typeof tx) => Promise<unknown>) =>
+          callback(tx),
+      ),
+    },
+  });
+
+  return { create, service, tx };
 }
 
 describe('SongsService.listPlaylistTracks', () => {
@@ -109,31 +195,41 @@ describe('SongsService.listPlaylistTracks', () => {
         limit: 1,
       }),
     ).resolves.toMatchObject({ hasMore: false });
-    expect(findMany).toHaveBeenCalled();
-  });
-
-  it.each([
-    ['missing playlist', null, 'owner', status.NOT_FOUND],
-    [
-      'private playlist owned by another user',
-      { userId: 'owner', isPublic: false },
-      'listener',
-      status.PERMISSION_DENIED,
-    ],
-  ])('rejects %s', async (_label, playlist, requesterUserId, code) => {
-    const { service, findMany } = createService({ playlist });
-
-    await expectRpcCode(
-      service.listPlaylistTracks({
-        playlistId: 'playlist',
-        requesterUserId,
-        cursor: '',
-        limit: 1,
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          playlistId: 'playlist',
+          song: {
+            status: 3,
+            OR: [{ isCatalog: true }, { owners: { some: { isPublic: true } } }],
+          },
+        },
       }),
-      code,
     );
-    expect(findMany).not.toHaveBeenCalled();
   });
+
+  it.each(playlistAccessCases)(
+    'rejects %s',
+    async (
+      _label: string,
+      playlist: PlaylistAccessCase[1],
+      requesterUserId: string,
+      code: number,
+    ) => {
+      const { service, findMany } = createService({ playlist });
+
+      await expectRpcCode(
+        service.listPlaylistTracks({
+          playlistId: 'playlist',
+          requesterUserId,
+          cursor: '',
+          limit: 1,
+        }),
+        code,
+      );
+      expect(findMany).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(['not-a-number', '-1', '1.5'])(
     'rejects invalid cursor %s',
@@ -152,4 +248,73 @@ describe('SongsService.listPlaylistTracks', () => {
       expect(findMany).not.toHaveBeenCalled();
     },
   );
+});
+
+describe('SongsService.addTrackToPlaylist', () => {
+  it('does not expose a private song through a public playlist', async () => {
+    const { create, service } = createAddTrackService({
+      playlist: { userId: 'owner', isPublic: true },
+    });
+
+    await expectRpcCode(
+      service.addTrackToPlaylist('owner', 'playlist', 'song'),
+      status.PERMISSION_DENIED,
+    );
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a song the playlist owner cannot read', async () => {
+    const { create, service } = createAddTrackService({
+      song: {
+        id: 'song',
+        status: 3,
+        isCatalog: false,
+        owners: [{ userId: 'other-user', isPublic: false }],
+      },
+    });
+
+    await expectRpcCode(
+      service.addTrackToPlaylist('owner', 'playlist', 'song'),
+      status.PERMISSION_DENIED,
+    );
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('locks the playlist before allocating the next track position', async () => {
+    const { create, service, tx } = createAddTrackService({ maxPosition: 4 });
+
+    await expect(
+      service.addTrackToPlaylist('owner', 'playlist', 'song'),
+    ).resolves.toEqual({ success: true });
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledWith({
+      data: { playlistId: 'playlist', songId: 'song', position: 5 },
+    });
+  });
+});
+
+describe('SongsService.applyWorkerCompletion', () => {
+  it('does not let a stale transcode generation overwrite the current song', async () => {
+    const updateMany = jest.fn().mockResolvedValue({ count: 0 });
+    const service = Object.create(SongsService.prototype) as SongsService;
+    Object.assign(service as object, {
+      prisma: { song: { updateMany } },
+    });
+
+    await expect(
+      service.applyWorkerCompletion({
+        song_id: 'song-1',
+        metadata_version: 4,
+        status: 'success',
+        encrypted_file_path: 'processed/song-1.m4a',
+      }),
+    ).resolves.toBe(false);
+
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'song-1', transcodeVersion: 4n },
+      }),
+    );
+  });
 });

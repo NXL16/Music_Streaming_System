@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SongStatus } from '@musical/shared-proto';
 import { PrismaService } from '../database/prisma.service';
@@ -65,19 +70,23 @@ export class PendingCleanupService implements OnModuleInit, OnModuleDestroy {
         orderBy: { createdAt: 'asc' },
       });
 
-      if (stalePending.length === 0) {
-        return;
+      if (stalePending.length > 0) {
+        const ids = stalePending.map((item) => item.id);
+        const result = await this.prisma.song.updateMany({
+          // Re-check the predicate in the write: an upload can move to
+          // PROCESSING/READY between findMany and updateMany.
+          where: {
+            id: { in: ids },
+            status: SongStatus.SONG_STATUS_PENDING,
+            createdAt: { lt: threshold },
+          },
+          data: { status: SongStatus.SONG_STATUS_FAILED },
+        });
+
+        this.logger.warn(
+          `Marked stale pending songs as FAILED: ${result.count} (threshold=${threshold.toISOString()})`,
+        );
       }
-
-      const ids = stalePending.map((item) => item.id);
-      const result = await this.prisma.song.updateMany({
-        where: { id: { in: ids } },
-        data: { status: SongStatus.SONG_STATUS_FAILED },
-      });
-
-      this.logger.warn(
-        `Marked stale pending songs as FAILED: ${result.count} (threshold=${threshold.toISOString()})`,
-      );
     } catch (error) {
       this.logger.error(
         'Pending cleanup failed',

@@ -11,6 +11,7 @@ const REQUIRED_KEYS = [
   'R2_BUCKET',
   'ASSET_GRPC_URL',
   'INTERNAL_GRPC_TOKEN',
+  'SONG_GRPC_URL',
 ] as const;
 
 export function validateEnv(rawEnv: RawEnv): RawEnv {
@@ -37,6 +38,10 @@ export function validateEnv(rawEnv: RawEnv): RawEnv {
 
   if (!/^[^:\s]+:\d{1,5}$/.test(rawEnv.ASSET_GRPC_URL!)) {
     throw new Error('ASSET_GRPC_URL must use host:port format');
+  }
+
+  if (!/^[^:\s]+:\d{1,5}$/.test(rawEnv.SONG_GRPC_URL!)) {
+    throw new Error('SONG_GRPC_URL must use host:port format');
   }
 
   return rawEnv;

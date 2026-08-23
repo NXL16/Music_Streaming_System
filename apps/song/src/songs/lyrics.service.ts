@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { status } from '@grpc/grpc-js';
 import { RpcException } from '@nestjs/microservices';
 import {
@@ -11,6 +12,7 @@ import {
   SongLyricStatus,
   SongLyricSyncMode,
 } from '../generated/prisma/client';
+import type { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../database/prisma.service';
 
 const TIMESTAMP = /\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
@@ -19,6 +21,7 @@ const MAX_WORDS_PER_LINE = 100;
 const MAX_SOURCE_LENGTH = 200_000;
 const MAX_LINE_TEXT_LENGTH = 4_000;
 const MAX_WORD_TEXT_LENGTH = 500;
+const WORD_INSERT_BATCH_SIZE = 5_000;
 
 type PreparedWord = {
   position: number;
@@ -33,6 +36,12 @@ type PreparedLine = {
   endTimeMs: number;
   text: string;
   kind: SongLyricLineKind;
+  words: PreparedWord[];
+};
+
+type PersistedLine = Omit<PreparedLine, 'words'> & {
+  id: string;
+  lyricId: string;
   words: PreparedWord[];
 };
 
@@ -159,27 +168,7 @@ export class LyricsService {
           status: SongLyricStatus.PUBLISHED,
         },
       });
-      await tx.songLyricLine.deleteMany({ where: { lyricId: lyric.id } });
-      for (const line of lines) {
-        const createdLine = await tx.songLyricLine.create({
-          data: {
-            lyricId: lyric.id,
-            position: line.position,
-            startTimeMs: line.startTimeMs,
-            endTimeMs: line.endTimeMs,
-            text: line.text,
-            kind: line.kind,
-          },
-        });
-        if (line.words.length) {
-          await tx.songLyricWord.createMany({
-            data: line.words.map((word) => ({
-              lineId: createdLine.id,
-              ...word,
-            })),
-          });
-        }
-      }
+      await this.replacePublishedLines(tx, lyric.id, lines);
       await tx.song.update({
         where: { id: song.id },
         data: { hasLyrics: true, hasTimeSyncedLyrics: true },
@@ -207,6 +196,46 @@ export class LyricsService {
         code: status.PERMISSION_DENIED,
         message: 'SONG_FORBIDDEN',
       });
+    }
+  }
+
+  private async replacePublishedLines(
+    tx: Prisma.TransactionClient,
+    lyricId: string,
+    lines: PreparedLine[],
+  ): Promise<void> {
+    await tx.songLyricLine.deleteMany({ where: { lyricId } });
+    if (!lines.length) return;
+
+    const persistedLines: PersistedLine[] = lines.map((line) => ({
+      ...line,
+      id: randomUUID(),
+      lyricId,
+    }));
+    await tx.songLyricLine.createMany({
+      data: persistedLines.map((line) => ({
+        id: line.id,
+        lyricId: line.lyricId,
+        position: line.position,
+        startTimeMs: line.startTimeMs,
+        endTimeMs: line.endTimeMs,
+        text: line.text,
+        kind: line.kind,
+      })),
+    });
+
+    let wordBatch: Prisma.SongLyricWordCreateManyInput[] = [];
+    for (const line of persistedLines) {
+      for (const word of line.words) {
+        wordBatch.push({ lineId: line.id, ...word });
+        if (wordBatch.length === WORD_INSERT_BATCH_SIZE) {
+          await tx.songLyricWord.createMany({ data: wordBatch });
+          wordBatch = [];
+        }
+      }
+    }
+    if (wordBatch.length) {
+      await tx.songLyricWord.createMany({ data: wordBatch });
     }
   }
 
