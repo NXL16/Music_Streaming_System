@@ -1,18 +1,18 @@
-use crate::pipeline::ingest::run_pipeline;
 use crate::observability::log::log_event;
+use crate::pipeline::ingest::run_pipeline;
 use crate::queue::job::JobPayload;
 use crate::redis::{RedisPublisher, SongCompletionEvent};
 use aws_sdk_s3::Client;
 use std::sync::Arc;
 
-pub async fn handle_with_options(
+pub async fn handle(
     job: JobPayload,
-    publish_error_event: bool,
     master_secret_key: Arc<Vec<u8>>,
     r2_client: Client,
     redis_conn: redis::aio::ConnectionManager,
 ) -> anyhow::Result<()> {
     let song_id = job.song_id.clone();
+    let metadata_version = job.metadata_version;
     log_event("info", "job_started", &[("song_id", song_id.clone())]);
     let mut redis = RedisPublisher::from_manager(redis_conn);
 
@@ -25,6 +25,7 @@ pub async fn handle_with_options(
 
             let event = SongCompletionEvent {
                 song_id: song_id.clone(),
+                metadata_version,
                 status: "success".to_string(),
                 duration_sec,
                 encrypted_file_path: Some(encrypted_file_path),
@@ -38,26 +39,27 @@ pub async fn handle_with_options(
             };
 
             redis.publish_song_completion(event).await?;
-            log_event("info", "job_completed", &[("song_id", song_id.clone()), ("status", "success".to_string())]);
+            log_event(
+                "info",
+                "job_completed",
+                &[
+                    ("song_id", song_id.clone()),
+                    ("status", "success".to_string()),
+                ],
+            );
         }
         Err(e) => {
-            if publish_error_event {
-                let event = SongCompletionEvent {
-                    song_id: song_id.clone(),
-                    status: "error".to_string(),
-                    duration_sec: None,
-                    encrypted_file_path: None,
-                    bitrate_kbps: None,
-                    codec: None,
-                    format: None,
-                    mood_tags: None,
-                    mood_analysis_version: None,
-                    mood_analysis_scores: None,
-                    error_message: Some(e.to_string()),
-                };
-                let _ = redis.publish_song_completion(event).await;
-            }
-            log_event("error", "job_completed", &[("song_id", song_id.clone()), ("status", "error".to_string()), ("error", e.to_string())]);
+            log_event(
+                "error",
+                // This is an individual pipeline attempt, not a completed
+                // terminal job. The consumer decides retry/DLQ afterward.
+                "job_attempt_failed",
+                &[
+                    ("song_id", song_id.clone()),
+                    ("status", "error".to_string()),
+                    ("error", e.to_string()),
+                ],
+            );
 
             return Err(e);
         }

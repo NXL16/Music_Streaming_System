@@ -8,9 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure()
         .build_server(false)
         .compile_protos(
-            &[
-                "../../packages/shared-proto/metadata_service.proto",
-            ],
+            &["../../packages/shared-proto/metadata_service.proto"],
             &["../../packages/shared-proto"],
         )?;
 

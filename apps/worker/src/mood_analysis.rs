@@ -4,10 +4,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::Stdio;
 use tokio::process::Command;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
 const ALLOWED_TAGS: [&str; 7] = [
-    "focus", "feeling-blue", "energy", "heartbreak", "relax", "feel-good", "love",
+    "focus",
+    "feeling-blue",
+    "energy",
+    "heartbreak",
+    "relax",
+    "feel-good",
+    "love",
 ];
 
 #[derive(Debug)]
@@ -28,7 +34,10 @@ struct AnalyzerOutput {
 }
 
 fn enabled() -> bool {
-    matches!(std::env::var("MOOD_ANALYSIS_ENABLED").as_deref(), Ok("true") | Ok("1") | Ok("TRUE") | Ok("True"))
+    matches!(
+        std::env::var("MOOD_ANALYSIS_ENABLED").as_deref(),
+        Ok("true") | Ok("1") | Ok("TRUE") | Ok("True")
+    )
 }
 
 pub async fn analyze_file(path: &Path) -> Result<Option<MoodAnalysisResult>> {
@@ -41,32 +50,56 @@ pub async fn analyze_file(path: &Path) -> Result<Option<MoodAnalysisResult>> {
         anyhow::bail!("MOOD_ANALYSIS_EXECUTABLE is empty");
     }
     let seconds = std::env::var("MOOD_ANALYSIS_TIMEOUT_SEC")
-        .ok().and_then(|value| value.parse::<u64>().ok()).filter(|value| *value > 0).unwrap_or(90);
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(90);
     let configured_args = std::env::var("MOOD_ANALYSIS_ARGUMENTS")
         .unwrap_or_default()
         .split_whitespace()
         .map(str::to_owned)
         .collect::<Vec<_>>();
     let mut command = Command::new(executable);
-    command.args(configured_args).arg(path).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    let output = timeout(
-        Duration::from_secs(seconds),
-        command.output(),
-    ).await.map_err(|_| anyhow::anyhow!("mood analyser timed out after {}s", seconds))?
-      .context("failed to start mood analyser")?;
+    command
+        .args(configured_args)
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = timeout(Duration::from_secs(seconds), command.output())
+        .await
+        .map_err(|_| anyhow::anyhow!("mood analyser timed out after {}s", seconds))?
+        .context("failed to start mood analyser")?;
     if !output.status.success() {
-        anyhow::bail!("mood analyser exited {}: {}", output.status, String::from_utf8_lossy(&output.stderr).trim());
+        anyhow::bail!(
+            "mood analyser exited {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
     }
     let raw: AnalyzerOutput = serde_json::from_slice(&output.stdout)
         .context("mood analyser stdout must be one JSON object")?;
     let allowed: BTreeSet<&str> = ALLOWED_TAGS.into_iter().collect();
-    let mood_tags = raw.mood_tags.into_iter().map(|tag| tag.trim().to_ascii_lowercase())
-        .filter(|tag| allowed.contains(tag.as_str())).collect::<BTreeSet<_>>().into_iter().collect::<Vec<_>>();
-    let scores = raw.scores.into_iter()
+    let mood_tags = raw
+        .mood_tags
+        .into_iter()
+        .map(|tag| tag.trim().to_ascii_lowercase())
+        .filter(|tag| allowed.contains(tag.as_str()))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let scores = raw
+        .scores
+        .into_iter()
         .filter(|(tag, score)| allowed.contains(tag.as_str()) && score.is_finite())
-        .map(|(tag, score)| (tag, score.clamp(0.0, 1.0))).collect();
+        .map(|(tag, score)| (tag, score.clamp(0.0, 1.0)))
+        .collect();
     if raw.version.trim().is_empty() || mood_tags.is_empty() {
         return Ok(None);
     }
-    Ok(Some(MoodAnalysisResult { version: raw.version, mood_tags, scores }))
+    Ok(Some(MoodAnalysisResult {
+        version: raw.version,
+        mood_tags,
+        scores,
+    }))
 }

@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 #[derive(Debug, Serialize)]
 pub struct SongCompletionEvent {
     pub song_id: String,
+    pub metadata_version: i64,
     pub status: String,
     pub duration_sec: Option<i32>,
     pub encrypted_file_path: Option<String>,
@@ -37,8 +38,10 @@ impl RedisPublisher {
 
     pub async fn publish_song_completion(&mut self, event: SongCompletionEvent) -> Result<()> {
         let message = serde_json::to_string(&event)?;
-        let _: i64 = redis::cmd("LPUSH")
+        let _: String = redis::cmd("XADD")
             .arg("song_completion_queue")
+            .arg("*")
+            .arg("payload")
             .arg(&message)
             .query_async(&mut self.conn)
             .await?;

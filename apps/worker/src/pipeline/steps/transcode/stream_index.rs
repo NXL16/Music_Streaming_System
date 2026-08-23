@@ -26,8 +26,8 @@ fn parse_boxes(data: &[u8]) -> Vec<(usize, usize, usize, [u8; 4])> {
     let mut pos = 0usize;
 
     while pos + 8 <= data.len() {
-        let size32 = u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]])
-            as usize;
+        let size32 =
+            u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
         let box_type = [data[pos + 4], data[pos + 5], data[pos + 6], data[pos + 7]];
 
         let (header_len, box_size) = if size32 == 1 {
@@ -74,19 +74,22 @@ fn extract_timescale(data: &[u8]) -> Option<i32> {
                 continue;
             }
 
-            let trak_payload = moov_payload.get(trak_start + trak_header..trak_start + trak_size)?;
+            let trak_payload =
+                moov_payload.get(trak_start + trak_header..trak_start + trak_size)?;
             for (mdia_start, mdia_header, mdia_size, mdia_type) in parse_boxes(trak_payload) {
                 if &mdia_type != b"mdia" {
                     continue;
                 }
 
-                let mdia_payload = trak_payload.get(mdia_start + mdia_header..mdia_start + mdia_size)?;
+                let mdia_payload =
+                    trak_payload.get(mdia_start + mdia_header..mdia_start + mdia_size)?;
                 for (mdhd_start, mdhd_header, mdhd_size, mdhd_type) in parse_boxes(mdia_payload) {
                     if &mdhd_type != b"mdhd" {
                         continue;
                     }
 
-                    let mdhd_payload = mdia_payload.get(mdhd_start + mdhd_header..mdhd_start + mdhd_size)?;
+                    let mdhd_payload =
+                        mdia_payload.get(mdhd_start + mdhd_header..mdhd_start + mdhd_size)?;
                     let version = *mdhd_payload.first()?;
 
                     let timescale = if version == 1 {
@@ -120,7 +123,8 @@ fn extract_tfdt_seconds(moof_payload: &[u8], timescale: i32) -> Option<f64> {
                 continue;
             }
 
-            let tfdt_payload = traf_payload.get(tfdt_start + tfdt_header..tfdt_start + tfdt_size)?;
+            let tfdt_payload =
+                traf_payload.get(tfdt_start + tfdt_header..tfdt_start + tfdt_size)?;
             let version = *tfdt_payload.first()?;
             let base_time = if version == 1 {
                 read_u64_be(tfdt_payload, 4)? as f64
@@ -171,7 +175,12 @@ impl IncrementalMetaParser {
                 self.buffer[2],
                 self.buffer[3],
             ]) as usize;
-            let box_type = [self.buffer[4], self.buffer[5], self.buffer[6], self.buffer[7]];
+            let box_type = [
+                self.buffer[4],
+                self.buffer[5],
+                self.buffer[6],
+                self.buffer[7],
+            ];
 
             let (header_len, box_size) = if size32 == 1 {
                 if self.buffer.len() < 16 {
@@ -246,7 +255,9 @@ pub fn build_segments(
     timescale: i32,
 ) -> anyhow::Result<Vec<Segment>> {
     if seek_points.is_empty() {
-        return Err(anyhow::anyhow!("no seek points extracted from transcoded output"));
+        return Err(anyhow::anyhow!(
+            "no seek points extracted from transcoded output"
+        ));
     }
 
     let mut segments = Vec::with_capacity(seek_points.len());
@@ -319,7 +330,9 @@ pub fn validate_segments(segments: &[Segment]) -> anyhow::Result<()> {
             return Err(anyhow::anyhow!("segment has invalid values"));
         }
         if seg.start_byte <= last_start {
-            return Err(anyhow::anyhow!("segment start_byte is not strictly increasing"));
+            return Err(anyhow::anyhow!(
+                "segment start_byte is not strictly increasing"
+            ));
         }
         if seg.start_time_sec < last_time {
             return Err(anyhow::anyhow!("segment start_time_sec is not monotonic"));

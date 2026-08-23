@@ -2,6 +2,7 @@ mod config;
 mod crypto;
 mod job;
 mod metadata;
+mod modal;
 mod mood_analysis;
 mod observability;
 mod pipeline;
@@ -10,7 +11,7 @@ mod queue;
 mod r2;
 mod redis;
 
-use crate::config::config::Config;
+use crate::config::Config;
 use crate::observability::metrics::RuntimeMetrics;
 use crate::queue::consumer::Consumer;
 use std::path::PathBuf;
@@ -22,7 +23,11 @@ async fn main() -> anyhow::Result<()> {
     // (including the local mood analyser) are never silently skipped.
     let worker_env = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".env");
     if let Err(error) = dotenvy::from_path_override(&worker_env) {
-        eprintln!("worker_config env_load_failed path={} error={}", worker_env.display(), error);
+        eprintln!(
+            "worker_config env_load_failed path={} error={}",
+            worker_env.display(),
+            error
+        );
     }
 
     let mood_enabled = matches!(
@@ -40,16 +45,7 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::load();
     let metrics = RuntimeMetrics::shared();
 
-    let consumer = Consumer::new(
-        &config.redis_url,
-        config.queue_name.clone(),
-        config.max_concurrency,
-        config.job_max_retries,
-        config.retry_backoff_ms,
-        config.master_secret_key.clone(),
-        metrics,
-    )
-    .await?;
+    let consumer = Consumer::new(&config, metrics).await?;
     consumer.run().await?;
 
     Ok(())

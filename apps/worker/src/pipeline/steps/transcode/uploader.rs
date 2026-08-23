@@ -290,8 +290,7 @@ impl HybridUploader {
                             ));
                         }
                         retries_used += 1;
-                        let backoff = backoff_base_ms
-                            .saturating_mul(1u64 << (attempt - 1).min(10));
+                        let backoff = backoff_base_ms.saturating_mul(1u64 << (attempt - 1).min(10));
                         tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
                     }
                 }
