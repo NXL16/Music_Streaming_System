@@ -3,7 +3,11 @@
 // ==========================================
 export const TRANSCODE_QUEUE = "transcode_queue" as const;
 export const SONG_COMPLETION_QUEUE = "song_completion_queue" as const;
-export const SONG_ASSET_CLEANUP_QUEUE = "song_asset_cleanup_queue" as const;
+export const SONG_COMPLETION_DLQ = "song_completion_queue:dlq" as const;
+// A dedicated stream key avoids a WRONGTYPE conflict with the retired List
+// key while keeping all cleanup traffic on Redis Streams.
+export const SONG_ASSET_CLEANUP_STREAM = "song_asset_cleanup_stream" as const;
+export const SONG_ASSET_CLEANUP_DLQ = "song_asset_cleanup_stream:dlq" as const;
 
 export const authRefreshKey = (userId: string, deviceId: string): string =>
   `auth:refresh:${userId}:${deviceId}`;
@@ -16,8 +20,10 @@ export const authAccessBlacklistKey = (jti: string): string =>
 
 export const authStateKey = (userId: string): string => `auth:state:${userId}`;
 
-export const songCompletionProcessedKey = (songId: string): string =>
-  `song_completion_processed:${songId}`;
+export const songCompletionProcessedKey = (
+  songId: string,
+  metadataVersion: number,
+): string => `song_completion_processed:${songId}:${metadataVersion}`;
 
 export const songCompletionLockKey = (songId: string): string =>
   `song_completion_lock:${songId}`;

@@ -119,6 +119,14 @@ enum SongStatus {
   SONG_STATUS_FAILED      = 4;       // Xu ly that bai
 }
 
+// Controls how the source file is processed. STANDARD preserves the existing
+// single-stream pipeline; SING produces instrumental and vocal playback stems.
+enum AudioMode {
+  AUDIO_MODE_UNSPECIFIED = 0;
+  AUDIO_MODE_STANDARD    = 1;
+  AUDIO_MODE_SING        = 2;
+}
+
 // Lightweight summary for list/browse use cases
 message SongSummary {
   string              id                      = 1;
@@ -137,6 +145,7 @@ message SongSummary {
   repeated SongArtist artists                 = 14;
   string              content_rating          = 15;
   string              thumbnail_cover_src_set = 16;
+  AudioMode           audio_mode              = 17;
 }
 
 message SongArtist {
@@ -166,6 +175,7 @@ message SongDetail {
 
   int64 created_at = 13;
   int64 updated_at = 14;
+  AudioMode audio_mode = 15;
 }
 
 // Internal ingest metadata
@@ -176,6 +186,7 @@ message SongIngestInfo {
   string     checksum           = 4;
   int64      file_size_bytes    = 5;
   int64      created_at         = 6;
+  AudioMode  audio_mode         = 7;
 }
 
 message GetSongRequest {
@@ -231,6 +242,7 @@ message CreateSongRecordRequest {
   string source_object_path = 6;
   int64  file_size_bytes    = 7;
   string checksum           = 8;
+  AudioMode audio_mode      = 9;
 }
 
 message CreateSongRecordResponse {

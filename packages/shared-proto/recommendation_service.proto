@@ -258,6 +258,8 @@ message RecordListeningEventRequest {
   string             station_artwork_url       = 16;
   string             station_artwork_bg_color  = 17;
   string             playlist_curator_name     = 18;
+  // Optional client-generated ID. A retry must reuse the same value.
+  string             event_id                  = 19;
 }
 
 message RecordListeningEventResponse {

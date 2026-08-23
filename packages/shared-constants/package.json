@@ -10,6 +10,11 @@
       "types": "./dist/index.d.ts",
       "require": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./environment": {
+      "types": "./dist/environment.d.ts",
+      "require": "./dist/environment.js",
+      "default": "./dist/environment.js"
     }
   },
   "files": [
@@ -17,10 +22,15 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "type-check": "tsc -p tsconfig.json --noEmit"
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test src/environment.spec.ts"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2"
   },
   "devDependencies": {
     "@musical/ts-config": "workspace:*",
+    "tsx": "^4.23.1",
     "typescript": "^5.7.3"
   }
 }

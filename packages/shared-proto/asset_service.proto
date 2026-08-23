@@ -12,7 +12,6 @@ service AssetService {
   rpc GetAsset(GetAssetRequest) returns (AssetResponse);
   rpc ListAssets(ListAssetsRequest) returns (ListAssetsResponse);
   rpc DeleteAsset(DeleteAssetRequest) returns (DeleteAssetResponse);
-  rpc UpdateAssetProcessingResult(UpdateAssetProcessingResultRequest) returns (AssetResponse);
   rpc RegisterAssetUsages(SyncAssetUsagesRequest) returns (RegisterAssetUsagesResponse);
   rpc ReconcileAssetUsages(SyncAssetUsagesRequest) returns (SyncAssetUsagesResponse);
   rpc ListAssetUsages(GetAssetRequest) returns (ListAssetUsagesResponse);
@@ -87,17 +86,6 @@ message DeleteAssetRequest {
 
 message DeleteAssetResponse {
   bool success = 1;
-}
-
-message UpdateAssetProcessingResultRequest {
-  string                 asset_id        = 1;
-  bool                   success         = 2;
-  string                 public_url      = 3;
-  int32                  width           = 4;
-  int32                  height          = 5;
-  int32                  duration_millis = 6;
-  google.protobuf.Struct variants        = 7;
-  string                 error_message   = 8;
 }
 
 message AssetResponse {

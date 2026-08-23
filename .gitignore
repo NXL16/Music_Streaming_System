@@ -14,6 +14,8 @@ go.sum
 # Generated files
 next-env.d.ts
 **/src/generated/
+__pycache__/
+*.py[cod]
 node_modules/
 .pnpm-store/
 
@@ -36,6 +38,12 @@ Cargo.lock
 .env.*
 !.env.example
 .dev.vars
+
+# Seed Studio local credentials and runtime state. Keep the dashboard source
+# tracked so the controlled ingestion path is reproducible and reviewable.
+tools/seed-studio/.env
+tools/seed-studio/.tmp/
+tools/scripts/.tmp/
 
 # Local source files consumed by the controlled Asset-service import tool.
 # Production serves only processed R2/WebP renditions.

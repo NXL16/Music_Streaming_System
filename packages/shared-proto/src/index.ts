@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 export * from "./generated/identity_service";
 export * from "./generated/song_service";
 export * from "./generated/wallet_service";
+export * from "./grpc-tls";
 export * from "./generated/recommendation_service";
 export * from "./generated/asset_service";
 

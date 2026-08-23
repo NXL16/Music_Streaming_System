@@ -10,48 +10,56 @@ service MetadataService {
 }
 
 message SeekPoint {
-  double timestamp = 1;
-  int64 byte_offset = 2;
+  double timestamp   = 1;
+  int64  byte_offset = 2;
 }
 
 message ByteRange {
   int64 start = 1;
-  int64 end = 2;
+  int64 end   = 2;
 }
 
 message Segment {
-  int64 start_byte = 1;
-  int64 size = 2;
-  int64 duration_ts = 3;
+  int64  start_byte     = 1;
+  int64  size           = 2;
+  int64  duration_ts    = 3;
   double start_time_sec = 4;
 }
 
 message UpdateMetaRequest {
-  string song_id = 1;
-  double duration = 2;
-  int64 encryption_start_offset = 3;
-  int32 seektable_version = 4;
-  int32 timescale = 5;
-  int64 media_offset = 6;
-  ByteRange init_range = 7;
-  repeated Segment segments = 8;
-  repeated float waveform = 9;
+  string           song_id                 = 1;
+  double           duration                = 2;
+  int64            encryption_start_offset = 3;
+  int32            seektable_version       = 4;
+  int32            timescale               = 5;
+  int64            media_offset            = 6;
+  ByteRange        init_range              = 7;
+  repeated Segment segments                = 8;
+  repeated float   waveform                = 9;
+  // Empty is the legacy mixed stream. Separated stems use "instrumental" or "vocal".
+  string variant = 10;
+  // Monotonic version allocated by the Song transcode outbox. Meta must never
+  // derive this from request arrival time because retries can arrive out of order.
+  int64 metadata_version = 11;
 }
 
 message GetStreamDataRequest {
   string song_id = 1;
+  string variant = 2;
 }
 
 message StreamDataResponse {
-  string song_id = 1;
-  double duration = 2;
-  int64 encryption_start_offset = 3;
-  int32 seektable_version = 4;
-  int32 timescale = 5;
-  int64 media_offset = 6;
-  ByteRange init_range = 7;
-  repeated Segment segments = 8;
-  repeated float waveform = 9;
+  string           song_id                 = 1;
+  double           duration                = 2;
+  int64            encryption_start_offset = 3;
+  int32            seektable_version       = 4;
+  int32            timescale               = 5;
+  int64            media_offset            = 6;
+  ByteRange        init_range              = 7;
+  repeated Segment segments                = 8;
+  repeated float   waveform                = 9;
+  string           variant                 = 10;
+  int64            metadata_version       = 11;
 }
 
 message EmptyResponse {}
