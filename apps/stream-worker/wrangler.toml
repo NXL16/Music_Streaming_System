@@ -7,9 +7,6 @@ routes = [
     { pattern = "cdn.404hz.me", custom_domain = true }
 ]
 
-[[r2_buckets]]
-binding = "MUSIC_BUCKET"
-bucket_name = "music-hls-bucket"
-
 [vars]
 ALLOWED_ORIGINS = "http://localhost:3000,https://music.404hz.me"
+AUDIO_ORIGIN_URL = "https://r2.404hz.me"
