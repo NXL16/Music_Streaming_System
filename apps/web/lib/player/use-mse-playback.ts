@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePlayerStore } from "./use-player-store";
 import { preloadCache } from "./mse/preload-cache";
 import { createMediaPlayer, type MediaPlayer } from "./media-player-factory";
+import { getPlaybackManifest } from "./stream.api";
 
 const MSE_PREFIX = "mse:";
 
@@ -17,15 +18,18 @@ function extractSongId(playbackUrl: string): string {
 
 export function useMsePlayback(
   audioRef: React.RefObject<HTMLAudioElement | null>,
-): { isMseActive: boolean } {
+  vocalAudioRef?: React.RefObject<HTMLAudioElement | null>,
+): { isMseActive: boolean; isStemActive: boolean } {
   const currentSong = usePlayerStore((s) => s.currentSong);
   const playing = usePlayerStore((s) => s.playing);
   const queue = usePlayerStore((s) => s.queue);
   const currentIndex = usePlayerStore((s) => s.currentIndex);
   const pause = usePlayerStore((s) => s.pause);
   const playerRef = useRef<MediaPlayer | null>(null);
-  const activeSongIdRef = useRef<string | null>(null);
+  const vocalPlayerRef = useRef<MediaPlayer | null>(null);
+  const isStemPlaybackRef = useRef(false);
   const playerReadyRef = useRef(false);
+  const [isStemActive, setIsStemActive] = useState(false);
 
   const isMseActive = isMseSong(currentSong?.playbackUrl);
 
@@ -37,41 +41,119 @@ export function useMsePlayback(
       if (playerRef.current) {
         playerRef.current.detach();
         playerRef.current = null;
-        activeSongIdRef.current = null;
         playerReadyRef.current = false;
       }
+      vocalPlayerRef.current?.detach();
+      vocalPlayerRef.current = null;
+      isStemPlaybackRef.current = false;
+      setIsStemActive(false);
       return;
     }
 
     const songId = extractSongId(playbackUrl);
-    if (songId === activeSongIdRef.current) return;
-
     if (playerRef.current) {
       playerRef.current.detach();
     }
+    // A new STANDARD track can replace a SING track. Detach the old vocal
+    // source before creating either new player; otherwise the previous stem
+    // remains attached (and can keep playing) because only playerRef changes.
+    vocalPlayerRef.current?.detach();
+    vocalPlayerRef.current = null;
+    isStemPlaybackRef.current = false;
+    setIsStemActive(false);
 
     const player = createMediaPlayer();
+    const vocalAudio = vocalAudioRef?.current;
     playerRef.current = player;
-    activeSongIdRef.current = songId;
     playerReadyRef.current = false;
 
-    const preloaded = preloadCache.get(songId);
+    const attach = async () => {
+      const ensureCurrentPlayer = () => {
+        if (playerRef.current !== player) {
+          throw new DOMException("Player replaced", "AbortError");
+        }
+      };
 
-    player
-      .attach(audio, songId, preloaded)
+      let preloaded = preloadCache.consume(songId);
+      if (!preloaded) {
+        await preloadCache.waitForPending(songId);
+        preloaded = preloadCache.consume(songId);
+      }
+
+      if (preloaded?.mode === "SING") {
+        if (!vocalAudio) throw new Error("Vocal audio element is unavailable");
+        const vocalPlayer = createMediaPlayer();
+        await Promise.all([
+          player.attach(audio, preloaded.instrumental),
+          vocalPlayer.attach(vocalAudio, preloaded.vocal),
+        ]);
+        if (playerRef.current !== player) {
+          vocalPlayer.detach();
+          throw new DOMException("Player replaced", "AbortError");
+        }
+        vocalPlayerRef.current = vocalPlayer;
+        isStemPlaybackRef.current = true;
+        setIsStemActive(true);
+        return;
+      }
+
+      if (preloaded?.mode === "STANDARD") {
+        setIsStemActive(false);
+        await player.attach(audio, preloaded.main);
+        ensureCurrentPlayer();
+        return;
+      }
+
+      const manifest = await getPlaybackManifest(songId);
+      ensureCurrentPlayer();
+
+      if (manifest.mode === "SING") {
+        if (!vocalAudio) throw new Error("Vocal audio element is unavailable");
+        const vocalPlayer = createMediaPlayer();
+        await Promise.all([
+          player.attach(audio, undefined, {
+            streamInfo: manifest.instrumental,
+            metadata: manifest.instrumental.metadata,
+          }),
+          vocalPlayer.attach(vocalAudio, undefined, {
+            streamInfo: manifest.vocal,
+            metadata: manifest.vocal.metadata,
+          }),
+        ]);
+        if (playerRef.current !== player) {
+          vocalPlayer.detach();
+          throw new DOMException("Player replaced", "AbortError");
+        }
+        vocalPlayerRef.current = vocalPlayer;
+        isStemPlaybackRef.current = true;
+        setIsStemActive(true);
+        return;
+      }
+
+      setIsStemActive(false);
+      await player.attach(audio, undefined, {
+        streamInfo: manifest.main,
+        metadata: manifest.main.metadata,
+      });
+      ensureCurrentPlayer();
+    };
+
+    attach()
       .then(() => {
         if (playerRef.current !== player) return;
         playerReadyRef.current = true;
-        if (preloaded) preloadCache.evict(songId);
         if (usePlayerStore.getState().playing) {
-          audio.play().catch(() => pause());
+          const plays = [audio.play()];
+          if (isStemPlaybackRef.current && vocalAudio) plays.push(vocalAudio.play());
+          Promise.all(plays).catch(() => pause());
         }
       })
       .catch(() => {
         if (playerRef.current === player) {
           player.detach();
+          vocalPlayerRef.current?.detach();
+          vocalPlayerRef.current = null;
           playerRef.current = null;
-          activeSongIdRef.current = null;
           playerReadyRef.current = false;
           pause();
         }
@@ -80,12 +162,15 @@ export function useMsePlayback(
     return () => {
       if (playerRef.current === player) {
         player.detach();
+        vocalPlayerRef.current?.detach();
+        vocalPlayerRef.current = null;
+        isStemPlaybackRef.current = false;
+        setIsStemActive(false);
         playerRef.current = null;
-        activeSongIdRef.current = null;
         playerReadyRef.current = false;
       }
     };
-  }, [playbackUrl, audioRef, pause]);
+  }, [playbackUrl, audioRef, vocalAudioRef, pause]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -97,22 +182,59 @@ export function useMsePlayback(
       // replacement (AbortError), so only play after attach has completed.
       if (!playerReadyRef.current) return;
 
-      audio.play().catch(() => pause());
+      const plays = [audio.play()];
+      const vocal = vocalAudioRef?.current;
+      if (isStemPlaybackRef.current && vocal) plays.push(vocal.play());
+      Promise.all(plays).catch(() => pause());
     } else {
       audio.pause();
+      if (isStemPlaybackRef.current) vocalAudioRef?.current?.pause();
     }
-  }, [playing, isMseActive, audioRef, pause]);
+  }, [playing, isMseActive, audioRef, vocalAudioRef, pause]);
+
+  useEffect(() => {
+    const instrumental = audioRef.current;
+    const vocal = vocalAudioRef?.current;
+    if (!instrumental || !vocal || !isMseActive) return;
+
+    const alignVocalToInstrumental = () => {
+      if (isStemPlaybackRef.current) {
+        vocal.currentTime = instrumental.currentTime;
+      }
+    };
+    const correctPlaybackDrift = () => {
+      // The instrumental timeline is authoritative. Correct only meaningful
+      // drift during steady playback so normal rendering never causes audible
+      // micro-seeks.
+      if (
+        isStemPlaybackRef.current &&
+        Math.abs(vocal.currentTime - instrumental.currentTime) > 0.05
+      ) {
+        alignVocalToInstrumental();
+      }
+    };
+
+    // A seek must never keep the previous 50ms tolerance: both timelines need
+    // the exact target before and after the browser resolves their buffers.
+    instrumental.addEventListener("seeking", alignVocalToInstrumental);
+    instrumental.addEventListener("seeked", alignVocalToInstrumental);
+    instrumental.addEventListener("timeupdate", correctPlaybackDrift);
+    return () => {
+      instrumental.removeEventListener("seeking", alignVocalToInstrumental);
+      instrumental.removeEventListener("seeked", alignVocalToInstrumental);
+      instrumental.removeEventListener("timeupdate", correctPlaybackDrift);
+    };
+  }, [audioRef, vocalAudioRef, isMseActive]);
 
   useEffect(() => {
     if (!isMseActive || currentIndex < 0) return;
 
     const nextSong = queue[currentIndex + 1];
     if (!nextSong || !isMseSong(nextSong.playbackUrl)) return;
-
     const nextSongId = extractSongId(nextSong.playbackUrl);
     preloadCache.preload(nextSongId).catch(() => {});
     return () => preloadCache.cancelPreload(nextSongId);
   }, [currentIndex, queue, isMseActive]);
 
-  return { isMseActive };
+  return { isMseActive, isStemActive };
 }

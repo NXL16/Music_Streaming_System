@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import { usePlayerStore } from "@/lib/player/use-player-store";
+import { syncPlaybackClock } from "@/lib/player/playback-clock";
 import { getSongLyrics, type LyricLine } from "@/lib/lyrics/song-lyrics.api";
 
 type LoadedLyrics = {
@@ -349,6 +350,7 @@ export default function AmpLyrics({
           lineSeekScrollLockTimer = undefined;
         }, LINE_SEEK_MAX_WAIT_MS);
         audio.currentTime = startTimeMs / 1000;
+        syncPlaybackClock(audio, usePlayerStore.getState().setPlaybackTimeMs);
         if (!usePlayerStore.getState().playing) {
           usePlayerStore.getState().togglePlayback();
         }

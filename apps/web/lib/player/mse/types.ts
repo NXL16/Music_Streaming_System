@@ -13,6 +13,7 @@ export type SegmentInfo = {
 
 export type StreamMetadata = {
   songId: string;
+  variant?: "instrumental" | "vocal";
   duration: number;
   offset: number;
   timescale: number;
@@ -20,6 +21,30 @@ export type StreamMetadata = {
   segments: SegmentInfo[];
   encryptionStartOffset: number;
   waveform: number[];
+};
+
+export type StemPlayback = StreamInfo & {
+  metadata: StreamMetadata;
+};
+
+export type StandardPlaybackManifest = {
+  mode: "STANDARD";
+  main: StemPlayback;
+};
+
+export type SingPlaybackManifest = {
+  mode: "SING";
+  instrumental: StemPlayback;
+  vocal: StemPlayback;
+};
+
+export type PlaybackManifest =
+  | StandardPlaybackManifest
+  | SingPlaybackManifest;
+
+export type AttachedStream = {
+  streamInfo: StreamInfo;
+  metadata: StreamMetadata;
 };
 
 export type PreloadedSong = {
@@ -32,3 +57,14 @@ export type PreloadedSong = {
   firstSegmentsBatch: ArrayBuffer;
   preloadedCount: number;
 };
+
+export type PreloadedPlayback =
+  | {
+      mode: "STANDARD";
+      main: PreloadedSong;
+    }
+  | {
+      mode: "SING";
+      instrumental: PreloadedSong;
+      vocal: PreloadedSong;
+    };

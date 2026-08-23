@@ -8,6 +8,7 @@ import AmpLyrics from "@/components/custom-elements/AmpLyrics";
 import AmpPlaybackControls from "@/components/custom-elements/AmpPlaybackControls";
 import AmpPlaybackControlsProgress from "@/components/custom-elements/AmpPlaybackControlsProgress";
 import CardArtwork from "@/components/media/common/card-artwork";
+import { VocalVolumeControl } from "./vocal-volume-control";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { toggleSongFavorite } from "@/lib/favorites/toggle-song-favorite";
@@ -36,6 +37,11 @@ type MusicPlayDetailProps = {
   onClose: (value: boolean) => void;
   volume: number;
   onSetVolume: (volume: number) => void;
+  isStemActive: boolean;
+  vocalVolume: number;
+  onSetVocalVolume: (volume: number) => void;
+  onPreviewVocalVolume: (volume: number) => void;
+  onTogglePlayback: () => void;
 };
 
 export default function MusicPlayDetail({
@@ -45,6 +51,11 @@ export default function MusicPlayDetail({
   onClose,
   volume,
   onSetVolume,
+  isStemActive,
+  vocalVolume,
+  onSetVocalVolume,
+  onPreviewVocalVolume,
+  onTogglePlayback,
 }: MusicPlayDetailProps) {
   const dialogRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -185,6 +196,13 @@ export default function MusicPlayDetail({
                     <path d="M1.2 18C.6 18 0 17.5 0 16.8c0-.4.1-.6.4-.8l7-7-7-7c-.3-.2-.4-.5-.4-.8C0 .5.6 0 1.2 0c.3 0 .6.1.8.3l7 7 7-7c.2-.2.5-.3.8-.3.6 0 1.2.5 1.2 1.2 0 .3-.1.6-.4.8l-7 7 7 7c.2.2.4.5.4.8 0 .7-.6 1.2-1.2 1.2-.3 0-.6-.1-.8-.3l-7-7-7 7c-.2.1-.5.3-.8.3z"></path>
                   </svg>
                 </button>
+                {isStemActive && isOpenLyric && (
+                  <VocalVolumeControl
+                    value={vocalVolume}
+                    onValueChange={onSetVocalVolume}
+                    onPreviewValueChange={onPreviewVocalVolume}
+                  />
+                )}
                 <div className="grid [grid-area:controls] grid-rows-[auto_55px_65px_55px_26px] grid-cols-none [grid-template-areas:'artwork'_'metadata'_'scrubber'_'controls'_'volume'] h-fit mt-5 max-w-150 place-items-center place-self-center w-full z-[calc(var(--z-default)+1)]">
                   <div className="shadow-[0_20px_25px_rgba(0,0,0,.1),0_10px_25px_rgba(0,0,0,.1)] opacity-100 [grid-area:artwork] h-full transform-[scale(.92)] origin-[bottom_center] [--global-transition-duration:1s] [transition:var(--global-transition)]">
                     {isBlurArtworkVisible && (
@@ -297,7 +315,7 @@ export default function MusicPlayDetail({
                       audioRef={audioRef}
                     />
                   </div>
-                  <AmpPlaybackControls />
+                  <AmpPlaybackControls onTogglePlayback={onTogglePlayback} />
 
                   <AmpChromeVolume volume={volume} onSetVolume={onSetVolume} />
                 </div>

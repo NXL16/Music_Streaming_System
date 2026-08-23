@@ -1,23 +1,12 @@
 import { http } from "@/lib/api/http";
-import type { StreamInfo, StreamMetadata } from "./mse/types";
+import type { PlaybackManifest } from "./mse/types";
 
-export async function getStreamInfo(
+export async function getPlaybackManifest(
   songId: string,
   signal?: AbortSignal,
-): Promise<StreamInfo> {
-  const response = await http.get<StreamInfo>(
-    `/stream/${encodeURIComponent(songId)}`,
-    { signal },
-  );
-  return response.data;
-}
-
-export async function getStreamMetadata(
-  songId: string,
-  signal?: AbortSignal,
-): Promise<StreamMetadata> {
-  const response = await http.get<StreamMetadata>(
-    `/metadata/${encodeURIComponent(songId)}`,
+): Promise<PlaybackManifest> {
+  const response = await http.get<PlaybackManifest>(
+    `/stream/${encodeURIComponent(songId)}/playback`,
     { signal },
   );
   return response.data;

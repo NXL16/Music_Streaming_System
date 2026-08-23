@@ -242,6 +242,10 @@ type DesktopPlayerBarProps = {
   onNext: () => void;
   onPrevious: () => void;
   onDrawerOpenChange: (open: boolean) => void;
+  isStemActive: boolean;
+  vocalVolume: number;
+  onSetVocalVolume: (volume: number) => void;
+  onPreviewVocalVolume: (volume: number) => void;
 };
 
 export function DesktopPlayerBar({
@@ -268,6 +272,10 @@ export function DesktopPlayerBar({
   onNext,
   onPrevious,
   onDrawerOpenChange,
+  isStemActive,
+  vocalVolume,
+  onSetVocalVolume,
+  onPreviewVocalVolume,
 }: DesktopPlayerBarProps) {
   const userId = useAuthStore((state) => state.user?.userId);
   const favoriteSongIds = useFavoriteStore((state) => state.songIds);
@@ -573,6 +581,11 @@ export function DesktopPlayerBar({
                         }}
                         volume={volume}
                         onSetVolume={onSetVolume}
+                        isStemActive={isStemActive}
+                        vocalVolume={vocalVolume}
+                        onSetVocalVolume={onSetVocalVolume}
+                        onPreviewVocalVolume={onPreviewVocalVolume}
+                        onTogglePlayback={onTogglePlayback}
                       />
                     )}
                   </div>

@@ -13,10 +13,12 @@ const INTERNAL_STYLE_2 = `.icon{display:block}.icon svg{width:inherit;height:inh
 
 type AmpPlaybackControlsProps = {
   theme?: string;
+  onTogglePlayback?: () => void;
 };
 
 const AmpPlaybackControls = memo(function AmpPlaybackControls({
   theme = "dark",
+  onTogglePlayback,
 }: AmpPlaybackControlsProps) {
   const containerRef = useRef<HTMLElement>(null);
 
@@ -142,7 +144,7 @@ const AmpPlaybackControls = memo(function AmpPlaybackControls({
             />
             <AmpPlayPauseButton
               mode={!isPlaying ? "play" : "pause"}
-              onClick={togglePlayback}
+              onClick={onTogglePlayback ?? togglePlayback}
               disabled={!currentSong?.playbackUrl}
             />
             <AmpSkipButton

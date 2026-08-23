@@ -13,6 +13,8 @@ import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { useShallow } from "zustand/react/shallow";
 import { useMsePlayback } from "@/lib/player/use-mse-playback";
 import { usePersistentVolume } from "@/lib/player/use-persistent-volume";
+import { resumeAudioContext } from "@/lib/player/audio-context";
+import { syncPlaybackClock } from "@/lib/player/playback-clock";
 import { sendListeningEvent } from "@/lib/recommendations/listening-events";
 import type {
   MediaArtwork,
@@ -36,6 +38,12 @@ const DesktopPlayerBar = dynamic(
 
 const LISTENING_QUALIFY_SECONDS = 3;
 const LOCK_SCREEN_SEEK_SECONDS = 10;
+
+function resetAudioToStart(audio: HTMLAudioElement | null): void {
+  if (audio) {
+    audio.currentTime = 0;
+  }
+}
 
 function getAbsoluteArtworkUrl(artworkUrl: string): string {
   try {
@@ -136,6 +144,11 @@ function recentlyPlayedCard(song: PlayerSong): MediaCardProps {
 
 export function AppPlayerBar() {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const vocalAudioRef = useRef<HTMLAudioElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const masterGainRef = useRef<GainNode | null>(null);
+  const vocalGainRef = useRef<GainNode | null>(null);
+  const audioContextCloseTimerRef = useRef<number | null>(null);
   const playbackTimeSongIdRef = useRef<string | undefined>(undefined);
   const {
     currentSong,
@@ -172,7 +185,7 @@ export function AppPlayerBar() {
       playbackRate: state.playbackRate,
     })),
   );
-  const { isMseActive } = useMsePlayback(audioRef);
+  const { isMseActive, isStemActive } = useMsePlayback(audioRef, vocalAudioRef);
   const isPlaying = Boolean(currentSong && playing);
   const currentArtworkSrcSet =
     currentSong?.thumbnailArtworkSrcSet ?? currentSong?.artworkSrcSet;
@@ -188,9 +201,47 @@ export function AppPlayerBar() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isProgressExpanded, setIsProgressExpanded] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [vocalVolume, setVocalVolume] = useState(1);
   const useCompactPlayer = useMediaQuery("(max-width: 739px)");
   const { volume, lastAudibleVolume, setVolume } = usePersistentVolume();
   const trackedSongRef = useRef<string | null>(null);
+
+  const previewVocalVolume = useCallback((nextVolume: number) => {
+    const vocalGain = vocalGainRef.current;
+    const audioContext = audioContextRef.current;
+    if (!vocalGain || !audioContext) return;
+    vocalGain.gain.setTargetAtTime(
+      Math.min(1, Math.max(0, nextVolume)),
+      audioContext.currentTime,
+      0.015,
+    );
+  }, []);
+
+  const handleTogglePlayback = useCallback(() => {
+    resumeAudioContext(audioContextRef.current);
+
+    const audio = audioRef.current;
+    const hasReachedEnd =
+      audio?.ended ||
+      (audio &&
+        Number.isFinite(audio.duration) &&
+        audio.currentTime >= audio.duration);
+
+    // The store stops at the end of a queue, but retains the same song and
+    // MediaSource. A plain `play()` would therefore run with currentTime at
+    // the end and immediately remain ended.
+    if (hasReachedEnd && audio) {
+      // The completed SourceBuffer retains the full track, so replay stays in
+      // the existing MSE session and does not fetch its ranges again.
+      audio.currentTime = 0;
+      setPlaybackTimeMs(0);
+      resetAudioToStart(isStemActive ? vocalAudioRef.current : null);
+      if (!playing) togglePlayback();
+      return;
+    }
+
+    togglePlayback();
+  }, [isStemActive, playing, setPlaybackTimeMs, togglePlayback]);
 
   const emitEvent = useCallback(
     (
@@ -248,27 +299,98 @@ export function AppPlayerBar() {
     if (!audio || !songId) return;
 
     playbackTimeSongIdRef.current = songId;
-    setPlaybackTimeMs(Math.floor(audio.currentTime * 1000));
+    syncPlaybackClock(audio, setPlaybackTimeMs);
   }, [currentSong?.id, setPlaybackTimeMs]);
 
   const handleTimeUpdate = useCallback(() => {
     const audio = audioRef.current;
     if (!audio || playbackTimeSongIdRef.current !== currentSong?.id) return;
 
-    setPlaybackTimeMs(Math.floor(audio.currentTime * 1000));
+    syncPlaybackClock(audio, setPlaybackTimeMs);
     markQualifiedPlay();
   }, [currentSong?.id, markQualifiedPlay, setPlaybackTimeMs]);
 
+  const handleSeeking = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio || playbackTimeSongIdRef.current !== currentSong?.id) return;
+
+    // `seeked` can arrive before the next `timeupdate`. Update the shared
+    // clock here so progress, lyrics, and the audio element stay aligned
+    // throughout a seek instead of briefly showing the old lyric line.
+    syncPlaybackClock(audio, setPlaybackTimeMs);
+  }, [currentSong?.id, setPlaybackTimeMs]);
+
   useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = volume;
+    if (audioContextCloseTimerRef.current !== null) {
+      window.clearTimeout(audioContextCloseTimerRef.current);
+      audioContextCloseTimerRef.current = null;
     }
+
+    let context = audioContextRef.current;
+    if (!context) {
+      const instrumental = audioRef.current;
+      const vocal = vocalAudioRef.current;
+      if (!instrumental || !vocal) return;
+
+      context = new AudioContext();
+      const masterGain = context.createGain();
+      const vocalGain = context.createGain();
+      context.createMediaElementSource(instrumental).connect(masterGain);
+      context
+        .createMediaElementSource(vocal)
+        .connect(vocalGain)
+        .connect(masterGain);
+      masterGain.connect(context.destination);
+      audioContextRef.current = context;
+      masterGainRef.current = masterGain;
+      vocalGainRef.current = vocalGain;
+    }
+
+    return () => {
+      // React Strict Mode temporarily remounts effects in development. Delaying
+      // teardown lets that remount reuse the MediaElementSource nodes, while a
+      // real unmount still closes the context and releases its audio resources.
+      audioContextCloseTimerRef.current = window.setTimeout(() => {
+        if (audioContextRef.current !== context) return;
+        audioContextRef.current = null;
+        masterGainRef.current = null;
+        vocalGainRef.current = null;
+        void context.close();
+      }, 0);
+    };
+  }, []);
+
+  useEffect(() => {
+    const masterGain = masterGainRef.current;
+    if (masterGain)
+      masterGain.gain.setTargetAtTime(
+        volume,
+        audioContextRef.current!.currentTime,
+        0.02,
+      );
+    else if (audioRef.current) audioRef.current.volume = volume;
   }, [volume]);
 
   useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.playbackRate = playbackRate;
-      audioRef.current.defaultPlaybackRate = playbackRate;
+    const vocalGain = vocalGainRef.current;
+    if (vocalGain && audioContextRef.current) {
+      vocalGain.gain.setTargetAtTime(
+        vocalVolume,
+        audioContextRef.current.currentTime,
+        0.02,
+      );
+    }
+  }, [vocalVolume]);
+
+  useEffect(() => {
+    if (playing) resumeAudioContext(audioContextRef.current);
+  }, [playing]);
+
+  useEffect(() => {
+    for (const audio of [audioRef.current, vocalAudioRef.current]) {
+      if (!audio) continue;
+      audio.playbackRate = playbackRate;
+      audio.defaultPlaybackRate = playbackRate;
     }
   }, [playbackRate]);
 
@@ -282,7 +404,7 @@ export function AppPlayerBar() {
         : Number.MAX_SAFE_INTEGER;
       const nextTimeMs = Math.min(Math.max(0, timeMs as number), maxTimeMs);
       audio.currentTime = nextTimeMs / 1000;
-      setPlaybackTimeMs(Math.round(nextTimeMs));
+      syncPlaybackClock(audio, setPlaybackTimeMs);
     };
 
     window.addEventListener("musical:seek", seekFromEditor);
@@ -317,7 +439,12 @@ export function AppPlayerBar() {
       (repeatMode === 1 || (repeatMode === 2 && playableSongCount === 1))
     ) {
       audio.currentTime = 0;
-      void audio.play().catch(pause);
+      setPlaybackTimeMs(0);
+      const vocal = isStemActive ? vocalAudioRef.current : null;
+      resetAudioToStart(vocal);
+      const plays = [audio.play()];
+      if (vocal) plays.push(vocal.play());
+      void Promise.all(plays).catch(pause);
       return;
     }
     next(true);
@@ -390,15 +517,21 @@ export function AppPlayerBar() {
 
     setAction("play", () => {
       const audio = audioRef.current;
+      const vocal = isStemActive ? vocalAudioRef.current : null;
       const playerState = usePlayerStore.getState();
       if (!audio) return;
+
+      resumeAudioContext(audioContextRef.current);
 
       const hasReachedEnd =
         audio.ended ||
         (Number.isFinite(audio.duration) &&
           audio.currentTime >= audio.duration);
+
       if (hasReachedEnd) {
         audio.currentTime = 0;
+        playerState.setPlaybackTimeMs(0);
+        resetAudioToStart(vocal);
       }
 
       if (!playerState.playing) {
@@ -408,7 +541,9 @@ export function AppPlayerBar() {
       // Invoke play from the Media Session action itself. Safari can defer the
       // React effect that normally calls play while the device is locked.
       if (audio.paused || hasReachedEnd) {
-        void audio.play().catch(() => usePlayerStore.getState().pause());
+        const plays = [audio.play()];
+        if (vocal) plays.push(vocal.play());
+        void Promise.all(plays).catch(() => usePlayerStore.getState().pause());
       }
     });
     setAction("pause", () => usePlayerStore.getState().pause());
@@ -416,25 +551,31 @@ export function AppPlayerBar() {
     setAction("previoustrack", handlePrevious);
     setAction("seekbackward", () => {
       const audio = audioRef.current;
-      if (audio)
-        audio.currentTime = Math.max(
+      if (audio) {
+        const nextTime = Math.max(
           0,
           audio.currentTime - LOCK_SCREEN_SEEK_SECONDS,
         );
+        audio.currentTime = nextTime;
+        syncPlaybackClock(audio, usePlayerStore.getState().setPlaybackTimeMs);
+      }
     });
     setAction("seekforward", () => {
       const audio = audioRef.current;
       if (audio) {
-        audio.currentTime = Math.min(
+        const nextTime = Math.min(
           audio.duration || Infinity,
           audio.currentTime + LOCK_SCREEN_SEEK_SECONDS,
         );
+        audio.currentTime = nextTime;
+        syncPlaybackClock(audio, usePlayerStore.getState().setPlaybackTimeMs);
       }
     });
     setAction("seekto", (details) => {
       const audio = audioRef.current;
       if (audio && typeof details.seekTime === "number") {
         audio.currentTime = details.seekTime;
+        syncPlaybackClock(audio, usePlayerStore.getState().setPlaybackTimeMs);
       }
     });
 
@@ -463,7 +604,7 @@ export function AppPlayerBar() {
         setAction(action, null);
       }
     };
-  }, [currentSong, handleNext, handlePrevious, playing]);
+  }, [currentSong, handleNext, handlePrevious, isStemActive, playing]);
 
   const toggleMute = () => {
     if (!isExpanded) {
@@ -489,14 +630,16 @@ export function AppPlayerBar() {
         onEnded={handleEnded}
         onError={pause}
         onLoadedMetadata={handleLoadedMetadata}
+        onSeeking={handleSeeking}
         onTimeUpdate={handleTimeUpdate}
       />
+      <audio ref={vocalAudioRef} preload="metadata" aria-hidden />
       {useCompactPlayer ? (
         <CompactPlayerBar
           currentSong={currentSong}
           currentArtworkSrcSet={currentArtworkSrcSet}
           isPlaying={isPlaying}
-          onTogglePlayback={togglePlayback}
+          onTogglePlayback={handleTogglePlayback}
           onNext={handleNext}
         />
       ) : (
@@ -518,12 +661,16 @@ export function AppPlayerBar() {
           volume={volume}
           onSetVolume={setVolume}
           onToggleMute={toggleMute}
-          onTogglePlayback={togglePlayback}
+          onTogglePlayback={handleTogglePlayback}
           onToggleShuffle={toggleShuffle}
           onCycleRepeatMode={cycleRepeatMode}
           onNext={handleNext}
           onPrevious={handlePrevious}
           onDrawerOpenChange={setIsSidebarOpen}
+          isStemActive={isStemActive}
+          vocalVolume={vocalVolume}
+          onSetVocalVolume={setVocalVolume}
+          onPreviewVocalVolume={previewVocalVolume}
         />
       )}
     </div>

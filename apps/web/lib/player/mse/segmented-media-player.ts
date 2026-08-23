@@ -1,14 +1,20 @@
-import { getStreamInfo, getStreamMetadata } from "../stream.api";
 import { decryptChunk, hexToBytes, importAesKey } from "./crypto";
 import { fetchRange } from "./fetcher";
-import type { PreloadedSong, SegmentInfo, StreamMetadata } from "./types";
+import type { AttachedStream, PreloadedSong, SegmentInfo, StreamMetadata } from "./types";
 
 const MIME = 'audio/mp4; codecs="mp4a.40.2"';
-const INITIAL_BATCH = 2;
+const INITIAL_BATCH = 1;
 const SEEK_BATCH = 1;
 const BUFFER_BATCH_BYTES = 256 * 1024;
 const BUFFER_GOAL_SEC = 30;
 const BUFFER_LOW_SEC = 15;
+const FAILED_FILL_RETRY_DELAY_MS = 250;
+
+type SourceBufferOperation = {
+  data: ArrayBuffer;
+  resolve: () => void;
+  reject: (error: unknown) => void;
+};
 
 function findSegmentIndex(segments: SegmentInfo[], timeSec: number): number {
   let lo = 0;
@@ -111,20 +117,21 @@ export abstract class SegmentedMediaPlayer {
   private disposed = false;
   private fillGeneration = 0;
   private needsUrgentFill = false;
+  private fillRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
-  private appendQueue: ArrayBuffer[] = [];
+  private sourceBufferQueue: SourceBufferOperation[] = [];
   private flushing = false;
 
   async attach(
     audio: HTMLAudioElement,
-    songId: string,
     preloaded?: PreloadedSong,
+    attachedStream?: AttachedStream,
   ): Promise<void> {
     this.disposed = false;
     this.audio = audio;
     this.abortController = new AbortController();
 
-    const initialData = await this.loadInitialData(songId, preloaded);
+    const initialData = await this.loadInitialData(preloaded, attachedStream);
     if (this.disposed) return;
 
     this.mediaSource = this.createMediaSource();
@@ -154,6 +161,7 @@ export abstract class SegmentedMediaPlayer {
     this.mediaSource.duration = this.metadata.duration;
     audio.addEventListener("seeking", this.onSeeking);
     audio.addEventListener("timeupdate", this.onTimeUpdate);
+    audio.addEventListener("waiting", this.onWaiting);
     this.fillBuffer();
   }
 
@@ -165,6 +173,7 @@ export abstract class SegmentedMediaPlayer {
     if (audio) {
       audio.removeEventListener("seeking", this.onSeeking);
       audio.removeEventListener("timeupdate", this.onTimeUpdate);
+      audio.removeEventListener("waiting", this.onWaiting);
       this.restoreAudio(audio);
       audio.removeAttribute("src");
       audio.load();
@@ -196,7 +205,9 @@ export abstract class SegmentedMediaPlayer {
     this.appendedSegments.clear();
     this.requiredTailStartIndex = 0;
     this.needsUrgentFill = false;
-    this.appendQueue = [];
+    if (this.fillRetryTimer) clearTimeout(this.fillRetryTimer);
+    this.fillRetryTimer = null;
+    this.rejectQueuedSourceBufferOperations();
     this.flushing = false;
   }
 
@@ -237,8 +248,8 @@ export abstract class SegmentedMediaPlayer {
   }
 
   private async loadInitialData(
-    songId: string,
     preloaded?: PreloadedSong,
+    attachedStream?: AttachedStream,
   ): Promise<Pick<PreloadedSong, "initSegment" | "firstSegmentsBatch" | "preloadedCount">> {
     if (preloaded) {
       this.streamUrl = preloaded.streamInfo.streamUrl;
@@ -252,10 +263,10 @@ export abstract class SegmentedMediaPlayer {
     const signal = this.abortController?.signal;
     if (!signal) throw new DOMException("Player detached", "AbortError");
 
-    const [streamInfo, metadata] = await Promise.all([
-      getStreamInfo(songId),
-      getStreamMetadata(songId),
-    ]);
+    if (!attachedStream) {
+      throw new Error("Playback manifest is required");
+    }
+    const { streamInfo, metadata } = attachedStream;
     if (this.disposed || signal.aborted) {
       throw new DOMException("Player detached", "AbortError");
     }
@@ -304,6 +315,22 @@ export abstract class SegmentedMediaPlayer {
     }
 
     this.requiredTailStartIndex = targetIndex;
+    // SourceBuffer can evict data under memory pressure. Keep the segment index
+    // cache authoritative only when the media element confirms that time is
+    // buffered; otherwise a seek would skip fetchAndAppendBatch() for data that
+    // no longer exists. Invalidate the whole forward buffer window: evictions
+    // are not constrained to one fragment, and refetching only the target would
+    // play one fragment then stall at the next stale cache entry.
+    const refillEndIndex = Math.min(
+      findSegmentIndex(
+        this.metadata.segments,
+        targetTime + BUFFER_GOAL_SEC,
+      ),
+      this.metadata.segments.length - 1,
+    );
+    for (let index = targetIndex; index <= refillEndIndex; index += 1) {
+      this.appendedSegments.delete(index);
+    }
     this.cancelFetching();
     this.abortController = new AbortController();
     this.needsUrgentFill = true;
@@ -317,6 +344,13 @@ export abstract class SegmentedMediaPlayer {
     if (!this.downloading && this.getBufferAhead() < BUFFER_LOW_SEC) {
       this.fillBuffer();
     }
+  };
+
+  private onWaiting = (): void => {
+    // A transport failure can end a fill just before the buffer runs dry.
+    // `timeupdate` then stops, so waiting is the reliable retry signal rather
+    // than leaving playback stalled until the user seeks manually.
+    if (!this.downloading) this.fillBuffer();
   };
 
   private cancelFetching(): void {
@@ -424,13 +458,29 @@ export abstract class SegmentedMediaPlayer {
         );
       }
     } catch {
-      // Abort and transport failures are retried by the next playback event.
+      // `waiting` can fire while `downloading` is still true, before this
+      // catch/finally runs. In that ordering there may be no later media event
+      // to restart the fill, leaving playback stuck at one missing fragment.
+      // Schedule a bounded delayed retry; fetchRange itself already rejects
+      // stale/non-range CDN responses before they can corrupt MSE.
+      if (!signal.aborted && generation === this.fillGeneration) {
+        this.scheduleFillRetry();
+      }
     } finally {
       if (generation === this.fillGeneration) {
         this.downloading = false;
         this.tryEndOfStream();
       }
     }
+  }
+
+  private scheduleFillRetry(): void {
+    if (this.fillRetryTimer || this.disposed) return;
+
+    this.fillRetryTimer = setTimeout(() => {
+      this.fillRetryTimer = null;
+      this.fillBuffer();
+    }, FAILED_FILL_RETRY_DELAY_MS);
   }
 
   private tryEndOfStream(): void {
@@ -464,23 +514,66 @@ export abstract class SegmentedMediaPlayer {
     return false;
   }
 
-  private async appendBuffer(data: ArrayBuffer): Promise<void> {
-    if (!this.sourceBuffer || this.disposed) return;
+  private appendBuffer(data: ArrayBuffer): Promise<void> {
+    return this.enqueueSourceBufferOperation(data);
+  }
 
-    this.appendQueue.push(data);
+  private enqueueSourceBufferOperation(
+    data: ArrayBuffer,
+  ): Promise<void> {
+    if (!this.sourceBuffer || this.disposed) return Promise.resolve();
+
+    return new Promise((resolve, reject) => {
+      this.sourceBufferQueue.push({ data, resolve, reject });
+      void this.flushSourceBufferOperations();
+    });
+  }
+
+  private async flushSourceBufferOperations(): Promise<void> {
     if (this.flushing) return;
 
     this.flushing = true;
     try {
-      while (this.appendQueue.length > 0 && !this.disposed) {
-        const buffer = this.appendQueue.shift();
-        if (!buffer || !this.sourceBuffer) return;
+      while (this.sourceBufferQueue.length > 0) {
+        const operation = this.sourceBufferQueue.shift();
+        if (!operation) continue;
 
-        this.sourceBuffer.appendBuffer(buffer);
-        await waitForUpdateEnd(this.sourceBuffer);
+        const sourceBuffer = this.sourceBuffer;
+        if (!sourceBuffer || this.disposed) {
+          operation.reject(new DOMException("Player detached", "AbortError"));
+          continue;
+        }
+
+        try {
+          await waitForUpdateEnd(sourceBuffer);
+          this.ensureCurrentSourceBuffer(sourceBuffer);
+
+          sourceBuffer.appendBuffer(operation.data);
+
+          await waitForUpdateEnd(sourceBuffer);
+          this.ensureCurrentSourceBuffer(sourceBuffer);
+          operation.resolve();
+        } catch (error) {
+          operation.reject(error);
+        }
       }
     } finally {
       this.flushing = false;
+      if (!this.disposed && this.sourceBufferQueue.length > 0) {
+        void this.flushSourceBufferOperations();
+      }
     }
+  }
+
+  private ensureCurrentSourceBuffer(sourceBuffer: SourceBuffer): void {
+    if (this.disposed || this.sourceBuffer !== sourceBuffer) {
+      throw new DOMException("Player detached", "AbortError");
+    }
+  }
+
+  private rejectQueuedSourceBufferOperations(): void {
+    const error = new DOMException("Player detached", "AbortError");
+    for (const operation of this.sourceBufferQueue) operation.reject(error);
+    this.sourceBufferQueue = [];
   }
 }

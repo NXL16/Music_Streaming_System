@@ -24,6 +24,7 @@ export type PlayerSong = {
   artworkBgColor?: string;
   releaseDate?: string;
   playbackUrl: string;
+  audioMode?: "STANDARD" | "SING";
   contentRating?: string;
   sourcePlaylist?: {
     id: string;

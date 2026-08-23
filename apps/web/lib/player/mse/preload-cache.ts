@@ -1,113 +1,188 @@
-import { getStreamInfo, getStreamMetadata } from "../stream.api";
+import { getPlaybackManifest } from "../stream.api";
 import { decryptChunk, hexToBytes, importAesKey } from "./crypto";
 import { fetchRange } from "./fetcher";
-import type { PreloadedSong } from "./types";
+import type { PreloadedPlayback, PreloadedSong, StemPlayback } from "./types";
 
-const MAX_CACHE_SIZE = 2;
+const MAX_CACHE_SIZE = 3;
 const MAX_PENDING_PRELOADS = 2;
-const PRELOAD_SEGMENTS_COUNT = 3;
+const BOOTSTRAP_SEGMENTS_COUNT = 1;
+const INTENT_DELAY_MS = 140;
+
+type PreloadKind = "intent" | "queue";
+
+type PendingPreload = {
+  controller: AbortController;
+  kind: PreloadKind;
+  promise: Promise<void>;
+  token: symbol;
+};
+
+async function preloadStem(
+  songId: string,
+  stem: StemPlayback,
+  signal: AbortSignal,
+): Promise<PreloadedSong> {
+  const cryptoKey = await importAesKey(stem.key);
+  const ivBytes = hexToBytes(stem.iv);
+  const { metadata } = stem;
+  const count = Math.min(BOOTSTRAP_SEGMENTS_COUNT, metadata.segments.length);
+  const lastSegment = metadata.segments[count - 1];
+  const fetchEnd = lastSegment
+    ? lastSegment.startByte + lastSegment.size - 1
+    : metadata.initRange.end;
+  const cipher = await fetchRange(stem.streamUrl, 0, fetchEnd, signal);
+  if (signal.aborted) throw new DOMException("Preload aborted", "AbortError");
+
+  const plain = await decryptChunk(cryptoKey, ivBytes, cipher, 0);
+  if (signal.aborted) throw new DOMException("Preload aborted", "AbortError");
+
+  return {
+    songId,
+    streamInfo: stem,
+    metadata,
+    cryptoKey,
+    ivBytes,
+    initSegment: plain.slice(0, metadata.initRange.end + 1),
+    firstSegmentsBatch:
+      count > 0
+        ? plain.slice(metadata.initRange.end + 1)
+        : new ArrayBuffer(0),
+    preloadedCount: count,
+  };
+}
 
 class PreloadCacheStore {
-  private cache = new Map<string, PreloadedSong>();
-  private pending = new Map<string, AbortController>();
+  private cache = new Map<string, PreloadedPlayback>();
+  private pending = new Map<string, PendingPreload>();
+  private scheduled = new Map<string, ReturnType<typeof setTimeout>>();
 
-  async preload(songId: string): Promise<void> {
-    if (this.cache.has(songId) || this.pending.has(songId)) return;
+  scheduleIntent(songId: string): void {
+    if (
+      this.cache.has(songId) ||
+      this.pending.has(songId) ||
+      this.scheduled.has(songId)
+    ) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      this.scheduled.delete(songId);
+      void this.preload(songId, "intent").catch(() => {});
+    }, INTENT_DELAY_MS);
+    this.scheduled.set(songId, timer);
+  }
+
+  warmImmediately(songId: string): void {
+    this.cancelScheduled(songId);
+    void this.preload(songId, "intent").catch(() => {});
+  }
+
+  cancelIntent(songId: string): void {
+    this.cancelScheduled(songId);
+    const pending = this.pending.get(songId);
+    if (pending?.kind === "intent") pending.controller.abort();
+  }
+
+  async preload(songId: string, kind: PreloadKind = "queue"): Promise<void> {
+    if (this.cache.has(songId)) return;
+    const existing = this.pending.get(songId);
+    if (existing) return existing.promise;
 
     while (this.pending.size >= MAX_PENDING_PRELOADS) {
-      const oldestSongId = this.pending.keys().next().value;
-      if (!oldestSongId) break;
-      this.cancelPreload(oldestSongId);
+      const oldestEntry = this.pending.entries().next().value as
+        | [string, PendingPreload]
+        | undefined;
+      if (!oldestEntry) break;
+      const [oldestSongId, oldest] = oldestEntry;
+      oldest.controller.abort();
+      this.pending.delete(oldestSongId);
     }
 
     const controller = new AbortController();
-    this.pending.set(songId, controller);
-
-    try {
-      const signal = controller.signal;
-      const [streamInfo, metadata] = await Promise.all([
-        getStreamInfo(songId, signal),
-        getStreamMetadata(songId, signal),
-      ]);
-
-      if (signal.aborted) return;
-
-      const cryptoKey = await importAesKey(streamInfo.key);
-      const ivBytes = hexToBytes(streamInfo.iv);
-
-      const segments = metadata.segments;
-      const initEnd = metadata.initRange.end;
-      const count = Math.min(PRELOAD_SEGMENTS_COUNT, segments.length);
-
-      let fetchEnd: number;
-      if (count > 0) {
-        const lastSeg = segments[count - 1];
-        fetchEnd = lastSeg.startByte + lastSeg.size - 1;
-      } else {
-        fetchEnd = initEnd;
-      }
-
-      const cipher = await fetchRange(
-        streamInfo.streamUrl,
-        0,
-        fetchEnd,
-        signal,
-      );
-      if (signal.aborted) return;
-
-      const plain = await decryptChunk(cryptoKey, ivBytes, cipher, 0);
-      if (signal.aborted) return;
-
-      const initSegment = plain.slice(0, initEnd + 1);
-      const firstSegmentsBatch =
-        count > 0 ? plain.slice(initEnd + 1) : new ArrayBuffer(0);
-
-      if (this.cache.size >= MAX_CACHE_SIZE) {
-        const oldest = this.cache.keys().next().value;
-        if (oldest) this.cache.delete(oldest);
-      }
-
-      this.cache.set(songId, {
-        songId,
-        streamInfo,
-        metadata,
-        cryptoKey,
-        ivBytes,
-        initSegment,
-        firstSegmentsBatch,
-        preloadedCount: count,
+    const token = Symbol(songId);
+    const promise = this.load(songId, controller.signal)
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        throw error;
+      })
+      .finally(() => {
+        if (this.pending.get(songId)?.token === token) {
+          this.pending.delete(songId);
+        }
       });
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      throw err;
-    } finally {
-      this.pending.delete(songId);
-    }
+    this.pending.set(songId, { controller, kind, promise, token });
+    return promise;
   }
 
-  cancelPreload(songId: string): void {
-    const controller = this.pending.get(songId);
-    if (controller) {
-      controller.abort();
-      this.pending.delete(songId);
+  private async load(songId: string, signal: AbortSignal): Promise<void> {
+    const manifest = await getPlaybackManifest(songId, signal);
+    if (signal.aborted) throw new DOMException("Preload aborted", "AbortError");
+
+    let playback: PreloadedPlayback;
+    if (manifest.mode === "STANDARD") {
+      playback = {
+        mode: "STANDARD",
+        main: await preloadStem(songId, manifest.main, signal),
+      };
+    } else {
+      const [instrumental, vocal] = await Promise.all([
+        preloadStem(songId, manifest.instrumental, signal),
+        preloadStem(songId, manifest.vocal, signal),
+      ]);
+      playback = { mode: "SING", instrumental, vocal };
     }
+
+    if (signal.aborted) throw new DOMException("Preload aborted", "AbortError");
+    this.remember(songId, playback);
   }
 
-  get(songId: string): PreloadedSong | undefined {
+  private remember(songId: string, playback: PreloadedPlayback): void {
+    if (this.cache.size >= MAX_CACHE_SIZE) {
+      const oldestSongId = this.cache.keys().next().value as string | undefined;
+      if (oldestSongId) this.cache.delete(oldestSongId);
+    }
+    this.cache.set(songId, playback);
+  }
+
+  get(songId: string): PreloadedPlayback | undefined {
     return this.cache.get(songId);
   }
 
-  evict(songId: string): void {
+  async waitForPending(songId: string): Promise<PreloadedPlayback | undefined> {
+    const pending = this.pending.get(songId);
+    if (!pending) return this.get(songId);
+    try {
+      await pending.promise;
+    } catch {
+      // A foreground attach falls back to the normal manifest path.
+    }
+    return this.get(songId);
+  }
+
+  consume(songId: string): PreloadedPlayback | undefined {
+    const playback = this.cache.get(songId);
     this.cache.delete(songId);
-    this.cancelPreload(songId);
+    this.cancelScheduled(songId);
+    return playback;
+  }
+
+  cancelPreload(songId: string): void {
+    this.cancelScheduled(songId);
+    this.pending.get(songId)?.controller.abort();
   }
 
   clear(): void {
-    for (const controller of this.pending.values()) {
-      controller.abort();
-    }
+    for (const timer of this.scheduled.values()) clearTimeout(timer);
+    for (const pending of this.pending.values()) pending.controller.abort();
+    this.scheduled.clear();
     this.pending.clear();
     this.cache.clear();
+  }
+
+  private cancelScheduled(songId: string): void {
+    const timer = this.scheduled.get(songId);
+    if (timer) clearTimeout(timer);
+    this.scheduled.delete(songId);
   }
 }
 
