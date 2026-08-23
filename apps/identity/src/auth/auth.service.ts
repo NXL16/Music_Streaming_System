@@ -61,7 +61,6 @@ import {
 } from './auth-token.util';
 import { MailService } from '../common/mail/mail.service';
 import { OAuth2Client, TokenPayload } from 'google-auth-library';
-import { WalletClientService } from '../wallet/wallet-client.service';
 
 type TwoFactorChallenge = {
   userId: string;
@@ -126,6 +125,9 @@ const authRateLimitKey = (scope: string, identifier: string): string =>
 const authSessionKey = (userId: string, deviceId: string): string =>
   `auth:session:${userId}:${deviceId}`;
 
+const authDeviceRecencyKey = (userId: string): string =>
+  `${authDevicesKey(userId)}:recency`;
+
 const twoFactorConfirmLockKey = (userId: string): string =>
   `auth:2fa:confirm:lock:${userId}`;
 
@@ -134,6 +136,10 @@ const twoFactorOtpLastCounterKey = (userId: string): string =>
 
 const twoFactorTrustedDeviceKey = (userId: string, deviceId: string): string =>
   `auth:2fa:trusted:${userId}:${deviceId}`;
+
+const TWO_FACTOR_OTP_COUNTER_TTL_SECONDS = 120;
+const TWO_FACTOR_CONFIRM_LOCK_TTL_SECONDS = 10;
+const DEFAULT_MAX_ACTIVE_SESSIONS = 20;
 
 @Injectable()
 export class AuthService {
@@ -147,13 +153,65 @@ export class AuthService {
     local ttl = redis.call("TTL", KEYS[1])
     return {attempts, ttl}
   `;
+  private static readonly TOTP_COUNTER_CLAIM_LUA = `
+    local lastCounter = redis.call("GET", KEYS[1])
+    local lastCounterNumber = lastCounter and tonumber(lastCounter)
+    local candidateCounter = tonumber(ARGV[1])
+
+    if lastCounterNumber and candidateCounter <= lastCounterNumber then
+      return 0
+    end
+
+    redis.call("SET", KEYS[1], ARGV[1], "EX", tonumber(ARGV[2]))
+    return 1
+  `;
+  private static readonly COMPARE_AND_DELETE_LOCK_LUA = `
+    if redis.call("GET", KEYS[1]) == ARGV[1] then
+      return redis.call("DEL", KEYS[1])
+    end
+    return 0
+  `;
+  private static readonly SAVE_REFRESH_SESSION_LUA = `
+    redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[3])
+    redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
+    redis.call("SADD", KEYS[3], ARGV[4])
+    redis.call("ZADD", KEYS[4], ARGV[5], ARGV[4])
+
+    -- Rolling deploys can have device-set entries written before the recency
+    -- index exists. Backfill only when the cardinalities differ.
+    if redis.call("ZCARD", KEYS[4]) < redis.call("SCARD", KEYS[3]) then
+      for _, deviceId in ipairs(redis.call("SMEMBERS", KEYS[3])) do
+        if not redis.call("ZSCORE", KEYS[4], deviceId) then
+          redis.call("ZADD", KEYS[4], 0, deviceId)
+        end
+      end
+    end
+
+    local excess = redis.call("ZCARD", KEYS[4]) - tonumber(ARGV[6])
+    local evicted = {}
+    if excess > 0 then
+      -- Fetch one extra member in case the current device shares the lowest
+      -- score and must be kept. The new session is never evicted by itself.
+      for _, deviceId in ipairs(redis.call("ZRANGE", KEYS[4], 0, excess)) do
+        if #evicted >= excess then break end
+        if deviceId ~= ARGV[4] then
+          redis.call("SREM", KEYS[3], deviceId)
+          redis.call("ZREM", KEYS[4], deviceId)
+          table.insert(evicted, deviceId)
+        end
+      end
+    end
+
+    redis.call("EXPIRE", KEYS[3], ARGV[3])
+    redis.call("EXPIRE", KEYS[4], ARGV[3])
+    return evicted
+  `;
 
   constructor(
     private readonly usersService: UsersService,
     private jwtService: JwtService,
     private configService: ConfigService,
     private readonly mailService: MailService,
-    private readonly walletClientService: WalletClientService,
     @Inject('REDIS_INSTANCE') private readonly redis: Redis,
   ) {}
 
@@ -171,8 +229,6 @@ export class AuthService {
         password: hashedPassword,
         displayName,
       });
-
-      await this.walletClientService.createWalletForUser(newUser.id);
 
       const finalDeviceId = deviceId || randomUUID();
       const tokens = this.generateTokens(newUser, finalDeviceId);
@@ -403,8 +459,6 @@ export class AuthService {
         });
 
         await this.usersService.linkGoogleAccount(user.id, providerSub, email);
-        await this.walletClientService.createWalletForUser(user.id);
-
         if (!user.emailVerified) {
           user = await this.usersService.markEmailVerified(user.id);
         }
@@ -463,7 +517,8 @@ export class AuthService {
       .pipeline()
       .del(key)
       .del(authSessionKey(userId, deviceId))
-      .srem(deviceSetKey, deviceId);
+      .srem(deviceSetKey, deviceId)
+      .zrem(authDeviceRecencyKey(userId), deviceId);
 
     if (accessJti && accessExp) {
       const ttl = Math.max(accessExp - Math.floor(Date.now() / 1000), 1);
@@ -518,8 +573,8 @@ export class AuthService {
       });
     }
 
-    const deviceIds = await this.redis.smembers(authDevicesKey(request.userId));
-    deviceIds.sort();
+    const deviceSetKey = authDevicesKey(request.userId);
+    const deviceIds = await this.listSessionDeviceIds(request.userId);
 
     const sessionKeys = deviceIds.map((deviceId) =>
       authSessionKey(request.userId, deviceId),
@@ -530,7 +585,11 @@ export class AuthService {
 
     const staleDeviceIds = deviceIds.filter((_, i) => !sessionValues[i]);
     if (staleDeviceIds.length > 0) {
-      await this.redis.srem(authDevicesKey(request.userId), ...staleDeviceIds);
+      await this.redis
+        .pipeline()
+        .srem(deviceSetKey, ...staleDeviceIds)
+        .zrem(authDeviceRecencyKey(request.userId), ...staleDeviceIds)
+        .exec();
     }
     const activeDeviceIds = deviceIds.filter((_, i) => sessionValues[i]);
     const activeSessionValues = sessionValues.filter(Boolean);
@@ -582,13 +641,15 @@ export class AuthService {
     redis.call("DEL", KEYS[3]) -- session
     redis.call("DEL", KEYS[4]) -- trusted 2FA
     redis.call("SREM", KEYS[1], ARGV[1])
+    redis.call("ZREM", KEYS[5], ARGV[1])
     return 1
   `,
-      4,
+      5,
       authDevicesKey(request.userId),
       authRefreshKey(request.userId, request.deviceId),
       authSessionKey(request.userId, request.deviceId),
       twoFactorTrustedDeviceKey(request.userId, request.deviceId),
+      authDeviceRecencyKey(request.userId),
       request.deviceId,
     );
 
@@ -920,7 +981,14 @@ export class AuthService {
     request: ConfirmTwoFactorSetupRequest,
   ): Promise<ConfirmTwoFactorSetupResponse> {
     const lockKey = twoFactorConfirmLockKey(request.userId);
-    const lockAcquired = await this.redis.set(lockKey, '1', 'EX', 10, 'NX');
+    const lockToken = randomUUID();
+    const lockAcquired = await this.redis.set(
+      lockKey,
+      lockToken,
+      'EX',
+      TWO_FACTOR_CONFIRM_LOCK_TTL_SECONDS,
+      'NX',
+    );
     if (!lockAcquired) {
       throw new RpcException({
         code: status.ABORTED,
@@ -987,7 +1055,7 @@ export class AuthService {
         recoveryCodes,
       };
     } finally {
-      await this.redis.del(lockKey);
+      await this.releaseLockIfOwned(lockKey, lockToken);
     }
   }
 
@@ -1366,6 +1434,7 @@ export class AuthService {
     }
 
     pipeline.del(deviceSetKey);
+    pipeline.del(authDeviceRecencyKey(userId));
 
     await pipeline.exec();
   }
@@ -1389,15 +1458,17 @@ export class AuthService {
         else
           redis.call("DEL", KEYS[1])
           redis.call("SREM", KEYS[2], ARGV[2])
+          redis.call("ZREM", KEYS[3], ARGV[2])
           return 0
         end
       `;
 
       const result = await this.redis.eval(
         luaScript,
-        2,
+        3,
         key,
         deviceSetKey,
+        authDeviceRecencyKey(payload.sub),
         hashedToken,
         payload.deviceId,
       );
@@ -1490,21 +1561,86 @@ export class AuthService {
     const hashedToken = createHash('sha256').update(token).digest('hex');
     const key = authRefreshKey(userId, deviceId);
     const deviceSetKey = authDevicesKey(userId);
+    const lastSeenAt = Date.now();
 
     const sessionPayload = JSON.stringify({
       deviceId,
       ipAddress: sessionMeta?.ipAddress,
       userAgent: sessionMeta?.userAgent,
-      lastSeenAt: Date.now(),
+      lastSeenAt,
     } satisfies SessionState);
 
-    await this.redis
-      .pipeline()
-      .set(key, hashedToken, 'EX', ttl)
-      .set(authSessionKey(userId, deviceId), sessionPayload, 'EX', ttl)
-      .sadd(deviceSetKey, deviceId)
-      .expire(deviceSetKey, ttl)
-      .exec();
+    const evictedDeviceIds = (await this.redis.eval(
+      AuthService.SAVE_REFRESH_SESSION_LUA,
+      4,
+      key,
+      authSessionKey(userId, deviceId),
+      deviceSetKey,
+      authDeviceRecencyKey(userId),
+      hashedToken,
+      sessionPayload,
+      String(ttl),
+      deviceId,
+      String(lastSeenAt),
+      String(this.maxActiveSessions()),
+    ));
+    const evicted = Array.isArray(evictedDeviceIds)
+      ? evictedDeviceIds.filter(
+          (candidate): candidate is string => typeof candidate === 'string',
+        )
+      : [];
+    if (!evicted.length) return;
+
+    const cleanup = this.redis.pipeline();
+    for (const evictedDeviceId of evicted) {
+      cleanup
+        .del(authRefreshKey(userId, evictedDeviceId))
+        .del(authSessionKey(userId, evictedDeviceId))
+        .del(twoFactorTrustedDeviceKey(userId, evictedDeviceId));
+    }
+    await cleanup.exec();
+    this.logger.warn(
+      `Evicted ${evicted.length} oldest session(s) for user ${userId} after reaching the active-session limit`,
+    );
+  }
+
+  private async listSessionDeviceIds(userId: string): Promise<string[]> {
+    const maxSessions = this.maxActiveSessions();
+    const indexedDeviceIds = await this.redis.zrevrange(
+      authDeviceRecencyKey(userId),
+      0,
+      maxSessions - 1,
+    );
+    if (indexedDeviceIds.length) return indexedDeviceIds;
+
+    // A bounded migration path for sessions created before the recency index.
+    // The next token refresh/login creates the index and applies the hard cap.
+    const deviceIds = new Set<string>();
+    let cursor = '0';
+    do {
+      const [nextCursor, page] = await this.redis.sscan(
+        authDevicesKey(userId),
+        cursor,
+        'COUNT',
+        String(maxSessions),
+      );
+      for (const deviceId of page) {
+        deviceIds.add(deviceId);
+        if (deviceIds.size >= maxSessions) break;
+      }
+      cursor = nextCursor;
+    } while (cursor !== '0' && deviceIds.size < maxSessions);
+
+    return [...deviceIds].sort();
+  }
+
+  private maxActiveSessions(): number {
+    const configured = Number(
+      this.configService.get<string>('AUTH_MAX_ACTIVE_SESSIONS'),
+    );
+    return Number.isSafeInteger(configured) && configured >= 1 && configured <= 100
+      ? configured
+      : DEFAULT_MAX_ACTIVE_SESSIONS;
   }
 
   private generateTokens(user: UserEntity, deviceId: string): AuthResponse {
@@ -1678,21 +1814,34 @@ export class AuthService {
     counter: number,
   ): Promise<void> {
     const key = twoFactorOtpLastCounterKey(userId);
-    const lastRaw = await this.redis.get(key);
-    const lastCounter = lastRaw ? Number(lastRaw) : null;
+    const claimed = Number(
+      await this.redis.eval(
+        AuthService.TOTP_COUNTER_CLAIM_LUA,
+        1,
+        key,
+        String(counter),
+        String(TWO_FACTOR_OTP_COUNTER_TTL_SECONDS),
+      ),
+    );
 
-    if (
-      lastCounter !== null &&
-      Number.isFinite(lastCounter) &&
-      counter <= lastCounter
-    ) {
+    if (claimed !== 1) {
       throw new RpcException({
         code: status.UNAUTHENTICATED,
         message: 'Mã 2FA đã được sử dụng, vui lòng chờ mã mới',
       });
     }
+  }
 
-    await this.redis.set(key, String(counter), 'EX', 120);
+  private async releaseLockIfOwned(
+    lockKey: string,
+    lockToken: string,
+  ): Promise<void> {
+    await this.redis.eval(
+      AuthService.COMPARE_AND_DELETE_LOCK_LUA,
+      1,
+      lockKey,
+      lockToken,
+    );
   }
 
   private async shouldRequireTwoFactor(

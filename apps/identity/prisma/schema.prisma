@@ -41,6 +41,7 @@ model User {
     emailVerifyTokens      EmailVerificationToken[]
     twoFactorRecoveryCodes TwoFactorRecoveryCode[]
     oauthAccounts          OAuthAccount[]
+    provisioningOutbox     IdentityProvisioningOutbox[]
 
     @@index([isActive, createdAt(sort: Desc)])
     @@index([role, isActive])
@@ -112,4 +113,24 @@ model OAuthAccount {
 
     @@unique([provider, providerSub])
     @@index([userId])
+}
+
+model IdentityProvisioningOutbox {
+    id             String   @id
+    eventType      String   @db.VarChar(64)
+    userId         String
+    attempts       Int      @default(0)
+    availableAt    DateTime @default(now())
+    lockToken      String?  @db.VarChar(64)
+    lockedUntil    DateTime?
+    processedAt    DateTime?
+    deadLetteredAt DateTime?
+    lastError      String?  @db.VarChar(1024)
+    createdAt      DateTime @default(now())
+    updatedAt      DateTime @updatedAt
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@unique([eventType, userId])
+    @@index([processedAt, deadLetteredAt, availableAt, lockedUntil, createdAt])
 }

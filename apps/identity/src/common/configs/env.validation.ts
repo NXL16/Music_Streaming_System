@@ -12,6 +12,11 @@ type IdentityEnv = {
   INTERNAL_GRPC_TOKEN: string;
   IDENTITY_GRPC_URL: string;
   WALLET_GRPC_URL: string;
+  WALLET_GRPC_TLS_ENABLED?: string;
+  WALLET_GRPC_TLS_CA_FILE?: string;
+  WALLET_GRPC_TLS_CLIENT_CERT_FILE?: string;
+  WALLET_GRPC_TLS_CLIENT_KEY_FILE?: string;
+  WALLET_GRPC_TIMEOUT_MS?: string;
   JWT_ACCESS_EXPIRES_IN: string;
   JWT_REFRESH_EXPIRES_IN: string;
   RESEND_API_KEY: string;
@@ -25,6 +30,11 @@ type IdentityEnv = {
   GOOGLE_OAUTH_REDIRECT_URI: string;
   TWO_FACTOR_TRUST_DAYS_USER?: string;
   TWO_FACTOR_TRUST_DAYS_ADMIN?: string;
+  IDENTITY_OUTBOX_POLL_INTERVAL_MS?: string;
+  IDENTITY_OUTBOX_BATCH_SIZE?: string;
+  IDENTITY_OUTBOX_LEASE_SECONDS?: string;
+  IDENTITY_OUTBOX_MAX_ATTEMPTS?: string;
+  AUTH_MAX_ACTIVE_SESSIONS?: string;
 };
 
 const REQUIRED_KEYS: Array<keyof IdentityEnv> = [
@@ -69,6 +79,8 @@ export function validateEnv(config: Record<string, unknown>): IdentityEnv {
   if (String(config.INTERNAL_GRPC_TOKEN).length < 32) {
     throw new Error('INTERNAL_GRPC_TOKEN phải có ít nhất 32 ký tự');
   }
+
+  validateWalletGrpcTls(config);
 
   const accessTtlMs = ms(config.JWT_ACCESS_EXPIRES_IN as StringValue);
   const refreshTtlMs = ms(config.JWT_REFRESH_EXPIRES_IN as StringValue);
@@ -127,5 +139,80 @@ export function validateEnv(config: Record<string, unknown>): IdentityEnv {
     }
   }
 
+  const outboxBounds: Array<{
+    key:
+      | 'IDENTITY_OUTBOX_POLL_INTERVAL_MS'
+      | 'IDENTITY_OUTBOX_BATCH_SIZE'
+      | 'IDENTITY_OUTBOX_LEASE_SECONDS'
+      | 'IDENTITY_OUTBOX_MAX_ATTEMPTS'
+      | 'WALLET_GRPC_TIMEOUT_MS';
+    min: number;
+    max: number;
+  }> = [
+    { key: 'IDENTITY_OUTBOX_POLL_INTERVAL_MS', min: 100, max: 60_000 },
+    { key: 'IDENTITY_OUTBOX_BATCH_SIZE', min: 1, max: 100 },
+    { key: 'IDENTITY_OUTBOX_LEASE_SECONDS', min: 5, max: 300 },
+    { key: 'IDENTITY_OUTBOX_MAX_ATTEMPTS', min: 1, max: 100 },
+    { key: 'WALLET_GRPC_TIMEOUT_MS', min: 100, max: 60_000 },
+  ];
+
+  for (const { key, min, max } of outboxBounds) {
+    if (config[key] === undefined) {
+      continue;
+    }
+
+    const value = Number(config[key]);
+    if (!Number.isInteger(value) || value < min || value > max) {
+      throw new Error(`${key} phải là số nguyên trong khoảng ${min}-${max}`);
+    }
+  }
+
+  if (config.AUTH_MAX_ACTIVE_SESSIONS !== undefined) {
+    const maxActiveSessions = Number(config.AUTH_MAX_ACTIVE_SESSIONS);
+    if (
+      !Number.isInteger(maxActiveSessions) ||
+      maxActiveSessions < 1 ||
+      maxActiveSessions > 100
+    ) {
+      throw new Error('AUTH_MAX_ACTIVE_SESSIONS phải là số nguyên trong khoảng 1-100');
+    }
+  }
+
   return config as IdentityEnv;
+}
+
+function validateWalletGrpcTls(config: Record<string, unknown>): void {
+  const tlsEnabled = environmentString(
+    config,
+    'WALLET_GRPC_TLS_ENABLED',
+  ).toLowerCase();
+  if (tlsEnabled && tlsEnabled !== 'true' && tlsEnabled !== 'false') {
+    throw new Error('WALLET_GRPC_TLS_ENABLED phải là true hoặc false');
+  }
+  if (tlsEnabled !== 'true') return;
+
+  const caFile = environmentString(config, 'WALLET_GRPC_TLS_CA_FILE');
+  if (!caFile) {
+    throw new Error(
+      'WALLET_GRPC_TLS_CA_FILE là bắt buộc khi Wallet TLS được bật',
+    );
+  }
+  const certificateFile = environmentString(
+    config,
+    'WALLET_GRPC_TLS_CLIENT_CERT_FILE',
+  );
+  const keyFile = environmentString(config, 'WALLET_GRPC_TLS_CLIENT_KEY_FILE');
+  if (Boolean(certificateFile) !== Boolean(keyFile)) {
+    throw new Error(
+      'WALLET_GRPC_TLS_CLIENT_CERT_FILE và WALLET_GRPC_TLS_CLIENT_KEY_FILE phải được set cùng nhau',
+    );
+  }
+}
+
+function environmentString(
+  config: Record<string, unknown>,
+  key: string,
+): string {
+  const value = config[key];
+  return typeof value === 'string' ? value.trim() : '';
 }

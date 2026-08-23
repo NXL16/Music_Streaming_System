@@ -33,10 +33,6 @@ export function buildOtpAuthUrl(
   return `otpauth://totp/${label}?${params.toString()}`;
 }
 
-export function verifyTotpCode(secret: string, code: string): boolean {
-  return verifyTotpCodeWithCounter(secret, code) !== null;
-}
-
 export function verifyTotpCodeWithCounter(
   secret: string,
   code: string,

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import {
@@ -9,6 +9,8 @@ import { UserEntity } from './entities/user.entity';
 import { Prisma, User as PrismaUser } from '../generated/prisma/client';
 import { OAuthProvider, UserRole } from '../generated/prisma/enums';
 import { PrismaService } from '../common/database/prisma.service';
+import { randomUUID } from 'crypto';
+import { USER_PROVISIONING_EVENT_TYPES } from './user-provisioning-outbox.types';
 
 type MetadataLean = {
   userId?: string;
@@ -96,21 +98,32 @@ export class UsersService {
   // CREATE USER
   // ================================
   async create(data: CreateUserInput): Promise<UserEntity> {
-    const user = await this.prisma.user.create({ data });
+    const user = await this.prisma.$transaction(async (tx) => {
+      const createdUser = await tx.user.create({ data });
 
-    try {
-      const metadata = await this.metadataModel
-        .create({ userId: user.id })
-        .then((doc) => doc.toObject());
+      // PostgreSQL is the source of truth for identity. Persist both external
+      // provisioning requests in this same transaction so a process crash
+      // cannot leave a committed user with no durable work item.
+      await tx.$executeRaw`
+        INSERT INTO "IdentityProvisioningOutbox" (
+          "id",
+          "eventType",
+          "userId",
+          "updatedAt"
+        )
+        VALUES
+          (${randomUUID()}, ${USER_PROVISIONING_EVENT_TYPES.metadata}, ${createdUser.id}, NOW()),
+          (${randomUUID()}, ${USER_PROVISIONING_EVENT_TYPES.wallet}, ${createdUser.id}, NOW())
+        ON CONFLICT ("eventType", "userId") DO NOTHING
+      `;
 
-      return this.mapToEntity(user, metadata);
-    } catch (error) {
-      await this.prisma.user.delete({ where: { id: user.id } }).catch(() => {
-        // best-effort rollback
-      });
+      return createdUser;
+    });
 
-      throw new Error('Không thể tạo metadata người dùng', { cause: error });
-    }
+    // Metadata has safe defaults and is provisioned asynchronously. Returning
+    // those defaults keeps the registration contract available immediately
+    // after the authoritative PostgreSQL transaction commits.
+    return this.mapToEntity(user, null);
   }
 
   // ================================
@@ -132,7 +145,7 @@ export class UsersService {
 
     if (!user) return null;
 
-    return this.mapToEntity(user, metadata as MetadataLean | null);
+    return this.mapToEntity(user, metadata);
   }
 
   // ================================
@@ -217,7 +230,23 @@ export class UsersService {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
-        return;
+        const existingAccount = await this.prisma.oAuthAccount.findUnique({
+          where: {
+            provider_providerSub: {
+              provider: OAuthProvider.GOOGLE,
+              providerSub,
+            },
+          },
+          select: { userId: true },
+        });
+
+        if (existingAccount?.userId === userId) {
+          return;
+        }
+
+        throw new ConflictException(
+          'Google account is already linked to another user',
+        );
       }
 
       throw error;

@@ -7,6 +7,7 @@ import {
   WALLET,
 } from '@musical/shared-proto';
 import { WalletClientService } from './wallet-client.service';
+import { walletGrpcChannelCredentials } from './wallet-grpc-tls';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { WalletClientService } from './wallet-client.service';
             package: WALLET.PACKAGE,
             protoPath: resolveProtoPath(WALLET.PROTO_FILE),
             loader: GRPC_LOADER_OPTIONS,
+            credentials: walletGrpcChannelCredentials(config),
           },
         }),
       },

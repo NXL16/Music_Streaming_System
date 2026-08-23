@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
@@ -10,6 +9,9 @@ import {
 import { PrismaService } from './common/database/prisma.service';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { loadEnvironment } from '@musical/shared-constants/environment';
+
+loadEnvironment();
 
 async function bootstrap() {
   const configService = new ConfigService();

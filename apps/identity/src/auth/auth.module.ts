@@ -4,12 +4,11 @@ import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { UsersModule } from '../users/users.module';
-import { WalletClientModule } from '../wallet/wallet-client.module';
+import { InternalGrpcGuard } from '../common/guards/internal-grpc.guard';
 
 @Module({
   imports: [
     UsersModule,
-    WalletClientModule,
     JwtModule.registerAsync({
       useFactory: (configService: ConfigService) => ({
         secret: configService.get<string>('JWT_ACCESS_SECRET'),
@@ -21,7 +20,7 @@ import { WalletClientModule } from '../wallet/wallet-client.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService],
+  providers: [AuthService, InternalGrpcGuard],
   exports: [AuthService],
 })
 export class AuthModule {}
