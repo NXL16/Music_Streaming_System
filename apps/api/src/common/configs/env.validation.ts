@@ -5,6 +5,7 @@ const REQUIRED_KEYS = [
   'API_PORT',
   'API_PREFIX',
   'IDENTITY_GRPC_URL',
+  'SONG_GRPC_URL',
   'INTERNAL_GRPC_TOKEN',
   'META_GRPC_URL',
   'WALLET_GRPC_URL',
@@ -20,17 +21,22 @@ const REQUIRED_KEYS = [
   'R2_BUCKET',
   'FINALIZER_INTERNAL_TOKEN',
   'AUTH_REFRESH_COOKIE_MAX_AGE_DAYS',
+  'JWT_ACCESS_SECRET',
   'MASTER_SECRET_KEY',
   'STREAM_WORKER_URL',
+  'CORS_ORIGIN',
 ] as const;
 
 const isPositiveInteger = (value: string): boolean => /^\d+$/.test(value);
+const isHostPort = (value: string): boolean => /^[^:\s]+:\d{1,5}$/.test(value);
 
 export const validateEnv = (rawEnv: RawEnv): RawEnv => {
   const missing = REQUIRED_KEYS.filter((key) => !rawEnv[key]);
 
   if (missing.length > 0) {
-    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+    throw new Error(
+      `Missing required environment variables: ${missing.join(', ')}`,
+    );
   }
 
   if ((rawEnv.INTERNAL_GRPC_TOKEN as string).length < 32) {
@@ -41,9 +47,13 @@ export const validateEnv = (rawEnv: RawEnv): RawEnv => {
     throw new Error('FINALIZER_INTERNAL_TOKEN must be at least 32 characters');
   }
 
+  validateMetaGrpcTls(rawEnv);
+  validateWalletGrpcTls(rawEnv);
+
   const apiPort = rawEnv.API_PORT as string;
   const redisPort = rawEnv.REDIS_PORT as string;
-  const refreshCookieMaxAgeDays = rawEnv.AUTH_REFRESH_COOKIE_MAX_AGE_DAYS as string;
+  const refreshCookieMaxAgeDays =
+    rawEnv.AUTH_REFRESH_COOKIE_MAX_AGE_DAYS as string;
 
   if (!isPositiveInteger(apiPort)) {
     throw new Error('API_PORT must be a positive integer');
@@ -54,13 +64,66 @@ export const validateEnv = (rawEnv: RawEnv): RawEnv => {
   }
 
   if (!isPositiveInteger(refreshCookieMaxAgeDays)) {
-    throw new Error('AUTH_REFRESH_COOKIE_MAX_AGE_DAYS must be a positive integer');
+    throw new Error(
+      'AUTH_REFRESH_COOKIE_MAX_AGE_DAYS must be a positive integer',
+    );
+  }
+
+  const songGrpcUrl = rawEnv.SONG_GRPC_URL as string;
+  if (!isHostPort(songGrpcUrl)) {
+    throw new Error('SONG_GRPC_URL must use host:port format');
   }
 
   const masterSecretKey = rawEnv.MASTER_SECRET_KEY as string;
-  if (masterSecretKey.length < 64 || masterSecretKey.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(masterSecretKey)) {
-    throw new Error('MASTER_SECRET_KEY must be a hex string of at least 32 bytes (64 hex chars)');
+  if (
+    masterSecretKey.length < 64 ||
+    masterSecretKey.length % 2 !== 0 ||
+    !/^[0-9a-fA-F]+$/.test(masterSecretKey)
+  ) {
+    throw new Error(
+      'MASTER_SECRET_KEY must be a hex string of at least 32 bytes (64 hex chars)',
+    );
   }
 
   return rawEnv;
 };
+
+function validateMetaGrpcTls(rawEnv: RawEnv): void {
+  const tlsEnabled = rawEnv.META_GRPC_TLS_ENABLED?.trim().toLowerCase();
+  if (tlsEnabled !== undefined && !['true', 'false'].includes(tlsEnabled)) {
+    throw new Error('META_GRPC_TLS_ENABLED must be true or false');
+  }
+  if (tlsEnabled !== 'true') return;
+
+  if (!rawEnv.META_GRPC_TLS_CA_FILE?.trim()) {
+    throw new Error('META_GRPC_TLS_CA_FILE is required when Meta TLS is enabled');
+  }
+  const certificateFile = rawEnv.META_GRPC_TLS_CLIENT_CERT_FILE?.trim();
+  const keyFile = rawEnv.META_GRPC_TLS_CLIENT_KEY_FILE?.trim();
+  if (Boolean(certificateFile) !== Boolean(keyFile)) {
+    throw new Error(
+      'META_GRPC_TLS_CLIENT_CERT_FILE and META_GRPC_TLS_CLIENT_KEY_FILE must be set together',
+    );
+  }
+}
+
+function validateWalletGrpcTls(rawEnv: RawEnv): void {
+  const tlsEnabled = rawEnv.WALLET_GRPC_TLS_ENABLED?.trim().toLowerCase();
+  if (tlsEnabled !== undefined && !['true', 'false'].includes(tlsEnabled)) {
+    throw new Error('WALLET_GRPC_TLS_ENABLED must be true or false');
+  }
+  if (tlsEnabled !== 'true') return;
+
+  if (!rawEnv.WALLET_GRPC_TLS_CA_FILE?.trim()) {
+    throw new Error(
+      'WALLET_GRPC_TLS_CA_FILE is required when Wallet TLS is enabled',
+    );
+  }
+  const certificateFile = rawEnv.WALLET_GRPC_TLS_CLIENT_CERT_FILE?.trim();
+  const keyFile = rawEnv.WALLET_GRPC_TLS_CLIENT_KEY_FILE?.trim();
+  if (Boolean(certificateFile) !== Boolean(keyFile)) {
+    throw new Error(
+      'WALLET_GRPC_TLS_CLIENT_CERT_FILE and WALLET_GRPC_TLS_CLIENT_KEY_FILE must be set together',
+    );
+  }
+}

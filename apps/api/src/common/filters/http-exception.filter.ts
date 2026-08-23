@@ -34,15 +34,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
       DEFAULT_ERROR_CODE_BY_STATUS[status] ||
       (status >= 500 ? 'INTERNAL_SERVER_ERROR' : `HTTP_${status}`);
 
-    // HANDLE OTHER HTTP EXCEPTIONS
-    if (typeof exceptionResponse === 'object') {
+    if (status < 500 && typeof exceptionResponse === 'object') {
       const responseObj = exceptionResponse as unknown as Record<
         string,
         unknown
       >;
       message = (responseObj.message as string | string[]) || message;
       code = (responseObj.code as string) || code;
-    } else if (typeof exceptionResponse === 'string') {
+    } else if (status < 500 && typeof exceptionResponse === 'string') {
       message = exceptionResponse;
     }
 

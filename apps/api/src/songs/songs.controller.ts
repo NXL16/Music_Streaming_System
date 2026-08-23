@@ -185,7 +185,11 @@ export class SongsController {
   }
 
   @Get(':songId/lyrics')
-  getLyrics(@Param('songId') songId: string) {
+  async getLyrics(@Param('songId') songId: string) {
+    // Lyrics are published independently of the Song row. Resolve the song
+    // through the public visibility policy first so a private owner's lyrics
+    // cannot be enumerated through this otherwise public endpoint.
+    await this.songsService.getSong({ songId, requesterUserId: '' });
     return this.songsService.getSongLyrics({ songId, includeDraft: false });
   }
 

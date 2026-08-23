@@ -1,6 +1,7 @@
 import {
   IsBoolean,
   IsHexadecimal,
+  IsIn,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -28,6 +29,10 @@ export class RequestUploadDto {
   @IsOptional()
   @IsBoolean()
   isPublic?: boolean;
+
+  @IsOptional()
+  @IsIn(['STANDARD', 'SING'])
+  audioMode?: 'STANDARD' | 'SING';
 
   @IsString()
   @IsNotEmpty()

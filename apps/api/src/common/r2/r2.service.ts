@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   S3Client,
@@ -10,7 +10,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 @Injectable()
-export class R2Service {
+export class R2Service implements OnModuleDestroy {
   private readonly client: S3Client;
   private readonly bucket: string;
 
@@ -105,5 +105,9 @@ export class R2Service {
       .split('/')
       .map((part) => encodeURIComponent(part))
       .join('/')}`;
+  }
+
+  onModuleDestroy(): void {
+    this.client.destroy();
   }
 }

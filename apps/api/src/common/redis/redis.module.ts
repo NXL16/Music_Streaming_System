@@ -17,8 +17,12 @@ class RedisProvider implements OnModuleDestroy, BeforeApplicationShutdown {
       host: config.getOrThrow<string>('REDIS_HOST'),
       port: Number(config.getOrThrow<string>('REDIS_PORT')),
       password: config.getOrThrow<string>('REDIS_PASSWORD'),
-      maxRetriesPerRequest: null,
+      connectTimeout: 5_000,
+      commandTimeout: 2_000,
+      maxRetriesPerRequest: 1,
       enableReadyCheck: true,
+      retryStrategy: (attempt: number) =>
+        attempt <= 3 ? Math.min(attempt * 200, 1_000) : null,
     });
   }
 

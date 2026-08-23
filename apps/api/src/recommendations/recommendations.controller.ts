@@ -197,6 +197,7 @@ export class RecommendationsController {
       stationName?: string;
       stationArtworkUrl?: string;
       stationArtworkBgColor?: string;
+      eventId?: string;
     },
   ) {
     const user = req.user as JwtUser;
@@ -219,6 +220,7 @@ export class RecommendationsController {
       stationName: body.stationName ?? '',
       stationArtworkUrl: body.stationArtworkUrl ?? '',
       stationArtworkBgColor: body.stationArtworkBgColor ?? '',
+      eventId: typeof body.eventId === 'string' ? body.eventId : '',
     });
   }
 

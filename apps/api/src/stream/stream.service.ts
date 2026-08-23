@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { status } from '@grpc/grpc-js';
 import { hkdf } from 'crypto';
 import { promisify } from 'util';
+import { MetadataService } from '../metadata/metadata.service';
 
 const KEY_INFO = 'music-stream:v1:key';
 const IV_INFO = 'music-stream:v1:iv';
@@ -19,7 +21,10 @@ export class StreamService {
   private readonly keyCache = new Map<string, { key: string; iv: string }>();
   private static readonly MAX_CACHE_SIZE = 10_000;
 
-  constructor(private readonly config: ConfigService) {
+  constructor(
+    private readonly config: ConfigService,
+    private readonly metadata: MetadataService,
+  ) {
     this.masterSecret = Buffer.from(
       this.config.getOrThrow<string>('MASTER_SECRET_KEY'),
       'hex',
@@ -29,16 +34,28 @@ export class StreamService {
       .replace(/\/+$/, '');
   }
 
-  async getStreamUrl(songId: string): Promise<{
+  async getStreamUrl(
+    songId: string,
+    variant = '',
+  ): Promise<{
     streamUrl: string;
     key: string;
     iv: string;
   }> {
-    const streamUrl = `${this.streamWorkerUrl}/${encodeURIComponent(songId)}`;
-    const cached = this.keyCache.get(songId);
+    const normalizedVariant = normalizeVariant(variant);
+    const streamUrl = normalizedVariant
+      ? `${this.streamWorkerUrl}/${encodeURIComponent(songId)}/${normalizedVariant}`
+      : `${this.streamWorkerUrl}/${encodeURIComponent(songId)}`;
+    const cacheKey = `${songId}:${normalizedVariant}`;
+    const cached = this.keyCache.get(cacheKey);
     if (cached) return { streamUrl, ...cached };
 
-    const salt = Buffer.from(songId, 'utf-8');
+    // Preserve the legacy single-stream derivation. Stem variants use a
+    // distinct asset id, preventing AES-CTR key/IV reuse between stems.
+    const salt = Buffer.from(
+      normalizedVariant ? `${songId}:${normalizedVariant}` : songId,
+      'utf-8',
+    );
     const [key, iv] = await Promise.all([
       hkdfAsync('sha256', this.masterSecret, salt, KEY_INFO, KEY_LEN),
       hkdfAsync('sha256', this.masterSecret, salt, IV_INFO, IV_LEN),
@@ -53,8 +70,56 @@ export class StreamService {
       const firstKey = this.keyCache.keys().next().value!;
       this.keyCache.delete(firstKey);
     }
-    this.keyCache.set(songId, derived);
+    this.keyCache.set(cacheKey, derived);
 
     return { streamUrl, ...derived };
   }
+
+  async getPlaybackManifest(songId: string) {
+    try {
+      const [main, metadata] = await Promise.all([
+        this.getStreamUrl(songId),
+        this.metadata.getCompactStreamData(songId),
+      ]);
+
+      return {
+        mode: 'STANDARD' as const,
+        main: { ...main, metadata },
+      };
+    } catch (error) {
+      // SING assets deliberately have no mixed stream metadata. Only that
+      // expected absence selects the two-stem manifest; operational errors
+      // must remain visible to the caller.
+      if (!isGrpcNotFound(error)) throw error;
+    }
+
+    const [instrumental, vocal, instrumentalMetadata, vocalMetadata] =
+      await Promise.all([
+        this.getStreamUrl(songId, 'instrumental'),
+        this.getStreamUrl(songId, 'vocal'),
+        this.metadata.getCompactStreamData(songId, 'instrumental'),
+        this.metadata.getCompactStreamData(songId, 'vocal'),
+      ]);
+
+    return {
+      mode: 'SING' as const,
+      instrumental: { ...instrumental, metadata: instrumentalMetadata },
+      vocal: { ...vocal, metadata: vocalMetadata },
+    };
+  }
+}
+
+function isGrpcNotFound(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === status.NOT_FOUND
+  );
+}
+
+function normalizeVariant(value: string): '' | 'instrumental' | 'vocal' {
+  if (!value) return '';
+  if (value === 'instrumental' || value === 'vocal') return value;
+  throw new Error('INVALID_STREAM_VARIANT');
 }

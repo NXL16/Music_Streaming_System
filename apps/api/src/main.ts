@@ -12,11 +12,11 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  app.enableShutdownHooks();
   const configService = app.get(ConfigService);
 
   const corsOrigin = configService.get<string>('CORS_ORIGIN');
-  if (!corsOrigin)
-    throw new Error('CORS_ORIGIN chưa được cấu hình tại .env');
+  if (!corsOrigin) throw new Error('CORS_ORIGIN chưa được cấu hình tại .env');
 
   const ALLOWED_ORIGINS = corsOrigin.split(',').map((d) => d.trim());
   if (ALLOWED_ORIGINS.includes('*'))
@@ -49,12 +49,12 @@ async function bootstrap() {
 
   app.useGlobalFilters(
     new GrpcExceptionFilter(),
-    new ThrottlerExceptionFilter(),
-    new ValidationExceptionFilter(),
     new HttpExceptionFilter(),
+    new ValidationExceptionFilter(),
+    new ThrottlerExceptionFilter(),
   );
 
-  await app.listen(port, () =>
+  await app.listen(port, host, () =>
     Logger.log(`API Gateway is running at http://${host}:${port}/${prefix}`),
   );
 }

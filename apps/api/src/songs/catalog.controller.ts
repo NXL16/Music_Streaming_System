@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   Post,
@@ -194,15 +195,23 @@ export class ArtistStudioCatalogController {
   }
 
   @Get('songs/:songId/lyrics')
-  async getSongLyrics(
-    @Req() req: Request,
-    @Param('songId') songId: string,
-  ) {
-    // Verify ownership before exposing an unpublished lyric draft.
-    await this.songsService.getSong({
+  async getSongLyrics(@Req() req: Request, @Param('songId') songId: string) {
+    const user = req.user as JwtUser;
+    // getSong intentionally permits a signed-in caller to view a public song.
+    // That does not establish ownership, which this Artist Studio route
+    // requires before exposing a draft.
+    const songResponse = await this.songsService.getSong({
       songId,
-      requesterUserId: (req.user as JwtUser).userId,
+      requesterUserId: user.userId,
     });
+
+    if (!songResponse.song || songResponse.song.uploaderId !== user.userId) {
+      throw new ForbiddenException({
+        code: 'SONG_LYRICS_DRAFT_ACCESS_DENIED',
+        message: 'Bạn không có quyền xem bản nháp lời bài hát này',
+      });
+    }
+
     return this.songsService.getSongLyrics({ songId, includeDraft: true });
   }
 

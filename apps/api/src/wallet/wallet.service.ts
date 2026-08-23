@@ -1,4 +1,6 @@
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
+import { Metadata } from '@grpc/grpc-js';
+import { ConfigService } from '@nestjs/config';
 import type { ClientGrpc } from '@nestjs/microservices';
 import { grpcFirstValueFrom } from '../common/utils/grpc-timeout';
 import type {
@@ -12,7 +14,19 @@ import type {
 export class WalletService implements OnModuleInit {
   private walletClient!: WalletServiceClient;
 
-  constructor(@Inject('WALLET_SERVICE') private readonly client: ClientGrpc) {}
+  constructor(
+    @Inject('WALLET_SERVICE') private readonly client: ClientGrpc,
+    private readonly configService: ConfigService,
+  ) {}
+
+  private metadata(): Metadata {
+    const metadata = new Metadata();
+    metadata.set(
+      'x-internal-token',
+      this.configService.getOrThrow<string>('INTERNAL_GRPC_TOKEN'),
+    );
+    return metadata;
+  }
 
   onModuleInit() {
     this.walletClient =
@@ -21,7 +35,7 @@ export class WalletService implements OnModuleInit {
 
   async getBalance(userId: string): Promise<GetBalanceResponse> {
     const balance = await grpcFirstValueFrom(
-      this.walletClient.getBalance({ userId }),
+      this.walletClient.getBalance({ userId }, this.metadata()),
     );
 
     return {
@@ -33,6 +47,8 @@ export class WalletService implements OnModuleInit {
   async createDepositOrder(
     payload: DepositOrderRequest,
   ): Promise<DepositOrderResponse> {
-    return grpcFirstValueFrom(this.walletClient.createDepositOrder(payload));
+    return grpcFirstValueFrom(
+      this.walletClient.createDepositOrder(payload, this.metadata()),
+    );
   }
 }

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { SongsController } from './songs.controller';
 import { SongsService } from './songs.service';
@@ -22,16 +23,20 @@ import {
   imports: [
     R2Module,
     RecommendationsModule,
-    ClientsModule.register([
+    ClientsModule.registerAsync([
       {
         name: 'SONG_SERVICE',
-        transport: Transport.GRPC,
-        options: {
-          package: SONG.PACKAGE,
-          protoPath: resolveProtoPath(SONG.PROTO_FILE),
-          url: '0.0.0.0:7777',
-          loader: GRPC_LOADER_OPTIONS,
-        },
+        imports: [ConfigModule],
+        inject: [ConfigService],
+        useFactory: (configService: ConfigService) => ({
+          transport: Transport.GRPC,
+          options: {
+            package: SONG.PACKAGE,
+            protoPath: resolveProtoPath(SONG.PROTO_FILE),
+            url: configService.getOrThrow<string>('SONG_GRPC_URL'),
+            loader: GRPC_LOADER_OPTIONS,
+          },
+        }),
       },
     ]),
   ],

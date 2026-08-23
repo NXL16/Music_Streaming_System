@@ -3,12 +3,13 @@ import {
   Catch,
   ExceptionFilter,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import { Response } from 'express';
 
 const GRPC_CODE_TO_HTTP_STATUS: Record<number, number> = {
   3: HttpStatus.BAD_REQUEST,
-  4: HttpStatus.UNAUTHORIZED,
+  4: HttpStatus.GATEWAY_TIMEOUT,
   5: HttpStatus.NOT_FOUND,
   6: HttpStatus.CONFLICT,
   7: HttpStatus.FORBIDDEN,
@@ -23,6 +24,8 @@ const GRPC_CODE_TO_HTTP_STATUS: Record<number, number> = {
 
 @Catch()
 export class GrpcExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(GrpcExceptionFilter.name);
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
@@ -46,8 +49,15 @@ export class GrpcExceptionFilter implements ExceptionFilter {
     }
 
     const status = GRPC_CODE_TO_HTTP_STATUS[grpcCode];
-    const message =
-      error.details || error.message || 'Lỗi giao tiếp với gRPC service.';
+    const isServerError = status >= Number(HttpStatus.INTERNAL_SERVER_ERROR);
+    if (isServerError) {
+      this.logger.error(
+        `gRPC request failed code=${grpcCode}: ${error.details || error.message || 'unknown error'}`,
+      );
+    }
+    const message = isServerError
+      ? 'Dịch vụ phụ thuộc hiện không khả dụng. Vui lòng thử lại sau.'
+      : error.details || error.message || 'Lỗi giao tiếp với gRPC service.';
 
     response.status(status).json({
       success: false,

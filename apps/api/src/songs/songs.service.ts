@@ -1,7 +1,6 @@
 import {
   Injectable,
   Inject,
-  OnModuleInit,
   Logger,
   BadRequestException,
   ConflictException,
@@ -47,6 +46,7 @@ import {
   ListPlaylistTracksRequest,
   ListPlaylistTracksResponse,
   SongStatus,
+  AudioMode,
   GetCatalogAlbumRequest,
   GetCatalogPlaylistRequest,
   GetCatalogResourcesRequest,
@@ -90,16 +90,20 @@ import { RequestUploadDto } from './dto/request-upload.dto';
 import { FinalizeUploadDto } from './dto/finalize-upload.dto';
 import {
   getArtworkRenditionSrcSet,
-  TRANSCODE_QUEUE,
 } from '@musical/shared-types';
 import {
   wrapStructInput,
   wrapStructInputs,
   unwrapStructOutput,
 } from '../common/utils/protobuf-struct';
+import { mapWithConcurrency } from '../common/utils/concurrency';
+
+const LIBRARY_CASCADE_WRITE_CONCURRENCY = 8;
+const LIBRARY_CASCADE_CATALOG_BATCH_SIZE = 100;
+const LIBRARY_CASCADE_CATALOG_CONCURRENCY = 2;
 
 @Injectable()
-export class SongsService implements OnModuleInit {
+export class SongsService {
   private songServiceClient: SongServiceClient;
   private readonly logger = new Logger(SongsService.name);
 
@@ -111,10 +115,6 @@ export class SongsService implements OnModuleInit {
   ) {
     this.songServiceClient =
       this.client.getService<SongServiceClient>('SongService');
-  }
-
-  onModuleInit() {
-    // Client is initialized in constructor.
   }
 
   async getSong(data: GetSongRequest): Promise<GetSongResponse> {
@@ -209,10 +209,11 @@ export class SongsService implements OnModuleInit {
         data.userId,
         songIds,
       );
-      await Promise.all(
-        songResources.map((song) =>
+      await mapWithConcurrency(
+        songResources,
+        LIBRARY_CASCADE_WRITE_CONCURRENCY,
+        (song) =>
           grpcFirstValueFrom(this.songServiceClient.addLibraryResource(song)),
-        ),
       );
     }
 
@@ -230,21 +231,39 @@ export class SongsService implements OnModuleInit {
     const uniqueSongIds = [...new Set(songIds.filter(Boolean))];
     if (!uniqueSongIds.length) return [];
 
+    const batches = this.chunk(
+      uniqueSongIds,
+      LIBRARY_CASCADE_CATALOG_BATCH_SIZE,
+    );
+    const resolvedBatches = await mapWithConcurrency(
+      batches,
+      LIBRARY_CASCADE_CATALOG_CONCURRENCY,
+      (batch) => this.resolveLibrarySongResourceBatch(userId, batch),
+    );
+    return resolvedBatches.flat();
+  }
+
+  private async resolveLibrarySongResourceBatch(
+    userId: string,
+    songIds: string[],
+  ): Promise<LibraryResourceRequest[]> {
     let catalog: CatalogResponse | undefined;
     try {
       catalog = await this.getCatalogResources({
         storefront: 'vn',
-        resources: uniqueSongIds.map((id) => ({ type: 'songs', id })),
+        resources: songIds.map((id) => ({ type: 'songs', id })),
       });
     } catch {
       // Private uploads are not catalog entries; resolve those individually.
     }
 
     const catalogSongs = catalog?.resources?.songs ?? {};
-    const missingSongIds = uniqueSongIds.filter((id) => !catalogSongs[id]);
+    const missingSongIds = songIds.filter((id) => !catalogSongs[id]);
     const privateSongs = new Map<string, GetSongResponse['song']>();
-    await Promise.all(
-      missingSongIds.map(async (songId) => {
+    await mapWithConcurrency(
+      missingSongIds,
+      LIBRARY_CASCADE_WRITE_CONCURRENCY,
+      async (songId) => {
         try {
           const response = await this.getSong({
             songId,
@@ -255,10 +274,10 @@ export class SongsService implements OnModuleInit {
           // Keep an existing library action resilient if a stale source track
           // was deleted between resolving the collection and this write.
         }
-      }),
+      },
     );
 
-    return uniqueSongIds.map((songId) => {
+    return songIds.map((songId) => {
       const catalogSong = catalogSongs[songId];
       const attributes = catalogSong?.attributes;
       const privateSong = privateSongs.get(songId);
@@ -565,8 +584,10 @@ export class SongsService implements OnModuleInit {
     );
 
     if (result.success && derivedSongIds.length) {
-      await Promise.all(
-        derivedSongIds.map((resourceId) =>
+      await mapWithConcurrency(
+        derivedSongIds,
+        LIBRARY_CASCADE_WRITE_CONCURRENCY,
+        (resourceId) =>
           grpcFirstValueFrom(
             this.songServiceClient.removeLibraryResource({
               userId: data.userId,
@@ -577,7 +598,6 @@ export class SongsService implements OnModuleInit {
               artworkUrl: '',
             }),
           ),
-        ),
       );
     }
 
@@ -827,6 +847,14 @@ export class SongsService implements OnModuleInit {
     );
   }
 
+  private chunk<T>(items: readonly T[], size: number): T[][] {
+    const chunks: T[][] = [];
+    for (let index = 0; index < items.length; index += size) {
+      chunks.push(items.slice(index, index + size));
+    }
+    return chunks;
+  }
+
   async updateUserPlaylist(
     data: UpdateUserPlaylistRequest,
   ): Promise<UserPlaylistInfo> {
@@ -1058,6 +1086,10 @@ export class SongsService implements OnModuleInit {
   }
 
   async requestUpload(request: RequestUploadDto, userId: string) {
+    const audioMode =
+      request.audioMode === 'SING'
+        ? AudioMode.AUDIO_MODE_SING
+        : AudioMode.AUDIO_MODE_STANDARD;
     const existing = await this.getSongByChecksum({
       checksum: request.checksum,
     });
@@ -1067,6 +1099,16 @@ export class SongsService implements OnModuleInit {
         throw new BadRequestException({
           code: 'SONG_SOURCE_PATH_MISSING',
           message: 'SONG_SOURCE_PATH_MISSING',
+        });
+      }
+      if (
+        audioMode === AudioMode.AUDIO_MODE_SING &&
+        Number(existing.song.audioMode) !== Number(AudioMode.AUDIO_MODE_SING)
+      ) {
+        throw new ConflictException({
+          code: 'SING_REPROCESS_REQUIRED',
+          message:
+            'Bài hát này đã được xử lý ở chế độ thường. Hãy dùng luồng chuyển đổi Sing riêng để tạo stem.',
         });
       }
       let alreadyInLibrary = false;
@@ -1080,6 +1122,7 @@ export class SongsService implements OnModuleInit {
           sourceObjectPath: existing.song.sourceObjectPath,
           fileSizeBytes: request.size,
           checksum: request.checksum,
+          audioMode,
         });
       } catch (error) {
         if (this.isSongAlreadyInLibraryError(error)) {
@@ -1108,6 +1151,7 @@ export class SongsService implements OnModuleInit {
       sourceObjectPath: objectKey,
       fileSizeBytes: request.size,
       checksum: request.checksum,
+      audioMode,
     };
 
     try {
@@ -1332,6 +1376,8 @@ export class SongsService implements OnModuleInit {
       const currentStatus = Number(song.song.status);
 
       if (currentStatus === Number(SongStatus.SONG_STATUS_PROCESSING)) {
+        // The Song service owns a transactional outbox; an existing
+        // PROCESSING record therefore already has a durable publish intent.
         return { status: 'PROCESSING' };
       }
 
@@ -1362,30 +1408,6 @@ export class SongsService implements OnModuleInit {
         format: '',
         errorMessage: '',
       });
-
-      const jobPayload = {
-        song_id: songId,
-        r2_path: song.song.sourceObjectPath,
-        checksum: song.song.checksum || '',
-      };
-
-      try {
-        await this.redis.lpush(TRANSCODE_QUEUE, JSON.stringify(jobPayload));
-      } catch (error) {
-        // Rollback so caller can safely retry finalize.
-        await this.updateSongProcessingResult({
-          songId,
-          status: SongStatus.SONG_STATUS_PENDING,
-          encryptedFilePath: '',
-          durationSec: 0,
-          bitrateKbps: 0,
-          codec: '',
-          format: '',
-          errorMessage: '',
-        });
-
-        throw error;
-      }
 
       return { status: 'PROCESSING' };
     } catch (error) {

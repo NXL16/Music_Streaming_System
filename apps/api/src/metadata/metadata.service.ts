@@ -1,4 +1,6 @@
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Metadata } from '@grpc/grpc-js';
 import type { ClientGrpc } from '@nestjs/microservices';
 import { grpcFirstValueFrom } from '../common/utils/grpc-timeout';
 import { developmentCacheDisabled } from '../common/configs/development-cache';
@@ -17,6 +19,7 @@ type CompactSegment = {
 
 export type CompactMetadataResponse = {
   songId: string;
+  variant: string;
   duration: number;
   seektableVersion: number;
   offset: number;
@@ -42,6 +45,7 @@ export class MetadataService implements OnModuleInit {
 
   constructor(
     @Inject('METADATA_SERVICE') private readonly client: ClientGrpc,
+    private readonly configService: ConfigService,
   ) {}
 
   onModuleInit() {
@@ -50,23 +54,30 @@ export class MetadataService implements OnModuleInit {
   }
 
   async getStreamData(data: GetStreamDataRequest): Promise<StreamDataResponse> {
-    return await grpcFirstValueFrom(this.metadataClient.getStreamData(data));
+    return await grpcFirstValueFrom(
+      this.metadataClient.getStreamData(data, this.internalMetadata()),
+    );
   }
 
-  async getCompactStreamData(songId: string): Promise<CompactMetadataResponse> {
+  async getCompactStreamData(
+    songId: string,
+    variant = '',
+  ): Promise<CompactMetadataResponse> {
+    const cacheKey = `${songId}:${variant}`;
     const now = Date.now();
-    const cached = this.streamDataCache.get(songId);
+    const cached = this.streamDataCache.get(cacheKey);
     if (!developmentCacheDisabled() && cached && cached.expiresAt > now) {
       return cached.data;
     }
 
     if (cached) {
-      this.streamDataCache.delete(songId);
+      this.streamDataCache.delete(cacheKey);
     }
 
-    const data = await this.getStreamData({ songId });
+    const data = await this.getStreamData({ songId, variant });
     const compact: CompactMetadataResponse = {
       songId: data.songId,
+      variant: data.variant,
       duration: data.duration,
       seektableVersion: data.seektableVersion,
       offset: data.mediaOffset || data.encryptionStartOffset || 0,
@@ -97,7 +108,7 @@ export class MetadataService implements OnModuleInit {
       if (oldestKey) this.streamDataCache.delete(oldestKey);
     }
 
-    this.streamDataCache.set(songId, {
+    this.streamDataCache.set(cacheKey, {
       expiresAt: now + META_CACHE_TTL_MS,
       data: compact,
     });
@@ -111,5 +122,14 @@ export class MetadataService implements OnModuleInit {
         this.streamDataCache.delete(key);
       }
     }
+  }
+
+  private internalMetadata(): Metadata {
+    const metadata = new Metadata();
+    metadata.set(
+      'x-internal-token',
+      this.configService.getOrThrow<string>('INTERNAL_GRPC_TOKEN'),
+    );
+    return metadata;
   }
 }

@@ -10,16 +10,27 @@ export class RequestLoggerMiddleware implements NestMiddleware {
 
     res.on('finish', () => {
       const duration = Date.now() - start;
-      const { method, originalUrl } = req;
+      const { method } = req;
       const { statusCode } = res;
+      const requestTarget = redactRequestTarget(req.originalUrl);
 
-      if (originalUrl.includes('/health')) return;
+      if (requestTarget.includes('/health')) return;
 
-      this.logger.log(
-        `${method} ${originalUrl} ${statusCode} ${duration}ms`,
-      );
+      this.logger.log(`${method} ${requestTarget} ${statusCode} ${duration}ms`);
     });
 
     next();
   }
+}
+
+function redactRequestTarget(originalUrl: string): string {
+  const queryIndex = originalUrl.indexOf('?');
+  const path =
+    queryIndex === -1 ? originalUrl : originalUrl.slice(0, queryIndex);
+  const redactedPath = path.replace(
+    /^(\/(?:v\d+\/)?integrations\/room\/media\/)[^/?#]+/,
+    '$1[REDACTED]',
+  );
+
+  return queryIndex === -1 ? redactedPath : `${redactedPath}?[REDACTED]`;
 }

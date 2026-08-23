@@ -1,6 +1,6 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { SongsModule } from './songs/songs.module';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import Redis from 'ioredis';
@@ -33,8 +33,10 @@ import { RoomIntegrationModule } from './integrations/room/room-integration.modu
     StreamModule,
     MetadataModule,
     ThrottlerModule.forRootAsync({
-      inject: ['REDIS_INSTANCE'],
-      useFactory: (redis: Redis) => getThrottlerConfig(redis),
+      imports: [ConfigModule],
+      inject: ['REDIS_INSTANCE', ConfigService],
+      useFactory: (redis: Redis, config: ConfigService) =>
+        getThrottlerConfig(redis, config),
     }),
     WalletModule,
     RecommendationsModule,
