@@ -10,6 +10,7 @@ import { useCatalogArtistSongs } from "@/lib/catalog/use-catalog-artist-songs";
 import { getAllCatalogArtistSongs } from "@/lib/catalog/artist-song-pages";
 import { ArtistLinks } from "../media/artist-links";
 import { usePlayerStore } from "@/lib/player/use-player-store";
+import { playbackIntentProps } from "@/lib/player/playback-intent";
 import Loading from "@/app/loading";
 import CatalogPageLoading from "../loading/catalog-page-loading";
 import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
@@ -221,6 +222,7 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
                         <div className="[--nonPlatterIconFill:var(--nonPlatterOverrideIconColor,var(--keyColor))] h-full align-top w-full">
                           <button
                             disabled={!song.playbackUrl}
+                            {...playbackIntentProps(song)}
                             onClick={(event) => {
                               if (selectedTrackId !== null) {
                                 activateTrack(song.id);

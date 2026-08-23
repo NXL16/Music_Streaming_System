@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePlayerStore } from "@/lib/player/use-player-store";
+import { playbackIntentProps } from "@/lib/player/playback-intent";
 import { useCatalogSong } from "@/lib/catalog/use-catalog-song";
 import { formatDuration } from "@/lib/format/duration";
 import { ArtistLinks } from "../media/artist-links";
@@ -90,6 +91,7 @@ export function SongDetailPage({ songId }: SongDetailPageProps) {
             <button
               className="rounded-full bg-(--keyColor,#000) px-5 py-2 text-white [font:var(--body-emphasized)] disabled:opacity-50"
               disabled={!song.playbackUrl}
+              {...playbackIntentProps(song)}
               onClick={() => setQueue([song])}
               type="button"
             >

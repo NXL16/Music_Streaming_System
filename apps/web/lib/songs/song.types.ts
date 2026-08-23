@@ -54,22 +54,6 @@ export type ListFavoriteSongsResponse = ListSongsResponse & {
   collection?: FavoriteCollection;
 };
 
-export type RequestUploadPayload = {
-  title: string;
-  artist?: string;
-  album?: string;
-  isPublic?: boolean;
-  checksum: string;
-  size: number;
-};
-
-export type RequestUploadResponse = {
-  songId: string;
-  instant: boolean;
-  uploadUrl: string;
-  status?: "PROCESSING" | "RETRY_UPLOAD";
-};
-
 export type GetSongResponse = {
   song: SongDetail;
 };

@@ -132,15 +132,6 @@ export function subscribeMediaEntity(
   };
 }
 
-export function invalidateMediaEntity(
-  resourceType: string,
-  resourceId: string,
-  scope: "catalog" | "user-library" = "catalog",
-) {
-  const key = `${scope}:${resourceType}:${resourceId}`;
-  if (entities.delete(key)) notify(key);
-}
-
 export function invalidateAllMediaEntities() {
   const keys = [...entities.keys()];
   entities.clear();

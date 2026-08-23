@@ -9,7 +9,7 @@ export type RetryAbortSignal = Pick<
   "aborted" | "addEventListener" | "removeEventListener"
 >;
 
-export function isRequestCanceled(error: unknown) {
+function isRequestCanceled(error: unknown) {
   return (
     axios.isCancel(error) ||
     (axios.isAxiosError(error) && error.code === "ERR_CANCELED")

@@ -143,11 +143,11 @@ if (librarySyncChannel) {
 
 function setPendingCascadeSongs(parentKey: string, songIds?: string[]) {
   clearPendingCascadeSongs(parentKey);
-  const uniqueSongIds = [...new Set(songIds?.filter(Boolean) ?? [])];
-  if (!uniqueSongIds.length) return;
+  const ids = uniqueSongIds(songIds);
+  if (!ids.length) return;
 
-  pendingCascadeSongIdsByParent.set(parentKey, uniqueSongIds);
-  uniqueSongIds.forEach((songId) => {
+  pendingCascadeSongIdsByParent.set(parentKey, ids);
+  ids.forEach((songId) => {
     const songKey = resourceKey("songs", songId);
     const count = pendingCascadeSongRefCounts.get(songKey) ?? 0;
     pendingCascadeSongRefCounts.set(songKey, count + 1);
@@ -215,6 +215,25 @@ function uniqueSongIds(songIds?: string[]) {
   return [...new Set(songIds?.filter(Boolean) ?? [])];
 }
 
+function isCollectionCascade(
+  resourceType: LibraryResourceType,
+  sourceOrigin: LibraryResourceInput["sourceOrigin"],
+) {
+  return Boolean(
+    sourceOrigin && (resourceType === "albums" || resourceType === "playlists"),
+  );
+}
+
+function collectionCascadeSongIds(
+  resourceType: LibraryResourceType,
+  sourceOrigin: LibraryResourceInput["sourceOrigin"],
+  songIds?: string[],
+) {
+  return isCollectionCascade(resourceType, sourceOrigin)
+    ? uniqueSongIds(songIds)
+    : [];
+}
+
 /**
  * Library cards normally carry these ids from their Catalog projection. This
  * fallback also covers older cached cards and other collection entry points,
@@ -263,7 +282,7 @@ export function isLibraryResourcePendingRemoval(
  * Keeping this at the cache/API boundary means every Add entry point behaves
  * consistently, rather than each button having to know about pending toasts.
  */
-export function cancelPendingLibraryResourceRemoval(
+function cancelPendingLibraryResourceRemoval(
   resourceType: LibraryResourceType,
   resourceId: string,
 ) {
@@ -437,18 +456,18 @@ async function addLibraryResourceInternal(
 
   await http.post("/songs/library/resources", input);
 
-  const cascadedSongIds =
-    input.sourceOrigin &&
-    (input.resourceType === "albums" || input.resourceType === "playlists")
-      ? [...new Set(input.songIds?.filter(Boolean) ?? [])]
-      : [];
-  const isCollectionCascade = Boolean(
-    input.sourceOrigin &&
-    (input.resourceType === "albums" || input.resourceType === "playlists"),
+  const cascadedSongIds = collectionCascadeSongIds(
+    input.resourceType,
+    input.sourceOrigin,
+    input.songIds,
+  );
+  const hasCollectionCascade = isCollectionCascade(
+    input.resourceType,
+    input.sourceOrigin,
   );
 
-  if (!cachedResources || (isCollectionCascade && !cascadedSongIds.length)) {
-    if (isCollectionCascade && !cascadedSongIds.length) {
+  if (!cachedResources || (hasCollectionCascade && !cascadedSongIds.length)) {
+    if (hasCollectionCascade && !cascadedSongIds.length) {
       cachedResources = null;
       cachedAt = 0;
     }
@@ -512,7 +531,7 @@ async function addLibraryResourceInternal(
   notifyLibraryResourcesChanged(change);
   broadcastLibraryResourcesChanged(change);
 
-  if (isCollectionCascade) {
+  if (hasCollectionCascade) {
     const cascadeChange: LibraryResourcesChange = {
       resourceType: "songs",
       resourceId: "",
@@ -554,15 +573,6 @@ async function pinLibraryResourceInternal(
   broadcastLibraryResourcesChanged(change);
 }
 
-export function pinLibraryResource(
-  resourceType: LibraryResourceType,
-  resourceId: string,
-) {
-  return withResourceMutation(resourceType, resourceId, () =>
-    pinLibraryResourceInternal(resourceType, resourceId),
-  );
-}
-
 async function unpinLibraryResourceInternal(
   resourceType: LibraryResourceType,
   resourceId: string,
@@ -583,15 +593,6 @@ async function unpinLibraryResourceInternal(
   const change = { resourceType, resourceId, operation: "unpin" as const };
   notifyLibraryResourcesChanged(change);
   broadcastLibraryResourcesChanged(change);
-}
-
-export function unpinLibraryResource(
-  resourceType: LibraryResourceType,
-  resourceId: string,
-) {
-  return withResourceMutation(resourceType, resourceId, () =>
-    unpinLibraryResourceInternal(resourceType, resourceId),
-  );
 }
 
 export async function toggleLibraryResourcePin(
@@ -630,15 +631,16 @@ async function removeLibraryResourceInternal(
     },
   );
 
-  const cascadedSongIds =
-    cascade?.sourceOrigin &&
-    (resourceType === "albums" || resourceType === "playlists")
-      ? [...new Set(cascade.songIds?.filter(Boolean) ?? [])]
-      : [];
-  const isCollectionCascade = Boolean(
-    cascade?.sourceOrigin &&
-    (resourceType === "albums" || resourceType === "playlists"),
+  const cascadedSongIds = collectionCascadeSongIds(
+    resourceType,
+    cascade?.sourceOrigin,
+    cascade?.songIds,
   );
+  const hasCollectionCascade = isCollectionCascade(
+    resourceType,
+    cascade?.sourceOrigin,
+  );
+  const cascadedSongIdSet = new Set(cascadedSongIds);
 
   // Only deleting an owned playlist destroys its listening context. Removing a
   // public playlist from Library must leave Recently Played untouched.
@@ -646,7 +648,7 @@ async function removeLibraryResourceInternal(
     removeRecentlyPlayedPlaylistSnapshot(resourceId);
   }
 
-  if (isCollectionCascade && !cascadedSongIds.length) {
+  if (hasCollectionCascade && !cascadedSongIds.length) {
     cachedResources = null;
     cachedAt = 0;
     await getLibraryResources();
@@ -659,7 +661,7 @@ async function removeLibraryResourceInternal(
           resource.resourceId !== resourceId) &&
         !(
           resource.resourceType === "songs" &&
-          cascadedSongIds.includes(resource.resourceId)
+          cascadedSongIdSet.has(resource.resourceId)
         ),
     );
   }
@@ -674,7 +676,7 @@ async function removeLibraryResourceInternal(
   notifyLibraryResourcesChanged(change);
   broadcastLibraryResourcesChanged(change);
 
-  if (isCollectionCascade) {
+  if (hasCollectionCascade) {
     const cascadeChange: LibraryResourcesChange = {
       resourceType: "songs",
       resourceId: "",
@@ -686,7 +688,7 @@ async function removeLibraryResourceInternal(
   }
 }
 
-export function removeLibraryResource(
+function removeLibraryResource(
   resourceType: LibraryResourceType,
   resourceId: string,
   sourceId?: string,
@@ -710,11 +712,12 @@ export async function beginLibraryResourceRemoval(
     getLibraryResources(),
     resolvePendingCascadeSongIds(input),
   ]);
-  const cascadedSongIds =
-    input.sourceOrigin &&
-    (input.resourceType === "albums" || input.resourceType === "playlists")
-      ? new Set(pendingSongIds)
-      : new Set<string>();
+  const cascadedSongIds = isCollectionCascade(
+    input.resourceType,
+    input.sourceOrigin,
+  )
+    ? new Set(pendingSongIds)
+    : new Set<string>();
   const removedResources = resources.filter(
     (resource) =>
       (resource.resourceType === input.resourceType &&

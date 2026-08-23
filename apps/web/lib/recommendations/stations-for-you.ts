@@ -98,8 +98,3 @@ export async function playSystemStation(stationId: string): Promise<boolean> {
   usePlayerStore.getState().startStation(tracks);
   return true;
 }
-
-// Kept as a compatibility alias for callers that only know the original
-// personalised-station name. The implementation now supports mood stations.
-export const isStationsForYouId = isPlayableSystemStationId;
-export const playStationsForYou = playSystemStation;

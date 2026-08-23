@@ -23,6 +23,7 @@ import { getAllLibrarySongs, listLibrarySongs } from "@/lib/songs/song.api";
 import type { SongSummary } from "@/lib/songs/song.types";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { usePlayerStore } from "@/lib/player/use-player-store";
+import { playbackIntentProps } from "@/lib/player/playback-intent";
 import { projectSongSummary } from "@/lib/songs/project-song-summary";
 import {
   isLibraryResourcePendingRemoval,
@@ -334,6 +335,7 @@ export default function SongsPage() {
                           <div className="[--nonPlatterIconFill:var(--nonPlatterOverrideIconColor,var(--keyColor))] h-full align-top w-full">
                             <button
                               disabled={track.status !== 3}
+                              {...playbackIntentProps(projectSongSummary(track))}
                               onClick={(event) => {
                                 if (selectedTrackId !== null) {
                                   activateTrack(track.id);

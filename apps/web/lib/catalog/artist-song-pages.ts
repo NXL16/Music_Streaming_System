@@ -3,8 +3,6 @@ import { mapCatalogTracks } from "./catalog.mapper";
 import { developmentCacheDisabled } from "@/lib/config/development-cache";
 import type { PlayerSong } from "@/lib/player/use-player-store";
 
-export const ARTIST_SONGS_PAGE_SIZE = 20;
-
 type ArtistSongPage = {
   songs: PlayerSong[];
   nextCursor?: string;

@@ -20,6 +20,7 @@ import { useTrackRowSelection } from "@/lib/player/use-track-row-selection";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { withPlaylistPlaybackSource } from "@/lib/player/playlist-playback-source";
+import { playbackIntentProps } from "@/lib/player/playback-intent";
 import { ExplicitBadgeIcon } from "../icons/explicit-badge-icon";
 import {
   SONG_ROW_HEIGHT,
@@ -527,6 +528,7 @@ export default function PlaylistDetailView({
                               disabled={
                                 !track.playbackUrl || isPreparingPlayback
                               }
+                              {...playbackIntentProps(track)}
                               onClick={(event) => {
                                 if (selectedTrackId !== null) {
                                   activateTrack(track.id);

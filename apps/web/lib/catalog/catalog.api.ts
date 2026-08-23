@@ -20,9 +20,13 @@ type ResourceCacheEntry = {
 };
 
 const resourceCache = new Map<string, ResourceCacheEntry>();
-const pendingResourceRequests = new Map<string, Promise<CatalogResponse>>();
 const detailCache = new Map<string, ResourceCacheEntry>();
-const pendingDetailRequests = new Map<string, Promise<CatalogResponse>>();
+type PendingCatalogRequest = {
+  promise: Promise<CatalogResponse>;
+  controller: AbortController;
+};
+const pendingResourceRequests = new Map<string, PendingCatalogRequest>();
+const pendingDetailRequests = new Map<string, PendingCatalogRequest>();
 let cacheGeneration = 0;
 
 function pruneCatalogCache(
@@ -93,35 +97,45 @@ function getCachedCatalogResources(
   }
 
   const pending = pendingResourceRequests.get(key);
-  if (pending) return pending;
+  if (pending) return pending.promise;
 
   const requestGeneration = cacheGeneration;
+  const controller = new AbortController();
   const request = http
-    .post<CatalogResponse>(`/catalog/${STOREFRONT}/resources`, { resources })
+    .post<CatalogResponse>(`/catalog/${STOREFRONT}/resources`, { resources }, {
+      signal: controller.signal,
+    })
     .then((response) => {
-      if (!developmentCacheDisabled && requestGeneration === cacheGeneration) {
-        setCatalogCacheEntry(
-          resourceCache,
-          key,
-          response.data,
-          MAX_RESOURCE_CACHE_ENTRIES,
-        );
+      if (requestGeneration === cacheGeneration) {
+        if (!developmentCacheDisabled) {
+          setCatalogCacheEntry(
+            resourceCache,
+            key,
+            response.data,
+            MAX_RESOURCE_CACHE_ENTRIES,
+          );
+        }
+        return hydrateCatalogMediaEntities(response.data);
       }
-      return hydrateCatalogMediaEntities(response.data);
+
+      // Invalidated requests can still resolve in transports that do not
+      // honor abort immediately. Return their payload to the original caller
+      // without restoring stale entities into the shared store.
+      return response.data;
     })
     .finally(() => {
-      if (pendingResourceRequests.get(key) === request) {
+      if (pendingResourceRequests.get(key)?.promise === request) {
         pendingResourceRequests.delete(key);
       }
     });
 
-  pendingResourceRequests.set(key, request);
+  pendingResourceRequests.set(key, { promise: request, controller });
   return request;
 }
 
 function getCachedCatalogDetail(
   key: string,
-  request: () => Promise<CatalogResponse>,
+  request: (signal: AbortSignal) => Promise<CatalogResponse>,
 ) {
   const cached = developmentCacheDisabled
     ? undefined
@@ -131,29 +145,41 @@ function getCachedCatalogDetail(
   }
 
   const pending = pendingDetailRequests.get(key);
-  if (pending) return pending;
+  if (pending) return pending.promise;
 
   const requestGeneration = cacheGeneration;
-  const pendingRequest = request()
+  const controller = new AbortController();
+  const pendingRequest = request(controller.signal)
     .then((response) => {
-      const hydrated = hydrateCatalogMediaEntities(response);
-      if (!developmentCacheDisabled && requestGeneration === cacheGeneration) {
-        setCatalogCacheEntry(
-          detailCache,
-          key,
-          hydrated,
-          MAX_DETAIL_CACHE_ENTRIES,
-        );
+      if (requestGeneration === cacheGeneration) {
+        const hydrated = hydrateCatalogMediaEntities(response);
+        if (!developmentCacheDisabled) {
+          setCatalogCacheEntry(
+            detailCache,
+            key,
+            hydrated,
+            MAX_DETAIL_CACHE_ENTRIES,
+          );
+        }
+        return hydrated;
       }
-      return hydrated;
+
+      return response;
     })
     .finally(() => {
-      if (pendingDetailRequests.get(key) === pendingRequest) {
+      if (pendingDetailRequests.get(key)?.promise === pendingRequest) {
         pendingDetailRequests.delete(key);
       }
     });
-  pendingDetailRequests.set(key, pendingRequest);
+  pendingDetailRequests.set(key, { promise: pendingRequest, controller });
   return pendingRequest;
+}
+
+function abortPendingCatalogRequests(
+  requests: Map<string, PendingCatalogRequest>,
+) {
+  for (const { controller } of requests.values()) controller.abort();
+  requests.clear();
 }
 
 function getCatalogDetail(
@@ -161,14 +187,14 @@ function getCatalogDetail(
   path: string,
   signal?: AbortSignal,
 ) {
-  const request = () =>
+  const request = (requestSignal?: AbortSignal) =>
     http
-      .get<CatalogResponse>(path, { signal })
+      .get<CatalogResponse>(path, { signal: requestSignal })
       .then((response) => response.data);
 
   // A caller that owns cancellation must never receive a shared request.
   return signal
-    ? request().then(hydrateCatalogMediaEntities)
+    ? request(signal).then(hydrateCatalogMediaEntities)
     : getCachedCatalogDetail(cacheKey, request);
 }
 
@@ -176,8 +202,8 @@ export function invalidateCatalogResourceCache() {
   cacheGeneration += 1;
   resourceCache.clear();
   detailCache.clear();
-  pendingResourceRequests.clear();
-  pendingDetailRequests.clear();
+  abortPendingCatalogRequests(pendingResourceRequests);
+  abortPendingCatalogRequests(pendingDetailRequests);
   invalidateAllMediaEntities();
 }
 

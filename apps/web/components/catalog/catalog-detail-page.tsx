@@ -10,6 +10,7 @@ import {
   useCatalogDetail,
 } from "@/lib/catalog/use-catalog-detail";
 import { usePlayerStore } from "@/lib/player/use-player-store";
+import { playbackIntentProps } from "@/lib/player/playback-intent";
 import { useTrackRowSelection } from "@/lib/player/use-track-row-selection";
 import {
   CSSProperties,
@@ -712,6 +713,7 @@ export function CatalogDetailPage({
                               <div className="[--nonPlatterIconFill:var(--nonPlatterOverrideIconColor,var(--keyColor))] size-full align-top">
                                 <button
                                   disabled={!track.playbackUrl}
+                                  {...playbackIntentProps(track)}
                                   onClick={(e) => {
                                     if (selectedTrackId !== null) {
                                       activateTrack(track.id);

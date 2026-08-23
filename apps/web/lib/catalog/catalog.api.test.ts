@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
+const hydrate = vi.hoisted(() => vi.fn(<T>(response: T) => response));
 vi.mock("@/lib/api/http", () => ({ http: api }));
 vi.mock("./hydrate-catalog-media-entities", () => ({
-  hydrateCatalogMediaEntities: <T>(response: T) => response,
+  hydrateCatalogMediaEntities: hydrate,
 }));
 vi.mock("@/lib/media/media-entity-store", () => ({
   invalidateAllMediaEntities: vi.fn(),
@@ -25,9 +26,10 @@ describe("Catalog detail cache", () => {
     await Promise.all([getCatalogAlbum("a1"), getCatalogAlbum("a1")]);
 
     expect(api.get).toHaveBeenCalledTimes(1);
-    expect(api.get).toHaveBeenCalledWith("/catalog/vn/albums/a1", {
-      signal: undefined,
-    });
+    expect(api.get).toHaveBeenCalledWith(
+      "/catalog/vn/albums/a1",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it("does not reuse a detail snapshot after explicit invalidation", async () => {
@@ -60,5 +62,36 @@ describe("Catalog detail cache", () => {
     await getCatalogAlbum("a1", controller.signal);
 
     expect(api.get).toHaveBeenCalledTimes(2);
+  });
+
+  it("aborts and ignores a shared request that resolves after invalidation", async () => {
+    let resolveRequest:
+      | ((
+          value: {
+            data: {
+              resources: {
+                albums: Record<string, never>;
+                playlists: Record<string, never>;
+              };
+            };
+          },
+        ) => void)
+      | undefined;
+    api.get.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveRequest = resolve;
+        }),
+    );
+
+    const request = getCatalogAlbum("a1");
+    const signal = api.get.mock.calls[0]?.[1]?.signal as AbortSignal;
+    invalidateCatalogResourceCache();
+
+    expect(signal.aborted).toBe(true);
+    resolveRequest?.({ data: { resources: { albums: {}, playlists: {} } } });
+    await request;
+
+    expect(hydrate).not.toHaveBeenCalled();
   });
 });

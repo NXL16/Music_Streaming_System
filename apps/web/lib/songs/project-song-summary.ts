@@ -25,6 +25,7 @@ export type SongSummaryProjectionSource = {
   durationSec?: number;
   coverUrl?: string;
   thumbnailCoverSrcSet?: string;
+  audioMode?: "STANDARD" | "SING";
 };
 
 /**
@@ -49,6 +50,7 @@ export type PlayerSongProjectionSource = {
   artworkBgColor?: string;
   releaseDate?: string;
   contentRating?: string;
+  audioMode?: "STANDARD" | "SING";
 };
 
 export function projectPlayerSong(
@@ -82,6 +84,7 @@ export function projectPlayerSong(
     artworkBgColor: song.artworkBgColor,
     releaseDate: song.releaseDate,
     contentRating: song.contentRating,
+    audioMode: song.audioMode,
     playbackUrl: `mse:${song.id}`,
   };
 }
@@ -117,5 +120,6 @@ export function projectSongSummary(
     artworkUrl: song.coverUrl,
     thumbnailArtworkSrcSet: song.thumbnailCoverSrcSet,
     contentRating: song.contentRating,
+    audioMode: song.audioMode,
   });
 }

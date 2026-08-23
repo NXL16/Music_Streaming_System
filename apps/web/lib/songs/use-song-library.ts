@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getApiErrorMessage } from "@/lib/api/api-error";
 import { deleteMySong, listMySongs } from "@/lib/songs/song.api";
-import { subscribeSongLibraryChanged } from "@/lib/songs/song-library-events";
 import type { SongSummary } from "@/lib/songs/song.types";
 import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 import {
@@ -119,12 +118,6 @@ export function useSongLibrary(refreshKey = 0) {
   useEffect(() => {
     queueMicrotask(() => void loadSongs());
   }, [loadSongs, refreshKey]);
-
-  useEffect(() => {
-    return subscribeSongLibraryChanged(() => {
-      void loadSongs({ silent: true });
-    });
-  }, [loadSongs]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {

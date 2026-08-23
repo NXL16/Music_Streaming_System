@@ -61,10 +61,22 @@ type ListeningEventPayload = {
   stationName?: string;
   stationArtworkUrl?: string;
   stationArtworkBgColor?: string;
+  /** Stable across delivery retries for one telemetry event. */
+  eventId?: string;
   recentlyPlayedItem?: MediaCardProps;
 };
 
 export async function sendListeningEvent(payload: ListeningEventPayload) {
+  const requestPayload = {
+    ...payload,
+    eventId:
+      payload.eventId ??
+      (typeof crypto === "undefined" ||
+      typeof crypto.randomUUID !== "function"
+        ? undefined
+        : crypto.randomUUID()),
+  };
+
   if (
     payload.eventType === "PLAY_START" &&
     payload.recentlyPlayedItem &&
@@ -74,7 +86,7 @@ export async function sendListeningEvent(payload: ListeningEventPayload) {
   }
 
   try {
-    await http.post("/me/recommendations/listening-events", payload);
+    await http.post("/me/recommendations/listening-events", requestPayload);
     const userId = useAuthStore.getState().user?.userId;
     if (
       payload.eventType === "PLAY_START" &&

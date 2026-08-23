@@ -1,4 +1,4 @@
-export const FAVORITES_CHANGED_EVENT = "favorites:changed";
+const FAVORITES_CHANGED_EVENT = "favorites:changed";
 const FAVORITES_SYNC_CHANNEL = "favorite-changes";
 
 export type FavoriteChange = {
