@@ -34,6 +34,14 @@ export function validateEnv(
     throw new Error('ASSET_WORKER_ENABLED must be true or false');
   }
 
+  const artifactCleanupEnabled = rawEnv.ASSET_ARTIFACT_CLEANUP_ENABLED;
+  if (
+    artifactCleanupEnabled !== undefined &&
+    !['true', 'false'].includes(artifactCleanupEnabled.trim().toLowerCase())
+  ) {
+    throw new Error('ASSET_ARTIFACT_CLEANUP_ENABLED must be true or false');
+  }
+
   validatePositiveInteger(
     rawEnv,
     'ASSET_WORKER_POLL_INTERVAL_MS',
@@ -47,6 +55,55 @@ export function validateEnv(
     24 * 60 * 60 * 1000,
   );
   validatePositiveInteger(rawEnv, 'ASSET_WORKER_MAX_ATTEMPTS', 1, 20);
+  validatePositiveInteger(
+    rawEnv,
+    'ASSET_WORKER_METRICS_INTERVAL_MS',
+    10_000,
+    24 * 60 * 60 * 1000,
+  );
+  validatePositiveInteger(
+    rawEnv,
+    'ASSET_ARTIFACT_CLEANUP_POLL_INTERVAL_MS',
+    1_000,
+    24 * 60 * 60 * 1000,
+  );
+  validatePositiveInteger(
+    rawEnv,
+    'ASSET_ARTIFACT_CLEANUP_LOCK_TTL_MS',
+    30_000,
+    24 * 60 * 60 * 1000,
+  );
+  validatePositiveInteger(
+    rawEnv,
+    'ASSET_ARTIFACT_CLEANUP_RETRY_MAX_BACKOFF_MS',
+    1_000,
+    24 * 60 * 60 * 1000,
+  );
+  validatePositiveInteger(
+    rawEnv,
+    'ASSET_ARTIFACT_CLEANUP_METRICS_INTERVAL_MS',
+    10_000,
+    24 * 60 * 60 * 1000,
+  );
+  validatePositiveInteger(
+    rawEnv,
+    'ASSET_FAILED_ARTIFACT_RETENTION_MS',
+    60 * 60 * 1000,
+    90 * 24 * 60 * 60 * 1000,
+  );
+  validatePositiveInteger(
+    rawEnv,
+    'ASSET_ARTWORK_MAX_INPUT_PIXELS',
+    1_000_000,
+    80_000_000,
+  );
+  validatePositiveInteger(
+    rawEnv,
+    'ASSET_IMAGE_RENDITION_CONCURRENCY',
+    1,
+    4,
+  );
+  validatePositiveInteger(rawEnv, 'ASSET_VIDEO_UPLOAD_CONCURRENCY', 1, 16);
 
   return rawEnv as Record<string, string>;
 }

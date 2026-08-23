@@ -15,6 +15,9 @@ import { AssetProcessingResult, MediaRendition } from "./asset-processor.types";
 const NORMAL_ARTWORK_WIDTHS = [40, 80, 296, 316, 592, 632];
 const AVATAR_SIZES = [40, 80, 256];
 const AVATAR_MAX_INPUT_PIXELS = 25_000_000;
+const DEFAULT_ARTWORK_MAX_INPUT_PIXELS = 30_000_000;
+const DEFAULT_IMAGE_RENDITION_CONCURRENCY = 2;
+const DEFAULT_VIDEO_UPLOAD_CONCURRENCY = 4;
 const HERO_ARTWORK_WIDTHS = [450, 600, 900, 1200];
 const HERO_ASPECT_RATIO = 3 / 4;
 const HERO_EXTENSION_STRIP = 48;
@@ -69,6 +72,9 @@ interface ProbeResult {
 export class AssetProcessorService implements OnModuleDestroy {
   private readonly ffmpegPath: string;
   private readonly ffprobePath: string;
+  private readonly artworkMaxInputPixels: number;
+  private readonly imageRenditionConcurrency: number;
+  private readonly videoUploadConcurrency: number;
   private activeChild?: ChildProcess;
 
   constructor(
@@ -77,6 +83,18 @@ export class AssetProcessorService implements OnModuleDestroy {
   ) {
     this.ffmpegPath = config.get<string>("FFMPEG_PATH") || "ffmpeg";
     this.ffprobePath = config.get<string>("FFPROBE_PATH") || "ffprobe";
+    this.artworkMaxInputPixels = this.positiveInteger(
+      config.get<string>("ASSET_ARTWORK_MAX_INPUT_PIXELS"),
+      DEFAULT_ARTWORK_MAX_INPUT_PIXELS,
+    );
+    this.imageRenditionConcurrency = this.positiveInteger(
+      config.get<string>("ASSET_IMAGE_RENDITION_CONCURRENCY"),
+      DEFAULT_IMAGE_RENDITION_CONCURRENCY,
+    );
+    this.videoUploadConcurrency = this.positiveInteger(
+      config.get<string>("ASSET_VIDEO_UPLOAD_CONCURRENCY"),
+      DEFAULT_VIDEO_UPLOAD_CONCURRENCY,
+    );
   }
 
   process(asset: Asset): Promise<AssetProcessingResult> {
@@ -103,8 +121,10 @@ export class AssetProcessorService implements OnModuleDestroy {
       throw new Error("AVATAR_DIMENSIONS_INVALID");
     }
 
-    const renditions = await Promise.all(
-      AVATAR_SIZES.map(async (size) => {
+    const renditions = await this.mapWithConcurrency(
+      AVATAR_SIZES,
+      this.imageRenditionConcurrency,
+      async (size) => {
         const { data, info } = await sharp(normalizedSource)
           .resize({
             width: size,
@@ -125,7 +145,7 @@ export class AssetProcessorService implements OnModuleDestroy {
           height: info.height,
           sizeBytes: data.length,
         };
-      }),
+      },
     );
     const primary = renditions.at(-1);
     if (!primary) throw new Error("AVATAR_RENDITION_MISSING");
@@ -146,7 +166,7 @@ export class AssetProcessorService implements OnModuleDestroy {
     const source = await this.storage.getBuffer(asset.sourceObjectKey);
     this.verifyChecksum(asset, this.bufferChecksum(source));
     const normalizedSource = await sharp(source, {
-      limitInputPixels: 100_000_000,
+      limitInputPixels: this.artworkMaxInputPixels,
     })
       .rotate()
       .toBuffer();
@@ -173,8 +193,10 @@ export class AssetProcessorService implements OnModuleDestroy {
     ];
     const renditions: MediaRendition[] = [];
 
-    const results = await Promise.all(
-      normalTargetWidths.map(async (targetWidth) => {
+    const results = await this.mapWithConcurrency(
+      normalTargetWidths,
+      this.imageRenditionConcurrency,
+      async (targetWidth) => {
         const { data, info } = await sharp(normalizedSource)
           .resize({ width: targetWidth, withoutEnlargement: true })
           .webp({ quality: 84, effort: 5 })
@@ -189,7 +211,7 @@ export class AssetProcessorService implements OnModuleDestroy {
           height: info.height,
           sizeBytes: data.length,
         };
-      }),
+      },
     );
     renditions.push(...results);
 
@@ -226,8 +248,10 @@ export class AssetProcessorService implements OnModuleDestroy {
         heroMaximumWidth,
       ]),
     ];
-    const heroRenditions = await Promise.all(
-      heroTargetWidths.map(async (targetWidth) => {
+    const heroRenditions = await this.mapWithConcurrency(
+      heroTargetWidths,
+      this.imageRenditionConcurrency,
+      async (targetWidth) => {
         const { data, info } = await sharp(heroSource)
           .resize({ width: targetWidth, withoutEnlargement: true })
           .webp({ quality: 84, effort: 5, smartSubsample: true })
@@ -242,7 +266,7 @@ export class AssetProcessorService implements OnModuleDestroy {
           height: info.height,
           sizeBytes: data.length,
         };
-      }),
+      },
     );
 
     const primary = renditions.at(-1);
@@ -768,8 +792,10 @@ export class AssetProcessorService implements OnModuleDestroy {
 
       // Upload all segments, sub-playlists, master playlist and WebP poster variants to S3/R2 storage
       const finalFiles = await readdir(workDirectory);
-      await Promise.all(
-        finalFiles.map(async (file) => {
+      await this.mapWithConcurrency(
+        finalFiles,
+        this.videoUploadConcurrency,
+        async (file) => {
           const filePath = join(workDirectory, file);
           const objectKey = `processed/${asset.id}/video/${file}`;
 
@@ -787,7 +813,7 @@ export class AssetProcessorService implements OnModuleDestroy {
           ) {
             await this.storage.uploadFile(objectKey, filePath, "image/webp");
           }
-        }),
+        },
       );
 
       const masterPlaylistObjectKey = `processed/${asset.id}/video/default.m3u8`;
@@ -938,5 +964,34 @@ export class AssetProcessorService implements OnModuleDestroy {
     if (checksum !== asset.checksum) {
       throw new Error("ASSET_CHECKSUM_MISMATCH");
     }
+  }
+
+  private positiveInteger(value: string | undefined, fallback: number): number {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+  }
+
+  private async mapWithConcurrency<Input, Output>(
+    inputs: readonly Input[],
+    maxConcurrency: number,
+    mapper: (input: Input) => Promise<Output>,
+  ): Promise<Output[]> {
+    const outputs = new Array<Output>(inputs.length);
+    let nextIndex = 0;
+    const worker = async (): Promise<void> => {
+      while (nextIndex < inputs.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        outputs[index] = await mapper(inputs[index]);
+      }
+    };
+
+    await Promise.all(
+      Array.from(
+        { length: Math.min(maxConcurrency, inputs.length) },
+        () => worker(),
+      ),
+    );
+    return outputs;
   }
 }

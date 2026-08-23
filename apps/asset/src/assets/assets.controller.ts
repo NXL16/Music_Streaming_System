@@ -15,7 +15,6 @@ import {
   RequestAssetUploadResponse,
   SyncAssetUsagesRequest,
   SyncAssetUsagesResponse,
-  UpdateAssetProcessingResultRequest,
 } from '@musical/shared-proto';
 import { AssetsService } from './assets.service';
 import { InternalGrpcGuard } from '../common/guards/internal-grpc.guard';
@@ -48,12 +47,6 @@ export class AssetsController implements AssetServiceController {
 
   deleteAsset(request: DeleteAssetRequest): Promise<DeleteAssetResponse> {
     return this.assetsService.deleteAsset(request);
-  }
-
-  updateAssetProcessingResult(
-    request: UpdateAssetProcessingResultRequest,
-  ): Promise<AssetResponse> {
-    return this.assetsService.updateProcessingResult(request);
   }
 
   registerAssetUsages(

@@ -68,7 +68,7 @@ export class StorageService implements OnModuleDestroy {
     if (uniqueKeys.length === 0) return;
 
     for (let index = 0; index < uniqueKeys.length; index += 1000) {
-      await this.client.send(
+      const response = await this.client.send(
         new DeleteObjectsCommand({
           Bucket: this.bucket,
           Delete: {
@@ -79,6 +79,16 @@ export class StorageService implements OnModuleDestroy {
           },
         }),
       );
+      if (response.Errors?.length) {
+        const codes = [
+          ...new Set(response.Errors.map(({ Code }) => Code || 'Unknown')),
+        ]
+          .slice(0, 3)
+          .join(',');
+        throw new Error(
+          `STORAGE_DELETE_PARTIAL_FAILURE count=${response.Errors.length} codes=${codes}`,
+        );
+      }
     }
   }
 

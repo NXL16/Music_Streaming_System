@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { createHash } from 'node:crypto';
 import { status } from '@grpc/grpc-js';
 import { RpcException } from '@nestjs/microservices';
@@ -20,7 +21,6 @@ import {
   RequestAssetUploadResponse,
   SyncAssetUsagesRequest,
   SyncAssetUsagesResponse,
-  UpdateAssetProcessingResultRequest,
 } from '@musical/shared-proto';
 import { PrismaService } from '../database/prisma.service';
 import {
@@ -36,6 +36,8 @@ const MAX_LIST_LIMIT = 100;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
+const DEFAULT_ARTIFACT_CLEANUP_LOCK_TTL_MS = 10 * 60 * 1000;
+const DEFAULT_FAILED_ARTIFACT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const IMAGE_TYPES = new Set([
   'image/jpeg',
   'image/png',
@@ -50,10 +52,23 @@ const VIDEO_TYPES = new Set([
 
 @Injectable()
 export class AssetsService {
+  private readonly artifactCleanupLockTtlMs: number;
+  private readonly failedArtifactRetentionMs: number;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
-  ) {}
+    config: ConfigService,
+  ) {
+    this.artifactCleanupLockTtlMs = this.positiveInteger(
+      config.get<string>('ASSET_ARTIFACT_CLEANUP_LOCK_TTL_MS'),
+      DEFAULT_ARTIFACT_CLEANUP_LOCK_TTL_MS,
+    );
+    this.failedArtifactRetentionMs = this.positiveInteger(
+      config.get<string>('ASSET_FAILED_ARTIFACT_RETENTION_MS'),
+      DEFAULT_FAILED_ARTIFACT_RETENTION_MS,
+    );
+  }
 
   async requestUpload(
     request: RequestAssetUploadRequest,
@@ -84,18 +99,7 @@ export class AssetsService {
       existing.status !== PrismaAssetStatus.FAILED &&
       existing.status !== PrismaAssetStatus.DELETED
     ) {
-      const needsUpload =
-        existing.status === PrismaAssetStatus.PENDING_UPLOAD;
-      return {
-        asset: this.assetMessage(existing),
-        uploadUrl: needsUpload
-          ? await this.storage.createUploadUrl(
-              existing.sourceObjectKey,
-              existing.contentType,
-            )
-          : '',
-        instant: !needsUpload,
-      };
+      return this.uploadResponse(existing);
     }
 
     const objectKey = this.objectKey(
@@ -106,25 +110,46 @@ export class AssetsService {
       filename,
     );
     const asset = existing
-      ? await this.prisma.asset.update({
-          where: { id: existing.id },
-          data: {
-            status: PrismaAssetStatus.PENDING_UPLOAD,
-            filename,
-            contentType,
-            sizeBytes: BigInt(sizeBytes),
-            sourceObjectKey: objectKey,
-            publicUrl: '',
-            width: 0,
-            height: 0,
-            durationMillis: 0,
-            variants: Prisma.DbNull,
-            errorMessage: '',
+      ? await this.prisma.$transaction(async (tx) => {
+          await this.lockAssets(tx, [existing.id]);
+          const current = await tx.asset.findUnique({
+            where: { id: existing.id },
+          });
+          if (!current) this.notFound('ASSET_NOT_FOUND');
+          if (
+            current.status !== PrismaAssetStatus.FAILED &&
+            current.status !== PrismaAssetStatus.DELETED
+          ) {
+            return current;
+          }
+
+          await this.cancelArtifactCleanup(tx, current.id);
+          return tx.asset.update({
+            where: { id: current.id },
+            data: {
+              status: PrismaAssetStatus.PENDING_UPLOAD,
+              filename,
+              contentType,
+              sizeBytes: BigInt(sizeBytes),
+              sourceObjectKey: objectKey,
+              publicUrl: '',
+              width: 0,
+              height: 0,
+              durationMillis: 0,
+              variants: Prisma.DbNull,
+              errorMessage: '',
+              createdBy: request.actorUserId,
+            },
+          });
+        })
+      : await this.createAssetOrReadConcurrent(
+          {
+            kind,
+            purpose,
+            checksum,
             createdBy: request.actorUserId,
           },
-        })
-      : await this.prisma.asset.create({
-          data: {
+          {
             kind,
             purpose,
             filename,
@@ -134,13 +159,9 @@ export class AssetsService {
             sourceObjectKey: objectKey,
             createdBy: request.actorUserId,
           },
-        });
+        );
 
-    return {
-      asset: this.assetMessage(asset),
-      uploadUrl: await this.storage.createUploadUrl(objectKey, contentType),
-      instant: false,
-    };
+    return this.uploadResponse(asset);
   }
 
   async finalizeUpload(
@@ -183,6 +204,7 @@ export class AssetsService {
       ) {
         return current;
       }
+      await this.cancelArtifactCleanup(tx, current.id);
       const updated = await tx.asset.update({
         where: { id: asset.id },
         data: {
@@ -196,6 +218,7 @@ export class AssetsService {
         update: {
           availableAt: new Date(),
           lockedAt: null,
+          leaseToken: null,
           lastError: '',
         },
       });
@@ -242,7 +265,7 @@ export class AssetsService {
       await this.lockAssets(tx, [asset.id]);
       const current = await tx.asset.findUnique({
         where: { id: asset.id },
-        select: { status: true },
+        select: { status: true, sourceObjectKey: true },
       });
       if (!current) this.notFound('ASSET_NOT_FOUND');
       if (current.status === PrismaAssetStatus.PROCESSING) {
@@ -254,24 +277,21 @@ export class AssetsService {
       if (usageCount > 0) {
         this.failedPrecondition('ASSET_IN_USE');
       }
+      if (current.status === PrismaAssetStatus.DELETED) return;
       await tx.asset.update({
         where: { id: asset.id },
-        data: { status: PrismaAssetStatus.DELETED },
+        data: {
+          status: PrismaAssetStatus.DELETED,
+          publicUrl: '',
+          variants: Prisma.DbNull,
+        },
       });
-    });
-
-    await this.storage.deleteMany([
-      asset.sourceObjectKey,
-      ...this.variantObjectKeys(asset.variants),
-    ]);
-    await this.storage.deletePrefix(`processed/${asset.id}/`);
-    await this.prisma.asset.update({
-      where: { id: asset.id },
-      data: {
-        status: PrismaAssetStatus.DELETED,
-        publicUrl: '',
-        variants: Prisma.DbNull,
-      },
+      await this.enqueueArtifactCleanup(
+        tx,
+        asset.id,
+        current.sourceObjectKey,
+        new Date(),
+      );
     });
     return { success: true };
   }
@@ -380,39 +400,6 @@ export class AssetsService {
     };
   }
 
-  async updateProcessingResult(
-    request: UpdateAssetProcessingResultRequest,
-  ): Promise<AssetResponse> {
-    const asset = await this.findAsset(request.assetId, true);
-    if (asset.status !== PrismaAssetStatus.PROCESSING) {
-      this.failedPrecondition('ASSET_NOT_PROCESSING');
-    }
-
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const result = await tx.asset.update({
-        where: { id: asset.id },
-        data: request.success
-          ? {
-              status: PrismaAssetStatus.READY,
-              publicUrl: request.publicUrl.trim(),
-              width: Math.max(0, request.width),
-              height: Math.max(0, request.height),
-              durationMillis: Math.max(0, request.durationMillis),
-              variants: this.jsonNullable(request.variants),
-              errorMessage: '',
-            }
-          : {
-              status: PrismaAssetStatus.FAILED,
-              errorMessage:
-                request.errorMessage.trim() || 'ASSET_PROCESSING_FAILED',
-            },
-      });
-      await tx.assetProcessingJob.deleteMany({ where: { assetId: asset.id } });
-      return result;
-    });
-    return { asset: this.assetMessage(updated) };
-  }
-
   private validateUpload(
     kind: PrismaAssetKind,
     purpose: PrismaAssetPurpose,
@@ -450,6 +437,53 @@ export class AssetsService {
     ) {
       this.invalidArgument(`size_bytes must be between 1 and ${maxBytes}`);
     }
+  }
+
+  private async uploadResponse(
+    asset: Asset,
+  ): Promise<RequestAssetUploadResponse> {
+    const needsUpload = asset.status === PrismaAssetStatus.PENDING_UPLOAD;
+    return {
+      asset: this.assetMessage(asset),
+      uploadUrl: needsUpload
+        ? await this.storage.createUploadUrl(
+            asset.sourceObjectKey,
+            asset.contentType,
+          )
+        : '',
+      instant: !needsUpload,
+    };
+  }
+
+  private async createAssetOrReadConcurrent(
+    unique: {
+      kind: PrismaAssetKind;
+      purpose: PrismaAssetPurpose;
+      checksum: string;
+      createdBy: string;
+    },
+    data: Prisma.AssetCreateInput,
+  ): Promise<Asset> {
+    try {
+      return await this.prisma.asset.create({ data });
+    } catch (error) {
+      if (!this.isUniqueConstraintViolation(error)) throw error;
+
+      const concurrentAsset = await this.prisma.asset.findUnique({
+        where: { kind_purpose_checksum_createdBy: unique },
+      });
+      if (concurrentAsset) return concurrentAsset;
+      throw error;
+    }
+  }
+
+  private isUniqueConstraintViolation(error: unknown): boolean {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 'P2002'
+    );
   }
 
   private validatedUsages(
@@ -511,6 +545,60 @@ export class AssetsService {
         this.failedPrecondition('ASSET_USAGE_TYPE_OR_STATUS_MISMATCH');
       }
     }
+  }
+
+  /**
+   * Asset mutations lock the asset before this job. The retention sweep uses
+   * the same order, so a retry either cancels a pending cleanup atomically or
+   * receives a clear precondition error while R2 deletion is in flight.
+   */
+  private async cancelArtifactCleanup(
+    tx: Prisma.TransactionClient,
+    assetId: string,
+  ): Promise<void> {
+    const cleanup = await this.lockArtifactCleanupJob(tx, assetId);
+    if (cleanup?.active) {
+      this.failedPrecondition('ASSET_ARTIFACT_CLEANUP_IN_PROGRESS');
+    }
+    if (cleanup) {
+      await tx.assetArtifactCleanupJob.deleteMany({ where: { assetId } });
+    }
+  }
+
+  private async enqueueArtifactCleanup(
+    tx: Prisma.TransactionClient,
+    assetId: string,
+    sourceObjectKey: string,
+    availableAt: Date,
+  ): Promise<void> {
+    await tx.assetArtifactCleanupJob.upsert({
+      where: { assetId },
+      create: { assetId, sourceObjectKey, availableAt },
+      update: {
+        sourceObjectKey,
+        availableAt,
+        lockedAt: null,
+        leaseToken: null,
+        lastError: '',
+      },
+    });
+  }
+
+  private async lockArtifactCleanupJob(
+    tx: Prisma.TransactionClient,
+    assetId: string,
+  ): Promise<{ active: boolean } | undefined> {
+    const jobs = await tx.$queryRaw<Array<{ active: boolean }>>(Prisma.sql`
+      SELECT COALESCE(
+        "leaseToken" IS NOT NULL
+        AND "lockedAt" >= clock_timestamp() - (${this.artifactCleanupLockTtlMs} * INTERVAL '1 millisecond'),
+        false
+      ) AS "active"
+      FROM "asset_artifact_cleanup_jobs"
+      WHERE "assetId" = ${assetId}
+      FOR UPDATE
+    `);
+    return jobs[0];
   }
 
   private async lockAssets(
@@ -647,13 +735,6 @@ export class AssetsService {
     return `assets/${kind.toLowerCase()}/${purpose.toLowerCase()}/${ownerKey}/${checksum.slice(0, 2)}/${checksum}/${filename}`;
   }
 
-  private jsonNullable(
-    value: unknown,
-  ): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput {
-    if (!value || typeof value !== 'object') return Prisma.DbNull;
-    return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
-  }
-
   private wrapStruct(
     value: Prisma.JsonValue | null,
   ): Record<string, unknown> | undefined {
@@ -661,20 +742,6 @@ export class AssetsService {
       return undefined;
     }
     return value;
-  }
-
-  private variantObjectKeys(
-    value: Prisma.JsonValue | null | undefined,
-  ): string[] {
-    if (Array.isArray(value)) {
-      return value.flatMap((item) => this.variantObjectKeys(item));
-    }
-    if (!value || typeof value !== 'object') return [];
-
-    return Object.entries(value).flatMap(([key, item]) => {
-      if (key === 'objectKey' && typeof item === 'string') return [item];
-      return this.variantObjectKeys(item);
-    });
   }
 
   private requireText(value: string, field: string, maxLength: number): void {
@@ -698,5 +765,10 @@ export class AssetsService {
 
   private notFound(message: string): never {
     throw new RpcException({ code: status.NOT_FOUND, message });
+  }
+
+  private positiveInteger(value: string | undefined, fallback: number): number {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
   }
 }

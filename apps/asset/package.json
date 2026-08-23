@@ -11,13 +11,16 @@
     "start:dev": "nest start --watch",
     "dev": "nest start --watch",
     "start:prod": "node dist/src/main",
-    "lint": "eslint \"{src,test}/**/*.ts\" --fix",
+    "lint": "eslint \"{src,test}/**/*.ts\"",
+    "lint:fix": "eslint \"{src,test}/**/*.ts\" --fix",
+    "test": "tsx --test src/assets/assets.service.spec.ts src/processing/asset-artifact-retention.service.spec.ts src/processing/asset-processing-worker.service.spec.ts src/processing/asset-processor.service.spec.ts src/storage/storage.service.spec.ts",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1093.0",
     "@aws-sdk/s3-request-presigner": "^3.1093.0",
     "@grpc/grpc-js": "^1.14.4",
+    "@musical/shared-constants": "workspace:*",
     "@musical/shared-proto": "workspace:*",
     "@nestjs/common": "^11.1.28",
     "@nestjs/config": "^4.0.4",
@@ -43,6 +46,7 @@
     "eslint-plugin-prettier": "^5.5.6",
     "globals": "^17.7.0",
     "prisma": "^7.9.0",
+    "tsx": "^4.23.1",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.65.0"
   }

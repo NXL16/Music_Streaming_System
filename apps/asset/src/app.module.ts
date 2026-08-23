@@ -8,7 +8,11 @@ import { ProcessingModule } from './processing/processing.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: [`.env.${process.env.APP_ENV ?? 'development'}`, '.env'],
+      validate: validateEnv,
+    }),
     DatabaseModule,
     StorageModule,
     AssetsModule,

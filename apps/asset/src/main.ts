@@ -7,7 +7,10 @@ import {
   GRPC_LOADER_OPTIONS,
   resolveProtoPath,
 } from "@musical/shared-proto";
+import { loadEnvironment } from '@musical/shared-constants/environment';
 import { AppModule } from "./app.module";
+
+loadEnvironment();
 
 async function bootstrap(): Promise<void> {
   const config = new ConfigService();
@@ -24,6 +27,7 @@ async function bootstrap(): Promise<void> {
       },
     },
   );
+  app.enableShutdownHooks();
   await app.listen();
 
   Logger.log(`Asset gRPC server running at ${grpcUrl}`);
