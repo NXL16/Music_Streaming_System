@@ -1,0 +1,124 @@
+name: Verify
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    name: Node workspace
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm type-check
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+
+      - name: Validate Prisma schemas
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/verification?schema=public
+        run: |
+          pnpm --filter song exec prisma validate --schema=prisma/schema.prisma
+          pnpm --filter asset exec prisma validate --schema=prisma/schema.prisma
+          pnpm --filter identity exec prisma validate --schema=prisma/schema.prisma
+          pnpm --filter recommendation exec prisma validate --schema=prisma/schema.prisma
+
+  redis-streams:
+    name: Redis Streams recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - name: Verify crash, reclaim, retry cap, and DLQ
+        env:
+          REDIS_STREAMS_INTEGRATION: "1"
+          REDIS_URL: redis://127.0.0.1:6379
+        run: pnpm --filter song test:queue
+
+  go:
+    name: Go (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - apps/meta
+          - apps/wallet
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.service }}/go.mod
+          cache-dependency-path: ${{ matrix.service }}/go.sum
+
+      - name: Test and vet
+        working-directory: ${{ matrix.service }}
+        run: |
+          go test ./...
+          go vet ./...
+
+  rust-worker:
+    name: Rust worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Format, lint, and test
+        working-directory: apps/worker
+        run: |
+          cargo fmt --check
+          cargo clippy -- -D warnings
+          cargo test
