@@ -37,5 +37,31 @@ export function validateEnv(rawEnv: RawEnv): RawEnv {
     throw new Error('INTERNAL_GRPC_TOKEN must be at least 32 characters');
   }
 
+  const leaseTtl = optionalDuration(
+    rawEnv.RECOMMENDATION_GENERATION_LEASE_TTL_MS,
+    'RECOMMENDATION_GENERATION_LEASE_TTL_MS',
+  );
+  const leaseRenewInterval = optionalDuration(
+    rawEnv.RECOMMENDATION_GENERATION_LEASE_RENEW_INTERVAL_MS,
+    'RECOMMENDATION_GENERATION_LEASE_RENEW_INTERVAL_MS',
+  );
+  if (leaseTtl && leaseRenewInterval && leaseRenewInterval > leaseTtl / 2) {
+    throw new Error(
+      'RECOMMENDATION_GENERATION_LEASE_RENEW_INTERVAL_MS must not exceed half of RECOMMENDATION_GENERATION_LEASE_TTL_MS',
+    );
+  }
+
   return rawEnv;
+}
+
+function optionalDuration(
+  value: string | undefined,
+  key: string,
+): number | null {
+  if (value === undefined || value.trim() === '') return null;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 60_000 || parsed > 3_600_000) {
+    throw new Error(`${key} must be an integer between 60000 and 3600000`);
+  }
+  return parsed;
 }

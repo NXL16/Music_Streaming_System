@@ -56,16 +56,24 @@ export class RecommendationEngineService {
     private readonly catalogService: RecommendationCatalogService,
   ) {}
 
-  async generateUserShelves(userId: string): Promise<GeneratedShelf[]> {
-    const profile = await this.listeningService.getUserTasteProfile(userId);
-    const candidates = await this.collectAlbumCandidates(userId, profile);
+  async generateUserShelves(
+    userId: string,
+    profile?: TasteProfile,
+  ): Promise<GeneratedShelf[]> {
+    const resolvedProfile =
+      profile ?? (await this.listeningService.getUserTasteProfile(userId));
+    const candidates = await this.collectAlbumCandidates(userId, resolvedProfile);
     if (candidates.length < policy.minimumShelfSize) return [];
 
     const allocated = new Set<string>();
     const result: GeneratedShelf[] = [];
     const seeds = await this.recentAlbumSeeds(userId);
-    const topGenres = profile.genres.map((genre) => genre.name).slice(0, 4);
-    const topArtists = profile.artists.map((artist) => artist.name).slice(0, 3);
+    const topGenres = resolvedProfile.genres
+      .map((genre) => genre.name)
+      .slice(0, 4);
+    const topArtists = resolvedProfile.artists
+      .map((artist) => artist.name)
+      .slice(0, 3);
     // Reserve the finite local catalog across all album-based Home slots. A
     // 40-album catalog should show eight meaningful shelves, not one 16-card
     // Top Picks shelf followed by empty gaps.

@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
+import { loadEnvironment } from '@musical/shared-constants/environment';
 import { AppModule } from './app.module';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import {
@@ -9,6 +10,8 @@ import {
 } from '@musical/shared-proto';
 import { PrismaService } from './database/prisma.service';
 import { Logger } from '@nestjs/common';
+
+loadEnvironment();
 
 const API_GRPC_MAX_MESSAGE_LENGTH = 16 * 1024 * 1024;
 

@@ -8,6 +8,7 @@ import { validateEnv } from './common/configs/env.validation';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: [`.env.${process.env.APP_ENV ?? 'development'}`, '.env'],
       validate: validateEnv,
     }),
     DatabaseModule,

@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { status } from '@grpc/grpc-js';
+import { RpcException } from '@nestjs/microservices';
 import { createHash } from 'node:crypto';
 import {
   GenerateRecommendationsRequest,
@@ -25,6 +27,11 @@ import {
 } from './recommendation-engine.service';
 import { PRODUCTION_RECOMMENDATION_POLICY } from './production-recommendation-policy';
 import { developmentCacheDisabled } from '../common/configs/development-cache';
+import { GenerationLeaseService } from './generation-lease.service';
+import {
+  GENERATION_LEASE_LOST_MESSAGE,
+  type GenerationLease,
+} from './generation-lease.types';
 
 const STALE_DURATION_MS = 6 * 60 * 60 * 1000;
 const RELEASE_RADAR_DAYS = 30;
@@ -44,7 +51,6 @@ const SYSTEM_VARIANT_MIN_NOVEL_RATIO = 0.25;
 const MIN_LISTENED_SONGS = 3;
 const HOME_SHELF_ITEM_MIN = 10;
 const HOME_SHELF_ITEM_LIMIT = 40;
-const HOME_SHELF_PREVIEW_LIMIT = 16;
 const GLOBAL_PUBLISH_MIN_SHELVES = 12;
 const GLOBAL_SHELF_LIMIT = 22;
 const GLOBAL_HERO_LIMIT = 10;
@@ -64,6 +70,24 @@ type ArtworkVariants = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+export function isGenerationLeaseLostError(error: unknown): boolean {
+  if (!(error instanceof RpcException)) return false;
+
+  const details = error.getError();
+  return (
+    isRecord(details) &&
+    details.code === status.ABORTED &&
+    details.message === GENERATION_LEASE_LOST_MESSAGE
+  );
+}
+
+function generationLeaseLostError(): RpcException {
+  return new RpcException({
+    code: status.ABORTED,
+    message: GENERATION_LEASE_LOST_MESSAGE,
+  });
 }
 
 function artworkVariantsFromAttributes(
@@ -115,17 +139,7 @@ type StationSeed = {
   mood?: MoodStationProfile;
 };
 
-type AlbumShelfCandidate = {
-  resourceId: string;
-  resourceType: string;
-  name: string;
-  artistName: string;
-  genreNames: string[];
-  releaseDate: string;
-  recordLabel: string;
-  trackCount: number;
-  updatedAt: Date;
-};
+type GenerationWriteGuard = () => Promise<void>;
 
 function normalizeTimezone(value: string): string {
   const tz = value || DEFAULT_TIMEZONE;
@@ -145,16 +159,21 @@ export class GenerationService {
     private readonly catalogSynchronizationService: CatalogSynchronizationService,
     private readonly recommendationEngine: RecommendationEngineService,
     private readonly systemStationArtworkService: SystemStationArtworkService,
+    private readonly generationLeaseService: GenerationLeaseService,
   ) {}
 
   async generate(
     request: GenerateRecommendationsRequest,
   ): Promise<GetHomeRecommendationsResponse> {
-    const scope = request.scope;
-    if (scope === RecommendationPageScope.RECOMMENDATION_PAGE_SCOPE_USER) {
-      return this.generateUser(request);
+    const generated = await this.generateWithLease(request);
+    if (generated) {
+      return generated;
     }
-    return this.generateGlobal(request);
+
+    throw new RpcException({
+      code: status.ABORTED,
+      message: 'Recommendation generation is already in progress',
+    });
   }
 
   private generatingGlobal = false;
@@ -196,7 +215,7 @@ export class GenerationService {
 
     this.generatingGlobal = true;
     try {
-      return await this.generateGlobal({
+      return await this.generateWithLease({
         userId: '',
         scope: RecommendationPageScope.RECOMMENDATION_PAGE_SCOPE_GLOBAL,
         actorUserId: 'system:recommendation-engine',
@@ -206,6 +225,12 @@ export class GenerationService {
         platform: platform || 'web',
       });
     } catch (error) {
+      if (isGenerationLeaseLostError(error)) {
+        this.logger.debug(
+          '[generation] lazy global refresh canceled after lease ownership changed',
+        );
+        return null;
+      }
       this.logger.warn('Failed to lazy-generate global recommendations', error);
       return null;
     } finally {
@@ -268,7 +293,7 @@ export class GenerationService {
 
     this.generatingUsers.add(userId);
     try {
-      const result = await this.generateUser({
+      const result = await this.generateWithLease({
         userId,
         scope: RecommendationPageScope.RECOMMENDATION_PAGE_SCOPE_USER,
         actorUserId: '',
@@ -279,6 +304,12 @@ export class GenerationService {
       });
       return result;
     } catch (error) {
+      if (isGenerationLeaseLostError(error)) {
+        this.logger.debug(
+          '[generation] lazy user refresh canceled after lease ownership changed',
+        );
+        return null;
+      }
       this.logger.warn('Failed to generate user recommendations', error);
       return null;
     } finally {
@@ -286,10 +317,116 @@ export class GenerationService {
     }
   }
 
+  /**
+   * Serializes generation across every Recommendation replica. The lease token
+   * is checked in the same transaction as every destructive page write, so a
+   * worker that outlives its lease cannot publish an obsolete result.
+   */
+  private async generateWithLease(
+    request: GenerateRecommendationsRequest,
+  ): Promise<GetHomeRecommendationsResponse | null> {
+    const leaseKey = this.generationLeaseKey(request);
+    const lease = await this.generationLeaseService.acquire(leaseKey);
+    if (!lease) {
+      this.logger.debug(`[generation] skip: lease is held for ${leaseKey}`);
+      return null;
+    }
+
+    let stopped = false;
+    let leaseLost = false;
+    let renewalTimer: ReturnType<typeof setTimeout> | undefined;
+    const assertLeaseHeldBeforeWrite: GenerationWriteGuard = async () => {
+      if (leaseLost || !(await this.generationLeaseService.isHeld(lease))) {
+        if (!leaseLost) {
+          this.logger.warn(
+            `[generation] lease ownership changed before persistence for ${leaseKey}; current page is unchanged`,
+          );
+        }
+        leaseLost = true;
+        throw generationLeaseLostError();
+      }
+    };
+    const renewLease = async (): Promise<void> => {
+      if (stopped) return;
+
+      try {
+        const renewed = await this.generationLeaseService.renew(lease);
+        if (!renewed) {
+          leaseLost = true;
+          this.logger.warn(
+            `[generation] lease ownership changed before completion for ${leaseKey}; writes will be canceled`,
+          );
+          return;
+        }
+      } catch (error) {
+        // A transient renewal failure must not immediately discard a valid
+        // generation. Fencing at write time still prevents an expired worker
+        // from replacing a newer page.
+        this.logger.warn(
+          `[generation] failed to renew lease for ${leaseKey}`,
+          error,
+        );
+      }
+
+      if (!stopped) {
+        renewalTimer = setTimeout(() => {
+          void renewLease();
+        }, this.generationLeaseService.renewIntervalMs);
+      }
+    };
+
+    renewalTimer = setTimeout(() => {
+      void renewLease();
+    }, this.generationLeaseService.renewIntervalMs);
+
+    try {
+      if (
+        request.scope === RecommendationPageScope.RECOMMENDATION_PAGE_SCOPE_USER
+      ) {
+        return await this.generateUser(
+          request,
+          lease,
+          assertLeaseHeldBeforeWrite,
+        );
+      }
+
+      return await this.generateGlobal(
+        request,
+        lease,
+        assertLeaseHeldBeforeWrite,
+      );
+    } finally {
+      stopped = true;
+      if (renewalTimer) {
+        clearTimeout(renewalTimer);
+      }
+      await this.generationLeaseService.release(lease);
+    }
+  }
+
+  private generationLeaseKey(request: GenerateRecommendationsRequest): string {
+    const isUserScope =
+      request.scope === RecommendationPageScope.RECOMMENDATION_PAGE_SCOPE_USER;
+    const scopeKey = isUserScope ? `USER:${request.userId}` : 'GLOBAL';
+    const timezone = isUserScope ? normalizeTimezone(request.timezone) : '*';
+    const fingerprint = JSON.stringify({
+      scopeKey,
+      name: request.name || 'listen-now',
+      locale: request.locale || 'en-GB',
+      timezone,
+    });
+
+    return `recommendation-home:${createHash('sha256')
+      .update(fingerprint)
+      .digest('hex')}`;
+  }
+
   // ─── Global generation ───
 
   private async generateGlobal(
     request: GenerateRecommendationsRequest,
+    lease: GenerationLease,
+    assertLeaseHeldBeforeWrite: GenerationWriteGuard,
   ): Promise<GetHomeRecommendationsResponse> {
     const name = request.name || 'listen-now';
     const locale = request.locale || 'en-GB';
@@ -361,40 +498,36 @@ export class GenerationService {
       });
     }
 
-    await this.recommendationsService.replaceHomeRecommendations({
-      userId: '',
-      name,
-      locale,
-      timezone,
-      platform,
-      sections: publishableSections,
-      resources: [],
-      scope: RecommendationPageScope.RECOMMENDATION_PAGE_SCOPE_GLOBAL,
-      status: RecommendationPageStatus.RECOMMENDATION_PAGE_STATUS_DRAFT,
-      actorUserId,
-    });
-
-    const result = await this.recommendationsService.publishRecommendationPage({
-      userId: '',
-      name,
-      locale,
-      timezone,
-      platform,
-      scope: RecommendationPageScope.RECOMMENDATION_PAGE_SCOPE_GLOBAL,
-      actorUserId,
-    });
-
-    await this.prisma.recommendationPage.updateMany({
-      where: {
-        scopeKey: 'GLOBAL',
+    await assertLeaseHeldBeforeWrite();
+    await this.recommendationsService.replaceHomeRecommendations(
+      {
+        userId: '',
         name,
         locale,
-        status: 'PUBLISHED',
+        timezone,
+        platform,
+        sections: publishableSections,
+        resources: [],
+        scope: RecommendationPageScope.RECOMMENDATION_PAGE_SCOPE_GLOBAL,
+        status: RecommendationPageStatus.RECOMMENDATION_PAGE_STATUS_DRAFT,
+        actorUserId,
       },
-      data: {
-        staleAfter: new Date(Date.now() + STALE_DURATION_MS),
+      { lease },
+    );
+
+    await assertLeaseHeldBeforeWrite();
+    const result = await this.recommendationsService.publishRecommendationPage(
+      {
+        userId: '',
+        name,
+        locale,
+        timezone,
+        platform,
+        scope: RecommendationPageScope.RECOMMENDATION_PAGE_SCOPE_GLOBAL,
+        actorUserId,
       },
-    });
+      { lease, staleAfter: new Date(Date.now() + STALE_DURATION_MS) },
+    );
 
     return result;
   }
@@ -403,6 +536,8 @@ export class GenerationService {
 
   private async generateUser(
     request: GenerateRecommendationsRequest,
+    lease: GenerationLease,
+    assertLeaseHeldBeforeWrite: GenerationWriteGuard,
   ): Promise<GetHomeRecommendationsResponse> {
     const userId = request.userId;
     const name = request.name || 'listen-now';
@@ -430,7 +565,10 @@ export class GenerationService {
     const dailyMix = await this.buildDailyMixPlaylist(userId, profile);
     const stations = await this.buildStationsForYouSection(userId, profile);
     const moodStations = await this.buildMoodStationsSection(userId, profile);
-    const shelves = await this.recommendationEngine.generateUserShelves(userId);
+    const shelves = await this.recommendationEngine.generateUserShelves(
+      userId,
+      profile,
+    );
     const shelfById = new Map(
       shelves.map((shelf) => [shelf.id, this.buildEngineSection(shelf)]),
     );
@@ -476,40 +614,36 @@ export class GenerationService {
     const publishableSections =
       await this.deduplicateSemanticAlbumItems(sections);
 
-    await this.recommendationsService.replaceHomeRecommendations({
-      userId,
-      name,
-      locale,
-      timezone,
-      platform,
-      sections: publishableSections,
-      resources: [],
-      scope: RecommendationPageScope.RECOMMENDATION_PAGE_SCOPE_USER,
-      status: RecommendationPageStatus.RECOMMENDATION_PAGE_STATUS_DRAFT,
-      actorUserId,
-    });
-
-    const result = await this.recommendationsService.publishRecommendationPage({
-      userId,
-      name,
-      locale,
-      timezone,
-      platform,
-      scope: RecommendationPageScope.RECOMMENDATION_PAGE_SCOPE_USER,
-      actorUserId,
-    });
-
-    await this.prisma.recommendationPage.updateMany({
-      where: {
-        scopeKey: `USER:${userId}`,
+    await assertLeaseHeldBeforeWrite();
+    await this.recommendationsService.replaceHomeRecommendations(
+      {
+        userId,
         name,
         locale,
-        status: 'PUBLISHED',
+        timezone,
+        platform,
+        sections: publishableSections,
+        resources: [],
+        scope: RecommendationPageScope.RECOMMENDATION_PAGE_SCOPE_USER,
+        status: RecommendationPageStatus.RECOMMENDATION_PAGE_STATUS_DRAFT,
+        actorUserId,
       },
-      data: {
-        staleAfter: new Date(Date.now() + STALE_DURATION_MS),
+      { lease },
+    );
+
+    await assertLeaseHeldBeforeWrite();
+    const result = await this.recommendationsService.publishRecommendationPage(
+      {
+        userId,
+        name,
+        locale,
+        timezone,
+        platform,
+        scope: RecommendationPageScope.RECOMMENDATION_PAGE_SCOPE_USER,
+        actorUserId,
       },
-    });
+      { lease, staleAfter: new Date(Date.now() + STALE_DURATION_MS) },
+    );
 
     return result;
   }
@@ -1593,9 +1727,7 @@ export class GenerationService {
     const stationArtworkByKey: Map<string, SystemStationArtwork> =
       mode === 'mood'
         ? await this.systemStationArtworkService.byStationKeys(
-            stationSeeds.flatMap((seed) =>
-              seed.mood ? [seed.mood.key] : [],
-            ),
+            stationSeeds.flatMap((seed) => (seed.mood ? [seed.mood.key] : [])),
           )
         : new Map<string, SystemStationArtwork>();
 
@@ -2589,189 +2721,6 @@ export class GenerationService {
     }));
   }
 
-  private async buildSmartGlobalAlbumSections(
-    existingSectionCount: number,
-  ): Promise<PersonalRecommendationResource[]> {
-    const albums = await this.albumShelfCandidates(600);
-    if (albums.length < HOME_SHELF_ITEM_MIN) return [];
-
-    const sections: PersonalRecommendationResource[] = [];
-    const usedSectionIds = new Set<string>();
-    const addSection = (
-      sectionId: string,
-      title: string,
-      candidates: AlbumShelfCandidate[],
-      displayKind = 'MusicCoverShelf',
-    ) => {
-      if (
-        existingSectionCount + sections.length >= GLOBAL_SHELF_LIMIT ||
-        usedSectionIds.has(sectionId)
-      ) {
-        return;
-      }
-
-      const items = this.albumShelfItems(candidates);
-      if (items.length < HOME_SHELF_ITEM_MIN) return;
-      usedSectionIds.add(sectionId);
-      sections.push(
-        this.buildSection(sectionId, title, displayKind, ['albums'], items),
-      );
-    };
-
-    const latest = [...albums].sort((left, right) =>
-      this.compareReleaseDate(right, left),
-    );
-    const deepest = [...albums].sort((left, right) =>
-      this.compareReleaseDate(left, right),
-    );
-    const longest = [...albums].sort(
-      (left, right) => right.trackCount - left.trackCount,
-    );
-    const refreshed = [...albums].sort(
-      (left, right) => right.updatedAt.getTime() - left.updatedAt.getTime(),
-    );
-
-    addSection('global-fresh-finds', 'Fresh Finds', latest.slice(12));
-    addSection('global-big-albums', 'Big Albums', longest);
-    addSection('global-recently-added', 'Recently Added', refreshed);
-    addSection('global-deep-cuts', 'Deep Cuts', deepest);
-
-    for (const { key, title, candidates } of this.groupAlbumShelves(
-      albums,
-      'genre',
-    )) {
-      addSection(`global-genre-more-${key}`, title, candidates);
-    }
-
-    for (const { key, title, candidates } of this.groupAlbumShelves(
-      albums,
-      'artist',
-    )) {
-      addSection(`global-artist-${key}`, `${title} Essentials`, candidates);
-    }
-
-    for (const { key, title, candidates } of this.groupAlbumShelves(
-      albums,
-      'label',
-    )) {
-      addSection(`global-label-${key}`, `From ${title}`, candidates);
-    }
-
-    for (const { key, title, candidates } of this.groupAlbumShelves(
-      albums,
-      'decade',
-    )) {
-      addSection(`global-decade-${key}`, title, candidates, 'MusicCoverShelf');
-    }
-
-    if (existingSectionCount + sections.length < GLOBAL_PUBLISH_MIN_SHELVES) {
-      const windows = [
-        ['global-more-new-music', 'More New Music', latest.slice(24)],
-        ['global-editors-picks', 'Editors Picks', refreshed.slice(24)],
-        ['global-albums-to-explore', 'Albums to Explore', albums.slice(48)],
-        ['global-weekend-listening', 'Weekend Listening', longest.slice(24)],
-      ] as const;
-
-      for (const [sectionId, title, candidates] of windows) {
-        addSection(sectionId, title, candidates);
-      }
-    }
-
-    return sections;
-  }
-
-  private async albumShelfCandidates(
-    limit: number,
-  ): Promise<AlbumShelfCandidate[]> {
-    return this.prisma.recommendationResourceSnapshot.findMany({
-      where: {
-        resourceType: 'albums',
-        artworkUrl: { not: '' },
-      },
-      orderBy: [{ releaseDate: 'desc' }, { updatedAt: 'desc' }],
-      take: limit,
-      select: {
-        resourceId: true,
-        resourceType: true,
-        name: true,
-        artistName: true,
-        genreNames: true,
-        releaseDate: true,
-        recordLabel: true,
-        trackCount: true,
-        updatedAt: true,
-      },
-    });
-  }
-
-  private groupAlbumShelves(
-    albums: AlbumShelfCandidate[],
-    mode: 'genre' | 'artist' | 'label' | 'decade',
-  ): Array<{ key: string; title: string; candidates: AlbumShelfCandidate[] }> {
-    const groups = new Map<string, AlbumShelfCandidate[]>();
-    const titles = new Map<string, string>();
-
-    for (const album of albums) {
-      const values =
-        mode === 'genre'
-          ? album.genreNames.filter(
-              (genre) => genre.trim() && genre.toLowerCase() !== 'music',
-            )
-          : mode === 'artist'
-            ? [album.artistName]
-            : mode === 'label'
-              ? [album.recordLabel]
-              : [this.decadeTitle(album.releaseDate)];
-
-      for (const value of values) {
-        const title = value.trim();
-        if (!title) continue;
-        const key = this.slugify(title);
-        if (!key) continue;
-        titles.set(key, title);
-        groups.set(key, [...(groups.get(key) ?? []), album]);
-      }
-    }
-
-    return [...groups.entries()]
-      .filter(([, candidates]) => candidates.length >= HOME_SHELF_ITEM_MIN)
-      .sort((left, right) => right[1].length - left[1].length)
-      .slice(0, mode === 'genre' ? 8 : 4)
-      .map(([key, candidates]) => ({
-        key,
-        title: titles.get(key) ?? key,
-        candidates,
-      }));
-  }
-
-  private albumShelfItems(
-    albums: AlbumShelfCandidate[],
-  ): Array<{ id: string; type: string }> {
-    return this.uniqueItems(
-      albums.map((album) => ({
-        id: album.resourceId,
-        type: album.resourceType,
-      })),
-    ).slice(0, HOME_SHELF_ITEM_LIMIT);
-  }
-
-  private compareReleaseDate(
-    left: Pick<AlbumShelfCandidate, 'releaseDate' | 'updatedAt'>,
-    right: Pick<AlbumShelfCandidate, 'releaseDate' | 'updatedAt'>,
-  ): number {
-    const leftTime = Date.parse(left.releaseDate) || left.updatedAt.getTime();
-    const rightTime =
-      Date.parse(right.releaseDate) || right.updatedAt.getTime();
-    return leftTime - rightTime;
-  }
-
-  private decadeTitle(releaseDate: string): string {
-    const year = Number.parseInt(releaseDate.slice(0, 4), 10);
-    if (!Number.isFinite(year)) return '';
-    const decade = Math.floor(year / 10) * 10;
-    return `${decade}s Essentials`;
-  }
-
   private albumItemsOnly(
     items: Array<{ id: string; type: string }>,
   ): Array<{ id: string; type: string }> {
@@ -2885,16 +2834,18 @@ export class GenerationService {
       // would otherwise render as an empty section on Home.
       if (deduped.length === 0) return [];
 
-      return [{
-        ...section,
-        relationships: {
-          primaryContent: section.relationships?.primaryContent ?? {
-            href: '',
-            data: [],
+      return [
+        {
+          ...section,
+          relationships: {
+            primaryContent: section.relationships?.primaryContent ?? {
+              href: '',
+              data: [],
+            },
+            contents: { ...contents, data: deduped },
           },
-          contents: { ...contents, data: deduped },
         },
-      }];
+      ];
     });
   }
 
@@ -2944,69 +2895,6 @@ export class GenerationService {
       .replace(/[^a-z0-9]+/g, ' ')
       .trim()
       .replace(/\s+/g, ' ');
-  }
-
-  private diversifyHomeAlbumPreviews(
-    sections: PersonalRecommendationResource[],
-  ): PersonalRecommendationResource[] {
-    const usedPreviewResources = new Set<string>();
-    const diversified: PersonalRecommendationResource[] = [];
-
-    for (const section of sections) {
-      const contents = section.relationships?.contents;
-      const refs = contents?.data ?? [];
-      const preview: typeof refs = [];
-      const overflow: typeof refs = [];
-      const sectionResources = new Set<string>();
-
-      for (const item of refs) {
-        const key = `${item.type}:${item.id}`;
-        if (sectionResources.has(key)) continue;
-        sectionResources.add(key);
-        if (usedPreviewResources.has(key)) continue;
-
-        if (preview.length < HOME_SHELF_PREVIEW_LIMIT) {
-          preview.push(item);
-          continue;
-        }
-
-        overflow.push(item);
-      }
-
-      const minimumPreviewItems = section.attributes?.resourceTypes?.every(
-        (type) => type === 'albums',
-      )
-        ? HOME_SHELF_ITEM_MIN
-        : 3;
-      if (preview.length < minimumPreviewItems) continue;
-
-      const nextRefs = [...preview, ...overflow];
-
-      for (const item of preview) {
-        usedPreviewResources.add(`${item.type}:${item.id}`);
-      }
-
-      if (!contents) {
-        diversified.push(section);
-        continue;
-      }
-
-      diversified.push({
-        ...section,
-        relationships: {
-          primaryContent: section.relationships?.primaryContent ?? {
-            href: '',
-            data: [],
-          },
-          contents: {
-            ...contents,
-            data: nextRefs,
-          },
-        },
-      });
-    }
-
-    return diversified;
   }
 
   private buildSection(

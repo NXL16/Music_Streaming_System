@@ -8,6 +8,7 @@ import {
 } from '@musical/shared-proto';
 import { PrismaService } from '../database/prisma.service';
 import { RECENTLY_PLAYED_CONTEXT_LIMIT } from '@musical/shared-constants';
+import { Prisma } from '../generated/prisma/client';
 
 export type TasteProfile = {
   genres: Array<{ name: string; weight: number }>;
@@ -31,9 +32,31 @@ const EVENT_TYPE_MAP: Record<number, string> = {
 };
 
 const MAX_ID_LENGTH = 128;
+const MAX_EVENT_ID_LENGTH = 128;
 const MAX_ARTWORK_URL_LENGTH = 1000;
 const MAX_ARTWORK_COLOR_LENGTH = 16;
 const MAX_METADATA_TEXT_LENGTH = 4096;
+const MAX_DURATION_SECONDS = 86_400;
+const MAX_ANALYTICS_SONG_IDS = 1_000;
+
+type AggregateCount = bigint | number;
+
+type ListeningAnalyticsSummaryRow = {
+  plays: AggregateCount;
+  completions: AggregateCount;
+  skips: AggregateCount;
+  listeners: AggregateCount;
+};
+
+type ListeningAnalyticsTrendRow = ListeningAnalyticsSummaryRow & {
+  date: string;
+};
+
+type ListeningAnalyticsTopSongRow = ListeningAnalyticsSummaryRow & {
+  songId: string;
+  title: string;
+  artistName: string;
+};
 
 function normalizeText(value: string | undefined, maxLength: number): string {
   return value?.trim().slice(0, maxLength) ?? '';
@@ -45,6 +68,48 @@ function normalizeOptionalValue(
 ): string {
   const normalized = value?.trim() ?? '';
   return normalized.length <= maxLength ? normalized : '';
+}
+
+function isValidDuration(value: number): boolean {
+  return (
+    Number.isSafeInteger(value) && value >= 0 && value <= MAX_DURATION_SECONDS
+  );
+}
+
+function normalizeAnalyticsSongIds(songIds: readonly string[]): string[] {
+  const normalizedIds = new Set<string>();
+
+  for (const songId of songIds) {
+    const normalized = songId.trim();
+    if (!normalized || normalized.length > MAX_ID_LENGTH) continue;
+
+    normalizedIds.add(normalized);
+    if (normalizedIds.size === MAX_ANALYTICS_SONG_IDS) break;
+  }
+
+  return [...normalizedIds];
+}
+
+function toCount(value: AggregateCount): number {
+  return Number(value);
+}
+
+function isListeningEventIdempotencyConflict(error: unknown): boolean {
+  if (
+    !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+    error.code !== 'P2002'
+  ) {
+    return false;
+  }
+
+  const target = error.meta?.target;
+  return (
+    (Array.isArray(target) &&
+      target.length === 2 &&
+      target.includes('userId') &&
+      target.includes('eventId')) ||
+    target === 'listening_events_userId_eventId_key'
+  );
 }
 
 @Injectable()
@@ -114,25 +179,59 @@ export class ListeningService {
   ): Promise<RecordListeningEventResponse> {
     const userId = request.userId?.trim() ?? '';
     const songId = request.songId?.trim() ?? '';
+    const eventId = request.eventId?.trim() ?? '';
     if (
       !userId ||
       !songId ||
       userId.length > MAX_ID_LENGTH ||
       songId.length > MAX_ID_LENGTH
     ) {
-      this.logger.warn('Ignoring listening event with an invalid user or song ID');
+      this.logger.warn(
+        'Ignoring listening event with an invalid user or song ID',
+      );
+      return { success: false };
+    }
+    if (eventId.length > MAX_EVENT_ID_LENGTH) {
+      this.logger.warn('Ignoring listening event with an oversized event ID');
       return { success: false };
     }
 
-    const eventType = EVENT_TYPE_MAP[request.eventType] ?? 'PLAY_START';
-    const songTitle = normalizeText(request.songTitle, MAX_METADATA_TEXT_LENGTH);
+    const eventType = EVENT_TYPE_MAP[request.eventType];
+    const durationSec = request.durationSec ?? 0;
+    const totalSec = request.totalSec ?? 0;
+    if (
+      !eventType ||
+      !isValidDuration(durationSec) ||
+      !isValidDuration(totalSec)
+    ) {
+      this.logger.warn(
+        'Ignoring listening event with an invalid type or duration',
+      );
+      return { success: false };
+    }
+    if (totalSec > 0 && durationSec > totalSec) {
+      this.logger.warn(
+        'Ignoring listening event with duration above total duration',
+      );
+      return { success: false };
+    }
+    const songTitle = normalizeText(
+      request.songTitle,
+      MAX_METADATA_TEXT_LENGTH,
+    );
     const artistName = normalizeText(
       request.artistName,
       MAX_METADATA_TEXT_LENGTH,
     );
-    const albumName = normalizeText(request.albumName, MAX_METADATA_TEXT_LENGTH);
+    const albumName = normalizeText(
+      request.albumName,
+      MAX_METADATA_TEXT_LENGTH,
+    );
     const albumId = normalizeOptionalValue(request.albumId, MAX_ID_LENGTH);
-    const playlistId = normalizeOptionalValue(request.playlistId, MAX_ID_LENGTH);
+    const playlistId = normalizeOptionalValue(
+      request.playlistId,
+      MAX_ID_LENGTH,
+    );
     const playlistName = normalizeText(
       request.playlistName,
       MAX_METADATA_TEXT_LENGTH,
@@ -164,93 +263,90 @@ export class ListeningService {
     );
 
     try {
-      await this.prisma.listeningEvent.create({
-        data: {
-          userId,
-          songId,
-          eventType,
-          durationSec: request.durationSec || 0,
-          totalSec: request.totalSec || 0,
-          songTitle,
-          artistName,
-          albumName,
-          albumId,
-          playlistId,
-          playlistName,
-          playlistCuratorName,
-          playlistArtworkUrl,
-          playlistArtworkBgColor,
-          stationId,
-          stationName,
-          stationArtworkUrl,
-          stationArtworkBgColor,
-        },
-      });
+      const isPlayStart = eventType === 'PLAY_START';
+      const isComplete = eventType === 'PLAY_COMPLETE';
+      const isSkip = eventType === 'SKIP';
+      const context = isPlayStart
+        ? this.resolveRecentlyPlayedContext({
+            stationId,
+            playlistId,
+            albumId,
+          })
+        : null;
 
-      const isPlayStart =
-        request.eventType ===
-        ListeningEventType.LISTENING_EVENT_TYPE_PLAY_START;
-      const isComplete =
-        request.eventType ===
-        ListeningEventType.LISTENING_EVENT_TYPE_PLAY_COMPLETE;
-      const isSkip =
-        request.eventType === ListeningEventType.LISTENING_EVENT_TYPE_SKIP;
+      await this.prisma.$transaction(async (tx) => {
+        await tx.listeningEvent.create({
+          data: {
+            userId,
+            songId,
+            eventId: eventId || null,
+            eventType,
+            durationSec,
+            totalSec,
+            songTitle,
+            artistName,
+            albumName,
+            albumId,
+            playlistId,
+            playlistName,
+            playlistCuratorName,
+            playlistArtworkUrl,
+            playlistArtworkBgColor,
+            stationId,
+            stationName,
+            stationArtworkUrl,
+            stationArtworkBgColor,
+          },
+        });
 
-      await this.prisma.userListeningStats.upsert({
-        where: { userId_songId: { userId, songId } },
-        create: {
-          userId,
-          songId,
-          playCount: isPlayStart ? 1 : 0,
-          completionCount: isComplete ? 1 : 0,
-          skipCount: isSkip ? 1 : 0,
-          totalListenSec: request.durationSec || 0,
-          lastPlayedAt: new Date(),
-          songTitle,
-          artistName,
-          albumName,
-          albumId,
-          playlistId,
-          playlistName,
-          playlistCuratorName,
-          playlistArtworkUrl,
-          playlistArtworkBgColor,
-          stationId,
-          stationName,
-          stationArtworkUrl,
-          stationArtworkBgColor,
-        },
-        update: {
-          ...(isPlayStart && { playCount: { increment: 1 } }),
-          ...(isComplete && { completionCount: { increment: 1 } }),
-          ...(isSkip && { skipCount: { increment: 1 } }),
-          totalListenSec: { increment: request.durationSec || 0 },
-          lastPlayedAt: new Date(),
-          songTitle,
-          artistName,
-          albumName,
-          ...(albumId && { albumId }),
-          playlistId,
-          playlistName,
-          playlistCuratorName,
-          playlistArtworkUrl,
-          playlistArtworkBgColor,
-          stationId,
-          stationName,
-          stationArtworkUrl,
-          stationArtworkBgColor,
-        },
-      });
-
-      if (isPlayStart) {
-        const context = this.resolveRecentlyPlayedContext({
-          stationId,
-          playlistId,
-          albumId,
+        await tx.userListeningStats.upsert({
+          where: { userId_songId: { userId, songId } },
+          create: {
+            userId,
+            songId,
+            playCount: isPlayStart ? 1 : 0,
+            completionCount: isComplete ? 1 : 0,
+            skipCount: isSkip ? 1 : 0,
+            totalListenSec: durationSec,
+            lastPlayedAt: new Date(),
+            songTitle,
+            artistName,
+            albumName,
+            albumId,
+            playlistId,
+            playlistName,
+            playlistCuratorName,
+            playlistArtworkUrl,
+            playlistArtworkBgColor,
+            stationId,
+            stationName,
+            stationArtworkUrl,
+            stationArtworkBgColor,
+          },
+          update: {
+            ...(isPlayStart && { playCount: { increment: 1 } }),
+            ...(isComplete && { completionCount: { increment: 1 } }),
+            ...(isSkip && { skipCount: { increment: 1 } }),
+            totalListenSec: { increment: durationSec },
+            lastPlayedAt: new Date(),
+            songTitle,
+            artistName,
+            albumName,
+            ...(albumId && { albumId }),
+            playlistId,
+            playlistName,
+            playlistCuratorName,
+            playlistArtworkUrl,
+            playlistArtworkBgColor,
+            stationId,
+            stationName,
+            stationArtworkUrl,
+            stationArtworkBgColor,
+          },
         });
 
         if (context) {
-          await this.prisma.userRecentlyPlayedContext.upsert({
+          await tx.userRecentlyPlayedContext.upsert({
             where: {
               userId_resourceType_resourceId: {
                 userId,
@@ -268,13 +364,24 @@ export class ListeningService {
               lastPlayedAt: new Date(),
             },
           });
-
-          await this.trimRecentlyPlayedContexts(userId);
         }
+      });
+
+      if (context) {
+        await this.trimRecentlyPlayedContexts(userId).catch((trimError) => {
+          this.logger.warn(
+            `Unable to trim recently played contexts: ${trimError instanceof Error ? trimError.message : String(trimError)}`,
+          );
+        });
       }
 
       return { success: true };
     } catch (error) {
+      // The event insert occurs before aggregates in the same transaction. A
+      // duplicate key therefore rolls back before any counter can be changed.
+      if (eventId && isListeningEventIdempotencyConflict(error)) {
+        return { success: true };
+      }
       this.logger.error('Failed to record listening event', error);
       return { success: false };
     }
@@ -514,100 +621,102 @@ export class ListeningService {
   ): Promise<ListeningAnalyticsResponse> {
     const days = Math.min(90, Math.max(1, request.days || 28));
     const since = new Date(Date.now() - days * 86_400_000);
-    const songIds = request.songIds.filter(Boolean);
-    const events = await this.prisma.listeningEvent.findMany({
-      where: {
-        createdAt: { gte: since },
-        ...(songIds.length ? { songId: { in: songIds } } : {}),
-      },
-      select: {
-        userId: true,
-        songId: true,
-        songTitle: true,
-        artistName: true,
-        eventType: true,
-        createdAt: true,
-      },
-    });
-    const trend = new Map<
-      string,
-      {
-        plays: number;
-        completions: number;
-        skips: number;
-        listeners: Set<string>;
-      }
-    >();
-    const top = new Map<
-      string,
-      {
-        title: string;
-        artistName: string;
-        plays: number;
-        completions: number;
-        skips: number;
-        listeners: Set<string>;
-      }
-    >();
-    const listeners = new Set<string>();
-    let plays = 0;
-    let completions = 0;
-    let skips = 0;
-    for (const event of events) {
-      const day = event.createdAt.toISOString().slice(0, 10);
-      const point = trend.get(day) ?? {
-        plays: 0,
-        completions: 0,
-        skips: 0,
-        listeners: new Set<string>(),
-      };
-      const song = top.get(event.songId) ?? {
-        title: event.songTitle,
-        artistName: event.artistName,
-        plays: 0,
-        completions: 0,
-        skips: 0,
-        listeners: new Set<string>(),
-      };
-      listeners.add(event.userId);
-      point.listeners.add(event.userId);
-      song.listeners.add(event.userId);
-      if (event.eventType === 'PLAY_START') {
-        plays++;
-        point.plays++;
-        song.plays++;
-      }
-      if (event.eventType === 'PLAY_COMPLETE') {
-        completions++;
-        point.completions++;
-        song.completions++;
-      }
-      if (event.eventType === 'SKIP') {
-        skips++;
-        point.skips++;
-        song.skips++;
-      }
-      trend.set(day, point);
-      top.set(event.songId, song);
-    }
+    const songIds = normalizeAnalyticsSongIds(request.songIds);
+    const songIdFilter = songIds.length
+      ? Prisma.sql`AND "songId" IN (${Prisma.join(songIds)})`
+      : Prisma.empty;
+
+    // Keep the three response dimensions in the database: each query returns
+    // at most one row, 90 daily rows, or ten songs. `AT TIME ZONE 'UTC'`
+    // matches the previous `Date#toISOString()` day bucketing exactly.
+    const [summaryRows, trendRows, topSongRows] = await Promise.all([
+      this.prisma.$queryRaw<ListeningAnalyticsSummaryRow[]>`
+        SELECT
+          COUNT(*) FILTER (WHERE "eventType" = 'PLAY_START') AS "plays",
+          COUNT(*) FILTER (WHERE "eventType" = 'PLAY_COMPLETE') AS "completions",
+          COUNT(*) FILTER (WHERE "eventType" = 'SKIP') AS "skips",
+          COUNT(DISTINCT "userId") AS "listeners"
+        FROM listening_events
+        WHERE "createdAt" >= ${since}
+        ${songIdFilter}
+      `,
+      this.prisma.$queryRaw<ListeningAnalyticsTrendRow[]>`
+        SELECT
+          TO_CHAR("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS "date",
+          COUNT(*) FILTER (WHERE "eventType" = 'PLAY_START') AS "plays",
+          COUNT(*) FILTER (WHERE "eventType" = 'PLAY_COMPLETE') AS "completions",
+          COUNT(*) FILTER (WHERE "eventType" = 'SKIP') AS "skips",
+          COUNT(DISTINCT "userId") AS "listeners"
+        FROM listening_events
+        WHERE "createdAt" >= ${since}
+        ${songIdFilter}
+        GROUP BY 1
+        ORDER BY 1 ASC
+      `,
+      this.prisma.$queryRaw<ListeningAnalyticsTopSongRow[]>`
+        WITH top_songs AS (
+          SELECT
+            "songId",
+            COUNT(*) FILTER (WHERE "eventType" = 'PLAY_START') AS "plays",
+            COUNT(*) FILTER (WHERE "eventType" = 'PLAY_COMPLETE') AS "completions",
+            COUNT(*) FILTER (WHERE "eventType" = 'SKIP') AS "skips",
+            COUNT(DISTINCT "userId") AS "listeners"
+          FROM listening_events
+          WHERE "createdAt" >= ${since}
+          ${songIdFilter}
+          GROUP BY "songId"
+          ORDER BY "plays" DESC, "songId" ASC
+          LIMIT 10
+        )
+        SELECT
+          top_songs."songId",
+          metadata."songTitle" AS "title",
+          metadata."artistName" AS "artistName",
+          top_songs."plays",
+          top_songs."completions",
+          top_songs."skips",
+          top_songs."listeners"
+        FROM top_songs
+        JOIN LATERAL (
+          SELECT "songTitle", "artistName"
+          FROM listening_events
+          WHERE "songId" = top_songs."songId"
+            AND "createdAt" >= ${since}
+          ORDER BY "createdAt" ASC, "id" ASC
+          LIMIT 1
+        ) AS metadata ON TRUE
+        ORDER BY top_songs."plays" DESC, top_songs."songId" ASC
+      `,
+    ]);
+
+    const summary = summaryRows[0] ?? {
+      plays: 0,
+      completions: 0,
+      skips: 0,
+      listeners: 0,
+    };
+
     return {
-      plays,
-      completions,
-      skips,
-      listeners: listeners.size,
-      trend: [...trend.entries()]
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([date, p]) => ({
-          date,
-          plays: p.plays,
-          completions: p.completions,
-          skips: p.skips,
-          listeners: p.listeners.size,
-        })),
-      topSongs: [...top.entries()]
-        .map(([songId, s]) => ({ songId, ...s, listeners: s.listeners.size }))
-        .sort((a, b) => b.plays - a.plays)
-        .slice(0, 10),
+      plays: toCount(summary.plays),
+      completions: toCount(summary.completions),
+      skips: toCount(summary.skips),
+      listeners: toCount(summary.listeners),
+      trend: trendRows.map((row) => ({
+        date: row.date,
+        plays: toCount(row.plays),
+        completions: toCount(row.completions),
+        skips: toCount(row.skips),
+        listeners: toCount(row.listeners),
+      })),
+      topSongs: topSongRows.map((row) => ({
+        songId: row.songId,
+        title: row.title,
+        artistName: row.artistName,
+        plays: toCount(row.plays),
+        completions: toCount(row.completions),
+        skips: toCount(row.skips),
+        listeners: toCount(row.listeners),
+      })),
     };
   }
 }

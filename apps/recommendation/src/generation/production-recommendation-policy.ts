@@ -121,11 +121,3 @@ export const PRODUCTION_RECOMMENDATION_POLICY = {
     },
   ],
 } as const;
-
-export type RecommendationReason =
-  | 'artist-affinity'
-  | 'genre-affinity'
-  | 'fresh-release'
-  | 'collaborative-signal'
-  | 'popular-with-your-taste'
-  | 'discovery';

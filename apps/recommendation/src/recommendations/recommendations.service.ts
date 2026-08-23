@@ -38,6 +38,10 @@ import { RecommendationCatalogService } from './recommendation-catalog.service';
 import { ListeningService, TasteProfile } from '../listening/listening.service';
 import { randomUUID } from 'node:crypto';
 import { PRODUCTION_RECOMMENDATION_MODEL_VERSION } from '../generation/production-recommendation-policy';
+import {
+  GENERATION_LEASE_LOST_MESSAGE,
+  type GenerationLease,
+} from '../generation/generation-lease.types';
 
 const SUPPORTED_RESOURCE_TYPES = new Set([
   'albums',
@@ -169,6 +173,40 @@ type UserSongSignal = {
   skipCount: number;
   lastPlayedAt: Date;
 };
+
+type AggregateCount = bigint | number;
+
+type RecommendationQualityRow = {
+  sectionId: string;
+  modelVersion: number;
+  impressions: AggregateCount;
+  opens: AggregateCount;
+  plays: AggregateCount;
+  dismisses: AggregateCount;
+  users: AggregateCount;
+};
+
+type RecommendationQualitySummaryRow = Omit<
+  RecommendationQualityRow,
+  'sectionId' | 'modelVersion'
+>;
+
+type RecentPlaylistEvent = {
+  playlistId: string;
+  playlistName: string;
+  playlistCuratorName: string;
+  playlistArtworkUrl: string;
+  playlistArtworkBgColor: string;
+};
+
+type GenerationWriteOptions = {
+  lease?: GenerationLease;
+  staleAfter?: Date;
+};
+
+function aggregateCountToNumber(value: AggregateCount): number {
+  return Number(value);
+}
 
 @Injectable()
 export class RecommendationsService {
@@ -305,109 +343,75 @@ export class RecommendationsService {
       configuredBaseline && configuredBaseline > rollingWindowStart
         ? configuredBaseline
         : rollingWindowStart;
-    // Recently Played reflects explicit listener history, not a ranked model
-    // decision. Including it would dilute quality metrics for model versions.
-    const where = {
-      occurredAt: { gte: since },
-      sectionId: { not: 'user-recently-played' },
-    };
-
-    const [eventCounts, sectionUsers, summaryUsers] = await Promise.all([
-      this.prisma.recommendationInteraction.groupBy({
-        by: ['sectionId', 'modelVersion', 'eventType'],
-        where,
-        _count: { _all: true },
-      }),
-      this.prisma.recommendationInteraction.groupBy({
-        by: ['sectionId', 'modelVersion', 'userId'],
-        where,
-      }),
-      this.prisma.recommendationInteraction.findMany({
-        where,
-        distinct: ['userId'],
-        select: { userId: true },
-      }),
+    // Keep quality aggregation in PostgreSQL. The former Prisma groupBy and
+    // distinct calls materialized every section/user combination and every
+    // user in Node, even though this endpoint returns at most 100 sections.
+    const [summaryRows, sectionRows] = await Promise.all([
+      this.prisma.$queryRaw<RecommendationQualitySummaryRow[]>`
+        SELECT
+          COUNT(*) FILTER (WHERE "eventType" = 'IMPRESSION') AS "impressions",
+          COUNT(*) FILTER (WHERE "eventType" = 'OPEN') AS "opens",
+          COUNT(*) FILTER (WHERE "eventType" = 'PLAY') AS "plays",
+          COUNT(*) FILTER (WHERE "eventType" = 'DISMISS') AS "dismisses",
+          COUNT(DISTINCT "userId") AS "users"
+        FROM "recommendation_interactions"
+        WHERE "occurredAt" >= ${since}
+          AND "sectionId" <> 'user-recently-played'
+      `,
+      this.prisma.$queryRaw<RecommendationQualityRow[]>`
+        SELECT
+          "sectionId",
+          "modelVersion",
+          COUNT(*) FILTER (WHERE "eventType" = 'IMPRESSION') AS "impressions",
+          COUNT(*) FILTER (WHERE "eventType" = 'OPEN') AS "opens",
+          COUNT(*) FILTER (WHERE "eventType" = 'PLAY') AS "plays",
+          COUNT(*) FILTER (WHERE "eventType" = 'DISMISS') AS "dismisses",
+          COUNT(DISTINCT "userId") AS "users"
+        FROM "recommendation_interactions"
+        WHERE "occurredAt" >= ${since}
+          AND "sectionId" <> 'user-recently-played'
+        GROUP BY "sectionId", "modelVersion"
+        ORDER BY "impressions" DESC, "sectionId" ASC, "modelVersion" ASC
+        LIMIT ${limit}
+      `,
     ]);
 
-    type Bucket = {
-      sectionId: string;
-      modelVersion: number;
-      impressions: number;
-      opens: number;
-      plays: number;
-      dismisses: number;
-      users: number;
-    };
-    const buckets = new Map<string, Bucket>();
-    const keyFor = (sectionId: string, modelVersion: number) =>
-      `${sectionId}:${modelVersion}`;
+    const toMetric = (row: RecommendationQualityRow) => {
+      const impressions = aggregateCountToNumber(row.impressions);
+      const opens = aggregateCountToNumber(row.opens);
+      const plays = aggregateCountToNumber(row.plays);
+      const dismisses = aggregateCountToNumber(row.dismisses);
 
-    for (const row of eventCounts) {
-      const key = keyFor(row.sectionId, row.modelVersion);
-      const bucket = buckets.get(key) ?? {
+      return {
         sectionId: row.sectionId,
         modelVersion: row.modelVersion,
-        impressions: 0,
-        opens: 0,
-        plays: 0,
-        dismisses: 0,
-        users: 0,
+        impressions,
+        opens,
+        plays,
+        dismisses,
+        users: aggregateCountToNumber(row.users),
+        openRate: impressions ? opens / impressions : 0,
+        playRate: impressions ? plays / impressions : 0,
+        dismissRate: impressions ? dismisses / impressions : 0,
       };
-      if (row.eventType === PrismaInteractionType.IMPRESSION) {
-        bucket.impressions += row._count._all;
-      } else if (row.eventType === PrismaInteractionType.OPEN) {
-        bucket.opens += row._count._all;
-      } else if (row.eventType === PrismaInteractionType.PLAY) {
-        bucket.plays += row._count._all;
-      } else if (row.eventType === PrismaInteractionType.DISMISS) {
-        bucket.dismisses += row._count._all;
-      }
-      buckets.set(key, bucket);
-    }
+    };
 
-    for (const row of sectionUsers) {
-      const bucket = buckets.get(keyFor(row.sectionId, row.modelVersion));
-      if (bucket) bucket.users += 1;
-    }
-
-    const toMetric = (bucket: Bucket) => ({
-      ...bucket,
-      openRate: bucket.impressions ? bucket.opens / bucket.impressions : 0,
-      playRate: bucket.impressions ? bucket.plays / bucket.impressions : 0,
-      dismissRate: bucket.impressions
-        ? bucket.dismisses / bucket.impressions
-        : 0,
+    const summary = summaryRows[0] ?? {
+      impressions: 0,
+      opens: 0,
+      plays: 0,
+      dismisses: 0,
+      users: 0,
+    };
+    const total = toMetric({
+      sectionId: 'all',
+      modelVersion: 0,
+      ...summary,
     });
-    const sections = [...buckets.values()]
-      .sort(
-        (left, right) =>
-          right.impressions - left.impressions ||
-          left.sectionId.localeCompare(right.sectionId),
-      )
-      .slice(0, limit)
-      .map(toMetric);
-    const total = [...buckets.values()].reduce<Bucket>(
-      (current, bucket) => ({
-        ...current,
-        impressions: current.impressions + bucket.impressions,
-        opens: current.opens + bucket.opens,
-        plays: current.plays + bucket.plays,
-        dismisses: current.dismisses + bucket.dismisses,
-      }),
-      {
-        sectionId: 'all',
-        modelVersion: 0,
-        impressions: 0,
-        opens: 0,
-        plays: 0,
-        dismisses: 0,
-        users: summaryUsers.length,
-      },
-    );
 
     return {
-      summary: toMetric(total),
-      sections,
+      summary: total,
+      sections: sectionRows.map(toMetric),
       activeModelVersion: PRODUCTION_RECOMMENDATION_MODEL_VERSION,
       windowStartAt: since.toISOString(),
       baselineApplied: Boolean(
@@ -788,6 +792,7 @@ export class RecommendationsService {
 
   async replaceHomeRecommendations(
     request: ReplaceHomeRecommendationsRequest,
+    options: GenerationWriteOptions = {},
   ): Promise<GetHomeRecommendationsResponse> {
     const normalizedRequest = this.normalizeReplacementRequest(request);
     this.validateReplacement(normalizedRequest);
@@ -813,13 +818,14 @@ export class RecommendationsService {
 
     if (hydratedRequest.resources.length > 0) {
       await this.executePersistence(() =>
-        this.prisma.$transaction((tx) =>
-          this.upsertResourceSnapshots(
+        this.prisma.$transaction(async (tx) => {
+          await this.assertGenerationLease(tx, options.lease);
+          await this.upsertResourceSnapshots(
             tx,
             hydratedRequest.resources,
             preserveImportedRaw,
-          ),
-        ),
+          );
+        }),
       );
     }
 
@@ -833,6 +839,7 @@ export class RecommendationsService {
               hashtextextended(${pageLockKey}, 0)
             )::text AS "lock"
           `;
+          await this.assertGenerationLease(tx, options.lease);
 
           const page = await tx.recommendationPage.upsert({
             where: {
@@ -995,6 +1002,7 @@ export class RecommendationsService {
 
   async publishRecommendationPage(
     request: PublishRecommendationPageRequest,
+    options: GenerationWriteOptions = {},
   ): Promise<GetHomeRecommendationsResponse> {
     const name = request.name || 'listen-now';
     const locale = request.locale || 'en-GB';
@@ -1020,6 +1028,7 @@ export class RecommendationsService {
             hashtextextended(${pageLockKey}, 0)
           )::text AS "lock"
         `;
+        await this.assertGenerationLease(tx, options.lease);
 
         const draft = await tx.recommendationPage.findUnique({
           where: {
@@ -1064,6 +1073,7 @@ export class RecommendationsService {
           data: {
             status: PrismaPageStatus.PUBLISHED,
             publishedAt: new Date(),
+            staleAfter: options.staleAfter,
             updatedBy: request.actorUserId,
           },
           select: { id: true },
@@ -1479,21 +1489,22 @@ export class RecommendationsService {
       .map((context) => context.resourceId);
     const [playlistEvents, currentPlaylists] = userPlaylistIds.length
       ? await Promise.all([
-          this.prisma.listeningEvent.findMany({
-            where: {
-              userId,
-              eventType: 'PLAY_START',
-              playlistId: { in: userPlaylistIds },
-            },
-            orderBy: { createdAt: 'desc' },
-            select: {
-              playlistId: true,
-              playlistName: true,
-              playlistCuratorName: true,
-              playlistArtworkUrl: true,
-              playlistArtworkBgColor: true,
-            },
-          }),
+          // One row per playlist is all this shelf needs. Querying every
+          // matching listening event made this Home request grow with a
+          // user's entire playback history.
+          this.prisma.$queryRaw<RecentPlaylistEvent[]>`
+            SELECT DISTINCT ON ("playlistId")
+              "playlistId",
+              "playlistName",
+              "playlistCuratorName",
+              "playlistArtworkUrl",
+              "playlistArtworkBgColor"
+            FROM "listening_events"
+            WHERE "userId" = ${userId}
+              AND "eventType" = 'PLAY_START'
+              AND "playlistId" IN (${Prisma.join(userPlaylistIds)})
+            ORDER BY "playlistId" ASC, "createdAt" DESC, "id" DESC
+          `,
           Promise.all(
             userPlaylistIds.map((playlistId) =>
               this.catalogService.getUserPlaylist(playlistId, userId),
@@ -1501,10 +1512,7 @@ export class RecommendationsService {
           ),
         ])
       : [[], []];
-    const playlistEventById = new Map<
-      string,
-      (typeof playlistEvents)[number]
-    >();
+    const playlistEventById = new Map<string, RecentPlaylistEvent>();
     for (const event of playlistEvents) {
       if (!playlistEventById.has(event.playlistId)) {
         playlistEventById.set(event.playlistId, event);
@@ -3423,6 +3431,31 @@ export class RecommendationsService {
       (ref.type === 'playlists' && SYSTEM_DAILY_MIX_ID_PATTERN.test(ref.id)) ||
       (ref.type === 'stations' && SYSTEM_STATION_ID_PATTERN.test(ref.id))
     );
+  }
+
+  private async assertGenerationLease(
+    tx: Prisma.TransactionClient,
+    lease: GenerationLease | undefined,
+  ): Promise<void> {
+    if (!lease) return;
+
+    // Lock the lease row in the same transaction as the page write. A token
+    // that expired and was reclaimed by another pod cannot delete/replace or
+    // publish that pod's page, even if the stale generator resumes late.
+    const rows = await tx.$queryRaw<Array<{ leaseKey: string }>>`
+      SELECT "leaseKey"
+      FROM "recommendation_generation_leases"
+      WHERE "leaseKey" = ${lease.leaseKey}
+        AND "leaseToken" = ${lease.leaseToken}
+        AND "expiresAt" > clock_timestamp()
+      FOR UPDATE
+    `;
+    if (rows.length > 0) return;
+
+    throw new RpcException({
+      code: status.ABORTED,
+      message: GENERATION_LEASE_LOST_MESSAGE,
+    });
   }
 
   private async executePersistence<T>(operation: () => Promise<T>): Promise<T> {

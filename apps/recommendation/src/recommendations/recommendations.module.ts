@@ -19,6 +19,7 @@ import { RecommendationEngineService } from '../generation/recommendation-engine
 import { RecommendationRpcMetricsService } from '../common/observability/recommendation-rpc-metrics.service';
 import { RecommendationRpcMetricsInterceptor } from '../common/observability/recommendation-rpc-metrics.interceptor';
 import { SystemStationArtworkService } from './system-station-artwork.service';
+import { GenerationLeaseService } from '../generation/generation-lease.service';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { SystemStationArtworkService } from './system-station-artwork.service';
     RecommendationCatalogService,
     CatalogSynchronizationService,
     GenerationService,
+    GenerationLeaseService,
     RecommendationEngineService,
     RecommendationRpcMetricsService,
     RecommendationRpcMetricsInterceptor,
