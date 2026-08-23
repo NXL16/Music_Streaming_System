@@ -18,17 +18,17 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 
 func (r *PostgresRepository) CreateWalletTx(ctx context.Context, tx *sql.Tx, w *domain.Wallet) (string, error) {
 	query := `
-		INSERT INTO wallets (user_id, coin_balance, frozen_balance, currency_type, status, version, signature, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+		INSERT INTO wallets (id, user_id, coin_balance, frozen_balance, currency_type, status, version, signature, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
 		ON CONFLICT (user_id) DO NOTHING
 		RETURNING id`
 
 	var insertedID string
 	var err error
 	if tx != nil {
-		err = tx.QueryRowContext(ctx, query, w.UserID, w.CoinBalance, w.FrozenBalance, w.CurrencyType, w.Status, w.Version, w.Signature).Scan(&insertedID)
+		err = tx.QueryRowContext(ctx, query, w.ID, w.UserID, w.CoinBalance, w.FrozenBalance, w.CurrencyType, w.Status, w.Version, w.Signature).Scan(&insertedID)
 	} else {
-		err = r.db.QueryRowContext(ctx, query, w.UserID, w.CoinBalance, w.FrozenBalance, w.CurrencyType, w.Status, w.Version, w.Signature).Scan(&insertedID)
+		err = r.db.QueryRowContext(ctx, query, w.ID, w.UserID, w.CoinBalance, w.FrozenBalance, w.CurrencyType, w.Status, w.Version, w.Signature).Scan(&insertedID)
 	}
 
 	if err != nil {
@@ -156,29 +156,29 @@ func (r *PostgresRepository) CreateDepositOrderTx(ctx context.Context, tx *sql.T
 	return nil
 }
 
-func (r *PostgresRepository) GetDepositOrderByCodeTx(ctx context.Context, tx *sql.Tx, orderCode string) (*domain.BankPaymentOrder, error) {
+// GetDepositOrderByCodeForUpdateTx serializes callbacks for the same order.
+// A callback must hold this lock until its status update, wallet credit, and
+// ledger entry are committed together.
+func (r *PostgresRepository) GetDepositOrderByCodeForUpdateTx(ctx context.Context, tx *sql.Tx, orderCode string) (*domain.BankPaymentOrder, error) {
+	if tx == nil {
+		return nil, errors.New("transaction is required to lock a payment order")
+	}
+
 	query := `
 		SELECT id, user_id, wallet_id, order_code, amount_vnd, coin_amount, bank_account_number, bank_tx_reference, status, callback_logs, created_at, updated_at
 		FROM bank_payment_orders
-		WHERE order_code = $1 LIMIT 1`
+		WHERE order_code = $1
+		FOR UPDATE`
 
 	var order domain.BankPaymentOrder
-	var err error
-	if tx != nil {
-		err = tx.QueryRowContext(ctx, query, orderCode).Scan(
-			&order.ID, &order.UserID, &order.WalletID, &order.OrderCode, &order.AmountVnd, &order.CoinAmount,
-			&order.BankAccountNumber, &order.BankTxReference, &order.Status, &order.CallbackLogs, &order.CreatedAt, &order.UpdatedAt,
-		)
-	} else {
-		err = r.db.QueryRowContext(ctx, query, orderCode).Scan(
-			&order.ID, &order.UserID, &order.WalletID, &order.OrderCode, &order.AmountVnd, &order.CoinAmount,
-			&order.BankAccountNumber, &order.BankTxReference, &order.Status, &order.CallbackLogs, &order.CreatedAt, &order.UpdatedAt,
-		)
-	}
-
+	err := tx.QueryRowContext(ctx, query, orderCode).Scan(
+		&order.ID, &order.UserID, &order.WalletID, &order.OrderCode, &order.AmountVnd, &order.CoinAmount,
+		&order.BankAccountNumber, &order.BankTxReference, &order.Status, &order.CallbackLogs, &order.CreatedAt, &order.UpdatedAt,
+	)
 	if err != nil {
 		return nil, err
 	}
+
 	return &order, nil
 }
 

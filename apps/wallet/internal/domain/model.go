@@ -60,13 +60,3 @@ type BankPaymentOrder struct {
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
-
-// CoinRate đại diện cho bảng coin_rates (Tỷ giá quy đổi coin)
-type CoinRate struct {
-	ID          int32     `json:"id"`
-	AmountVnd   int64     `json:"amount_vnd"`
-	CoinAmount  int64     `json:"coin_amount"`
-	IsActive    bool      `json:"is_active"`
-	EffectiveAt time.Time `json:"effective_at"`
-	CreatedAt   time.Time `json:"created_at"`
-}

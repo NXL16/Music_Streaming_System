@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math"
 	"net/http"
 	"time"
 
@@ -26,6 +29,17 @@ type WalletService struct {
 	cfg        *config.Config
 	httpClient *http.Client
 }
+
+var (
+	ErrActiveCoinRateNotFound = errors.New("no active coin exchange rate is available")
+	ErrInvalidActiveCoinRate  = errors.New("active coin exchange rate is invalid")
+	ErrWebhookAmountMismatch  = errors.New("webhook amount does not match payment order")
+	ErrWalletBalanceOverflow  = errors.New("wallet balance credit overflows int64")
+	ErrWalletVersionOverflow  = errors.New("wallet version increment overflows int64")
+	ErrIdempotencyKeyConflict = errors.New("idempotency key conflicts with a different debit request")
+)
+
+const maxGatewayResponseBytes int64 = 64 * 1024
 
 // NewWalletService khởi tạo Service với đầy đủ kết nối Repo, DB và Config
 func NewWalletService(repo domain.WalletRepository, db *sql.DB, cfg *config.Config) *WalletService {
@@ -47,6 +61,10 @@ func (s *WalletService) CreateWallet(ctx context.Context, req *walletpb.CreateWa
 	if req.UserId == "" {
 		return nil, errors.New("user_id cannot be empty")
 	}
+	walletID, err := newWalletID()
+	if err != nil {
+		return nil, fmt.Errorf("generate wallet id: %w", err)
+	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -55,14 +73,15 @@ func (s *WalletService) CreateWallet(ctx context.Context, req *walletpb.CreateWa
 	defer tx.Rollback()
 
 	newWallet := &domain.Wallet{
+		ID:            walletID,
 		UserID:        req.UserId,
 		CoinBalance:   0,
 		FrozenBalance: 0,
 		CurrencyType:  "VND",
 		Status:        "ACTIVE",
 		Version:       1,
-		Signature:     "TEMPORARY_SIGNATURE",
 	}
+	newWallet.Signature = s.generateSignature(newWallet.ID, newWallet.UserID, newWallet.CoinBalance, newWallet.FrozenBalance, newWallet.Version, newWallet.CurrencyType, newWallet.Status)
 
 	realID, err := s.repo.CreateWalletTx(ctx, tx, newWallet)
 	if err != nil {
@@ -76,15 +95,6 @@ func (s *WalletService) CreateWallet(ctx context.Context, req *walletpb.CreateWa
 		}, nil
 	}
 
-	newWallet.ID = realID
-
-	finalSignature := s.generateSignature(newWallet.ID, newWallet.UserID, newWallet.CoinBalance, newWallet.FrozenBalance, newWallet.Version, newWallet.CurrencyType, newWallet.Status)
-
-	err = s.repo.UpdateBalanceTx(ctx, tx, newWallet.ID, newWallet.CoinBalance, newWallet.Version, finalSignature, newWallet.Version)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to update final signature: %w", err)
-	}
-
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("Failed to commit tx: %w", err)
 	}
@@ -93,6 +103,16 @@ func (s *WalletService) CreateWallet(ctx context.Context, req *walletpb.CreateWa
 		Status:  "SUCCESS",
 		Message: "Wallet created successfully with absolute secure signature",
 	}, nil
+}
+
+func newWalletID() (string, error) {
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return "", err
+	}
+	value[6] = (value[6] & 0x0f) | 0x40
+	value[8] = (value[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", value[:4], value[4:6], value[6:8], value[8:10], value[10:]), nil
 }
 
 // GetBalance: Lấy số dư ví của User và xác thực chữ ký dữ liệu
@@ -127,6 +147,9 @@ func (s *WalletService) GetBalance(ctx context.Context, req *walletpb.GetBalance
 
 // DebitWallet: Trừ tiền từ ví (Thanh toán nội bộ bằng Coin)
 func (s *WalletService) DebitWallet(ctx context.Context, req *walletpb.DebitWalletRequest) (*walletpb.DebitWalletResponse, error) {
+	if req.UserId == "" {
+		return nil, errors.New("user_id cannot be empty")
+	}
 	if req.Amount <= 0 {
 		return nil, errors.New("Amount must be greater than zero")
 	}
@@ -140,24 +163,36 @@ func (s *WalletService) DebitWallet(ctx context.Context, req *walletpb.DebitWall
 	}
 	defer tx.Rollback()
 
-	var existID string
-	var existTxType string
-	err = tx.QueryRowContext(ctx, "SELECT id, transaction_type FROM wallet_transactions WHERE idempotency_key = $1", req.IdempotencyKey).Scan(&existID, &existTxType)
-	if err == nil {
-		return &walletpb.DebitWalletResponse{
-			TransactionId: fmt.Sprintf("TX-%s-%s", existTxType, existID),
-			Status:        "SUCCESS",
-		}, nil
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("Failed to check idempotency key: %w", err)
-	}
-
 	wallet, err := s.repo.GetByUserIdForUpdateTx(ctx, tx, req.UserId)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errors.New("Wallet not found")
 		}
 		return nil, fmt.Errorf("Failed to get wallet: %w", err)
+	}
+
+	var existID, existingWalletID, existTxType, existingDescription string
+	var existingAmount int64
+	err = tx.QueryRowContext(
+		ctx,
+		`SELECT id, wallet_id, amount, transaction_type, COALESCE(description, '')
+		 FROM wallet_transactions
+		 WHERE idempotency_key = $1`,
+		req.IdempotencyKey,
+	).Scan(&existID, &existingWalletID, &existingAmount, &existTxType, &existingDescription)
+	if err == nil {
+		if existingWalletID != wallet.ID ||
+			existingAmount != req.Amount ||
+			existTxType != domain.TxTypeDebit ||
+			existingDescription != req.Description {
+			return nil, ErrIdempotencyKeyConflict
+		}
+		return &walletpb.DebitWalletResponse{
+			TransactionId: fmt.Sprintf("TX-%s-%s", existTxType, existID),
+			Status:        "SUCCESS",
+		}, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("Failed to check idempotency key: %w", err)
 	}
 
 	if !s.verifySignature(wallet) {
@@ -170,7 +205,10 @@ func (s *WalletService) DebitWallet(ctx context.Context, req *walletpb.DebitWall
 
 	balanceBefore := wallet.CoinBalance
 	balanceAfter := wallet.CoinBalance - req.Amount
-	newVersion := wallet.Version + 1
+	newVersion, err := nextWalletVersion(wallet.Version)
+	if err != nil {
+		return nil, err
+	}
 	newSignature := s.generateSignature(wallet.ID, wallet.UserID, balanceAfter, wallet.FrozenBalance, newVersion, wallet.CurrencyType, wallet.Status)
 
 	err = s.repo.UpdateBalanceTx(ctx, tx, wallet.ID, balanceAfter, newVersion, newSignature, wallet.Version)
@@ -226,6 +264,116 @@ func (s *WalletService) CreateDepositOrder(ctx context.Context, req *walletpb.De
 	}
 }
 
+// coinAmountForDeposit snapshots the currently active exchange rate before an
+// order is persisted. Orders retain that calculated coin amount, so a later
+// rate change cannot alter a payment that is already in progress.
+func (s *WalletService) coinAmountForDeposit(ctx context.Context, amountVnd int64) (int64, error) {
+	var rateVnd, rateCoin int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT amount_vnd, coin_amount
+		FROM coin_rates
+		WHERE is_active = true AND effective_at <= NOW()
+		ORDER BY effective_at DESC
+		LIMIT 1`).Scan(&rateVnd, &rateCoin)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrActiveCoinRateNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("fetch active exchange rate: %w", err)
+	}
+
+	coinAmount, err := calculateCoinAmount(amountVnd, rateVnd, rateCoin)
+	if err != nil {
+		return 0, err
+	}
+	return coinAmount, nil
+}
+
+func calculateCoinAmount(amountVnd, rateVnd, rateCoin int64) (int64, error) {
+	if rateVnd <= 0 || rateCoin <= 0 {
+		return 0, fmt.Errorf("%w: amount_vnd=%d, coin_amount=%d", ErrInvalidActiveCoinRate, rateVnd, rateCoin)
+	}
+	if amountVnd <= 0 {
+		return 0, errors.New("deposit amount must be greater than zero")
+	}
+	if amountVnd > math.MaxInt64/rateCoin {
+		return 0, fmt.Errorf("%w: conversion overflows int64", ErrInvalidActiveCoinRate)
+	}
+
+	coinAmount := amountVnd * rateCoin / rateVnd
+	if coinAmount <= 0 {
+		return 0, fmt.Errorf("%w: deposit amount does not convert to a positive coin amount", ErrInvalidActiveCoinRate)
+	}
+	return coinAmount, nil
+}
+
+func (s *WalletService) createPendingDepositOrder(ctx context.Context, req *walletpb.DepositOrderRequest, provider string) (*domain.BankPaymentOrder, error) {
+	wallet, err := s.repo.GetByUserIdTx(ctx, nil, req.UserId)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("wallet not found for this user")
+		}
+		return nil, fmt.Errorf("find wallet: %w", err)
+	}
+
+	coinAmount, err := s.coinAmountForDeposit(ctx, req.AmountVnd)
+	if err != nil {
+		return nil, err
+	}
+	orderCode, err := newPaymentOrderCode(provider)
+	if err != nil {
+		return nil, err
+	}
+
+	order := &domain.BankPaymentOrder{
+		UserID:            req.UserId,
+		WalletID:          wallet.ID,
+		OrderCode:         orderCode,
+		AmountVnd:         req.AmountVnd,
+		CoinAmount:        coinAmount,
+		BankAccountNumber: "",
+		BankTxReference:   "",
+		Status:            domain.OrderStatusPending,
+		CallbackLogs:      "",
+	}
+	if err := s.repo.CreateDepositOrderTx(ctx, nil, order); err != nil {
+		return nil, fmt.Errorf("save payment order: %w", err)
+	}
+
+	return order, nil
+}
+
+func newPaymentOrderCode(provider string) (string, error) {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", fmt.Errorf("generate payment order code: %w", err)
+	}
+	return fmt.Sprintf("%s-%s", provider, hex.EncodeToString(bytes)), nil
+}
+
+func validateWebhookAmount(expectedAmount, callbackAmount int64) error {
+	if callbackAmount != expectedAmount {
+		return fmt.Errorf("%w: received=%d, expected=%d", ErrWebhookAmountMismatch, callbackAmount, expectedAmount)
+	}
+	return nil
+}
+
+func creditWalletBalance(balance, credit int64) (int64, error) {
+	if balance < 0 || credit <= 0 || balance > math.MaxInt64-credit {
+		return 0, ErrWalletBalanceOverflow
+	}
+
+	return balance + credit, nil
+}
+
+func nextWalletVersion(version int64) (int64, error) {
+	if version < 0 || version == math.MaxInt64 {
+		return 0, ErrWalletVersionOverflow
+	}
+
+	return version + 1, nil
+}
+
 // ==============================================================================
 // MOMO PAYMENT GATEWAY IMPLEMENTATION
 // ==============================================================================
@@ -251,38 +399,12 @@ type MomoResponse struct {
 }
 
 func (s *WalletService) createMomoDepositOrder(ctx context.Context, req *walletpb.DepositOrderRequest) (*walletpb.DepositOrderResponse, error) {
-	wallet, err := s.repo.GetByUserIdTx(ctx, nil, req.UserId)
+	order, err := s.createPendingDepositOrder(ctx, req, "MOMO")
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errors.New("Wallet not found for this user")
-		}
-		return nil, fmt.Errorf("Failed to find wallet: %w", err)
+		return nil, fmt.Errorf("cannot create MoMo deposit order: %w", err)
 	}
-
-	var rateVnd int64 = 1000
-	var rateCoin int64 = 1
-	err = s.db.QueryRowContext(ctx, "SELECT amount_vnd, coin_amount FROM coin_rates WHERE is_active = true AND effective_at <= NOW() ORDER BY effective_at DESC LIMIT 1").Scan(&rateVnd, &rateCoin)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("Failed to fetch exchange rates: %w", err)
-	}
-
-	coinAmount := (req.AmountVnd * rateCoin) / rateVnd
-	orderCode := fmt.Sprintf("MOMO-%d", time.Now().UnixNano())
-
-	order := &domain.BankPaymentOrder{
-		UserID:            req.UserId,
-		WalletID:          wallet.ID,
-		OrderCode:         orderCode,
-		AmountVnd:         req.AmountVnd,
-		CoinAmount:        coinAmount,
-		BankAccountNumber: "",
-		BankTxReference:   "",
-		Status:            domain.OrderStatusPending,
-		CallbackLogs:      "",
-	}
-	if err := s.repo.CreateDepositOrderTx(ctx, nil, order); err != nil {
-		return nil, fmt.Errorf("Failed to save payment order: %w", err)
-	}
+	orderCode := order.OrderCode
+	coinAmount := order.CoinAmount
 
 	orderInfo := fmt.Sprintf("Nạp %d Coin vào hệ thống Music Streaming", coinAmount)
 	requestId := orderCode
@@ -312,21 +434,16 @@ func (s *WalletService) createMomoDepositOrder(ctx context.Context, req *walletp
 		Lang:        "vi",
 	}
 
-	jsonValue, _ := json.Marshal(momoBody)
-
-	resp, err := s.httpClient.Post(s.cfg.MomoAPIURL, "application/json", bytes.NewBuffer(jsonValue))
-	if err != nil {
-		return nil, fmt.Errorf("Network error connecting to MoMo API: %w", err)
-	}
-	defer resp.Body.Close()
-
 	var momoResp MomoResponse
-	if err := json.NewDecoder(resp.Body).Decode(&momoResp); err != nil {
-		return nil, fmt.Errorf("Failed to decode momo response: %w", err)
+	if err := s.postJSON(ctx, s.cfg.MomoAPIURL, momoBody, &momoResp); err != nil {
+		return nil, fmt.Errorf("MoMo create order request: %w", err)
 	}
 
 	if momoResp.ResultCode != 0 {
 		return nil, fmt.Errorf("Momo gateway rejected request: %s", momoResp.Message)
+	}
+	if momoResp.PayUrl == "" {
+		return nil, errors.New("MoMo gateway response is missing payUrl")
 	}
 
 	return &walletpb.DepositOrderResponse{
@@ -336,18 +453,33 @@ func (s *WalletService) createMomoDepositOrder(ctx context.Context, req *walletp
 }
 
 func (s *WalletService) ProcessDepositWebhook(ctx context.Context, orderID string, amountVnd int64, resultCode int) error {
+	return s.processDepositWebhook(ctx, orderID, amountVnd, resultCode, "MOMO_ORDER", "MoMo")
+}
+
+func (s *WalletService) processDepositWebhook(ctx context.Context, orderID string, amountVnd int64, resultCode int, referenceType, gatewayName string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("Failed to start webhook tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	order, err := s.repo.GetDepositOrderByCodeTx(ctx, tx, orderID)
+	// Lock the order before reading its status. Concurrent delivery attempts for
+	// the same provider order serialize here; only the callback that first turns
+	// a PENDING order into SUCCESS can proceed to credit the wallet.
+	order, err := s.repo.GetDepositOrderByCodeForUpdateTx(ctx, tx, orderID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("Payment order not found with code: %s", orderID)
 		}
 		return fmt.Errorf("Failed to check payment order: %w", err)
+	}
+
+	// A verified signature alone is insufficient: the payment must match the
+	// amount fixed when the local order was created. Check it before any status
+	// transition, including failed callbacks, so a malformed provider callback
+	// cannot finalize the order.
+	if err := validateWebhookAmount(order.AmountVnd, amountVnd); err != nil {
+		return err
 	}
 
 	if order.Status == domain.OrderStatusSuccess || order.Status == domain.OrderStatusFailed {
@@ -378,8 +510,14 @@ func (s *WalletService) ProcessDepositWebhook(ctx context.Context, orderID strin
 	}
 
 	balanceBefore := wallet.CoinBalance
-	balanceAfter := wallet.CoinBalance + order.CoinAmount
-	newVersion := wallet.Version + 1
+	balanceAfter, err := creditWalletBalance(wallet.CoinBalance, order.CoinAmount)
+	if err != nil {
+		return err
+	}
+	newVersion, err := nextWalletVersion(wallet.Version)
+	if err != nil {
+		return err
+	}
 	newSignature := s.generateSignature(wallet.ID, wallet.UserID, balanceAfter, wallet.FrozenBalance, newVersion, wallet.CurrencyType, wallet.Status)
 
 	err = s.repo.UpdateBalanceTx(ctx, tx, wallet.ID, balanceAfter, newVersion, newSignature, wallet.Version)
@@ -395,10 +533,10 @@ func (s *WalletService) ProcessDepositWebhook(ctx context.Context, orderID strin
 		BalanceAfter:    balanceAfter,
 		TransactionType: domain.TxTypeCredit,
 		Status:          "SUCCESS",
-		ReferenceType:   "MOMO_ORDER",
+		ReferenceType:   referenceType,
 		ReferenceID:     &refID,
 		IdempotencyKey:  order.OrderCode,
-		Description:     fmt.Sprintf("Nạp thành công %d Coin từ MoMo", order.CoinAmount),
+		Description:     fmt.Sprintf("Nạp thành công %d Coin từ %s", order.CoinAmount, gatewayName),
 	}
 	if err := s.repo.CreateTransactionTx(ctx, tx, txLog); err != nil {
 		return fmt.Errorf("Failed to log deposit transaction: %w", err)
@@ -431,38 +569,12 @@ type NFBankCreateResponse struct {
 }
 
 func (s *WalletService) createNFBankDepositOrder(ctx context.Context, req *walletpb.DepositOrderRequest) (*walletpb.DepositOrderResponse, error) {
-	wallet, err := s.repo.GetByUserIdTx(ctx, nil, req.UserId)
+	order, err := s.createPendingDepositOrder(ctx, req, "NFBANK")
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errors.New("Wallet not found for this user")
-		}
-		return nil, fmt.Errorf("Failed to find wallet: %w", err)
+		return nil, fmt.Errorf("cannot create NF-Bank deposit order: %w", err)
 	}
-
-	var rateVnd int64 = 1000
-	var rateCoin int64 = 1
-	err = s.db.QueryRowContext(ctx, "SELECT amount_vnd, coin_amount FROM coin_rates WHERE is_active = true AND effective_at <= NOW() ORDER BY effective_at DESC LIMIT 1").Scan(&rateVnd, &rateCoin)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("Failed to fetch exchange rates: %w", err)
-	}
-
-	coinAmount := (req.AmountVnd * rateCoin) / rateVnd
-	orderCode := fmt.Sprintf("NFBANK-%d", time.Now().UnixNano())
-
-	order := &domain.BankPaymentOrder{
-		UserID:            req.UserId,
-		WalletID:          wallet.ID,
-		OrderCode:         orderCode,
-		AmountVnd:         req.AmountVnd,
-		CoinAmount:        coinAmount,
-		BankAccountNumber: "",
-		BankTxReference:   "",
-		Status:            domain.OrderStatusPending,
-		CallbackLogs:      "",
-	}
-	if err := s.repo.CreateDepositOrderTx(ctx, nil, order); err != nil {
-		return nil, fmt.Errorf("Failed to save payment order: %w", err)
-	}
+	orderCode := order.OrderCode
+	coinAmount := order.CoinAmount
 
 	orderInfo := fmt.Sprintf("Nạp %d Coin vào hệ thống Music Streaming qua NF-Bank", coinAmount)
 	requestId := fmt.Sprintf("REQ_%s", orderCode)
@@ -493,21 +605,21 @@ func (s *WalletService) createNFBankDepositOrder(ctx context.Context, req *walle
 		Signature:   nfBankSignature,
 	}
 
-	jsonValue, _ := json.Marshal(nfBankBody)
-
-	resp, err := s.httpClient.Post(fmt.Sprintf("%s/payments/create", s.cfg.NFBankAPIURL), "application/json", bytes.NewBuffer(jsonValue))
-	if err != nil {
-		return nil, fmt.Errorf("Network error connecting to NF Bank API: %w", err)
-	}
-	defer resp.Body.Close()
-
 	var nfBankResp NFBankCreateResponse
-	if err := json.NewDecoder(resp.Body).Decode(&nfBankResp); err != nil {
-		return nil, fmt.Errorf("Failed to decode NF Bank response: %w", err)
+	if err := s.postJSON(
+		ctx,
+		fmt.Sprintf("%s/payments/create", s.cfg.NFBankAPIURL),
+		nfBankBody,
+		&nfBankResp,
+	); err != nil {
+		return nil, fmt.Errorf("NF-Bank create order request: %w", err)
 	}
 
 	if nfBankResp.ResultCode != 0 {
 		return nil, fmt.Errorf("NF Bank gateway rejected request: %s", nfBankResp.Message)
+	}
+	if nfBankResp.PayUrl == "" {
+		return nil, errors.New("NF-Bank gateway response is missing payUrl")
 	}
 
 	return &walletpb.DepositOrderResponse{
@@ -517,75 +629,42 @@ func (s *WalletService) createNFBankDepositOrder(ctx context.Context, req *walle
 }
 
 func (s *WalletService) ProcessNFBankDepositWebhook(ctx context.Context, orderID string, amountVnd int64, resultCode int) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	return s.processDepositWebhook(ctx, orderID, amountVnd, resultCode, "NFBANK_ORDER", "NF-Bank")
+}
+
+func (s *WalletService) postJSON(
+	ctx context.Context,
+	endpoint string,
+	payload any,
+	response any,
+) error {
+	body, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("Failed to start webhook tx: %w", err)
+		return fmt.Errorf("encode request: %w", err)
 	}
-	defer tx.Rollback()
-
-	order, err := s.repo.GetDepositOrderByCodeTx(ctx, tx, orderID)
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		endpoint,
+		bytes.NewReader(body),
+	)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("Payment order not found with code: %s", orderID)
-		}
-		return fmt.Errorf("Failed to check payment order: %w", err)
+		return fmt.Errorf("build request: %w", err)
 	}
+	request.Header.Set("Content-Type", "application/json")
 
-	if order.Status == domain.OrderStatusSuccess || order.Status == domain.OrderStatusFailed {
-		return nil
-	}
-
-	status := domain.OrderStatusFailed
-	if resultCode == 0 {
-		status = domain.OrderStatusSuccess
-	}
-
-	err = s.repo.UpdateDepositOrderStatusByCodeTx(ctx, tx, order.OrderCode, status)
+	result, err := s.httpClient.Do(request)
 	if err != nil {
-		return fmt.Errorf("Failed to update order status: %w", err)
+		return fmt.Errorf("send request: %w", err)
 	}
-
-	if resultCode != 0 {
-		return tx.Commit()
+	defer result.Body.Close()
+	if result.StatusCode < http.StatusOK || result.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("gateway returned HTTP %d", result.StatusCode)
 	}
-
-	wallet, err := s.repo.GetByUserIdForUpdateTx(ctx, tx, order.UserID)
-	if err != nil {
-		return fmt.Errorf("Failed to lock user wallet for deposit: %w", err)
+	if err := json.NewDecoder(io.LimitReader(result.Body, maxGatewayResponseBytes)).Decode(response); err != nil {
+		return fmt.Errorf("decode response: %w", err)
 	}
-
-	if !s.verifySignature(wallet) {
-		return errors.New("Critical: Secure signature validation failed during deposit")
-	}
-
-	balanceBefore := wallet.CoinBalance
-	balanceAfter := wallet.CoinBalance + order.CoinAmount
-	newVersion := wallet.Version + 1
-	newSignature := s.generateSignature(wallet.ID, wallet.UserID, balanceAfter, wallet.FrozenBalance, newVersion, wallet.CurrencyType, wallet.Status)
-
-	err = s.repo.UpdateBalanceTx(ctx, tx, wallet.ID, balanceAfter, newVersion, newSignature, wallet.Version)
-	if err != nil {
-		return fmt.Errorf("Deposit transaction conflict, failed to update balance: %w", err)
-	}
-
-	refID := order.ID
-	txLog := &domain.TransactionLog{
-		WalletID:        wallet.ID,
-		Amount:          order.CoinAmount,
-		BalanceBefore:   balanceBefore,
-		BalanceAfter:    balanceAfter,
-		TransactionType: domain.TxTypeCredit,
-		Status:          "SUCCESS",
-		ReferenceType:   "NFBANK_ORDER",
-		ReferenceID:     &refID,
-		IdempotencyKey:  order.OrderCode,
-		Description:     fmt.Sprintf("Nạp thành công %d Coin từ NF-Bank", order.CoinAmount),
-	}
-	if err := s.repo.CreateTransactionTx(ctx, tx, txLog); err != nil {
-		return fmt.Errorf("Failed to log deposit transaction: %w", err)
-	}
-
-	return tx.Commit()
+	return nil
 }
 
 // --- Crypto Helper Functions ---

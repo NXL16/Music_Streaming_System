@@ -23,10 +23,17 @@ import (
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
+
+const maxWebhookBodyBytes int64 = 64 * 1024
 
 func main() {
 	cfg := config.LoadConfig()
+	tlsConfig, err := config.BuildServerTLSConfig(cfg.GRPCTLS)
+	if err != nil {
+		log.Fatalf("Không thể cấu hình Wallet gRPC TLS: %v", err)
+	}
 
 	db, err := sql.Open("postgres", cfg.DatabaseURL)
 	if err != nil {
@@ -59,7 +66,20 @@ func main() {
 	stopChan := make(chan os.Signal, 1)
 	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
 
-	grpcServer := grpc.NewServer()
+	grpcOptions := []grpc.ServerOption{
+		grpc.UnaryInterceptor(deliveryGRPC.InternalAuthInterceptor(cfg.InternalGRPCToken)),
+	}
+	if tlsConfig != nil {
+		grpcOptions = append(grpcOptions, grpc.Creds(credentials.NewTLS(tlsConfig)))
+		log.Printf("Wallet gRPC TLS enabled (mTLS: %t)", cfg.GRPCTLS.ClientCAFile != "")
+	} else {
+		if cfg.AllowInsecureBind {
+			log.Println("WARNING: Wallet gRPC TLS is disabled with an explicitly allowed non-loopback bind; deploy only behind a verified private network policy")
+		} else {
+			log.Println("WARNING: Wallet gRPC TLS is disabled; listener is restricted to loopback")
+		}
+	}
+	grpcServer := grpc.NewServer(grpcOptions...)
 	walletpb.RegisterWalletServiceServer(grpcServer, grpcHandler)
 
 	go func() {
@@ -75,13 +95,22 @@ func main() {
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
+	router.Use(func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxWebhookBodyBytes)
+		c.Next()
+	})
 
 	router.POST("/v1/wallet/webhook/momo", momoHandler.HandleWebhook)
 	router.POST("/v1/wallet/webhook/nfbank", nfbankHandler.HandleWebhook)
 
 	httpServer := &http.Server{
-		Addr:    cfg.HTTPPort,
-		Handler: router,
+		Addr:              cfg.HTTPPort,
+		Handler:           router,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	go func() {

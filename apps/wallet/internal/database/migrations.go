@@ -20,6 +20,8 @@ var migrations = []migration{
 	{version: 1, name: "init", sql: initialSchema},
 }
 
+const walletMigrationAdvisoryLockID int64 = 4_409_210_001
+
 // ApplyMigrations applies every pending Wallet schema migration atomically.
 // A migration is recorded only after its SQL succeeds, so restarting the
 // service after a failed deploy is safe.
@@ -29,6 +31,16 @@ func ApplyMigrations(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("begin wallet migration transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Multiple replicas may start together. A transaction-scoped PostgreSQL
+	// advisory lock serializes the schema check and DDL without relying on
+	// process-local startup order.
+	if _, err := tx.ExecContext(
+		ctx,
+		`SELECT pg_advisory_xact_lock($1)`,
+		walletMigrationAdvisoryLockID,
+	); err != nil {
+		return fmt.Errorf("acquire wallet migration advisory lock: %w", err)
+	}
 
 	if _, err := tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS wallet_schema_migrations (

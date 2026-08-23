@@ -3,10 +3,14 @@ module Music_Streaming_System/apps/wallet
 go 1.26.2
 
 require (
+	Music_Streaming_System/packages/shared-proto v0.0.0
 	github.com/gin-gonic/gin v1.12.0
+	github.com/joho/godotenv v1.5.1
 	github.com/lib/pq v1.12.3
 	google.golang.org/grpc v1.81.1
 )
+
+replace Music_Streaming_System/packages/shared-proto => ../../packages/shared-proto
 
 require (
 	github.com/bytedance/gopkg v0.1.3 // indirect

@@ -25,8 +25,9 @@ type WalletRepository interface {
 	// Tạo đơn hàng nạp tiền qua cổng thanh toán (MoMo)
 	CreateDepositOrderTx(ctx context.Context, tx *sql.Tx, order *BankPaymentOrder) error
 
-	// Lấy đơn hàng nạp tiền qua mã code đơn hàng (order_code)
-	GetDepositOrderByCodeTx(ctx context.Context, tx *sql.Tx, orderCode string) (*BankPaymentOrder, error)
+	// Lấy và khóa đơn hàng nạp tiền để một callback tại một thời điểm quyết định
+	// trạng thái cuối cùng và việc ghi có vào ví.
+	GetDepositOrderByCodeForUpdateTx(ctx context.Context, tx *sql.Tx, orderCode string) (*BankPaymentOrder, error)
 
 	// Cập nhật trạng thái đơn hàng nạp tiền theo mã order_code khi Webhook báo về
 	UpdateDepositOrderStatusByCodeTx(ctx context.Context, tx *sql.Tx, orderCode string, status string) error
