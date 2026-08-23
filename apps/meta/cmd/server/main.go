@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net"
 	"os"
@@ -18,10 +17,19 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
+
+// Keep this aligned with API and Rust Worker. The validated metadata payload
+// can exceed gRPC's 4 MiB default for long tracks with dense seek tables.
+const maxMetadataGRPCMessageBytes = 8 * 1024 * 1024
 
 func main() {
 	cfg := config.LoadConfig()
+	tlsConfig, err := config.BuildServerTLSConfig(cfg.GRPCTLS)
+	if err != nil {
+		log.Fatalf("Failed to configure Meta gRPC TLS: %v", err)
+	}
 
 	connectCtx, connectCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer connectCancel()
@@ -43,19 +51,30 @@ func main() {
 	log.Println("MongoDB metadata indexes are ready")
 	metaServer := service.NewMetadataServer(repo)
 
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", cfg.GRPCPort))
+	lis, err := net.Listen("tcp", cfg.GRPCListenAddr)
 	if err != nil {
 		log.Fatalf("Failed to listen: %v", err)
 	}
 
-	grpcServer := grpc.NewServer()
+	grpcOptions := []grpc.ServerOption{
+		grpc.UnaryInterceptor(service.InternalAuthInterceptor(cfg.InternalGRPCToken)),
+		grpc.MaxRecvMsgSize(maxMetadataGRPCMessageBytes),
+		grpc.MaxSendMsgSize(maxMetadataGRPCMessageBytes),
+	}
+	if tlsConfig != nil {
+		grpcOptions = append(grpcOptions, grpc.Creds(credentials.NewTLS(tlsConfig)))
+		log.Printf("Metadata gRPC TLS enabled (mTLS: %t)", cfg.GRPCTLS.ClientCAFile != "")
+	} else {
+		log.Println("WARNING: Metadata gRPC TLS is disabled; deploy only behind a private network policy")
+	}
+	grpcServer := grpc.NewServer(grpcOptions...)
 	pb.RegisterMetadataServiceServer(grpcServer, metaServer)
 
 	stopChan := make(chan os.Signal, 1)
 	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("Metadata Service is running on port: %s", cfg.GRPCPort)
+		log.Printf("Metadata Service is running at %s", cfg.GRPCListenAddr)
 		if err := grpcServer.Serve(lis); err != nil {
 			log.Printf("gRPC Server stopped: %v", err)
 		}

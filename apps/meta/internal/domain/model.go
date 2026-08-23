@@ -4,6 +4,7 @@ import "time"
 
 type SongMetadata struct {
 	SongID                string    `bson:"song_id"`
+	Variant               string    `bson:"variant"`
 	Duration              float64   `bson:"duration"`
 	EncryptionStartOffset int64     `bson:"encryption_start_offset"`
 	SeektableVersion      int32     `bson:"seektable_version"`

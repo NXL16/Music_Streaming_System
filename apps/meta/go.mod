@@ -3,10 +3,13 @@ module Music_Streaming_System/apps/meta
 go 1.26.2
 
 require (
+	Music_Streaming_System/packages/shared-proto v0.0.0
 	github.com/joho/godotenv v1.5.1
 	go.mongodb.org/mongo-driver v1.17.9
 	google.golang.org/grpc v1.80.0
 )
+
+replace Music_Streaming_System/packages/shared-proto => ../../packages/shared-proto
 
 require (
 	github.com/golang/snappy v0.0.4 // indirect
