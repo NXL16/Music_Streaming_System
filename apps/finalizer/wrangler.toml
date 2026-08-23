@@ -5,10 +5,17 @@ minify = true
 
 [[queues.consumers]]
 queue = "upload-events"
+dead_letter_queue = "upload-events-dlq"
 max_batch_size = 4
 max_batch_timeout = 6
 max_retries = 3
 retry_delay = 16
 
 [vars]
-API_FINALIZE_URL = "https://api.404hz.me/v1/songs/internal/finalize-upload"
+# Deploy environments must set this explicitly. Keeping it blank by default
+# prevents preview/staging consumers from ever finalizing uploads against prod.
+API_FINALIZE_URL = ""
+
+[[queues.producers]]
+binding = "UPLOAD_EVENTS_DLQ"
+queue = "upload-events-dlq"
