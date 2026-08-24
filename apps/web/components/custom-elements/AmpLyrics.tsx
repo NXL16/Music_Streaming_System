@@ -24,11 +24,12 @@ type LyricsLoadStatus = "pending" | "loading" | "ready";
 type TimeSyncedLyricsDisplay = HTMLElement & {
   setLines(lines: LyricLine[]): void;
   setActiveLineTopRatio(value: number): void;
+  setLineStaggerEnabled(value: boolean): void;
   setActiveIndex(index: number, shouldScroll?: boolean): void;
   setPlaybackTimeMs?(timeMs: number): void;
   setPlaying?(playing: boolean): void;
   focusLine(index: number, behavior?: ScrollBehavior): void;
-  setAutoScroll(value: boolean): void;
+  setAutoScroll(value: boolean, hidePastLines?: boolean): void;
 };
 
 const MANUAL_SCROLL_RESUME_MS = 4_000;
@@ -213,6 +214,7 @@ export default function AmpLyrics({
       let display: TimeSyncedLyricsDisplay | undefined;
       let resumeTimer: number | undefined;
       let animationFrame: number | undefined;
+      let lineBoundaryTimer: number | undefined;
       let autoFollowEnabled = true;
       let resumeAutoScrollOnNextLine = false;
       let activeLineIndex = -1;
@@ -233,7 +235,37 @@ export default function AmpLyrics({
             "1",
           );
         }
-        display?.setAutoScroll(enabled);
+        display?.setAutoScroll(enabled, hidePastLines);
+      };
+      const clearLineBoundaryTimer = () => {
+        if (lineBoundaryTimer !== undefined) {
+          window.clearTimeout(lineBoundaryTimer);
+          lineBoundaryTimer = undefined;
+        }
+      };
+      const scheduleNextLineSync = (timeMs: number) => {
+        clearLineBoundaryTimer();
+        if (!audio || audio.paused) return;
+
+        let nextBoundary = Number.POSITIVE_INFINITY;
+        const currentLine = lines[activeLineIndex];
+        if (currentLine?.endTimeMs > timeMs) {
+          nextBoundary = currentLine.endTimeMs;
+        }
+        for (const line of lines) {
+          if (line.startTimeMs > timeMs && line.startTimeMs < nextBoundary) {
+            nextBoundary = line.startTimeMs;
+          }
+        }
+        if (!Number.isFinite(nextBoundary)) return;
+
+        lineBoundaryTimer = window.setTimeout(() => {
+          lineBoundaryTimer = undefined;
+          if (!audio || audio.paused) return;
+
+          syncPlaybackClock(audio, usePlayerStore.getState().setPlaybackTimeMs);
+          syncActiveLine();
+        }, Math.max(0, nextBoundary - timeMs));
       };
       const syncActiveLine = (shouldScroll = true) => {
         if (!display || !audio) return;
@@ -267,7 +299,11 @@ export default function AmpLyrics({
         display.setPlaying?.(
           playerState.currentSong?.id === songId && playerState.playing,
         );
-        display.setPlaybackTimeMs?.(timeMs);
+        if (lines[activeIndex]?.kind === "INSTRUMENTAL") {
+          display.setPlaybackTimeMs?.(timeMs);
+          startInstrumentalFrameSync();
+        }
+        scheduleNextLineSync(timeMs);
 
         if (isInitialSync && activeIndex >= 0) {
           display.focusLine(activeIndex, "auto");
@@ -278,6 +314,8 @@ export default function AmpLyrics({
       const handleAudioSeeking = () => {
         isAudioSeeking = true;
         pendingSeekScrollVersion ??= manualScrollVersion;
+        stopFrameSync();
+        clearLineBoundaryTimer();
       };
       const handleAudioSeeked = () => {
         isAudioSeeking = false;
@@ -303,23 +341,34 @@ export default function AmpLyrics({
         }
       };
       const stopFrameSync = () => {
-        if (animationFrame) window.cancelAnimationFrame(animationFrame);
+        if (animationFrame !== undefined) {
+          window.cancelAnimationFrame(animationFrame);
+        }
         animationFrame = undefined;
+      };
+      const startInstrumentalFrameSync = () => {
+        if (animationFrame !== undefined || !audio || audio.paused) return;
+        const tick = () => {
+          const currentLine = lines[activeLineIndex];
+          if (audio && !audio.paused && currentLine?.kind === "INSTRUMENTAL") {
+            syncPlaybackClock(audio, usePlayerStore.getState().setPlaybackTimeMs);
+            display?.setPlaybackTimeMs?.(
+              usePlayerStore.getState().playbackTimeMs,
+            );
+            animationFrame = window.requestAnimationFrame(tick);
+          } else {
+            animationFrame = undefined;
+          }
+        };
+        animationFrame = window.requestAnimationFrame(tick);
       };
       const startFrameSync = () => {
         stopFrameSync();
-        const tick = () => {
-          syncActiveLine();
-          if (!audio?.paused) {
-            animationFrame = window.requestAnimationFrame(tick);
-          }
-        };
-        if (!audio?.paused) {
-          animationFrame = window.requestAnimationFrame(tick);
-        }
+        syncActiveLine();
       };
       const handlePause = () => {
         stopFrameSync();
+        clearLineBoundaryTimer();
         syncActiveLine();
       };
       const handleSeek = (event: Event) => {
@@ -383,6 +432,7 @@ export default function AmpLyrics({
         ) as TimeSyncedLyricsDisplay;
         display.setLines(lines);
         display.setActiveLineTopRatio(activeLineTopRatio);
+        display.setLineStaggerEnabled(Boolean(inDetailView));
         display.addEventListener("lyrics-line-seek", handleSeek);
         display.addEventListener("wheel", handleManualScroll, {
           capture: true,
@@ -397,7 +447,6 @@ export default function AmpLyrics({
         requestAnimationFrame(() => {
           if (cancelled) return;
 
-          syncActiveLine();
           startFrameSync();
         });
       });
@@ -412,6 +461,7 @@ export default function AmpLyrics({
       return () => {
         cancelled = true;
         stopFrameSync();
+        clearLineBoundaryTimer();
         if (resumeTimer) window.clearTimeout(resumeTimer);
         if (lineSeekScrollLockTimer) {
           window.clearTimeout(lineSeekScrollLockTimer);

@@ -193,7 +193,7 @@ export class AmpLyricsDisplaySyncedLine extends HTMLElement {
   }
 
   private cancelInstrumentalRender() {
-    if (this.instrumentalRenderTimer) {
+    if (this.instrumentalRenderTimer !== undefined) {
       clearTimeout(this.instrumentalRenderTimer);
       this.instrumentalRenderTimer = undefined;
     }
@@ -219,7 +219,7 @@ export class AmpLyricsDisplaySyncedLine extends HTMLElement {
   }
 
   private cancelInstrumentalExit() {
-    if (this.instrumentalExitTimer) {
+    if (this.instrumentalExitTimer !== undefined) {
       clearTimeout(this.instrumentalExitTimer);
       this.instrumentalExitTimer = undefined;
     }
@@ -246,9 +246,11 @@ export class AmpLyricsDisplaySyncedLine extends HTMLElement {
           "--lyrics-current-line-padding-block",
         ),
       ) || 12;
+    const rootTop = this.root.getBoundingClientRect().top;
+    const buttonRect = this.button.getBoundingClientRect();
     const height =
-      this.button.offsetTop +
-      this.button.offsetHeight -
+      buttonRect.bottom -
+      rootTop -
       currentPadding +
       targetPadding * 2 +
       marginBottom;
