@@ -53,6 +53,10 @@ export function prependRecentlyPlayedSnapshot(item: MediaCardProps) {
 
   const itemKey = `${item.resourceType}:${item.resourceId}`;
   const currentItems = snapshot?.items ?? [];
+  const existingItem = currentItems.find(
+    (currentItem) =>
+      `${currentItem.resourceType}:${currentItem.resourceId}` === itemKey,
+  );
   snapshot = {
     ...(snapshot ?? {
       id: "user-recently-played",
@@ -64,7 +68,9 @@ export function prependRecentlyPlayedSnapshot(item: MediaCardProps) {
       items: [],
     }),
     items: [
-      item,
+      // Playback only changes recency. A cached card is canonical; an event
+      // may contain fallback metadata inherited from an individual track.
+      existingItem ?? item,
       ...currentItems.filter(
         (currentItem) =>
           `${currentItem.resourceType}:${currentItem.resourceId}` !== itemKey,

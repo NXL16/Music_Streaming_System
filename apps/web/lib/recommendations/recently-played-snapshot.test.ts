@@ -69,6 +69,26 @@ describe("recently played snapshot", () => {
     expect(getRecentlyPlayedSnapshot()).toBeUndefined();
   });
 
+  it("moves an existing resource without replacing its canonical metadata", () => {
+    setRecentlyPlayedSnapshot({
+      id: "user-recently-played",
+      title: "Recently Played",
+      displayKind: "MusicCoverShelf",
+      sourceDisplayKind: "MusicCoverShelf",
+      modelVersion: 1,
+      hasMore: false,
+      items: [firstItem, secondItem],
+    });
+
+    prependRecentlyPlayedSnapshot({
+      ...firstItem,
+      title: "Track-derived album title",
+      subtitle: "Track artist",
+    });
+
+    expect(getRecentlyPlayedSnapshot()?.items).toEqual([firstItem, secondItem]);
+  });
+
   it("restores a removed playlist to its previous Recently Played position", () => {
     const playlist = {
       ...firstItem,

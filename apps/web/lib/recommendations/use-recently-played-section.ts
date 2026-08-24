@@ -44,7 +44,11 @@ function mergeRecentlyPlayedItems(
   serverItems: MediaCardProps[],
 ) {
   const seen = new Set<string>();
+  const serverItemsByKey = new Map(
+    serverItems.map((item) => [itemKey(item), item]),
+  );
 
+  // Optimistic items control ordering, but canonical server metadata wins.
   return [...optimisticItems, ...serverItems]
     .filter((item) => {
       const key = itemKey(item);
@@ -53,6 +57,7 @@ function mergeRecentlyPlayedItems(
       seen.add(key);
       return true;
     })
+    .map((item) => serverItemsByKey.get(itemKey(item)) ?? item)
     .slice(0, RECENTLY_PLAYED_CONTEXT_LIMIT);
 }
 
@@ -158,8 +163,13 @@ export function useRecentlyPlayedSection() {
       if (!item) return;
 
       setOptimisticItems((currentItems) => {
+        const existingItem = currentItems.find(
+          (currentItem) => itemKey(currentItem) === itemKey(item),
+        );
         const nextItems = [
-          item,
+          // A repeated qualified play changes ordering only. Reusing the
+          // existing card also avoids recreating a card from track metadata.
+          existingItem ?? item,
           ...currentItems.filter(
             (currentItem) => itemKey(currentItem) !== itemKey(item),
           ),

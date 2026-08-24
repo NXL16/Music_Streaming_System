@@ -23,7 +23,11 @@ import type {
 import { getCoverArtwork } from "@/lib/media/artwork-slots";
 import { CompactPlayerBar } from "./player-bar/compact-player-bar";
 import { useMediaQuery } from "@/hooks/use-media-query";
-import { createAndHydrateMediaResourceCard } from "@/lib/media/normalize-media-resource";
+import {
+  createAndHydrateMediaResourceCard,
+  createMediaResourceCard,
+} from "@/lib/media/normalize-media-resource";
+import { getMediaEntity } from "@/lib/media/media-entity-store";
 import dynamic from "next/dynamic";
 
 // Desktop-only queue drag/drop and the expanded player are substantial. Keep
@@ -114,22 +118,43 @@ function recentlyPlayedCard(song: PlayerSong): MediaCardProps {
     );
   }
 
-  const resourceType = song.albumId ? "albums" : "songs";
-  const resourceId = song.albumId ?? song.id;
-  const title = song.albumId ? song.album || song.title : song.title;
+  if (!song.albumId) {
+    return createAndHydrateMediaResourceCard(
+      {
+        id: song.id,
+        type: "songs",
+        name: song.title,
+        artistName: song.artist,
+        artwork: { url: song.artworkUrl },
+      },
+      {
+        cardType: "collection",
+        slug: song.url,
+        imageUrl: song.artworkUrl,
+        imageSrcSet: song.artworkSrcSet || song.artworkUrl,
+        artists: song.artists?.flatMap((artist) =>
+          artist.id && artist.url
+            ? [{ id: artist.id, name: artist.name, url: artist.url }]
+            : [],
+        ),
+      },
+      "player",
+    );
+  }
 
-  return createAndHydrateMediaResourceCard(
+  // A track must not overwrite the canonical metadata for its parent album.
+  const fallback = createMediaResourceCard(
     {
-      id: resourceId,
-      type: resourceType,
-      name: title,
+      id: song.albumId,
+      type: "albums",
+      name: song.album || song.title,
       artistName: song.artist,
       artwork: { url: song.artworkUrl },
-      contentRating: song.albumId ? song.contentRating : undefined,
+      contentRating: song.contentRating,
     },
     {
       cardType: "collection",
-      slug: song.albumId ? song.albumUrl : song.url,
+      slug: song.albumUrl,
       imageUrl: song.artworkUrl,
       imageSrcSet: song.artworkSrcSet || song.artworkUrl,
       artists: song.artists?.flatMap((artist) =>
@@ -138,7 +163,26 @@ function recentlyPlayedCard(song: PlayerSong): MediaCardProps {
           : [],
       ),
     },
-    "player",
+  );
+  const canonical = getMediaEntity(fallback);
+  if (!canonical) return fallback;
+
+  return createMediaResourceCard(
+    {
+      id: song.albumId,
+      type: "albums",
+      name: canonical.title || fallback.title,
+      artistName: canonical.subtitle || fallback.subtitle,
+      artwork: canonical.artwork ?? fallback.artwork,
+      contentRating: canonical.contentRating ?? fallback.contentRating,
+    },
+    {
+      cardType: "collection",
+      slug: song.albumUrl,
+      artists: canonical.artists ?? fallback.artists,
+      description: canonical.description ?? fallback.description,
+      typeTag: canonical.typeTag ?? fallback.typeTag,
+    },
   );
 }
 
