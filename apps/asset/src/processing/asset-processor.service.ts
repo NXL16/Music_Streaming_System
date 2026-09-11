@@ -1,7 +1,7 @@
 import { Injectable, OnModuleDestroy } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { execFile, type ChildProcess } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,14 +10,20 @@ import { pipeline } from "node:stream/promises";
 import sharp from "sharp";
 import { Asset, AssetKind, AssetPurpose, Prisma } from "../generated/prisma/client";
 import { StorageService } from "../storage/storage.service";
+import {
+  encryptVideoKey,
+  parseVideoKeyEncryptionKey,
+} from "../common/crypto/video-key-encryption";
 import { AssetProcessingResult, MediaRendition } from "./asset-processor.types";
 
 const NORMAL_ARTWORK_WIDTHS = [40, 80, 296, 316, 592, 632];
+const STATION_ARTWORK_WIDTHS = [296, 316, 592, 632];
 const AVATAR_SIZES = [40, 80, 256];
 const AVATAR_MAX_INPUT_PIXELS = 25_000_000;
 const DEFAULT_ARTWORK_MAX_INPUT_PIXELS = 30_000_000;
 const DEFAULT_IMAGE_RENDITION_CONCURRENCY = 2;
 const DEFAULT_VIDEO_UPLOAD_CONCURRENCY = 4;
+const DEFAULT_VIDEO_HLS_SEGMENT_DURATION_SECONDS = 3;
 const HERO_ARTWORK_WIDTHS = [450, 600, 900, 1200];
 const HERO_ASPECT_RATIO = 3 / 4;
 const HERO_EXTENSION_STRIP = 48;
@@ -75,6 +81,9 @@ export class AssetProcessorService implements OnModuleDestroy {
   private readonly artworkMaxInputPixels: number;
   private readonly imageRenditionConcurrency: number;
   private readonly videoUploadConcurrency: number;
+  private readonly videoHlsSegmentDurationSeconds: number;
+  private readonly videoKeyUriBase: string;
+  private readonly videoKeyEncryptionKey: Buffer | undefined;
   private activeChild?: ChildProcess;
 
   constructor(
@@ -95,13 +104,27 @@ export class AssetProcessorService implements OnModuleDestroy {
       config.get<string>("ASSET_VIDEO_UPLOAD_CONCURRENCY"),
       DEFAULT_VIDEO_UPLOAD_CONCURRENCY,
     );
+    this.videoHlsSegmentDurationSeconds = this.positiveInteger(
+      config.get<string>("ASSET_VIDEO_HLS_SEGMENT_DURATION_SECONDS"),
+      DEFAULT_VIDEO_HLS_SEGMENT_DURATION_SECONDS,
+    );
+    this.videoKeyUriBase =
+      config.get<string>("ASSET_VIDEO_KEY_URI_BASE")?.replace(/\/+$/, "") ??
+      "";
+    this.videoKeyEncryptionKey = parseVideoKeyEncryptionKey(
+      config.get<string>("ASSET_VIDEO_KEY_ENCRYPTION_KEY"),
+    );
   }
 
   process(asset: Asset): Promise<AssetProcessingResult> {
     if (asset.kind === AssetKind.IMAGE) {
-      return asset.purpose === AssetPurpose.PROFILE_AVATAR
-        ? this.processAvatar(asset)
-        : this.processArtwork(asset);
+      if (asset.purpose === AssetPurpose.PROFILE_AVATAR) {
+        return this.processAvatar(asset);
+      }
+      if (asset.purpose === AssetPurpose.STATION_ARTWORK) {
+        return this.processStationArtwork(asset);
+      }
+      return this.processArtwork(asset);
     }
     return this.processVideo(asset);
   }
@@ -149,6 +172,63 @@ export class AssetProcessorService implements OnModuleDestroy {
     );
     const primary = renditions.at(-1);
     if (!primary) throw new Error("AVATAR_RENDITION_MISSING");
+
+    return {
+      publicUrl: primary.url,
+      width,
+      height,
+      durationMillis: 0,
+      variants: this.json({
+        original: { width, height, contentType: asset.contentType },
+        renditions,
+      }),
+    };
+  }
+
+  /**
+   * Song Station covers are only rendered in square card layouts. Keeping
+   * this separate from catalog artwork avoids generating hero artwork and
+   * small icon renditions that the Station UI never requests.
+   */
+  private async processStationArtwork(
+    asset: Asset,
+  ): Promise<AssetProcessingResult> {
+    const source = await this.storage.getBuffer(asset.sourceObjectKey);
+    this.verifyChecksum(asset, this.bufferChecksum(source));
+    const normalizedSource = await sharp(source, {
+      limitInputPixels: this.artworkMaxInputPixels,
+    })
+      .rotate()
+      .toBuffer();
+    const metadata = await sharp(normalizedSource).metadata();
+    const width = metadata.width ?? 0;
+    const height = metadata.height ?? 0;
+    if (width <= 0 || height <= 0) {
+      throw new Error("STATION_ARTWORK_DIMENSIONS_INVALID");
+    }
+
+    const renditions = await this.mapWithConcurrency(
+      STATION_ARTWORK_WIDTHS.filter((target) => target <= width),
+      this.imageRenditionConcurrency,
+      async (targetWidth) => {
+        const { data, info } = await sharp(normalizedSource)
+          .resize({ width: targetWidth, withoutEnlargement: true })
+          .webp({ quality: 86, effort: 4, smartSubsample: true })
+          .toBuffer({ resolveWithObject: true });
+        const objectKey = `processed/${asset.id}/station-artwork/${info.width}w.webp`;
+        await this.storage.uploadBuffer(objectKey, data, "image/webp");
+        return {
+          objectKey,
+          url: this.storage.publicUrl(objectKey),
+          contentType: "image/webp" as const,
+          width: info.width,
+          height: info.height,
+          sizeBytes: data.length,
+        };
+      },
+    );
+    const primary = renditions.at(-1);
+    if (!primary) throw new Error("STATION_ARTWORK_RENDITION_MISSING");
 
     return {
       publicUrl: primary.url,
@@ -625,8 +705,13 @@ export class AssetProcessorService implements OnModuleDestroy {
     const sourceExtension = extname(asset.filename) || ".video";
     const sourcePath = join(workDirectory, `source${sourceExtension}`);
     const rawPosterPath = join(workDirectory, "poster-raw.png");
-    const poster2400Path = join(workDirectory, "poster-2400w.webp");
-    const poster1200Path = join(workDirectory, "poster-1200w.webp");
+    const posterWidths = [320, 480, 640, 960, 1280, 1920, 2400];
+    const posterRenditions = posterWidths.map((width) => ({
+      width,
+      height: Math.round((width * 9) / 16),
+      filename: `poster-${width}w.webp`,
+      path: join(workDirectory, `poster-${width}w.webp`),
+    }));
 
     const TARGET_RESOLUTIONS = [
       { name: "720p", width: 1280, bitrate: "2800k", bandwidth: 2800000 },
@@ -634,6 +719,7 @@ export class AssetProcessorService implements OnModuleDestroy {
       { name: "1440p", width: 2560, bitrate: "9000k", bandwidth: 9000000 },
       { name: "2160p", width: 3840, bitrate: "14000k", bandwidth: 14000000 },
     ];
+    const keepAudio = asset.purpose === AssetPurpose.MUSIC_VIDEO;
 
     try {
       await this.storage.downloadToFile(asset.sourceObjectKey, sourcePath);
@@ -662,21 +748,30 @@ export class AssetProcessorService implements OnModuleDestroy {
         activeResolutions.push(TARGET_RESOLUTIONS[0]);
       }
 
-      // Dynamically calculate segment durations:
-      // First segment is 1 second (hls_init_time) for instant startup/playback.
-      // The remaining duration is split into approximately 6 segments.
-      const hlsInitTime = 1;
-      const hlsTime = Math.max(
-        1.5,
-        Math.round(((durationSeconds - hlsInitTime) / 6) * 10) / 10,
-      );
+      // Short, fixed segments keep adaptive bitrate switching and seeking
+      // responsive regardless of the source video duration.
+      const hlsTime = this.videoHlsSegmentDurationSeconds;
+      const videoEncryption = keepAudio
+        ? await this.prepareMusicVideoEncryption(asset.id, workDirectory)
+        : undefined;
+      // This prefix is never overwritten. If a job retries, CDN-cached objects
+      // from an earlier attempt cannot be paired with the new AES key.
+      const videoOutputPrefix = `processed/${asset.id}/video/${randomUUID()}`;
+      const hlsRenditions = activeResolutions.map((resolution) => ({
+        ...resolution,
+        // Playlist and segment object names are opaque implementation details.
+        // AES encryption protects content; unguessable names prevent casual URL
+        // enumeration and keep storage layout independent from presentation.
+        playlistFile: `${randomBytes(12).toString('hex')}.m3u8`,
+        segmentPrefix: randomBytes(18).toString('base64url'),
+      }));
 
       // Transcode each resolution
-      for (const res of activeResolutions) {
-        const playlistPath = join(workDirectory, `video-${res.name}.m3u8`);
+      for (const rendition of hlsRenditions) {
+        const playlistPath = join(workDirectory, rendition.playlistFile);
         const segmentPattern = join(
           workDirectory,
-          `segment-${res.name}_%03d.ts`,
+          `${rendition.segmentPrefix}_%013d.ts`,
         );
 
         await this.run(this.ffmpegPath, [
@@ -685,9 +780,11 @@ export class AssetProcessorService implements OnModuleDestroy {
           sourcePath,
           "-map",
           "0:v:0",
-          "-an",
+          ...(keepAudio
+            ? ["-map", "0:a:0?", "-c:a", "aac", "-b:a", "160k"]
+            : ["-an"]),
           "-vf",
-          `scale=w='min(${res.width},iw)':h=-2`,
+          `scale=w='min(${rendition.width},iw)':h=-2`,
           "-c:v",
           "libx264",
           "-preset",
@@ -695,23 +792,30 @@ export class AssetProcessorService implements OnModuleDestroy {
           "-crf",
           "23",
           "-b:v",
-          res.bitrate,
+          rendition.bitrate,
           "-maxrate",
-          res.bitrate,
+          rendition.bitrate,
           "-bufsize",
-          `${parseInt(res.bitrate) * 2}k`,
+          `${parseInt(rendition.bitrate) * 2}k`,
           "-pix_fmt",
           "yuv420p",
-          "-g",
-          "60",
-          "-hls_init_time",
-          String(hlsInitTime),
+          "-force_key_frames",
+          `expr:gte(t,n_forced*${hlsTime})`,
+          "-sc_threshold",
+          "0",
           "-hls_time",
           String(hlsTime),
           "-hls_playlist_type",
           "vod",
+          "-hls_flags",
+          "independent_segments",
+          "-hls_start_number_source",
+          "epoch_us",
           "-hls_segment_filename",
           segmentPattern,
+          ...(videoEncryption
+            ? ["-hls_key_info_file", videoEncryption.keyInfoPath]
+            : []),
           playlistPath,
         ]);
       }
@@ -728,16 +832,14 @@ export class AssetProcessorService implements OnModuleDestroy {
         rawPosterPath,
       ]);
 
-      // Generate 2400w and 1200w WebP poster images using sharp
-      await sharp(rawPosterPath)
-        .resize(2400, 1350, { fit: "cover" })
-        .webp({ quality: 85 })
-        .toFile(poster2400Path);
-
-      await sharp(rawPosterPath)
-        .resize(1200, 675, { fit: "cover" })
-        .webp({ quality: 85 })
-        .toFile(poster1200Path);
+      // Responsive 16:9 WebP posters let shelf cards load a compact image,
+      // while the detail page can still use a high-density poster.
+      for (const poster of posterRenditions) {
+        await sharp(rawPosterPath)
+          .resize(poster.width, poster.height, { fit: "cover" })
+          .webp({ quality: 85 })
+          .toFile(poster.path);
+      }
 
       // Write master default.m3u8 playlist file
       let masterPlaylistContent = "#EXTM3U\n#EXT-X-VERSION:3\n";
@@ -748,16 +850,20 @@ export class AssetProcessorService implements OnModuleDestroy {
         playlistFile: string;
       }> = [];
 
-      for (const res of activeResolutions) {
-        const subPlaylistName = `video-${res.name}.m3u8`;
+      for (const rendition of hlsRenditions) {
+        const subPlaylistName = rendition.playlistFile;
 
         // Find actual resolution of transcoded segments
         const allFiles = await readdir(workDirectory);
         const resSegments = allFiles.filter(
-          (f) => f.startsWith(`segment-${res.name}_`) && f.endsWith(".ts"),
+          (file) =>
+            file.startsWith(`${rendition.segmentPrefix}_`) &&
+            file.endsWith(".ts"),
         );
-        let actualWidth = res.width;
-        let actualHeight = Math.round((res.width * sourceHeight) / sourceWidth);
+        let actualWidth = rendition.width;
+        let actualHeight = Math.round(
+          (rendition.width * sourceHeight) / sourceWidth,
+        );
 
         if (resSegments[0]) {
           try {
@@ -776,11 +882,11 @@ export class AssetProcessorService implements OnModuleDestroy {
           }
         }
 
-        masterPlaylistContent += `#EXT-X-STREAM-INF:BANDWIDTH=${res.bandwidth},RESOLUTION=${actualWidth}x${actualHeight}\n`;
+        masterPlaylistContent += `#EXT-X-STREAM-INF:BANDWIDTH=${rendition.bandwidth},RESOLUTION=${actualWidth}x${actualHeight}\n`;
         masterPlaylistContent += `${subPlaylistName}\n`;
 
         parsedRenditions.push({
-          name: res.name,
+          name: rendition.name,
           width: actualWidth,
           height: actualHeight,
           playlistFile: subPlaylistName,
@@ -797,7 +903,7 @@ export class AssetProcessorService implements OnModuleDestroy {
         this.videoUploadConcurrency,
         async (file) => {
           const filePath = join(workDirectory, file);
-          const objectKey = `processed/${asset.id}/video/${file}`;
+          const objectKey = `${videoOutputPrefix}/${file}`;
 
           if (file.endsWith(".ts")) {
             await this.storage.uploadFile(objectKey, filePath, "video/MP2T");
@@ -807,22 +913,27 @@ export class AssetProcessorService implements OnModuleDestroy {
               filePath,
               "application/x-mpegURL",
             );
-          } else if (
-            file === "poster-2400w.webp" ||
-            file === "poster-1200w.webp"
-          ) {
+          } else if (file.startsWith("poster-") && file.endsWith(".webp")) {
             await this.storage.uploadFile(objectKey, filePath, "image/webp");
           }
         },
       );
 
-      const masterPlaylistObjectKey = `processed/${asset.id}/video/default.m3u8`;
-      const poster2400ObjectKey = `processed/${asset.id}/video/poster-2400w.webp`;
-      const poster1200ObjectKey = `processed/${asset.id}/video/poster-1200w.webp`;
+      const masterPlaylistObjectKey = `${videoOutputPrefix}/default.m3u8`;
+      const resolvedPosterRenditions = await Promise.all(
+        posterRenditions.map(async (poster) => ({
+          ...poster,
+          objectKey: `${videoOutputPrefix}/${poster.filename}`,
+          url: this.storage.publicUrl(
+            `${videoOutputPrefix}/${poster.filename}`,
+          ),
+          contentType: "image/webp",
+          sizeBytes: (await stat(poster.path)).size,
+        })),
+      );
+      const primaryPoster = resolvedPosterRenditions.at(-1)!;
 
       const masterFileStats = await stat(masterPlaylistPath);
-      const poster2400FileStats = await stat(poster2400Path);
-      const poster1200FileStats = await stat(poster1200Path);
       const masterPlaylistUrl = this.storage.publicUrl(masterPlaylistObjectKey);
 
       const renditions = [
@@ -835,9 +946,9 @@ export class AssetProcessorService implements OnModuleDestroy {
           sizeBytes: masterFileStats.size,
         },
         ...parsedRenditions.map((item) => ({
-          objectKey: `processed/${asset.id}/video/${item.playlistFile}`,
+          objectKey: `${videoOutputPrefix}/${item.playlistFile}`,
           url: this.storage.publicUrl(
-            `processed/${asset.id}/video/${item.playlistFile}`,
+            `${videoOutputPrefix}/${item.playlistFile}`,
           ),
           contentType: "application/x-mpegURL",
           width: item.width,
@@ -858,36 +969,38 @@ export class AssetProcessorService implements OnModuleDestroy {
             durationMillis: Math.round(durationSeconds * 1000),
             contentType: asset.contentType,
           },
+          generation: videoOutputPrefix,
           renditions,
           poster: {
-            objectKey: poster2400ObjectKey,
-            url: this.storage.publicUrl(poster2400ObjectKey),
-            contentType: "image/webp",
-            width: 2400,
-            height: 1350,
-            sizeBytes: poster2400FileStats.size,
+            objectKey: primaryPoster.objectKey,
+            url: primaryPoster.url,
+            contentType: primaryPoster.contentType,
+            width: primaryPoster.width,
+            height: primaryPoster.height,
+            sizeBytes: primaryPoster.sizeBytes,
             variants: {
-              renditions: [
-                {
-                  objectKey: poster1200ObjectKey,
-                  url: this.storage.publicUrl(poster1200ObjectKey),
-                  contentType: "image/webp",
-                  width: 1200,
-                  height: 675,
-                  sizeBytes: poster1200FileStats.size,
-                },
-                {
-                  objectKey: poster2400ObjectKey,
-                  url: this.storage.publicUrl(poster2400ObjectKey),
-                  contentType: "image/webp",
-                  width: 2400,
-                  height: 1350,
-                  sizeBytes: poster2400FileStats.size,
-                },
-              ],
+              renditions: resolvedPosterRenditions.map(
+                ({ objectKey, url, contentType, width, height, sizeBytes }) => ({
+                  objectKey,
+                  url,
+                  contentType,
+                  width,
+                  height,
+                  sizeBytes,
+                }),
+              ),
             },
           },
         }),
+        ...(videoEncryption
+          ? {
+              videoEncryption: {
+                ciphertext: videoEncryption.ciphertext,
+                iv: videoEncryption.encryptionIv,
+                authTag: videoEncryption.authTag,
+              },
+            }
+          : {}),
       };
     } finally {
       await rm(workDirectory, { recursive: true, force: true });
@@ -905,6 +1018,37 @@ export class AssetProcessorService implements OnModuleDestroy {
       filePath,
     ]);
     return JSON.parse(stdout) as ProbeResult;
+  }
+
+  private async prepareMusicVideoEncryption(
+    assetId: string,
+    workDirectory: string,
+  ): Promise<{
+    keyInfoPath: string;
+    ciphertext: Buffer;
+    encryptionIv: Buffer;
+    authTag: Buffer;
+  }> {
+    if (!this.videoKeyUriBase || !this.videoKeyEncryptionKey) {
+      throw new Error("MUSIC_VIDEO_ENCRYPTION_NOT_CONFIGURED");
+    }
+
+    const hlsKey = randomBytes(16);
+    const encryptedKey = encryptVideoKey(this.videoKeyEncryptionKey, hlsKey);
+    const keyPath = join(workDirectory, "hls.key");
+    const keyInfoPath = join(workDirectory, "hls-key-info.txt");
+    await writeFile(keyPath, hlsKey, { mode: 0o600 });
+    await writeFile(
+      keyInfoPath,
+      `${this.videoKeyUriBase}/${encodeURIComponent(assetId)}/key\n${keyPath}\n`,
+      { mode: 0o600 },
+    );
+    return {
+      keyInfoPath,
+      ciphertext: Buffer.from(encryptedKey.ciphertext),
+      encryptionIv: Buffer.from(encryptedKey.iv),
+      authTag: Buffer.from(encryptedKey.authTag),
+    };
   }
 
   private run(

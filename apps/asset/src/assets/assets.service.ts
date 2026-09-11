@@ -16,6 +16,8 @@ import {
   ListAssetsRequest,
   ListAssetsResponse,
   ListAssetUsagesResponse,
+  GetMusicVideoKeyRequest,
+  GetMusicVideoKeyResponse,
   RegisterAssetUsagesResponse,
   RequestAssetUploadRequest,
   RequestAssetUploadResponse,
@@ -31,6 +33,10 @@ import {
   Prisma,
 } from '../generated/prisma/client';
 import { StorageService } from '../storage/storage.service';
+import {
+  decryptVideoKey,
+  parseVideoKeyEncryptionKey,
+} from '../common/crypto/video-key-encryption';
 
 const MAX_LIST_LIMIT = 100;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -54,6 +60,7 @@ const VIDEO_TYPES = new Set([
 export class AssetsService {
   private readonly artifactCleanupLockTtlMs: number;
   private readonly failedArtifactRetentionMs: number;
+  private readonly videoKeyEncryptionKey: Buffer | undefined;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -67,6 +74,9 @@ export class AssetsService {
     this.failedArtifactRetentionMs = this.positiveInteger(
       config.get<string>('ASSET_FAILED_ARTIFACT_RETENTION_MS'),
       DEFAULT_FAILED_ARTIFACT_RETENTION_MS,
+    );
+    this.videoKeyEncryptionKey = parseVideoKeyEncryptionKey(
+      config.get<string>('ASSET_VIDEO_KEY_ENCRYPTION_KEY'),
     );
   }
 
@@ -230,6 +240,32 @@ export class AssetsService {
 
   async getAsset(request: GetAssetRequest): Promise<AssetResponse> {
     return { asset: this.assetMessage(await this.findAsset(request.assetId)) };
+  }
+
+  async getMusicVideoKey(
+    request: GetMusicVideoKeyRequest,
+  ): Promise<GetMusicVideoKeyResponse> {
+    if (!this.videoKeyEncryptionKey) {
+      throw new Error('MUSIC_VIDEO_ENCRYPTION_NOT_CONFIGURED');
+    }
+    const asset = await this.findAsset(request.assetId);
+    if (
+      asset.kind !== PrismaAssetKind.VIDEO ||
+      asset.purpose !== PrismaAssetPurpose.MUSIC_VIDEO ||
+      asset.status !== PrismaAssetStatus.READY
+    ) {
+      this.failedPrecondition('MUSIC_VIDEO_KEY_UNAVAILABLE');
+    }
+    const encrypted = await this.prisma.assetVideoEncryptionKey.findUnique({
+      where: { assetId: asset.id },
+    });
+    if (!encrypted) this.failedPrecondition('MUSIC_VIDEO_KEY_UNAVAILABLE');
+    try {
+      const key = decryptVideoKey(this.videoKeyEncryptionKey, encrypted);
+      return { key };
+    } catch {
+      this.failedPrecondition('MUSIC_VIDEO_KEY_UNAVAILABLE');
+    }
   }
 
   async listAssets(request: ListAssetsRequest): Promise<ListAssetsResponse> {
@@ -418,9 +454,11 @@ export class AssetsService {
     if (
       (kind === PrismaAssetKind.IMAGE &&
         purpose !== PrismaAssetPurpose.ARTWORK &&
-        purpose !== PrismaAssetPurpose.PROFILE_AVATAR) ||
+        purpose !== PrismaAssetPurpose.PROFILE_AVATAR &&
+        purpose !== PrismaAssetPurpose.STATION_ARTWORK) ||
       (kind === PrismaAssetKind.VIDEO &&
-        purpose !== PrismaAssetPurpose.EDITORIAL_VIDEO)
+        purpose !== PrismaAssetPurpose.EDITORIAL_VIDEO &&
+        purpose !== PrismaAssetPurpose.MUSIC_VIDEO)
     ) {
       this.invalidArgument('asset kind and purpose are incompatible');
     }
@@ -641,8 +679,12 @@ export class AssetsService {
       purpose:
         asset.purpose === PrismaAssetPurpose.ARTWORK
           ? AssetPurpose.ASSET_PURPOSE_ARTWORK
+          : asset.purpose === PrismaAssetPurpose.STATION_ARTWORK
+            ? AssetPurpose.ASSET_PURPOSE_STATION_ARTWORK
           : asset.purpose === PrismaAssetPurpose.PROFILE_AVATAR
             ? AssetPurpose.ASSET_PURPOSE_PROFILE_AVATAR
+          : asset.purpose === PrismaAssetPurpose.MUSIC_VIDEO
+            ? AssetPurpose.ASSET_PURPOSE_MUSIC_VIDEO
             : AssetPurpose.ASSET_PURPOSE_EDITORIAL_VIDEO,
       status: this.status(asset.status),
       filename: asset.filename,
@@ -686,8 +728,14 @@ export class AssetsService {
     if (value === AssetPurpose.ASSET_PURPOSE_ARTWORK) {
       return PrismaAssetPurpose.ARTWORK;
     }
+    if (value === AssetPurpose.ASSET_PURPOSE_STATION_ARTWORK) {
+      return PrismaAssetPurpose.STATION_ARTWORK;
+    }
     if (value === AssetPurpose.ASSET_PURPOSE_EDITORIAL_VIDEO) {
       return PrismaAssetPurpose.EDITORIAL_VIDEO;
+    }
+    if (value === AssetPurpose.ASSET_PURPOSE_MUSIC_VIDEO) {
+      return PrismaAssetPurpose.MUSIC_VIDEO;
     }
     if (value === AssetPurpose.ASSET_PURPOSE_PROFILE_AVATAR) {
       return PrismaAssetPurpose.PROFILE_AVATAR;
@@ -771,4 +819,5 @@ export class AssetsService {
     const parsed = Number(value);
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
   }
+
 }

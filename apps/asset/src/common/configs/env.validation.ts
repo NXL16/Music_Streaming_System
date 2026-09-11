@@ -7,6 +7,8 @@ const REQUIRED_ENV = [
   'R2_BUCKET',
   'CDN_URL',
   'INTERNAL_GRPC_TOKEN',
+  'ASSET_VIDEO_KEY_URI_BASE',
+  'ASSET_VIDEO_KEY_ENCRYPTION_KEY',
 ] as const;
 
 export function validateEnv(
@@ -24,6 +26,15 @@ export function validateEnv(
 
   if (rawEnv.INTERNAL_GRPC_TOKEN!.length < 32) {
     throw new Error('INTERNAL_GRPC_TOKEN must be at least 32 characters');
+  }
+
+  try {
+    new URL(rawEnv.ASSET_VIDEO_KEY_URI_BASE!);
+  } catch {
+    throw new Error('ASSET_VIDEO_KEY_URI_BASE must be an absolute URL');
+  }
+  if (!/^[0-9a-fA-F]{64}$/.test(rawEnv.ASSET_VIDEO_KEY_ENCRYPTION_KEY!)) {
+    throw new Error('ASSET_VIDEO_KEY_ENCRYPTION_KEY must be exactly 32 bytes in hex');
   }
 
   const workerEnabled = rawEnv.ASSET_WORKER_ENABLED;
@@ -104,6 +115,12 @@ export function validateEnv(
     4,
   );
   validatePositiveInteger(rawEnv, 'ASSET_VIDEO_UPLOAD_CONCURRENCY', 1, 16);
+  validatePositiveInteger(
+    rawEnv,
+    'ASSET_VIDEO_HLS_SEGMENT_DURATION_SECONDS',
+    2,
+    10,
+  );
 
   return rawEnv as Record<string, string>;
 }

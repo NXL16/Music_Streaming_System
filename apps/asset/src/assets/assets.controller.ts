@@ -7,6 +7,8 @@ import {
   DeleteAssetResponse,
   FinalizeAssetUploadRequest,
   GetAssetRequest,
+  GetMusicVideoKeyRequest,
+  GetMusicVideoKeyResponse,
   ListAssetsRequest,
   ListAssetsResponse,
   ListAssetUsagesResponse,
@@ -39,6 +41,12 @@ export class AssetsController implements AssetServiceController {
 
   getAsset(request: GetAssetRequest): Promise<AssetResponse> {
     return this.assetsService.getAsset(request);
+  }
+
+  getMusicVideoKey(
+    request: GetMusicVideoKeyRequest,
+  ): Promise<GetMusicVideoKeyResponse> {
+    return this.assetsService.getMusicVideoKey(request);
   }
 
   listAssets(request: ListAssetsRequest): Promise<ListAssetsResponse> {

@@ -265,6 +265,27 @@ export class AssetProcessingWorkerService
         return false;
       }
 
+      if (result.videoEncryption) {
+        await tx.assetVideoEncryptionKey.upsert({
+          where: { assetId: asset.id },
+          create: {
+            assetId: asset.id,
+            ciphertext: Uint8Array.from(result.videoEncryption.ciphertext),
+            iv: Uint8Array.from(result.videoEncryption.iv),
+            authTag: Uint8Array.from(result.videoEncryption.authTag),
+          },
+          update: {
+            ciphertext: Uint8Array.from(result.videoEncryption.ciphertext),
+            iv: Uint8Array.from(result.videoEncryption.iv),
+            authTag: Uint8Array.from(result.videoEncryption.authTag),
+          },
+        });
+      } else if (asset.purpose === 'MUSIC_VIDEO') {
+        await tx.assetVideoEncryptionKey.deleteMany({
+          where: { assetId: asset.id },
+        });
+      }
+
       // A previous failed generation may have left a delayed cleanup intent.
       // READY is the terminal owner of these keys, so it must cancel that intent
       // in the same transaction as the state transition.

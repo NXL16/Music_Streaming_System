@@ -6,6 +6,12 @@ export interface AssetProcessingResult {
   height: number;
   durationMillis: number;
   variants: Prisma.InputJsonObject;
+  /** Present only for MUSIC_VIDEO. The plaintext HLS key is never persisted. */
+  videoEncryption?: {
+    ciphertext: Buffer;
+    iv: Buffer;
+    authTag: Buffer;
+  };
 }
 
 export interface MediaRendition {
