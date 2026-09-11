@@ -14,6 +14,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"Music_Streaming_System/apps/wallet/internal/config"
@@ -569,6 +570,10 @@ type NFBankCreateResponse struct {
 }
 
 func (s *WalletService) createNFBankDepositOrder(ctx context.Context, req *walletpb.DepositOrderRequest) (*walletpb.DepositOrderResponse, error) {
+	if s.cfg.NFBankPartnerCode == "" || s.cfg.NFBankAccessKey == "" || s.cfg.NFBankSecretKey == "" || s.cfg.NFBankAPIURL == "" || s.cfg.NFBankRedirectURL == "" || s.cfg.NFBankNotifyURL == "" {
+		return nil, errors.New("NF-Bank payment gateway is not fully configured")
+	}
+
 	order, err := s.createPendingDepositOrder(ctx, req, "NFBANK")
 	if err != nil {
 		return nil, fmt.Errorf("cannot create NF-Bank deposit order: %w", err)
@@ -606,9 +611,10 @@ func (s *WalletService) createNFBankDepositOrder(ctx context.Context, req *walle
 	}
 
 	var nfBankResp NFBankCreateResponse
+	apiURL := strings.TrimRight(s.cfg.NFBankAPIURL, "/")
 	if err := s.postJSON(
 		ctx,
-		fmt.Sprintf("%s/payments/create", s.cfg.NFBankAPIURL),
+		fmt.Sprintf("%s/payments/create", apiURL),
 		nfBankBody,
 		&nfBankResp,
 	); err != nil {

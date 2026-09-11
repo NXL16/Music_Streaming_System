@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"Music_Streaming_System/apps/wallet/internal/config"
 	"Music_Streaming_System/apps/wallet/internal/service"
@@ -47,6 +48,10 @@ func (h *NFBankHandler) HandleWebhook(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Payload không hợp lệ"})
 		return
 	}
+	if payload.PartnerCode != h.cfg.NFBankPartnerCode {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "PartnerCode không hợp lệ"})
+		return
+	}
 
 	// 1. Lấy Secret Key từ config (NFBANK_SECRET_KEY)
 	secretKey := h.cfg.NFBankSecretKey
@@ -70,7 +75,7 @@ func (h *NFBankHandler) HandleWebhook(c *gin.Context) {
 	expectedSignature := hex.EncodeToString(mac.Sum(nil))
 
 	// 4. So khớp chữ ký chống giả mạo dữ liệu dòng tiền
-	if !hmac.Equal([]byte(payload.Signature), []byte(expectedSignature)) {
+	if !hmac.Equal([]byte(strings.ToLower(payload.Signature)), []byte(expectedSignature)) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Chữ ký xác thực không khớp!"})
 		return
 	}
