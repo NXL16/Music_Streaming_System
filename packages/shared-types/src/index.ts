@@ -80,6 +80,7 @@ export function getArtworkRenditionSrcSet(
 // ==========================================
 export const UserRole = {
   USER: "USER",
+  ARTIST_PENDING: "ARTIST_PENDING",
   ARTIST: "ARTIST",
   SUPER_ADMIN: "SUPER_ADMIN",
   ADMIN_USER_OPS: "ADMIN_USER_OPS",

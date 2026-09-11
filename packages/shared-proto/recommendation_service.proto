@@ -20,11 +20,21 @@ service RecommendationService {
   rpc GetListeningAnalytics(GetListeningAnalyticsRequest) returns (ListeningAnalyticsResponse);
   rpc GetRecommendationQualityAnalytics(GetRecommendationQualityAnalyticsRequest) returns (RecommendationQualityAnalyticsResponse);
   rpc RecordRecommendationInteraction(RecordRecommendationInteractionRequest) returns (RecordRecommendationInteractionResponse);
+  rpc RecordPreferenceEvent(RecordPreferenceEventRequest) returns (RecordPreferenceEventResponse);
+  rpc ListContentPreferences(ListContentPreferencesRequest) returns (ListContentPreferencesResponse);
+  rpc SetArtistFollow(SetArtistFollowRequest) returns (ArtistFollowResponse);
+  rpc GetArtistFollow(GetArtistFollowRequest) returns (ArtistFollowResponse);
   rpc UpsertSystemStationArtwork(UpsertSystemStationArtworkRequest) returns (SystemStationArtworkResponse);
+  rpc CreateSongStation(CreateSongStationRequest) returns (SongStationResponse);
+  rpc GetSongStation(GetSongStationRequest) returns (SongStationResponse);
+  rpc GetSongStationTracks(GetSongStationTracksRequest) returns (SongStationTracksResponse);
+  rpc CreateArtistStation(CreateArtistStationRequest) returns (ArtistStationResponse);
+  rpc GetArtistStation(GetArtistStationRequest) returns (ArtistStationResponse);
+  rpc GetArtistStationTracks(GetArtistStationTracksRequest) returns (SongStationTracksResponse);
 }
 
 message CleanupPlaylistHistoryRequest {
-  string user_id = 1;
+  string user_id     = 1;
   string playlist_id = 2;
 }
 
@@ -39,6 +49,82 @@ message UpsertSystemStationArtworkRequest {
 message SystemStationArtworkResponse {
   string station_key = 1;
   string asset_id    = 2;
+}
+
+message CreateSongStationRequest {
+  string user_id = 1;
+  string song_id = 2;
+  // Set only by the API after it has rendered and persisted the Station PNG.
+  string station_artwork_asset_id = 3;
+  string station_artwork_bg_color = 4;
+  // The release context that supplies Station artwork for a reusable Song.
+  string source_album_id = 5;
+}
+
+message SongStationResponse {
+  string station_id = 1;
+  string name = 2;
+  string description = 3;
+  string artwork_url = 4;
+  string artwork_bg_color = 5;
+  repeated string track_ids = 6;
+  // Internal API rendering input; never needs to be displayed by the client.
+  string seed_artwork_url = 7;
+  string seed_song_id = 8;
+  bool artwork_ready = 9;
+  string seed_album_id = 10;
+}
+
+message GetSongStationRequest {
+  string user_id = 1;
+  string station_id = 2;
+}
+
+// Requests the next distinct batch for a running Song Station. The caller
+// supplies its current session queue so the service never sends a repeat.
+message GetSongStationTracksRequest {
+  string user_id = 1;
+  string station_id = 2;
+  repeated string excluded_song_ids = 3;
+  int32 limit = 4;
+}
+
+message SongStationTracksResponse {
+  repeated string track_ids = 1;
+}
+
+message CreateArtistStationRequest {
+  string user_id = 1;
+  string artist_id = 2;
+  string station_artwork_asset_id = 3;
+  string station_artwork_bg_color = 4;
+  bool artist_only = 5;
+}
+
+message ArtistStationResponse {
+  string station_id = 1;
+  string name = 2;
+  string description = 3;
+  string artwork_url = 4;
+  string artwork_bg_color = 5;
+  repeated string track_ids = 6;
+  repeated string featured_artist_artwork_urls = 7;
+  repeated string featured_artist_ids = 8;
+  bool artwork_ready = 9;
+  string seed_artist_id = 10;
+  bool artist_only = 11;
+}
+
+message GetArtistStationRequest {
+  string user_id = 1;
+  string station_id = 2;
+}
+
+message GetArtistStationTracksRequest {
+  string user_id = 1;
+  string station_id = 2;
+  repeated string excluded_song_ids = 3;
+  int32 limit = 4;
 }
 
 enum RecommendationPageScope {
@@ -215,6 +301,7 @@ enum ListeningEventType {
   LISTENING_EVENT_TYPE_PLAY_START    = 1;
   LISTENING_EVENT_TYPE_PLAY_COMPLETE = 2;
   LISTENING_EVENT_TYPE_SKIP          = 3;
+  LISTENING_EVENT_TYPE_PLAY_STOPPED  = 4;
 }
 
 enum RecommendationInteractionType {
@@ -259,8 +346,56 @@ message RecordListeningEventRequest {
   string             station_artwork_bg_color  = 17;
   string             playlist_curator_name     = 18;
   // Optional client-generated ID. A retry must reuse the same value.
-  string             event_id                  = 19;
+  string event_id = 19;
 }
+
+enum PreferenceEventType {
+  PREFERENCE_EVENT_TYPE_UNSPECIFIED            = 0;
+  PREFERENCE_EVENT_TYPE_LIBRARY_ADDED          = 1;
+  PREFERENCE_EVENT_TYPE_LIBRARY_REMOVED        = 2;
+  PREFERENCE_EVENT_TYPE_ALBUM_FAVOURITED       = 3;
+  PREFERENCE_EVENT_TYPE_ALBUM_UNFAVOURITED     = 4;
+  PREFERENCE_EVENT_TYPE_SONG_FAVOURITED        = 5;
+  PREFERENCE_EVENT_TYPE_SONG_UNFAVOURITED      = 6;
+  PREFERENCE_EVENT_TYPE_PLAYLIST_TRACK_ADDED   = 7;
+  PREFERENCE_EVENT_TYPE_PLAYLIST_TRACK_REMOVED = 8;
+  PREFERENCE_EVENT_TYPE_ARTIST_FOLLOWED        = 9;
+  PREFERENCE_EVENT_TYPE_ARTIST_UNFOLLOWED      = 10;
+  PREFERENCE_EVENT_TYPE_SEARCH_CLICKED         = 11;
+  PREFERENCE_EVENT_TYPE_CONTENT_HIDDEN         = 12;
+  // A deliberate queue choice is a positive but weaker signal than Favourite.
+  PREFERENCE_EVENT_TYPE_QUEUE_ADDED           = 13;
+  PREFERENCE_EVENT_TYPE_PLAYLIST_FAVOURITED   = 14;
+  PREFERENCE_EVENT_TYPE_PLAYLIST_UNFAVOURITED = 15;
+}
+
+message RecordPreferenceEventRequest {
+  string              user_id       = 1;
+  string              event_id      = 2;
+  PreferenceEventType event_type    = 3;
+  string              resource_type = 4;
+  string              resource_id   = 5;
+  double              weight        = 6;
+}
+
+message RecordPreferenceEventResponse { bool success = 1; }
+
+message ListContentPreferencesRequest { string user_id = 1; }
+
+message ContentPreference {
+  string resource_type = 1;
+  string resource_id   = 2;
+}
+
+message ListContentPreferencesResponse {
+  repeated ContentPreference hidden_resources = 1;
+}
+
+message SetArtistFollowRequest { string user_id = 1; string artist_id = 2; bool is_followed = 3; }
+
+message GetArtistFollowRequest { string user_id = 1; string artist_id = 2; }
+
+message ArtistFollowResponse { bool success = 1; bool is_followed = 2; bool changed = 3; }
 
 message RecordListeningEventResponse {
   bool success = 1;

@@ -6,7 +6,9 @@ option go_package = "Music_Streaming_System/packages/shared-proto/identity";
 
 service IdentityService {
   rpc SignUp (SignUpRequest) returns (AuthResponse);
+  rpc SignUpArtist (SignUpRequest) returns (UserProfile);
   rpc Login (LoginRequest) returns (AuthResponse);
+  rpc LoginArtist (LoginRequest) returns (AuthResponse);
   rpc LoginWithGoogle (LoginWithGoogleRequest) returns (AuthResponse);
   rpc RefreshToken (RefreshTokenRequest) returns (AuthResponse);
   rpc Logout (LogoutRequest) returns (EmptyResponse);
@@ -21,6 +23,7 @@ service IdentityService {
   rpc AdminRevokeUserSessions (AdminUserActionRequest) returns (EmptyResponse);
   rpc AdminResetUserTwoFactor (AdminUserActionRequest) returns (UserProfile);
   rpc SetUserRole (SetUserRoleRequest) returns (UserProfile);
+  rpc GrantArtistWorkspaceSeat (GrantArtistWorkspaceSeatRequest) returns (UserProfile);
   rpc RequestPasswordReset (RequestPasswordResetRequest) returns (TokenIssueResponse);
   rpc ResetPassword (ResetPasswordRequest) returns (EmptyResponse);
   rpc RequestEmailVerification (RequestEmailVerificationRequest) returns (TokenIssueResponse);
@@ -29,6 +32,7 @@ service IdentityService {
   rpc ConfirmTwoFactorSetup (ConfirmTwoFactorSetupRequest) returns (ConfirmTwoFactorSetupResponse);
   rpc DisableTwoFactor (DisableTwoFactorRequest) returns (UserProfile);
   rpc VerifyTwoFactorLogin (VerifyTwoFactorLoginRequest) returns (AuthResponse);
+  rpc VerifyArtistTwoFactorLogin (VerifyTwoFactorLoginRequest) returns (AuthResponse);
   rpc RegenerateTwoFactorRecoveryCodes (RegenerateTwoFactorRecoveryCodesRequest) returns (TwoFactorRecoveryCodesResponse);
 }
 
@@ -138,6 +142,11 @@ message SetUserRoleRequest {
   string actor_user_id  = 1;
   string target_user_id = 2;
   string role           = 3;
+}
+
+message GrantArtistWorkspaceSeatRequest {
+  string actor_user_id  = 1;
+  string target_user_id = 2;
 }
 
 message RequestPasswordResetRequest {

@@ -15,6 +15,9 @@ service AssetService {
   rpc RegisterAssetUsages(SyncAssetUsagesRequest) returns (RegisterAssetUsagesResponse);
   rpc ReconcileAssetUsages(SyncAssetUsagesRequest) returns (SyncAssetUsagesResponse);
   rpc ListAssetUsages(GetAssetRequest) returns (ListAssetUsagesResponse);
+  // Internal-only: the API gateway obtains the raw 16-byte HLS key after
+  // authenticating a playback request. Key material never reaches R2/CDN.
+  rpc GetMusicVideoKey(GetMusicVideoKeyRequest) returns (GetMusicVideoKeyResponse);
 }
 
 enum AssetKind {
@@ -28,6 +31,8 @@ enum AssetPurpose {
   ASSET_PURPOSE_ARTWORK         = 1;
   ASSET_PURPOSE_EDITORIAL_VIDEO = 2;
   ASSET_PURPOSE_PROFILE_AVATAR  = 3;
+  ASSET_PURPOSE_MUSIC_VIDEO     = 4;
+  ASSET_PURPOSE_STATION_ARTWORK = 5;
 }
 
 enum AssetStatus {
@@ -90,6 +95,14 @@ message DeleteAssetResponse {
 
 message AssetResponse {
   Asset asset = 1;
+}
+
+message GetMusicVideoKeyRequest {
+  string asset_id = 1;
+}
+
+message GetMusicVideoKeyResponse {
+  bytes key = 1;
 }
 
 message AssetUsageAssignment {
