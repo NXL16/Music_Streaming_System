@@ -3,7 +3,6 @@ mod crypto;
 mod job;
 mod metadata;
 mod modal;
-mod mood_analysis;
 mod observability;
 mod pipeline;
 mod proto;
@@ -13,6 +12,7 @@ mod redis;
 
 use crate::config::Config;
 use crate::observability::metrics::RuntimeMetrics;
+use crate::queue::audio_analysis_consumer::AudioAnalysisConsumer;
 use crate::queue::consumer::Consumer;
 use std::path::PathBuf;
 
@@ -20,7 +20,7 @@ use std::path::PathBuf;
 async fn main() -> anyhow::Result<()> {
     // `pnpm dev` launches this binary from the workspace root. Resolve the
     // environment file from the worker crate itself so worker-only settings
-    // (including the local mood analyser) are never silently skipped.
+    // are never silently skipped.
     let worker_env = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".env");
     if let Err(error) = dotenvy::from_path_override(&worker_env) {
         eprintln!(
@@ -30,23 +30,30 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    let mood_enabled = matches!(
-        std::env::var("MOOD_ANALYSIS_ENABLED").as_deref(),
-        Ok("true") | Ok("1") | Ok("TRUE") | Ok("True")
-    );
-    let mood_executable_configured = std::env::var("MOOD_ANALYSIS_EXECUTABLE")
+    let audio_intelligence_enabled = crate::modal::client::audio_intelligence_enabled();
+    let audio_intelligence_url_configured = std::env::var("AUDIO_INTELLIGENCE_URL")
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+    let audio_intelligence_secret_configured = std::env::var("AUDIO_INTELLIGENCE_SHARED_SECRET")
         .map(|value| !value.trim().is_empty())
         .unwrap_or(false);
     eprintln!(
-        "worker_config mood_analysis_enabled={} mood_analysis_executable_configured={}",
-        mood_enabled, mood_executable_configured
+        "worker_config audio_intelligence_enabled={} audio_intelligence_url_configured={} audio_intelligence_secret_configured={}",
+        audio_intelligence_enabled,
+        audio_intelligence_url_configured,
+        audio_intelligence_secret_configured
     );
 
     let config = Config::load();
     let metrics = RuntimeMetrics::shared();
 
     let consumer = Consumer::new(&config, metrics).await?;
-    consumer.run().await?;
+    if audio_intelligence_enabled {
+        let audio_consumer = AudioAnalysisConsumer::new(&config.redis_url).await?;
+        tokio::try_join!(consumer.run(), audio_consumer.run())?;
+    } else {
+        consumer.run().await?;
+    }
 
     Ok(())
 }

@@ -1,24 +1,30 @@
 use anyhow::Result;
 use redis::aio::ConnectionManager;
 use serde::Serialize;
-use std::collections::BTreeMap;
 
 #[derive(Debug, Serialize)]
 pub struct SongCompletionEvent {
     pub song_id: String,
     pub metadata_version: i64,
     pub status: String,
+    pub audio_analysis_only: bool,
     pub duration_sec: Option<i32>,
     pub encrypted_file_path: Option<String>,
     pub bitrate_kbps: Option<i32>,
     pub codec: Option<String>,
     pub format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mood_tags: Option<Vec<String>>,
+    pub audio_bpm: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mood_analysis_version: Option<String>,
+    pub audio_energy: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mood_analysis_scores: Option<BTreeMap<String, f64>>,
+    pub audio_tags: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_embedding: Option<Vec<f64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_analysis_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_analysis_error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
 }
@@ -46,6 +52,29 @@ impl RedisPublisher {
             .query_async(&mut self.conn)
             .await?;
 
+        Ok(())
+    }
+
+    pub async fn publish_audio_analysis_job(
+        &mut self,
+        song_id: &str,
+        metadata_version: i64,
+        source_key: &str,
+    ) -> Result<()> {
+        let queue = std::env::var("AUDIO_INTELLIGENCE_QUEUE")
+            .unwrap_or_else(|_| "audio_intelligence_queue".to_string());
+        let payload = serde_json::json!({
+            "song_id": song_id,
+            "metadata_version": metadata_version,
+            "source_key": source_key,
+        });
+        let _: String = redis::cmd("XADD")
+            .arg(queue)
+            .arg("*")
+            .arg("payload")
+            .arg(payload.to_string())
+            .query_async(&mut self.conn)
+            .await?;
         Ok(())
     }
 }

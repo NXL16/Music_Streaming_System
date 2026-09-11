@@ -13,6 +13,7 @@ pub async fn handle(
 ) -> anyhow::Result<()> {
     let song_id = job.song_id.clone();
     let metadata_version = job.metadata_version;
+    let source_key = job.r2_path.clone();
     log_event("info", "job_started", &[("song_id", song_id.clone())]);
     let mut redis = RedisPublisher::from_manager(redis_conn);
 
@@ -27,18 +28,33 @@ pub async fn handle(
                 song_id: song_id.clone(),
                 metadata_version,
                 status: "success".to_string(),
+                audio_analysis_only: false,
                 duration_sec,
                 encrypted_file_path: Some(encrypted_file_path),
                 bitrate_kbps: Some(128),
                 codec: Some("aac".to_string()),
                 format: Some("fmp4".to_string()),
-                mood_tags: (!ctx.mood_tags.is_empty()).then_some(ctx.mood_tags),
-                mood_analysis_version: ctx.mood_analysis_version,
-                mood_analysis_scores: ctx.mood_analysis_scores,
+                audio_bpm: None,
+                audio_energy: None,
+                audio_tags: None,
+                audio_embedding: None,
+                audio_analysis_version: None,
+                audio_analysis_error: None,
                 error_message: None,
             };
 
             redis.publish_song_completion(event).await?;
+            if crate::modal::client::audio_intelligence_enabled()
+                && let Err(error) = redis
+                    .publish_audio_analysis_job(&song_id, metadata_version, &source_key)
+                    .await
+            {
+                log_event(
+                    "warn",
+                    "audio_analysis_enqueue_failed",
+                    &[("song_id", song_id.clone()), ("error", error.to_string())],
+                );
+            }
             log_event(
                 "info",
                 "job_completed",
