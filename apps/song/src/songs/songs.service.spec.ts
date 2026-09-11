@@ -20,6 +20,14 @@ jest.mock('@musical/shared-proto', () => ({
   SongStatus: {
     SONG_STATUS_READY: 3,
   },
+  PreferenceEventType: {
+    PREFERENCE_EVENT_TYPE_PLAYLIST_TRACK_ADDED: 7,
+  },
+}));
+jest.mock('@musical/shared-constants', () => ({
+  PREFERENCE_SIGNAL_WEIGHT: {
+    PLAYLIST_TRACK_ADDED: 1,
+  },
 }));
 jest.mock('@musical/shared-types', () => ({
   getArtworkRenditionSrcSet: jest.fn(),
@@ -111,12 +119,18 @@ function createAddTrackService(options?: {
         },
       ),
     },
+    albumTrack: {
+      findUnique: jest.fn().mockResolvedValue({ songId: 'song' }),
+    },
     userPlaylistTrack: {
       findUnique: jest.fn().mockResolvedValue(options?.existingTrack ?? null),
       aggregate: jest.fn().mockResolvedValue({
         _max: { position: options?.maxPosition ?? null },
       }),
       create,
+    },
+    preferenceOutbox: {
+      create: jest.fn().mockResolvedValue({}),
     },
   };
   const service = Object.create(SongsService.prototype) as SongsService;
@@ -257,7 +271,7 @@ describe('SongsService.addTrackToPlaylist', () => {
     });
 
     await expectRpcCode(
-      service.addTrackToPlaylist('owner', 'playlist', 'song'),
+      service.addTrackToPlaylist('owner', 'playlist', 'song', 'album'),
       status.PERMISSION_DENIED,
     );
     expect(create).not.toHaveBeenCalled();
@@ -274,7 +288,7 @@ describe('SongsService.addTrackToPlaylist', () => {
     });
 
     await expectRpcCode(
-      service.addTrackToPlaylist('owner', 'playlist', 'song'),
+      service.addTrackToPlaylist('owner', 'playlist', 'song', 'album'),
       status.PERMISSION_DENIED,
     );
     expect(create).not.toHaveBeenCalled();
@@ -284,12 +298,57 @@ describe('SongsService.addTrackToPlaylist', () => {
     const { create, service, tx } = createAddTrackService({ maxPosition: 4 });
 
     await expect(
-      service.addTrackToPlaylist('owner', 'playlist', 'song'),
-    ).resolves.toEqual({ success: true });
+      service.addTrackToPlaylist('owner', 'playlist', 'song', 'album'),
+    ).resolves.toMatchObject({ success: true });
 
     expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
     expect(create).toHaveBeenCalledWith({
-      data: { playlistId: 'playlist', songId: 'song', position: 5 },
+      data: {
+        playlistId: 'playlist',
+        songId: 'song',
+        sourceAlbumId: 'album',
+        position: 5,
+      },
+    });
+  });
+});
+
+describe('SongsService.removeLibraryResource', () => {
+  it('reports a removed playlist favourite in the same transaction', async () => {
+    const tx = {
+      userPlaylist: { findFirst: jest.fn().mockResolvedValue(null) },
+      userLibraryResource: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      playlistFavorite: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      preferenceOutbox: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const service = Object.create(SongsService.prototype) as SongsService;
+    Object.assign(service as object, {
+      prisma: {
+        $transaction: jest.fn(
+          (callback: (transaction: typeof tx) => Promise<unknown>) =>
+            callback(tx),
+        ),
+      },
+    });
+
+    await expect(
+      service.removeLibraryResource({
+        userId: 'user',
+        resourceType: 'playlists',
+        resourceId: 'playlist',
+        title: '',
+        subtitle: '',
+        artworkUrl: '',
+        sourceAlbumId: '',
+      }),
+    ).resolves.toMatchObject({
+      removed: true,
+      favoriteRemoved: true,
+    });
+    expect(tx.playlistFavorite.deleteMany).toHaveBeenCalledWith({
+      where: { userId: 'user', playlistId: 'playlist' },
     });
   });
 });

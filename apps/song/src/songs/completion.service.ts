@@ -27,15 +27,19 @@ type WorkerSongCompletionEvent = {
   song_id: string;
   metadata_version?: number | null;
   status: 'success' | 'error';
+  audio_analysis_only?: boolean;
   duration_sec?: number | null;
   encrypted_file_path?: string | null;
   bitrate_kbps?: number | null;
   codec?: string | null;
   format?: string | null;
   error_message?: string | null;
-  mood_tags?: string[] | null;
-  mood_analysis_version?: string | null;
-  mood_analysis_scores?: Record<string, number> | null;
+  audio_bpm?: number | null;
+  audio_energy?: number | null;
+  audio_tags?: string[] | null;
+  audio_embedding?: number[] | null;
+  audio_analysis_version?: string | null;
+  audio_analysis_error?: string | null;
 };
 
 type CompletionLockLease = {
@@ -195,10 +199,9 @@ export class CompletionService
           continue;
         }
 
-        const processedKey = songCompletionProcessedKey(
-          event.song_id,
-          metadataVersion,
-        );
+        const processedKey = event.audio_analysis_only
+          ? `${songCompletionProcessedKey(event.song_id, metadataVersion)}:audio-analysis`
+          : songCompletionProcessedKey(event.song_id, metadataVersion);
         const lockKey = songCompletionLockKey(event.song_id);
 
         // dedupe by outcome:

@@ -26,12 +26,16 @@ export interface ResolvedCatalogAssets {
   usages: CatalogAssetUsage[];
 }
 
-const RESOURCE_TYPES_WITH_ARTWORK = new Set([
-  'artists',
-  'songs',
-  'albums',
-  'playlists',
-]);
+export interface CatalogMusicVideoAsset {
+  posterUrl: string;
+  posterSrcSet: string;
+  durationMillis: number;
+  width: number;
+  height: number;
+}
+
+const RESOURCE_TYPES_WITH_ARTWORK = new Set(['artists', 'albums', 'playlists']);
+const RESOURCE_TYPES_WITH_EDITORIAL_ARTWORK = new Set(['albums', 'playlists']);
 
 @Injectable()
 export class CatalogAssetsService implements OnModuleInit {
@@ -60,12 +64,14 @@ export class CatalogAssetsService implements OnModuleInit {
           ownerService: input.ownerService,
           ownerType: input.ownerType,
           ownerId: input.ownerId,
-          usages: [{
-            slot: 'artwork',
-            assetId: input.assetId,
-            expectedKind: AssetKind.ASSET_KIND_IMAGE,
-            expectedPurpose: AssetPurpose.ASSET_PURPOSE_ARTWORK,
-          }],
+          usages: [
+            {
+              slot: 'artwork',
+              assetId: input.assetId,
+              expectedKind: AssetKind.ASSET_KIND_IMAGE,
+              expectedPurpose: AssetPurpose.ASSET_PURPOSE_ARTWORK,
+            },
+          ],
         },
         this.metadata(),
       ),
@@ -83,28 +89,33 @@ export class CatalogAssetsService implements OnModuleInit {
     resourceId: string,
     payload: JsonObject,
   ): Promise<ResolvedCatalogAssets> {
-    const artworkAssetId = this.string(payload.artworkAssetId);
-    if (
-      RESOURCE_TYPES_WITH_ARTWORK.has(resourceType) &&
-      !artworkAssetId
-    ) {
+    const artworkAssetId = RESOURCE_TYPES_WITH_ARTWORK.has(resourceType)
+      ? this.string(payload.artworkAssetId)
+      : '';
+    if (RESOURCE_TYPES_WITH_ARTWORK.has(resourceType) && !artworkAssetId) {
       this.failedPrecondition('CATALOG_ARTWORK_ASSET_REQUIRED');
     }
 
-    const editorialArtworkAssetId = this.string(
-      payload.editorialArtworkAssetId,
-    );
-    const editorialVideoAssetId = this.string(
-      payload.editorialVideoAssetId,
-    );
+    const editorialArtworkAssetId = RESOURCE_TYPES_WITH_EDITORIAL_ARTWORK.has(
+      resourceType,
+    )
+      ? this.string(payload.editorialArtworkAssetId)
+      : '';
+    const editorialVideoAssetId = this.string(payload.editorialVideoAssetId);
+    const musicVideoAssetId = this.string(payload.videoAssetId);
+    if (resourceType === 'song-videos' && !musicVideoAssetId) {
+      this.failedPrecondition('MUSIC_VIDEO_ASSET_REQUIRED');
+    }
     const usages = [
       ...(artworkAssetId
-        ? [{
-            slot: 'artwork',
-            assetId: artworkAssetId,
-            expectedKind: AssetKind.ASSET_KIND_IMAGE,
-            expectedPurpose: AssetPurpose.ASSET_PURPOSE_ARTWORK,
-          }]
+        ? [
+            {
+              slot: 'artwork',
+              assetId: artworkAssetId,
+              expectedKind: AssetKind.ASSET_KIND_IMAGE,
+              expectedPurpose: AssetPurpose.ASSET_PURPOSE_ARTWORK,
+            },
+          ]
         : []),
       ...(editorialArtworkAssetId
         ? [
@@ -122,8 +133,17 @@ export class CatalogAssetsService implements OnModuleInit {
               slot: 'editorial_video',
               assetId: editorialVideoAssetId,
               expectedKind: AssetKind.ASSET_KIND_VIDEO,
-              expectedPurpose:
-                AssetPurpose.ASSET_PURPOSE_EDITORIAL_VIDEO,
+              expectedPurpose: AssetPurpose.ASSET_PURPOSE_EDITORIAL_VIDEO,
+            },
+          ]
+        : []),
+      ...(musicVideoAssetId
+        ? [
+            {
+              slot: 'music_video',
+              assetId: musicVideoAssetId,
+              expectedKind: AssetKind.ASSET_KIND_VIDEO,
+              expectedPurpose: AssetPurpose.ASSET_PURPOSE_MUSIC_VIDEO,
             },
           ]
         : []),
@@ -164,7 +184,17 @@ export class CatalogAssetsService implements OnModuleInit {
       AssetKind.ASSET_KIND_VIDEO,
       AssetPurpose.ASSET_PURPOSE_EDITORIAL_VIDEO,
     );
-    const authoredEditorialArtwork = this.object(payload.editorialArtwork);
+    this.asset(
+      byId,
+      musicVideoAssetId,
+      AssetKind.ASSET_KIND_VIDEO,
+      AssetPurpose.ASSET_PURPOSE_MUSIC_VIDEO,
+    );
+    const authoredEditorialArtwork = RESOURCE_TYPES_WITH_EDITORIAL_ARTWORK.has(
+      resourceType,
+    )
+      ? this.object(payload.editorialArtwork)
+      : {};
     const resolvedEditorialArtwork = editorialArtworkAsset
       ? {
           ...authoredEditorialArtwork,
@@ -179,7 +209,9 @@ export class CatalogAssetsService implements OnModuleInit {
       payload: {
         ...payload,
         artwork: artworkAsset ? this.artwork(artworkAsset) : null,
-        editorialArtwork: resolvedEditorialArtwork,
+        ...(RESOURCE_TYPES_WITH_EDITORIAL_ARTWORK.has(resourceType)
+          ? { editorialArtwork: resolvedEditorialArtwork }
+          : {}),
         editorialVideo: editorialVideoAsset
           ? this.editorialVideo(editorialVideoAsset)
           : null,
@@ -203,6 +235,35 @@ export class CatalogAssetsService implements OnModuleInit {
         this.metadata(),
       ),
     );
+  }
+
+  async getMusicVideoAsset(assetId: string): Promise<CatalogMusicVideoAsset> {
+    let asset: Asset | undefined;
+    try {
+      const response = await firstValueFrom(
+        this.client.getAsset({ assetId }, this.metadata()),
+      );
+      asset = response.asset;
+    } catch {
+      this.failedPrecondition(`CATALOG_ASSET_NOT_FOUND:${assetId}`);
+    }
+    const musicVideo = this.asset(
+      new Map(asset ? [[asset.id, asset]] : []),
+      assetId,
+      AssetKind.ASSET_KIND_VIDEO,
+      AssetPurpose.ASSET_PURPOSE_MUSIC_VIDEO,
+    );
+    if (!musicVideo) {
+      this.failedPrecondition(`CATALOG_ASSET_NOT_FOUND:${assetId}`);
+    }
+    const poster = this.object(this.object(musicVideo.variants).poster);
+    return {
+      posterUrl: this.string(poster.url),
+      posterSrcSet: this.posterSrcSet(poster),
+      durationMillis: musicVideo.durationMillis,
+      width: musicVideo.width,
+      height: musicVideo.height,
+    };
   }
 
   private asset(
@@ -294,6 +355,18 @@ export class CatalogAssetsService implements OnModuleInit {
       width: primary ? this.number(primary.width) : asset.width,
       height: primary ? this.number(primary.height) : asset.height,
     };
+  }
+
+  private posterSrcSet(poster: JsonObject): string {
+    const variants = this.object(poster.variants);
+    const renditions = Array.isArray(variants.renditions)
+      ? variants.renditions.map((item) => this.object(item))
+      : [];
+    return renditions
+      .filter((item) => this.string(item.url) && this.number(item.width) > 0)
+      .sort((left, right) => this.number(left.width) - this.number(right.width))
+      .map((item) => `${this.string(item.url)} ${this.number(item.width)}w`)
+      .join(', ');
   }
 
   private metadata(): Metadata {

@@ -18,6 +18,16 @@ import {
   GetCatalogArtistAlbumsRequest,
   GetCatalogArtistSongsRequest,
   GetCatalogArtistSongsResponse,
+  GetCatalogSimilarArtistsRequest,
+  GetCatalogSongVideosRequest,
+  GetCatalogSongVideosResponse,
+  GetCatalogAlbumSongVideosRequest,
+  GetCatalogArtistSongVideosRequest,
+  GetCatalogSongVideoRequest,
+  GetCatalogRelatedSongVideosRequest,
+  CatalogSongVideo,
+  ResolveMusicVideoPlaybackRequest,
+  ResolveMusicVideoPlaybackResponse,
   GetCatalogAlbumRelatedRequest,
   GetCatalogAlbumRelatedResponse,
   ProtobufStruct,
@@ -26,14 +36,56 @@ import {
 } from '@musical/shared-proto';
 import { PrismaService } from '../database/prisma.service';
 import type { Prisma } from '../generated/prisma/client';
+import { albumPrimaryArtistName } from './album-artist';
+import { CatalogAssetsService } from './catalog-assets.service';
 
 const songCatalogInclude = {
   artistCredits: {
     include: { artist: true },
     orderBy: [{ role: 'asc' }, { position: 'asc' }],
   },
+  contributorCredits: {
+    orderBy: [{ role: 'asc' }, { position: 'asc' }],
+  },
   albumTracks: {
-    include: { album: { select: { id: true } } },
+    include: {
+      album: {
+        select: {
+          id: true,
+          name: true,
+          artistName: true,
+          artworkAssetId: true,
+          artwork: true,
+          artistCredits: {
+            orderBy: { position: 'asc' },
+            select: {
+              isPrimary: true,
+              position: true,
+              artist: { select: { name: true } },
+            },
+          },
+        },
+      },
+    },
+    orderBy: [{ discNumber: 'asc' }, { position: 'asc' }],
+  },
+} satisfies Prisma.SongInclude;
+
+const songVideoMetadataInclude = {
+  artistCredits: {
+    where: { role: 'artist' },
+    select: {
+      position: true,
+      isPrimary: true,
+      artist: { select: { id: true, name: true, url: true } },
+    },
+    orderBy: [{ isPrimary: 'desc' }, { position: 'asc' }],
+  },
+  albumTracks: {
+    select: {
+      id: true,
+      album: { select: { artwork: true } },
+    },
     orderBy: [{ discNumber: 'asc' }, { position: 'asc' }],
   },
 } satisfies Prisma.SongInclude;
@@ -56,6 +108,9 @@ const albumCatalogBrowseInclude = {
   artistCredits: {
     include: { artist: true },
     orderBy: { position: 'asc' },
+  },
+  _count: {
+    select: { tracks: true },
   },
 } satisfies Prisma.AlbumInclude;
 
@@ -88,8 +143,9 @@ type CatalogAlbumBrowseEntity = Prisma.AlbumGetPayload<{
 }>;
 // Accepts either the full album (with tracks) or the lighter browse album.
 // The `tracks` relation is optional so the mapper can tolerate its absence.
-type AlbumResourceInput = CatalogAlbumBrowseEntity & {
+type AlbumResourceInput = (CatalogAlbumBrowseEntity | CatalogAlbumEntity) & {
   tracks?: CatalogAlbumEntity['tracks'];
+  _count?: { tracks: number };
 };
 type CatalogPlaylistEntity = Prisma.PlaylistGetPayload<{
   include: typeof playlistCatalogInclude;
@@ -107,10 +163,15 @@ const ARTWORK_SIMILARITY_COOLDOWN_VARIANCE = 4;
 const ARTIST_DIVERSITY_COOLDOWN = 3;
 const ARTIST_SONG_PAGE_DEFAULT = 20;
 const ARTIST_SONG_PAGE_MAX = 50;
+const ARTIST_MUSIC_VIDEO_PAGE_DEFAULT = 12;
+const ARTIST_MUSIC_VIDEO_PAGE_MAX = 100;
+const RELATED_MUSIC_VIDEO_DEFAULT_LIMIT = 10;
+const RELATED_MUSIC_VIDEO_MAX_LIMIT = 30;
 const RELATED_SHELF_PREVIEW_LIMIT = 12;
 const RELATED_SHELF_DETAIL_PAGE_SIZE = 30;
 const RELATED_SHELF_DETAIL_MAX_ITEMS = 60;
 const RELATED_SHELF_CANDIDATE_LIMIT = RELATED_SHELF_DETAIL_MAX_ITEMS;
+const MUSIC_VIDEO_ASSET_CONCURRENCY = 8;
 // Ceiling for offset-based browse pagination. Offset degrades linearly at
 // depth; keyset would require encoding the sort column into the cursor
 // (a cursor-format/proto change), so deep offsets are rejected instead.
@@ -120,11 +181,15 @@ const BATCH_RESOURCE_TYPES = new Set([
   'playlists',
   'songs',
   'artists',
+  'release-tracks',
 ]);
 
 @Injectable()
 export class CatalogService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly catalogAssetsService: CatalogAssetsService,
+  ) {}
 
   async getAlbum(request: GetCatalogAlbumRequest): Promise<CatalogResponse> {
     const storefront = this.storefront(request.storefront);
@@ -138,7 +203,10 @@ export class CatalogService {
       this.throwNotFound('ALBUM_NOT_FOUND');
     }
 
-    const relatedShelfHints = await this.albumRelatedShelfHints(album, storefront);
+    const relatedShelfHints = await this.albumRelatedShelfHints(
+      album,
+      storefront,
+    );
 
     return this.albumResponse(album, storefront, relatedShelfHints);
   }
@@ -151,10 +219,11 @@ export class CatalogService {
       request.playlistId,
       'PLAYLIST_ID_REQUIRED',
     );
-    const playlist = await this.prisma.playlist.findFirst({
-      where: { id: playlistId, storefront, isPublic: true },
-      include: playlistCatalogInclude,
-    }) ??
+    const playlist =
+      (await this.prisma.playlist.findFirst({
+        where: { id: playlistId, storefront, isPublic: true },
+        include: playlistCatalogInclude,
+      })) ??
       (await this.prisma.playlist.findFirst({
         where: { id: playlistId, isPublic: true },
         include: playlistCatalogInclude,
@@ -196,10 +265,14 @@ export class CatalogService {
     request: UpsertSystemPlaylistRequest,
   ): Promise<CatalogResponse> {
     const storefront = this.storefront(request.storefront);
-    const playlistId = this.required(request.playlistId, 'PLAYLIST_ID_REQUIRED');
+    const playlistId = this.required(
+      request.playlistId,
+      'PLAYLIST_ID_REQUIRED',
+    );
     const name = this.required(request.name, 'PLAYLIST_NAME_REQUIRED');
     const songIds = [...new Set(request.songIds.filter(Boolean))];
-    if (songIds.length === 0) this.throwInvalidArgument('PLAYLIST_TRACKS_REQUIRED');
+    if (songIds.length === 0)
+      this.throwInvalidArgument('PLAYLIST_TRACKS_REQUIRED');
     const artwork = this.systemPlaylistArtwork(request);
 
     await this.prisma.$transaction(async (tx) => {
@@ -240,7 +313,11 @@ export class CatalogService {
       });
       await tx.playlistTrack.deleteMany({ where: { playlistId } });
       await tx.playlistTrack.createMany({
-        data: songIds.map((songId, position) => ({ playlistId, songId, position })),
+        data: songIds.map((songId, position) => ({
+          playlistId,
+          songId,
+          position,
+        })),
       });
     });
 
@@ -252,6 +329,19 @@ export class CatalogService {
   ): Promise<CatalogResponse> {
     const storefront = this.storefront(request.storefront);
     const artistId = this.required(request.artistId, 'ARTIST_ID_REQUIRED');
+    const limit = request.limit > 0 ? Math.min(request.limit, 500) : undefined;
+    const section = request.section.trim().toLowerCase();
+    if (section && section !== 'appears-on') {
+      this.throwInvalidArgument('ARTIST_ALBUM_SECTION_INVALID');
+    }
+    const releaseTypes = [
+      ...new Set(
+        request.releaseTypes.map((value) => value.trim().toLowerCase()),
+      ),
+    ].filter(
+      (value): value is 'album' | 'ep' | 'single' =>
+        value === 'album' || value === 'ep' || value === 'single',
+    );
 
     const artistExists = await this.prisma.artist.findFirst({
       where: { id: artistId, storefront },
@@ -263,14 +353,21 @@ export class CatalogService {
     const albums = await this.prisma.album.findMany({
       where: {
         storefront,
-        artistCredits: {
-          some: { artistId },
-        },
+        ...(releaseTypes.length > 0
+          ? { releaseType: { in: releaseTypes } }
+          : {}),
+        ...(section === 'appears-on'
+          ? {
+              ...this.oneTrackArtistAppearanceWhere([artistId]),
+              NOT: { artistCredits: { some: { artistId, isPrimary: true } } },
+            }
+          : { artistCredits: { some: { artistId, isPrimary: true } } }),
       },
       include: albumCatalogBrowseInclude,
-      // The current contract has no album cursor, so return the complete
-      // discography instead of silently truncating artists above a fixed cap.
+      // A missing limit requests the full section; the Artist page supplies a
+      // small preview limit and fetches the full section only on demand.
       orderBy: [{ releaseDate: 'desc' }, { id: 'desc' }],
+      take: limit,
     });
 
     const albumResources = Object.fromEntries(
@@ -388,27 +485,29 @@ export class CatalogService {
     });
     if (!album) this.throwNotFound('ALBUM_NOT_FOUND');
 
-    // Credit order may put a featured artist first. The album-level artist
-    // string is the authoritative owner shown in the album header. Never
-    // guess from a different credit: an absent owner means no "More by" shelf.
-    const normalizedAlbumArtistName = album.artistName.trim().toLocaleLowerCase();
-    const primaryArtist =
-      album.artistCredits.find(
-        ({ artist }) =>
-          artist.name.trim().toLocaleLowerCase() === normalizedAlbumArtistName,
-      )?.artist;
+    const primaryArtists = this.primaryAlbumArtists(album);
+    const primaryArtist = primaryArtists[0];
+    const primaryArtistIds = primaryArtists.map(({ id }) => id);
+    const sourceSongPrimaryArtistIds = request.sourceSongId
+      ? this.primarySongArtistIds(album, request.sourceSongId)
+      : primaryArtistIds;
+    const moreByArtistIds = sourceSongPrimaryArtistIds.length
+      ? sourceSongPrimaryArtistIds
+      : primaryArtistIds;
     const albumSongIds = album.tracks.map(({ songId }) => songId);
     const excludedAlbumIds = [album.id];
     const detailSection = request.section;
     const isDetailRequest =
-      ['more-by', 'featured-on', 'you-might-also-like'].includes(detailSection) &&
+      (this.isMoreBySection(detailSection) ||
+        ['featured-on', 'you-might-also-like'].includes(detailSection)) &&
       request.limit > 0;
 
     if (isDetailRequest) {
       return this.getAlbumRelatedDetailPage({
         storefront,
         album,
-        primaryArtist,
+        primaryArtists,
+        moreByArtistIds,
         albumSongIds,
         excludedAlbumIds,
         section: detailSection,
@@ -427,12 +526,12 @@ export class CatalogService {
       : null;
 
     const [moreBy, exactFeaturedOn, rawYouMightAlsoLike] = await Promise.all([
-      primaryArtist
+      primaryArtistIds.length || moreByArtistIds.length
         ? this.prisma.album.findMany({
             where: {
               storefront,
               id: { notIn: excludedAlbumIds },
-              artistCredits: { some: { artistId: primaryArtist.id } },
+              ...this.moreByAlbumWhere(primaryArtistIds, moreByArtistIds),
             },
             include: albumCatalogBrowseInclude,
             orderBy: [{ releaseDate: 'desc' }, { id: 'desc' }],
@@ -459,8 +558,15 @@ export class CatalogService {
             ...(album.genreNames.length
               ? { genreNames: { hasSome: album.genreNames } }
               : {}),
-            ...(primaryArtist
-              ? { artistCredits: { none: { artistId: primaryArtist.id } } }
+            ...(primaryArtistIds.length
+              ? {
+                  artistCredits: {
+                    none: {
+                      artistId: { in: primaryArtistIds },
+                      isPrimary: true,
+                    },
+                  },
+                }
               : {}),
           },
           include: albumCatalogBrowseInclude,
@@ -502,9 +608,12 @@ export class CatalogService {
     );
 
     return {
-      primaryArtistName: primaryArtist?.name ?? '',
+      primaryArtistName: album.artistName,
       moreBy: this.albumBrowseResponse(moreByPreview.items, storefront),
-      featuredOn: this.playlistBrowseResponse(featuredOnPreview.items, storefront),
+      featuredOn: this.playlistBrowseResponse(
+        featuredOnPreview.items,
+        storefront,
+      ),
       youMightAlsoLike: this.albumBrowseResponse(
         youMightAlsoLikePreview.items,
         storefront,
@@ -519,7 +628,8 @@ export class CatalogService {
   private async getAlbumRelatedDetailPage({
     storefront,
     album,
-    primaryArtist,
+    primaryArtists,
+    moreByArtistIds,
     albumSongIds,
     excludedAlbumIds,
     section,
@@ -529,7 +639,8 @@ export class CatalogService {
   }: {
     storefront: string;
     album: CatalogAlbumEntity;
-    primaryArtist: CatalogArtistEntity | undefined;
+    primaryArtists: CatalogArtistEntity[];
+    moreByArtistIds: string[];
     albumSongIds: string[];
     excludedAlbumIds: string[];
     section: string;
@@ -553,19 +664,24 @@ export class CatalogService {
     let items: CatalogAlbumBrowseEntity[] | CatalogPlaylistBrowseEntity[] = [];
     let usedFeaturedOnFallback = false;
 
-    if (section === 'more-by') {
-      items = primaryArtist
-        ? this.sequenceMoreByAlbums(await this.prisma.album.findMany({
-            where: {
-              storefront,
-              id: { notIn: excludedAlbumIds },
-              artistCredits: { some: { artistId: primaryArtist.id } },
-            },
-            include: albumCatalogBrowseInclude,
-            orderBy: [{ releaseDate: 'desc' }, { id: 'desc' }],
-            take: RELATED_SHELF_CANDIDATE_LIMIT,
-          })).slice(offset, offset + pageSize + 1)
-        : [];
+    const primaryArtist = primaryArtists[0];
+    const primaryArtistIds = primaryArtists.map(({ id }) => id);
+    if (this.isMoreBySection(section)) {
+      items =
+        primaryArtistIds.length || moreByArtistIds.length
+          ? this.sequenceMoreByAlbums(
+              await this.prisma.album.findMany({
+                where: {
+                  storefront,
+                  id: { notIn: excludedAlbumIds },
+                  ...this.moreByAlbumWhere(primaryArtistIds, moreByArtistIds),
+                },
+                include: albumCatalogBrowseInclude,
+                orderBy: [{ releaseDate: 'desc' }, { id: 'desc' }],
+                take: RELATED_SHELF_CANDIDATE_LIMIT,
+              }),
+            ).slice(offset, offset + pageSize + 1)
+          : [];
     } else if (section === 'featured-on') {
       const editorialWhere = primaryArtist
         ? {
@@ -596,10 +712,7 @@ export class CatalogService {
               ...pageOptions,
             })
           : [];
-        items =
-          exact.length > 0 || !editorialWhere
-            ? exact
-            : [];
+        items = exact.length > 0 || !editorialWhere ? exact : [];
         if (exact.length === 0 && editorialWhere) {
           usedFeaturedOnFallback = true;
           items = await this.prisma.playlist.findMany({
@@ -611,11 +724,13 @@ export class CatalogService {
         }
       }
     } else if (recommendedAlbumIds.length) {
-      items = (await this.recommendedAlbumBrowse(
-        recommendedAlbumIds,
-        excludedAlbumIds,
-        storefront,
-      )).slice(offset, offset + pageSize + 1);
+      items = (
+        await this.recommendedAlbumBrowse(
+          recommendedAlbumIds,
+          excludedAlbumIds,
+          storefront,
+        )
+      ).slice(offset, offset + pageSize + 1);
     } else {
       items = this.sequenceRelatedAlbums(
         await this.prisma.album.findMany({
@@ -625,8 +740,15 @@ export class CatalogService {
             ...(album.genreNames.length
               ? { genreNames: { hasSome: album.genreNames } }
               : {}),
-            ...(primaryArtist
-              ? { artistCredits: { none: { artistId: primaryArtist.id } } }
+            ...(primaryArtistIds.length
+              ? {
+                  artistCredits: {
+                    none: {
+                      artistId: { in: primaryArtistIds },
+                      isPrimary: true,
+                    },
+                  },
+                }
               : {}),
           },
           include: albumCatalogBrowseInclude,
@@ -643,7 +765,12 @@ export class CatalogService {
       hasMore && offset + page.length < RELATED_SHELF_DETAIL_MAX_ITEMS
         ? `${usedFeaturedOnFallback ? 'editorial:' : ''}${offset + page.length}`
         : '';
-    return this.albumRelatedDetailResponse(section, page, storefront, nextCursor);
+    return this.albumRelatedDetailResponse(
+      section,
+      page,
+      storefront,
+      nextCursor,
+    );
   }
 
   private albumRelatedDetailResponse(
@@ -652,12 +779,16 @@ export class CatalogService {
     storefront: string,
     nextCursor: string,
   ): GetCatalogAlbumRelatedResponse {
-    const albums = section === 'featured-on' ? [] : (items as CatalogAlbumBrowseEntity[]);
+    const albums =
+      section === 'featured-on' ? [] : (items as CatalogAlbumBrowseEntity[]);
     const playlists =
       section === 'featured-on' ? (items as CatalogPlaylistBrowseEntity[]) : [];
     return {
       primaryArtistName: '',
-      moreBy: this.albumBrowseResponse(section === 'more-by' ? albums : [], storefront),
+      moreBy: this.albumBrowseResponse(
+        this.isMoreBySection(section) ? albums : [],
+        storefront,
+      ),
       featuredOn: this.playlistBrowseResponse(playlists, storefront),
       youMightAlsoLike: this.albumBrowseResponse(
         section === 'you-might-also-like' ? albums : [],
@@ -670,13 +801,594 @@ export class CatalogService {
     };
   }
 
+  private primaryAlbumArtists(
+    album: CatalogAlbumEntity,
+  ): CatalogArtistEntity[] {
+    const primaryCredits = album.artistCredits
+      .filter(({ isPrimary }) => isPrimary)
+      .sort((left, right) => left.position - right.position);
+    if (primaryCredits.length) {
+      return primaryCredits.map(({ artist }) => artist);
+    }
+
+    // Compatibility for catalog rows created before album-credit primary flags
+    // existed. Do not infer a collaborator: only accept the explicit album
+    // header owner when it names one artist exactly.
+    const normalizedAlbumArtistName = album.artistName
+      .trim()
+      .toLocaleLowerCase();
+    const legacyOwner = album.artistCredits.find(
+      ({ artist }) =>
+        artist.name.trim().toLocaleLowerCase() === normalizedAlbumArtistName,
+    )?.artist;
+    return legacyOwner ? [legacyOwner] : [];
+  }
+
+  /**
+   * More By is discovery-oriented on release pages. Song Detail scopes this
+   * to the primary artist of its source song; Album Detail uses the album's
+   * primary artists. Featured artists of the open song never become a More By
+   * source. Artist Detail deliberately does not use this policy.
+   */
+  private primarySongArtistIds(
+    album: CatalogAlbumEntity,
+    sourceSongId: string,
+  ): string[] {
+    const song = album.tracks.find(
+      ({ songId }) => songId === sourceSongId,
+    )?.song;
+    if (!song) return [];
+
+    return [
+      ...new Set(
+        song.artistCredits
+          .filter((credit) => credit.role === 'artist' && credit.isPrimary)
+          .map((credit) => credit.artistId),
+      ),
+    ];
+  }
+
+  private moreByAlbumWhere(
+    primaryAlbumArtistIds: string[],
+    moreByArtistIds: string[],
+  ): Prisma.AlbumWhereInput {
+    const conditions: Prisma.AlbumWhereInput[] = [];
+    if (primaryAlbumArtistIds.length) {
+      conditions.push({
+        artistCredits: {
+          some: {
+            artistId: { in: primaryAlbumArtistIds },
+            isPrimary: true,
+          },
+        },
+      });
+    }
+    if (moreByArtistIds.length) {
+      conditions.push({
+        // Keep guest appearances aligned with Artist Detail > Appears On:
+        // only one-track standalone singles qualify. Primary releases above
+        // remain eligible regardless of their release type.
+        ...this.oneTrackArtistAppearanceWhere(moreByArtistIds),
+      });
+    }
+    return conditions.length ? { OR: conditions } : {};
+  }
+
+  private oneTrackArtistAppearanceWhere(
+    artistIds: string[],
+  ): Prisma.AlbumWhereInput {
+    return {
+      // A collaboration inside a multi-track release remains discoverable
+      // through the artist's song list instead of an album shelf.
+      releaseType: 'single',
+      trackCount: 1,
+      tracks: {
+        some: {
+          song: {
+            artistCredits: {
+              some: { artistId: { in: artistIds }, role: 'artist' },
+            },
+          },
+        },
+      },
+    };
+  }
+
+  async getSimilarArtists(
+    request: GetCatalogSimilarArtistsRequest,
+  ): Promise<CatalogResponse> {
+    const storefront = this.storefront(request.storefront);
+    const artistId = this.required(request.artistId, 'ARTIST_ID_REQUIRED');
+    const limit = Math.min(Math.max(request.limit || 10, 1), 500);
+    const sourceArtist = await this.prisma.artist.findFirst({
+      where: { id: artistId, storefront },
+    });
+    if (!sourceArtist) this.throwNotFound('ARTIST_NOT_FOUND');
+
+    const sourceGenres = sourceArtist.genreNames
+      .map((genre) => genre.trim())
+      .filter(Boolean);
+    const normalizedGenres = new Set(
+      sourceGenres.map((genre) => genre.toLocaleLowerCase()),
+    );
+    if (normalizedGenres.size === 0) {
+      return {
+        data: [],
+        resources: { albums: {}, playlists: {}, songs: {}, artists: {} },
+      };
+    }
+
+    const candidates = await this.prisma.artist.findMany({
+      where: {
+        storefront,
+        id: { not: artistId },
+        genreNames: { hasSome: sourceGenres },
+      },
+    });
+    const similarArtists = candidates
+      .map((candidate) => ({
+        candidate,
+        overlap: candidate.genreNames.filter((genre) =>
+          normalizedGenres.has(genre.trim().toLocaleLowerCase()),
+        ).length,
+        tieBreaker: this.similarArtistTieBreaker(artistId, candidate.id),
+      }))
+      .filter(({ overlap }) => overlap > 0)
+      .sort(
+        (left, right) =>
+          right.overlap - left.overlap ||
+          left.tieBreaker - right.tieBreaker ||
+          left.candidate.id.localeCompare(right.candidate.id),
+      )
+      .slice(0, limit)
+      .map(({ candidate }) => candidate);
+
+    return {
+      data: similarArtists.map((candidate) =>
+        this.reference(candidate.id, 'artists', storefront),
+      ),
+      resources: {
+        albums: {},
+        playlists: {},
+        songs: {},
+        artists: Object.fromEntries(
+          similarArtists.map((candidate) => [
+            candidate.id,
+            this.artistResource(candidate, storefront),
+          ]),
+        ),
+      },
+    };
+  }
+
+  /**
+   * Genre overlap is the actual similarity signal currently available in the
+   * catalog. Use a deterministic per-source tie-breaker when candidates have
+   * the same score, so every Artist Detail page is stable without all of them
+   * falling back to the same alphabetical order.
+   */
+  private similarArtistTieBreaker(
+    sourceArtistId: string,
+    candidateArtistId: string,
+  ) {
+    let hash = 2_166_136_261;
+    const key = `${sourceArtistId}:${candidateArtistId}`;
+
+    for (let index = 0; index < key.length; index += 1) {
+      hash ^= key.charCodeAt(index);
+      hash = Math.imul(hash, 16_777_619);
+    }
+
+    return hash >>> 0;
+  }
+
+  async getSongVideos(
+    request: GetCatalogSongVideosRequest,
+  ): Promise<GetCatalogSongVideosResponse> {
+    const storefront = this.storefront(request.storefront);
+    const songId = this.required(request.songId, 'SONG_ID_REQUIRED');
+    const song = await this.prisma.song.findFirst({
+      where: { id: songId, storefront, isCatalog: true },
+      include: songVideoMetadataInclude,
+    });
+    if (!song) this.throwNotFound('SONG_NOT_FOUND');
+
+    const videos = await this.prisma.songVideo.findMany({
+      where: { songId },
+      orderBy: [{ publishedAt: 'desc' }, { id: 'desc' }],
+    });
+    return {
+      videos: await this.mapWithConcurrency(
+        videos,
+        MUSIC_VIDEO_ASSET_CONCURRENCY,
+        (video) => this.catalogSongVideo(video, song),
+      ),
+      nextCursor: '',
+    };
+  }
+
+  async getSongVideo(
+    request: GetCatalogSongVideoRequest,
+  ): Promise<CatalogSongVideo> {
+    const storefront = this.storefront(request.storefront);
+    const songVideoId = this.required(
+      request.songVideoId,
+      'SONG_VIDEO_ID_REQUIRED',
+    );
+    const video = await this.prisma.songVideo.findFirst({
+      where: {
+        id: songVideoId,
+        song: { storefront, isCatalog: true },
+      },
+      select: {
+        id: true,
+        songId: true,
+        videoAssetId: true,
+        kind: true,
+        publishedAt: true,
+        song: { include: songVideoMetadataInclude },
+      },
+    });
+    if (!video) this.throwNotFound('MUSIC_VIDEO_NOT_FOUND');
+    return this.catalogSongVideo(video, video.song);
+  }
+
+  async getRelatedSongVideos(
+    request: GetCatalogRelatedSongVideosRequest,
+  ): Promise<GetCatalogSongVideosResponse> {
+    const storefront = this.storefront(request.storefront);
+    const songVideoId = this.required(
+      request.songVideoId,
+      'SONG_VIDEO_ID_REQUIRED',
+    );
+    const limit = Math.min(
+      Math.max(request.limit || RELATED_MUSIC_VIDEO_DEFAULT_LIMIT, 1),
+      RELATED_MUSIC_VIDEO_MAX_LIMIT,
+    );
+    const source = await this.prisma.songVideo.findFirst({
+      where: {
+        id: songVideoId,
+        song: { storefront, isCatalog: true },
+      },
+      select: {
+        id: true,
+        song: {
+          select: {
+            genreNames: true,
+            artistCredits: {
+              where: { role: 'artist' },
+              select: { artistId: true, isPrimary: true, position: true },
+              orderBy: [{ isPrimary: 'desc' }, { position: 'asc' }],
+            },
+          },
+        },
+      },
+    });
+    if (!source) this.throwNotFound('MUSIC_VIDEO_NOT_FOUND');
+
+    const primaryArtistId =
+      source.song.artistCredits.find((credit) => credit.isPrimary)?.artistId ??
+      source.song.artistCredits[0]?.artistId;
+    const collaboratorIds = source.song.artistCredits
+      .filter((credit) => credit.artistId !== primaryArtistId)
+      .map((credit) => credit.artistId);
+    const candidateSongWhere = {
+      storefront,
+      isCatalog: true,
+      ...(primaryArtistId
+        ? {
+            artistCredits: {
+              none: { artistId: primaryArtistId, role: 'artist' },
+            },
+          }
+        : {}),
+    } satisfies Prisma.SongWhereInput;
+    const select = {
+      id: true,
+      songId: true,
+      videoAssetId: true,
+      kind: true,
+      publishedAt: true,
+      song: { include: songVideoMetadataInclude },
+    } satisfies Prisma.SongVideoSelect;
+    const videos: Prisma.SongVideoGetPayload<{ select: typeof select }>[] = [];
+    const fillFrom = async (song: Prisma.SongWhereInput) => {
+      if (videos.length === limit) return;
+      const candidates = await this.prisma.songVideo.findMany({
+        where: {
+          id: { notIn: [source.id, ...videos.map((video) => video.id)] },
+          song,
+        },
+        orderBy: [{ publishedAt: 'desc' }, { id: 'desc' }],
+        take: limit - videos.length,
+        select,
+      });
+      videos.push(...candidates);
+    };
+
+    if (collaboratorIds.length) {
+      await fillFrom({
+        AND: [
+          candidateSongWhere,
+          {
+            artistCredits: {
+              some: { artistId: { in: collaboratorIds }, role: 'artist' },
+            },
+          },
+        ],
+      });
+    }
+    if (source.song.genreNames.length) {
+      await fillFrom({
+        AND: [
+          candidateSongWhere,
+          { genreNames: { hasSome: source.song.genreNames } },
+        ],
+      });
+    }
+    await fillFrom(candidateSongWhere);
+
+    return {
+      videos: await this.mapWithConcurrency(
+        videos,
+        MUSIC_VIDEO_ASSET_CONCURRENCY,
+        (video) => this.catalogSongVideo(video, video.song),
+      ),
+      nextCursor: '',
+    };
+  }
+
+  async getAlbumSongVideos(
+    request: GetCatalogAlbumSongVideosRequest,
+  ): Promise<GetCatalogSongVideosResponse> {
+    const storefront = this.storefront(request.storefront);
+    const albumId = this.required(request.albumId, 'ALBUM_ID_REQUIRED');
+    const album = await this.prisma.album.findFirst({
+      where: { id: albumId, storefront },
+      select: {
+        tracks: {
+          orderBy: [{ discNumber: 'asc' }, { position: 'asc' }],
+          select: {
+            song: {
+              include: {
+                ...songVideoMetadataInclude,
+                videos: { orderBy: [{ publishedAt: 'desc' }, { id: 'desc' }] },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!album) this.throwNotFound('ALBUM_NOT_FOUND');
+
+    const entries = album.tracks.flatMap(({ song }) =>
+      song.videos.map((video) => ({ song, video })),
+    );
+    const seenVideoIds = new Set<string>();
+    const uniqueEntries = entries.filter(({ video }) => {
+      if (seenVideoIds.has(video.id)) return false;
+      seenVideoIds.add(video.id);
+      return true;
+    });
+    return {
+      videos: await this.mapWithConcurrency(
+        uniqueEntries,
+        MUSIC_VIDEO_ASSET_CONCURRENCY,
+        ({ song, video }) => this.catalogSongVideo(video, song),
+      ),
+      nextCursor: '',
+    };
+  }
+
+  async getArtistSongVideos(
+    request: GetCatalogArtistSongVideosRequest,
+  ): Promise<GetCatalogSongVideosResponse> {
+    const storefront = this.storefront(request.storefront);
+    const artistId = this.required(request.artistId, 'ARTIST_ID_REQUIRED');
+    const artist = await this.prisma.artist.findFirst({
+      where: { id: artistId, storefront },
+      select: { id: true },
+    });
+    if (!artist) this.throwNotFound('ARTIST_NOT_FOUND');
+
+    const limit = Math.min(
+      Math.max(request.limit || ARTIST_MUSIC_VIDEO_PAGE_DEFAULT, 1),
+      ARTIST_MUSIC_VIDEO_PAGE_MAX,
+    );
+    const cursor = this.artistMusicVideoCursor(request.cursor);
+
+    const videos = await this.prisma.songVideo.findMany({
+      where: {
+        song: {
+          storefront,
+          isCatalog: true,
+          artistCredits: { some: { artistId, role: 'artist' } },
+        },
+        ...(cursor
+          ? {
+              OR: [
+                { publishedAt: { lt: cursor.publishedAt } },
+                {
+                  publishedAt: cursor.publishedAt,
+                  id: { lt: cursor.id },
+                },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ publishedAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      select: {
+        id: true,
+        songId: true,
+        videoAssetId: true,
+        kind: true,
+        publishedAt: true,
+        song: { include: songVideoMetadataInclude },
+      },
+    });
+    const page = videos.slice(0, limit);
+    return {
+      videos: await this.mapWithConcurrency(
+        page,
+        MUSIC_VIDEO_ASSET_CONCURRENCY,
+        (video) => this.catalogSongVideo(video, video.song),
+      ),
+      nextCursor:
+        videos.length > limit && page.length
+          ? this.encodeArtistMusicVideoCursor(page.at(-1)!)
+          : '',
+    };
+  }
+
+  private artistMusicVideoCursor(cursor: string):
+    | {
+        publishedAt: Date;
+        id: string;
+      }
+    | undefined {
+    if (!cursor) return undefined;
+    try {
+      const parsed = JSON.parse(
+        Buffer.from(cursor, 'base64url').toString('utf8'),
+      ) as { publishedAt?: unknown; id?: unknown };
+      const publishedAt = new Date(
+        typeof parsed.publishedAt === 'string' ? parsed.publishedAt : '',
+      );
+      if (
+        !Number.isFinite(publishedAt.getTime()) ||
+        typeof parsed.id !== 'string' ||
+        !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(parsed.id)
+      ) {
+        throw new Error('invalid cursor');
+      }
+      return { publishedAt, id: parsed.id };
+    } catch {
+      this.throwInvalidArgument('ARTIST_MUSIC_VIDEO_CURSOR_INVALID');
+    }
+  }
+
+  private encodeArtistMusicVideoCursor(video: {
+    publishedAt: Date;
+    id: string;
+  }): string {
+    return Buffer.from(
+      JSON.stringify({
+        publishedAt: video.publishedAt.toISOString(),
+        id: video.id,
+      }),
+    ).toString('base64url');
+  }
+
+  private async catalogSongVideo(
+    video: {
+      id: string;
+      songId: string;
+      videoAssetId: string;
+      kind: string;
+      publishedAt: Date;
+    },
+    song: {
+      catalogTitle: string;
+      artistName: string;
+      albumName: string;
+      releaseDate: Date | null;
+      contentRating: string;
+      genreNames: string[];
+      artistCredits: Array<{
+        position: number;
+        isPrimary: boolean;
+        artist: { id: string; name: string; url: string };
+      }>;
+      albumTracks: Array<{
+        id: string;
+        album: { artwork: Prisma.JsonValue | null };
+      }>;
+    },
+  ): Promise<CatalogSongVideo> {
+    const asset = await this.catalogAssetsService.getMusicVideoAsset(
+      video.videoAssetId,
+    );
+    return {
+      id: video.id,
+      songId: video.songId,
+      videoAssetId: video.videoAssetId,
+      kind: video.kind.toLowerCase(),
+      posterUrl: asset.posterUrl,
+      posterSrcSet: asset.posterSrcSet,
+      durationMillis: asset.durationMillis,
+      width: asset.width,
+      height: asset.height,
+      publishedAt: video.publishedAt.toISOString(),
+      songTitle: song.catalogTitle,
+      artistName: song.artistName,
+      songArtwork: this.artwork(song.albumTracks[0]?.album.artwork),
+      albumName: song.albumName,
+      releaseDate: this.dateOnly(song.releaseDate),
+      contentRating: song.contentRating,
+      genreNames: song.genreNames,
+      releaseTrackId: song.albumTracks[0]?.id ?? '',
+      artists: song.artistCredits.map((credit) => ({
+        artistId: credit.artist.id,
+        name: credit.artist.name,
+        url: credit.artist.url,
+        role: 'artist',
+        position: credit.position,
+        isPrimary: credit.isPrimary,
+      })),
+    };
+  }
+
+  private async mapWithConcurrency<Input, Output>(
+    items: readonly Input[],
+    concurrency: number,
+    mapper: (item: Input) => Promise<Output>,
+  ): Promise<Output[]> {
+    const output = new Array<Output>(items.length);
+    let nextIndex = 0;
+    const worker = async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex++;
+        output[index] = await mapper(items[index]);
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(concurrency, items.length) }, worker),
+    );
+    return output;
+  }
+
+  async resolveMusicVideoPlayback(
+    request: ResolveMusicVideoPlaybackRequest,
+  ): Promise<ResolveMusicVideoPlaybackResponse> {
+    const videoAssetId = this.required(
+      request.videoAssetId,
+      'VIDEO_ASSET_ID_REQUIRED',
+    );
+    const video = await this.prisma.songVideo.findUnique({
+      where: { videoAssetId },
+      select: {
+        songId: true,
+        song: { select: { id: true, isCatalog: true } },
+      },
+    });
+    if (!video?.song.isCatalog) this.throwNotFound('MUSIC_VIDEO_NOT_FOUND');
+    return { songId: video.songId };
+  }
+
+  private isMoreBySection(section: string) {
+    return section === 'more-by';
+  }
+
   private relatedShelfCursor(cursor: string): {
     offset: number;
     featuredOnFallback: boolean;
   } {
     if (!cursor) return { offset: 0, featuredOnFallback: false };
     const featuredOnFallback = cursor.startsWith('editorial:');
-    const offset = Number(featuredOnFallback ? cursor.slice('editorial:'.length) : cursor);
+    const offset = Number(
+      featuredOnFallback ? cursor.slice('editorial:'.length) : cursor,
+    );
     if (
       !Number.isSafeInteger(offset) ||
       offset < 0 ||
@@ -709,10 +1421,7 @@ export class CatalogService {
     return this.sequenceRelatedAlbums(ranked);
   }
 
-  private sequenceRelatedAlbums(
-    albums: CatalogAlbumBrowseEntity[],
-    seed = '',
-  ) {
+  private sequenceRelatedAlbums(albums: CatalogAlbumBrowseEntity[], seed = '') {
     const remaining = seed
       ? albums
           .map((album, index) => ({
@@ -743,7 +1452,7 @@ export class CatalogService {
   }
 
   private albumArtistName(album: CatalogAlbumBrowseEntity): string {
-    return album.artistCredits[0]?.artist.name ?? album.artistName;
+    return albumPrimaryArtistName(album);
   }
 
   private stableNoise(value: string) {
@@ -770,13 +1479,12 @@ export class CatalogService {
           artworkCooldowns.splice(index, 1);
         }
       }
-      const nextIndex = remaining.findIndex(
-        (album) =>
-          artworkCooldowns.every(
-            ({ album: recentAlbum, untilIndex }) =>
-              position > untilIndex ||
-              !this.artworksVisuallySimilar(album, recentAlbum),
-          ),
+      const nextIndex = remaining.findIndex((album) =>
+        artworkCooldowns.every(
+          ({ album: recentAlbum, untilIndex }) =>
+            position > untilIndex ||
+            !this.artworksVisuallySimilar(album, recentAlbum),
+        ),
       );
       const [next] = remaining.splice(nextIndex >= 0 ? nextIndex : 0, 1);
       ordered.push(next);
@@ -833,7 +1541,8 @@ export class CatalogService {
     }
     let distance = 0;
     for (let index = 0; index < left.length; index += 1) {
-      let difference = Number.parseInt(left[index], 16) ^ Number.parseInt(right[index], 16);
+      let difference =
+        Number.parseInt(left[index], 16) ^ Number.parseInt(right[index], 16);
       while (difference > 0) {
         distance += difference & 1;
         difference >>>= 1;
@@ -843,7 +1552,9 @@ export class CatalogService {
   }
 
   private artworkChecksumFromUrl(url: string) {
-    return url.match(/(?:^|\/)([a-f0-9]{64})(?:\/|$)/i)?.[1]?.toLowerCase() ?? '';
+    return (
+      url.match(/(?:^|\/)([a-f0-9]{64})(?:\/|$)/i)?.[1]?.toLowerCase() ?? ''
+    );
   }
 
   async getResources(
@@ -892,6 +1603,23 @@ export class CatalogService {
     const playlistIds = idsByType.playlists;
     const songIds = idsByType.songs;
     const artistIds = idsByType.artists;
+    const releaseTrackIds = idsByType['release-tracks'];
+
+    // A public song URL names an album_tracks row, not the reusable audio
+    // record. Keep this resolver behind the catalog resource boundary so the
+    // browser receives the selected album context without any query string or
+    // client-side session state.
+    if (releaseTrackIds.length) {
+      if (uniqueIdentifiers.length !== 1 || releaseTrackIds.length !== 1) {
+        this.throwInvalidArgument('RELEASE_TRACK_RESOLUTION_MUST_BE_SINGLE');
+      }
+      const releaseTrack = await this.prisma.albumTrack.findFirst({
+        where: { id: releaseTrackIds[0], album: { storefront } },
+        include: { album: { include: albumCatalogInclude } },
+      });
+      if (!releaseTrack) this.throwNotFound('RELEASE_TRACK_NOT_FOUND');
+      return this.albumResponse(releaseTrack.album, storefront);
+    }
 
     const [albums, playlists, songs, artists] = await Promise.all([
       albumIds.length
@@ -1013,7 +1741,7 @@ export class CatalogService {
     const songs = Object.fromEntries(
       album.tracks.map(({ song }) => [
         song.id,
-        this.songResource(song, storefront),
+        this.songResource(song, storefront, album.id),
       ]),
     );
     const artists = this.collectArtists(
@@ -1021,7 +1749,11 @@ export class CatalogService {
       album.artistCredits.map(({ artist }) => artist),
       storefront,
     );
-    const albumResource = this.albumResource(album, storefront, relatedShelfHints);
+    const albumResource = this.albumResource(
+      album,
+      storefront,
+      relatedShelfHints,
+    );
 
     return {
       data: [this.reference(album.id, 'albums', storefront)],
@@ -1159,14 +1891,12 @@ export class CatalogService {
     const artistData = album.artistCredits.map(({ artist }) =>
       this.reference(artist.id, 'artists', storefront),
     );
-    const trackData = tracks.map(({ song, popularity }) => ({
+    const trackData = tracks.map(({ id, song, popularity }) => ({
       ...this.reference(song.id, 'songs', storefront),
-      meta:
-        popularity === null
-          ? undefined
-          : {
-              popularity,
-            },
+      meta: {
+        popularity: popularity ?? 0,
+        releaseTrackId: id,
+      },
     }));
 
     return {
@@ -1187,12 +1917,12 @@ export class CatalogService {
         isComplete: album.isComplete,
         isStudioMastered: album.isStudioMastered,
         isPrerelease: album.isPrerelease,
-        isSingle: album.isSingle,
+        releaseType: album.releaseType,
         name: album.name,
         playParams: { id: album.id, kind: 'album', versionHash: '' },
         recordLabel: album.recordLabel,
         releaseDate: this.dateOnly(album.releaseDate),
-        trackCount: album.trackCount || tracks.length,
+        trackCount: tracks.length || album._count?.tracks || album.trackCount,
         upc: album.upc,
         canonicalReleaseId: album.canonicalReleaseId || album.id,
         relatedShelfHints,
@@ -1219,21 +1949,19 @@ export class CatalogService {
     album: CatalogAlbumEntity,
     storefront: string,
   ) {
-    const normalizedAlbumArtistName = album.artistName.trim().toLocaleLowerCase();
-    const primaryArtist = album.artistCredits.find(
-      ({ artist }) =>
-        artist.name.trim().toLocaleLowerCase() === normalizedAlbumArtistName,
-    )?.artist;
+    const primaryArtists = this.primaryAlbumArtists(album);
+    const primaryArtist = primaryArtists[0];
+    const primaryArtistIds = primaryArtists.map(({ id }) => id);
     const albumSongIds = album.tracks.map(({ songId }) => songId);
     const excludedAlbumIds = [album.id];
 
     const [moreBy, exactFeaturedOn, youMightAlsoLike] = await Promise.all([
-      primaryArtist
+      primaryArtistIds.length
         ? this.prisma.album.findFirst({
             where: {
               storefront,
               id: { notIn: excludedAlbumIds },
-              artistCredits: { some: { artistId: primaryArtist.id } },
+              ...this.moreByAlbumWhere(primaryArtistIds, primaryArtistIds),
             },
             select: { id: true },
           })
@@ -1255,8 +1983,15 @@ export class CatalogService {
           ...(album.genreNames.length
             ? { genreNames: { hasSome: album.genreNames } }
             : {}),
-          ...(primaryArtist
-            ? { artistCredits: { none: { artistId: primaryArtist.id } } }
+          ...(primaryArtistIds.length
+            ? {
+                artistCredits: {
+                  none: {
+                    artistId: { in: primaryArtistIds },
+                    isPrimary: true,
+                  },
+                },
+              }
             : {}),
         },
         select: { id: true },
@@ -1333,31 +2068,50 @@ export class CatalogService {
   private songResource(
     song: CatalogSongEntity,
     storefront: string,
+    sourceAlbumId?: string,
   ): CatalogSongResource {
+    const sourceAlbum =
+      song.albumTracks.find((track) => track.album.id === sourceAlbumId)
+        ?.album ?? song.albumTracks[0]?.album;
     const artistCredits = song.artistCredits.filter(
-      (credit) => credit.role !== 'composer',
+      (credit) => credit.role === 'artist',
     );
     const composerCredits = song.artistCredits.filter(
       (credit) => credit.role === 'composer',
     );
-
     return {
       id: song.id,
       type: 'songs',
       href: this.href(storefront, 'songs', song.id),
       attributes: {
-        albumName: song.albumName,
+        albumName: sourceAlbum?.name || song.albumName,
+        // The scalar is the source display credit supplied during seeding.
+        // Keep it verbatim; primary-credit flags model roles, not the text
+        // that must be shown for a song.
         artistName: song.artistName,
-        artworkAssetId: song.artworkAssetId,
-        editorialArtworkAssetId: song.editorialArtworkAssetId,
-        artwork: this.artwork(song.artwork),
-        editorialArtwork: this.optionalObject(song.editorialArtwork),
+        // Recommendation uses this denormalized set to locate an artist's
+        // recordings without confusing artists that share a display name.
+        artistNames: artistCredits.map((credit) => credit.artist.name),
+        artwork: this.artwork(sourceAlbum?.artwork),
         extendedAssetUrls: this.optionalObject(song.extendedAssetUrls),
         offers: this.toStructArray(song.offers),
         audioLocale: song.audioLocale,
         audioTraits: song.audioTraits,
         moodTags: song.moodTags,
         composerName: song.composerName,
+        credits: song.artistCredits.map((credit) => ({
+          artistId: credit.artist.id,
+          name: credit.artist.name,
+          url: credit.artist.url,
+          role: credit.role,
+          position: credit.position,
+          isPrimary: credit.isPrimary,
+        })),
+        contributorCredits: song.contributorCredits.map((credit) => ({
+          name: credit.name,
+          role: credit.role,
+          position: credit.position,
+        })),
         contentRating: song.contentRating,
         discNumber: song.discNumber,
         durationInMillis:
@@ -1379,9 +2133,10 @@ export class CatalogService {
       relationships: {
         albums: {
           href: `${this.href(storefront, 'songs', song.id)}/albums`,
-          data: song.albumTracks.map(({ album }) =>
-            this.reference(album.id, 'albums', storefront),
-          ),
+          data: song.albumTracks.map(({ id, album }) => ({
+            ...this.reference(album.id, 'albums', storefront),
+            meta: { popularity: 0, releaseTrackId: id },
+          })),
         },
         artists: {
           href: `${this.href(storefront, 'songs', song.id)}/artists`,
@@ -1422,7 +2177,7 @@ export class CatalogService {
   }
 
   private collectAlbumArtists(
-    albums: CatalogAlbumBrowseEntity[],
+    albums: AlbumResourceInput[],
     storefront: string,
   ): Record<string, CatalogArtistResource> {
     return Object.fromEntries(
@@ -1495,7 +2250,7 @@ export class CatalogService {
   }
 
   private artistResource(
-    artist: CatalogAlbumEntity['artistCredits'][number]['artist'],
+    artist: CatalogArtistEntity,
     storefront: string,
   ): CatalogArtistResource {
     return {
@@ -1508,6 +2263,10 @@ export class CatalogService {
         artworkAssetId: artist.artworkAssetId,
         artwork: this.artwork(artist.artwork),
         genreNames: artist.genreNames,
+        origin: artist.origin ?? '',
+        birthDate: this.dateOnly(artist.birthDate),
+        biography: artist.biography ?? '',
+        biographySourceUrl: artist.biographySourceUrl ?? '',
         editorialVideoAssetId: artist.editorialVideoAssetId,
         editorialVideo: this.optionalObject(artist.editorialVideo),
       },
@@ -1554,9 +2313,7 @@ export class CatalogService {
       url: request.artworkUrl,
       bgColor: request.artworkBgColor || '2c2c2e',
       ...(request.artworkWidth > 0 ? { width: request.artworkWidth } : {}),
-      ...(request.artworkHeight > 0
-        ? { height: request.artworkHeight }
-        : {}),
+      ...(request.artworkHeight > 0 ? { height: request.artworkHeight } : {}),
       ...(variants && Object.keys(variants).length > 0 ? { variants } : {}),
     } as Prisma.InputJsonObject;
   }

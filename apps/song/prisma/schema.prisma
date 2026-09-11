@@ -11,6 +11,8 @@ datasource db {
 enum CatalogDraftStatus {
   DRAFT
   PUBLISHED
+  SUBMITTED
+  CHANGES_REQUESTED
 }
 
 enum SongLyricStatus {
@@ -33,6 +35,21 @@ enum SongAudioMode {
   SING
 }
 
+enum AudioAnalysisStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum ArtistMemberRole {
+  OWNER
+  MANAGER
+  EDITOR
+  PRODUCTION
+  ANALYST
+}
+
 model CatalogDraft {
   id           String             @id @default(uuid())
   resourceType String             @db.VarChar(32)
@@ -44,6 +61,10 @@ model CatalogDraft {
   createdBy    String             @db.VarChar(128)
   updatedBy    String             @db.VarChar(128)
   publishedAt  DateTime?          @db.Timestamptz
+  submittedAt  DateTime?          @db.Timestamptz
+  reviewedAt   DateTime?          @db.Timestamptz
+  reviewedBy   String?            @db.VarChar(128)
+  reviewNote   String             @default("") @db.VarChar(2000)
   createdAt    DateTime           @default(now()) @db.Timestamptz
   updatedAt    DateTime           @updatedAt @db.Timestamptz
 
@@ -70,6 +91,27 @@ model CatalogAssetUsageOutbox {
   @@map("catalog_asset_usage_outbox")
 }
 
+model PreferenceOutbox {
+  id           String   @id @default(uuid())
+  eventId      String   @unique @db.VarChar(128)
+  userId       String   @db.VarChar(128)
+  eventType    Int
+  resourceType String   @db.VarChar(64)
+  resourceId   String   @db.VarChar(128)
+  weight       Float
+  attempts     Int      @default(0)
+  availableAt  DateTime @default(now()) @db.Timestamptz
+  lockedAt     DateTime? @db.Timestamptz
+  lockedBy     String   @default("") @db.VarChar(128)
+  deadLetteredAt DateTime? @db.Timestamptz
+  lastError    String   @default("") @db.VarChar(2000)
+  createdAt    DateTime @default(now()) @db.Timestamptz
+  updatedAt    DateTime @updatedAt @db.Timestamptz
+
+  @@index([availableAt, lockedAt, deadLetteredAt])
+  @@map("preference_outbox")
+}
+
 model Song {
   id                        String              @id @default(uuid())
   status                    Int                 @default(1)
@@ -90,10 +132,6 @@ model Song {
   catalogTitle              String              @default("") @db.VarChar(255)
   albumName                 String              @default("") @db.VarChar(255)
   artistName                String              @default("") @db.VarChar(500)
-  artworkAssetId            String              @default("") @db.VarChar(128)
-  editorialArtworkAssetId   String              @default("") @db.VarChar(128)
-  artwork                   Json?
-  editorialArtwork          Json?
   extendedAssetUrls         Json?
   offers                    Json?
   audioLocale               String              @default("") @db.VarChar(32)
@@ -102,6 +140,14 @@ model Song {
   moodAnalysisVersion       String              @default("") @db.VarChar(128)
   moodAnalysisScores        Json?
   moodAnalyzedAt            DateTime?           @db.Timestamptz
+  audioAnalysisStatus       AudioAnalysisStatus @default(PENDING)
+  audioAnalysisVersion      String              @default("") @db.VarChar(128)
+  audioBpm                  Float?
+  audioEnergy               Float?
+  audioTags                 String[]            @default([])
+  audioEmbedding            Float[]             @default([])
+  audioAnalysisError        String              @default("") @db.VarChar(2000)
+  audioAnalyzedAt           DateTime?           @db.Timestamptz
   composerName              String              @default("") @db.VarChar(1000)
   discNumber                Int                 @default(1)
   durationInMillis          Int                 @default(0)
@@ -123,21 +169,47 @@ model Song {
   albumTracks               AlbumTrack[]
   playlistTracks            PlaylistTrack[]
   artistCredits             SongArtistCredit[]
+  contributorCredits        SongContributorCredit[]
   favorites                 Favorite[]
   userPlaylistTracks        UserPlaylistTrack[]
   lyric                     SongLyric?
   lyricDraft                SongLyricDraft?
+  videos                    SongVideo[]
 
   @@index([status, createdAt])
   @@index([isCatalog, storefront])
   @@index([storefront, isCatalog, releaseDate(sort: Desc), id(sort: Desc)])
   @@index([catalogTitle])
   @@index([isrc])
-  @@index([artworkAssetId])
-  @@index([editorialArtworkAssetId])
   @@index([moodAnalyzedAt])
+  @@index([audioAnalysisStatus, audioAnalyzedAt])
+  @@index([audioTags], type: Gin)
   @@index([moodTags], type: Gin)
   @@map("songs")
+}
+
+enum SongVideoKind {
+  OFFICIAL
+  LYRIC
+  LIVE
+}
+
+// A SongVideo is an additional visual rendition of a Song. All editorial
+// metadata belongs to Song; this table stores only video-specific state.
+model SongVideo {
+  id           String        @id @default(uuid()) @db.Uuid
+  songId       String        @db.VarChar(128)
+  videoAssetId String        @unique @db.VarChar(128)
+  kind         SongVideoKind @default(OFFICIAL)
+  publishedAt  DateTime      @default(now()) @db.Timestamptz
+  createdAt    DateTime      @default(now()) @db.Timestamptz
+  updatedAt    DateTime      @updatedAt @db.Timestamptz
+
+  song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@unique([songId, kind])
+  @@index([songId, publishedAt(sort: Desc)])
+  @@map("song_videos")
 }
 
 model SongLyric {
@@ -216,15 +288,40 @@ model Artist {
   editorialVideoAssetId String              @default("") @db.VarChar(128)
   editorialVideo        Json?
   genreNames            String[]            @default([])
+  origin                String?             @db.VarChar(255)
+  birthDate             DateTime?           @db.Date
+  biography             String?             @db.Text
+  biographySourceUrl    String?             @db.VarChar(2048)
   createdAt             DateTime            @default(now()) @db.Timestamptz
   updatedAt             DateTime            @updatedAt @db.Timestamptz
   songCredits           SongArtistCredit[]
   albumCredits          AlbumArtistCredit[]
+  memberships           ArtistMembership[]
 
   @@index([storefront, name])
   @@index([artworkAssetId])
   @@index([editorialVideoAssetId])
   @@map("artists")
+}
+
+// Identity is owned by the Identity service, so userId intentionally remains
+// a scalar here rather than a cross-database relation. This is the ownership
+// boundary for every Artist workspace in Catalog.
+model ArtistMembership {
+  id        String           @id @default(uuid())
+  artistId  String           @db.VarChar(128)
+  userId    String           @db.VarChar(128)
+  role      ArtistMemberRole
+  createdBy String           @db.VarChar(128)
+  createdAt DateTime         @default(now()) @db.Timestamptz
+  updatedAt DateTime         @updatedAt @db.Timestamptz
+
+  artist Artist @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  @@unique([artistId, userId])
+  @@index([userId, updatedAt])
+  @@index([artistId, role])
+  @@map("artist_memberships")
 }
 
 model Album {
@@ -248,7 +345,7 @@ model Album {
   isComplete              Boolean   @default(true)
   isStudioMastered        Boolean   @default(false)
   isPrerelease            Boolean   @default(false)
-  isSingle                Boolean   @default(false)
+  releaseType             String    @default("album") @db.VarChar(16)
   recordLabel             String    @default("") @db.VarChar(255)
   releaseDate             DateTime? @db.Date
   trackCount              Int       @default(0)
@@ -262,6 +359,10 @@ model Album {
 
   tracks        AlbumTrack[]
   artistCredits AlbumArtistCredit[]
+  sourceFavorites Favorite[] @relation("FavoriteSourceAlbum")
+  favorites       AlbumFavorite[]
+  sourcePlaylistTracks UserPlaylistTrack[] @relation("UserPlaylistTrackSourceAlbum")
+  sourceLibraryResources UserLibraryResource[] @relation("LibraryResourceSourceAlbum")
 
   @@unique([ingestionSource, ingestionKey])
   @@index([storefront, name])
@@ -274,6 +375,7 @@ model Album {
 }
 
 model AlbumTrack {
+  id         String   @id @default(uuid()) @db.Uuid
   albumId    String
   songId     String
   position   Int
@@ -284,7 +386,7 @@ model AlbumTrack {
   album Album @relation(fields: [albumId], references: [id], onDelete: Cascade)
   song  Song  @relation(fields: [songId], references: [id], onDelete: Cascade)
 
-  @@id([albumId, songId])
+  @@unique([albumId, songId])
   @@unique([albumId, position])
   @@index([songId])
   @@map("album_tracks")
@@ -293,6 +395,7 @@ model AlbumTrack {
 model AlbumArtistCredit {
   albumId   String
   artistId  String
+  isPrimary Boolean  @default(false)
   position  Int      @default(0)
   createdAt DateTime @default(now()) @db.Timestamptz
 
@@ -302,6 +405,7 @@ model AlbumArtistCredit {
   @@id([albumId, artistId])
   @@unique([albumId, position])
   @@index([artistId])
+  @@index([artistId, isPrimary])
   @@map("album_artist_credits")
 }
 
@@ -309,6 +413,7 @@ model SongArtistCredit {
   songId    String
   artistId  String
   role      String   @default("artist") @db.VarChar(32)
+  isPrimary Boolean  @default(false)
   position  Int      @default(0)
   createdAt DateTime @default(now()) @db.Timestamptz
 
@@ -319,7 +424,25 @@ model SongArtistCredit {
   @@unique([songId, role, position])
   @@index([artistId])
   @@index([artistId, songId])
+  @@index([artistId, role, isPrimary])
   @@map("song_artist_credits")
+}
+
+// A credited person is not automatically a catalog Artist. This table keeps
+// manual performance, writing, production, and engineering credits without
+// creating a public artist profile or affecting artist discovery.
+model SongContributorCredit {
+  songId    String
+  name      String   @db.VarChar(255)
+  role      String   @db.VarChar(32)
+  position  Int      @default(0)
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@id([songId, role, position])
+  @@index([songId])
+  @@map("song_contributor_credits")
 }
 
 model Playlist {
@@ -354,6 +477,7 @@ model Playlist {
   updatedAt               DateTime  @updatedAt @db.Timestamptz
 
   tracks PlaylistTrack[]
+  favorites PlaylistFavorite[]
 
   @@index([storefront, name])
   @@index([ownerId])
@@ -386,7 +510,6 @@ model SongOwner {
   title     String   @default("") @db.VarChar(255)
   artist    String   @default("") @db.VarChar(255)
   album     String   @default("") @db.VarChar(255)
-  coverUrl  String   @default("") @db.VarChar(500)
   tags      String[] @default([])
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
@@ -440,14 +563,33 @@ model Favorite {
   id        String   @id @default(uuid())
   userId    String   @db.VarChar(128)
   songId    String   @db.VarChar(128)
+  sourceAlbumId String? @db.VarChar(128)
   createdAt DateTime @default(now()) @db.Timestamptz
 
   song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+  sourceAlbum Album? @relation("FavoriteSourceAlbum", fields: [sourceAlbumId], references: [id], onDelete: SetNull)
 
   @@unique([userId, songId])
   @@index([userId, createdAt])
   @@index([songId])
+  @@index([sourceAlbumId])
   @@map("favorites")
+}
+
+// Album favourites are deliberately separate from Library resources: removing
+// the star must never remove the album or its tracks from a user's Library.
+model AlbumFavorite {
+  id        String   @id @default(uuid())
+  userId    String   @db.VarChar(128)
+  albumId   String   @db.VarChar(128)
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  album Album @relation(fields: [albumId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, albumId])
+  @@index([userId, createdAt])
+  @@index([albumId])
+  @@map("album_favorites")
 }
 
 model SystemFavoriteArtwork {
@@ -471,25 +613,72 @@ model UserPlaylist {
   updatedAt   DateTime @updatedAt @db.Timestamptz
 
   tracks UserPlaylistTrack[]
+  favorites UserPlaylistFavorite[]
 
   @@index([userId, createdAt])
   @@index([isPublic, updatedAt])
   @@map("user_playlists")
 }
 
+// Favourites for playlists owned by the same user. These do not create a
+// second Library resource because the playlist already belongs to its owner.
+model UserPlaylistFavorite {
+  id         String   @id @default(uuid())
+  userId     String   @db.VarChar(128)
+  playlistId String   @db.VarChar(128)
+  createdAt  DateTime @default(now()) @db.Timestamptz
+
+  playlist UserPlaylist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, playlistId])
+  @@index([userId, createdAt])
+  @@index([playlistId])
+  @@map("user_playlist_favorites")
+}
+
 model UserPlaylistTrack {
   playlistId String
   songId     String
+  sourceAlbumId String? @db.VarChar(128)
   position   Int
   addedAt    DateTime @default(now()) @db.Timestamptz
 
   playlist UserPlaylist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
   song     Song         @relation(fields: [songId], references: [id], onDelete: Cascade)
+  sourceAlbum Album?    @relation("UserPlaylistTrackSourceAlbum", fields: [sourceAlbumId], references: [id], onDelete: SetNull)
 
   @@id([playlistId, songId])
   @@unique([playlistId, position])
   @@index([songId])
+  @@index([sourceAlbumId])
   @@map("user_playlist_tracks")
+}
+
+// Public playlist favourites are separate from Library membership. Removing
+// the favourite must not remove a playlist the user intentionally saved.
+model PlaylistFavorite {
+  id         String   @id @default(uuid())
+  userId     String   @db.VarChar(128)
+  playlistId String   @db.VarChar(128)
+  createdAt  DateTime @default(now()) @db.Timestamptz
+
+  playlist Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, playlistId])
+  @@index([userId, createdAt])
+  @@index([playlistId])
+  @@map("playlist_favorites")
+}
+
+// The Favourite Songs playlist is a virtual, per-user collection rather than
+// a row in Playlist. Keep its optional "super favourite" state separate so
+// public playlist foreign-key integrity remains intact.
+model SystemPlaylistFavorite {
+  id        String   @id @default(uuid())
+  userId    String   @unique @db.VarChar(128)
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  @@map("system_playlist_favorites")
 }
 
 model UserLibraryResource {
@@ -497,6 +686,7 @@ model UserLibraryResource {
   userId       String    @db.VarChar(128)
   resourceType String    @db.VarChar(32)
   resourceId   String    @db.VarChar(128)
+  sourceAlbumId String?  @db.VarChar(128)
   title        String    @default("") @db.VarChar(255)
   subtitle     String    @default("") @db.VarChar(255)
   artworkUrl   String    @default("") @db.VarChar(1000)
@@ -504,10 +694,13 @@ model UserLibraryResource {
   pinnedAt     DateTime? @db.Timestamptz
   createdAt    DateTime  @default(now()) @db.Timestamptz
 
+  sourceAlbum Album? @relation("LibraryResourceSourceAlbum", fields: [sourceAlbumId], references: [id], onDelete: SetNull)
+
   @@unique([userId, resourceType, resourceId])
   @@index([userId, createdAt])
   @@index([userId, resourceType, createdAt, resourceId])
   @@index([userId, resourceType, title, resourceId])
   @@index([userId, isPinned, pinnedAt])
+  @@index([sourceAlbumId])
   @@map("user_library_resources")
 }

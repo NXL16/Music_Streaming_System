@@ -11,12 +11,22 @@ import {
   GetSongIngestInfoResponse,
   ListSongsRequest,
   ListSongsResponse,
+  ListAudioAnalysisSongsRequest,
+  ListAudioAnalysisSongsResponse,
   CreateSongRecordRequest,
   CreateSongRecordResponse,
   UpdateSongProcessingResultRequest,
   UpdateSongProcessingResultResponse,
   FavoriteRequest,
   FavoriteResponse,
+  AlbumFavoriteRequest,
+  AlbumFavoriteResponse,
+  ListAlbumFavoriteIdsRequest,
+  ListAlbumFavoriteIdsResponse,
+  PlaylistFavoriteRequest,
+  PlaylistFavoriteResponse,
+  ListPlaylistFavoriteIdsRequest,
+  ListPlaylistFavoriteIdsResponse,
   ListFavoriteSongsRequest,
   ListFavoriteSongsResponse,
   UpsertFavoriteArtworkRequest,
@@ -40,6 +50,16 @@ import {
   GetCatalogArtistAlbumsRequest,
   GetCatalogArtistSongsRequest,
   GetCatalogArtistSongsResponse,
+  GetCatalogSimilarArtistsRequest,
+  GetCatalogSongVideosRequest,
+  GetCatalogSongVideosResponse,
+  GetCatalogAlbumSongVideosRequest,
+  GetCatalogArtistSongVideosRequest,
+  GetCatalogSongVideoRequest,
+  GetCatalogRelatedSongVideosRequest,
+  CatalogSongVideo,
+  ResolveMusicVideoPlaybackRequest,
+  ResolveMusicVideoPlaybackResponse,
   GetCatalogAlbumRelatedRequest,
   GetCatalogAlbumRelatedResponse,
   CatalogResponse,
@@ -47,11 +67,14 @@ import {
   SaveCatalogSongDraftRequest,
   SaveCatalogAlbumDraftRequest,
   SaveCatalogPlaylistDraftRequest,
+  SaveCatalogSongVideoDraftRequest,
   CatalogDraftInfo,
   GetCatalogDraftRequest,
   CatalogDraftDetail,
   ListCatalogDraftsRequest,
   ListCatalogDraftsResponse,
+  SubmitCatalogDraftRequest,
+  ReviewCatalogDraftRequest,
   PublishCatalogDraftRequest,
   DeleteCatalogDraftRequest,
   DeleteCatalogDraftResponse,
@@ -73,10 +96,21 @@ import {
   GetSongLyricsRequest,
   SongLyricsResponse,
   UpsertSongLyricsRequest,
+  ListArtistWorkspacesRequest,
+  ListArtistWorkspacesResponse,
+  ListArtistMembersRequest,
+  ListArtistMembersResponse,
+  UpsertArtistMemberRequest,
+  ArtistMembership,
+  RemoveArtistMemberRequest,
+  RemoveArtistMemberResponse,
+  CheckArtistPermissionRequest,
+  CheckArtistPermissionResponse,
 } from '@musical/shared-proto';
 import { CatalogService } from './catalog.service';
 import { CatalogAuthoringService } from './catalog-authoring.service';
 import { LyricsService } from './lyrics.service';
+import { ArtistWorkspaceService } from './artist-workspace.service';
 
 @Controller()
 @SongServiceControllerMethods()
@@ -86,6 +120,7 @@ export class SongsController implements SongServiceController {
     private readonly catalogService: CatalogService,
     private readonly catalogAuthoringService: CatalogAuthoringService,
     private readonly lyricsService: LyricsService,
+    private readonly artistWorkspaceService: ArtistWorkspaceService,
   ) {}
 
   async getSong(request: GetSongRequest): Promise<GetSongResponse> {
@@ -118,6 +153,12 @@ export class SongsController implements SongServiceController {
     return this.songsService.listSongs(request);
   }
 
+  async listAudioAnalysisSongs(
+    request: ListAudioAnalysisSongsRequest,
+  ): Promise<ListAudioAnalysisSongsResponse> {
+    return this.songsService.listAudioAnalysisSongs(request);
+  }
+
   async createSongRecord(
     request: CreateSongRecordRequest,
   ): Promise<CreateSongRecordResponse> {
@@ -136,6 +177,48 @@ export class SongsController implements SongServiceController {
 
   async removeFavorite(request: FavoriteRequest): Promise<FavoriteResponse> {
     return this.songsService.removeFavorite(request);
+  }
+
+  addAlbumFavorite(request: AlbumFavoriteRequest): Promise<AlbumFavoriteResponse> {
+    return this.songsService.addAlbumFavorite(request);
+  }
+
+  removeAlbumFavorite(request: AlbumFavoriteRequest): Promise<AlbumFavoriteResponse> {
+    return this.songsService.removeAlbumFavorite(request);
+  }
+
+  getAlbumFavorite(request: AlbumFavoriteRequest): Promise<AlbumFavoriteResponse> {
+    return this.songsService.getAlbumFavorite(request);
+  }
+
+  listAlbumFavoriteIds(
+    request: ListAlbumFavoriteIdsRequest,
+  ): Promise<ListAlbumFavoriteIdsResponse> {
+    return this.songsService.listAlbumFavoriteIds(request);
+  }
+
+  addPlaylistFavorite(
+    request: PlaylistFavoriteRequest,
+  ): Promise<PlaylistFavoriteResponse> {
+    return this.songsService.addPlaylistFavorite(request);
+  }
+
+  removePlaylistFavorite(
+    request: PlaylistFavoriteRequest,
+  ): Promise<PlaylistFavoriteResponse> {
+    return this.songsService.removePlaylistFavorite(request);
+  }
+
+  getPlaylistFavorite(
+    request: PlaylistFavoriteRequest,
+  ): Promise<PlaylistFavoriteResponse> {
+    return this.songsService.getPlaylistFavorite(request);
+  }
+
+  listPlaylistFavoriteIds(
+    request: ListPlaylistFavoriteIdsRequest,
+  ): Promise<ListPlaylistFavoriteIdsResponse> {
+    return this.songsService.listPlaylistFavoriteIds(request);
   }
 
   async listFavoriteSongs(
@@ -268,6 +351,7 @@ export class SongsController implements SongServiceController {
       request.userId,
       request.playlistId,
       request.songId,
+      request.sourceAlbumId,
     );
   }
 
@@ -323,6 +407,48 @@ export class SongsController implements SongServiceController {
     return this.catalogService.getArtistSongs(request);
   }
 
+  async getCatalogSimilarArtists(
+    request: GetCatalogSimilarArtistsRequest,
+  ): Promise<CatalogResponse> {
+    return this.catalogService.getSimilarArtists(request);
+  }
+
+  getCatalogSongVideos(
+    request: GetCatalogSongVideosRequest,
+  ): Promise<GetCatalogSongVideosResponse> {
+    return this.catalogService.getSongVideos(request);
+  }
+
+  getCatalogSongVideo(
+    request: GetCatalogSongVideoRequest,
+  ): Promise<CatalogSongVideo> {
+    return this.catalogService.getSongVideo(request);
+  }
+
+  getCatalogRelatedSongVideos(
+    request: GetCatalogRelatedSongVideosRequest,
+  ): Promise<GetCatalogSongVideosResponse> {
+    return this.catalogService.getRelatedSongVideos(request);
+  }
+
+  getCatalogAlbumSongVideos(
+    request: GetCatalogAlbumSongVideosRequest,
+  ): Promise<GetCatalogSongVideosResponse> {
+    return this.catalogService.getAlbumSongVideos(request);
+  }
+
+  getCatalogArtistSongVideos(
+    request: GetCatalogArtistSongVideosRequest,
+  ): Promise<GetCatalogSongVideosResponse> {
+    return this.catalogService.getArtistSongVideos(request);
+  }
+
+  resolveMusicVideoPlayback(
+    request: ResolveMusicVideoPlaybackRequest,
+  ): Promise<ResolveMusicVideoPlaybackResponse> {
+    return this.catalogService.resolveMusicVideoPlayback(request);
+  }
+
   async getCatalogAlbumRelated(
     request: GetCatalogAlbumRelatedRequest,
   ): Promise<GetCatalogAlbumRelatedResponse> {
@@ -353,6 +479,12 @@ export class SongsController implements SongServiceController {
     return this.catalogAuthoringService.savePlaylistDraft(request);
   }
 
+  saveCatalogSongVideoDraft(
+    request: SaveCatalogSongVideoDraftRequest,
+  ): Promise<CatalogDraftInfo> {
+    return this.catalogAuthoringService.saveSongVideoDraft(request);
+  }
+
   getCatalogDraft(
     request: GetCatalogDraftRequest,
   ): Promise<CatalogDraftDetail> {
@@ -363,6 +495,18 @@ export class SongsController implements SongServiceController {
     request: ListCatalogDraftsRequest,
   ): Promise<ListCatalogDraftsResponse> {
     return this.catalogAuthoringService.listDrafts(request);
+  }
+
+  submitCatalogDraft(
+    request: SubmitCatalogDraftRequest,
+  ): Promise<CatalogDraftInfo> {
+    return this.catalogAuthoringService.submitDraft(request);
+  }
+
+  reviewCatalogDraft(
+    request: ReviewCatalogDraftRequest,
+  ): Promise<CatalogDraftInfo> {
+    return this.catalogAuthoringService.reviewDraft(request);
   }
 
   publishCatalogDraft(
@@ -387,5 +531,35 @@ export class SongsController implements SongServiceController {
     request: SearchCatalogRequest,
   ): Promise<SearchCatalogResponse> {
     return this.catalogService.searchCatalog(request);
+  }
+
+  listArtistWorkspaces(
+    request: ListArtistWorkspacesRequest,
+  ): Promise<ListArtistWorkspacesResponse> {
+    return this.artistWorkspaceService.listWorkspaces(request);
+  }
+
+  listArtistMembers(
+    request: ListArtistMembersRequest,
+  ): Promise<ListArtistMembersResponse> {
+    return this.artistWorkspaceService.listMembers(request);
+  }
+
+  upsertArtistMember(
+    request: UpsertArtistMemberRequest,
+  ): Promise<ArtistMembership> {
+    return this.artistWorkspaceService.upsertMember(request);
+  }
+
+  removeArtistMember(
+    request: RemoveArtistMemberRequest,
+  ): Promise<RemoveArtistMemberResponse> {
+    return this.artistWorkspaceService.removeMember(request);
+  }
+
+  checkArtistPermission(
+    request: CheckArtistPermissionRequest,
+  ): Promise<CheckArtistPermissionResponse> {
+    return this.artistWorkspaceService.checkPermission(request);
   }
 }

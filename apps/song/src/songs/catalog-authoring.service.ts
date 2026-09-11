@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { status } from '@grpc/grpc-js';
 import { RpcException } from '@nestjs/microservices';
 import { randomUUID } from 'node:crypto';
 import {
@@ -12,18 +11,25 @@ import {
   GetCatalogDraftRequest,
   ListCatalogDraftsRequest,
   ListCatalogDraftsResponse,
+  SubmitCatalogDraftRequest,
+  ReviewCatalogDraftRequest,
   PublishCatalogDraftRequest,
   SaveCatalogAlbumDraftRequest,
   SaveCatalogArtistDraftRequest,
   SaveCatalogPlaylistDraftRequest,
   SaveCatalogSongDraftRequest,
+  SaveCatalogSongVideoDraftRequest,
+  SongContributorCreditInput,
+  SongCreditInput,
   SongStatus,
 } from '@musical/shared-proto';
+import { SONG_CREDIT_ROLE_IDS } from '@musical/shared-constants';
 import { PrismaService } from '../database/prisma.service';
 import {
   CatalogDraft,
   CatalogDraftStatus as PrismaDraftStatus,
   Prisma,
+  SongVideoKind,
 } from '../generated/prisma/client';
 import { CatalogService } from './catalog.service';
 import { CatalogAssetsService } from './catalog-assets.service';
@@ -33,13 +39,27 @@ const RESOURCE_TYPES = {
   SONG: 'songs',
   ALBUM: 'albums',
   PLAYLIST: 'playlists',
+  SONG_VIDEO: 'song-videos',
 } as const;
 
 const MAX_DRAFTS_PER_PAGE = 100;
 const MAX_TRACKS = 1_000;
 const MAX_CREDITS = 100;
 const MAX_OFFERS = 50;
+type NormalizedSongCredit = Pick<
+  SongCreditInput,
+  'artistId' | 'role' | 'isPrimary' | 'position'
+>;
+type NormalizedSongContributorCredit = Pick<
+  SongContributorCreditInput,
+  'name' | 'role' | 'position'
+>;
 const MAX_RICH_METADATA_BYTES = 256 * 1024;
+const GRPC_STATUS = {
+  INVALID_ARGUMENT: 3,
+  NOT_FOUND: 5,
+  FAILED_PRECONDITION: 9,
+} as const;
 
 type JsonObject = Record<string, unknown>;
 
@@ -55,9 +75,17 @@ export class CatalogAuthoringService {
     request: SaveCatalogArtistDraftRequest,
   ): Promise<CatalogDraftInfo> {
     const genreNames = this.list(request.genreNames);
+    const origin = request.origin?.trim() ?? '';
+    const birthDate = request.birthDate?.trim() ?? '';
+    const biography = request.biography?.trim() ?? '';
+    const biographySourceUrl = request.biographySourceUrl?.trim() ?? '';
 
     this.validateCommon(request.storefront, request.actorUserId);
     this.requireText(request.name, 'name', 255);
+    this.validateOptionalText(origin, 'origin', 255);
+    this.validateDate(birthDate, 'birth_date');
+    this.validateOptionalText(biography, 'biography', 5000);
+    this.validateOptionalUrl(biographySourceUrl, 'biography_source_url', 2048);
     this.validateStringArray(genreNames, 'genre_names', 128);
     this.rejectDirectAssetMetadata(request.artwork, 'artwork');
     this.rejectDirectAssetMetadata(request.editorialVideo, 'editorial_video');
@@ -74,6 +102,10 @@ export class CatalogAuthoringService {
         editorialVideoAssetId: request.editorialVideoAssetId?.trim() ?? '',
         editorialVideo: this.unwrapStruct(request.editorialVideo),
         genreNames,
+        origin,
+        birthDate,
+        biography,
+        biographySourceUrl,
       }),
     );
   }
@@ -85,19 +117,26 @@ export class CatalogAuthoringService {
     const audioTraits = this.list(request.audioTraits);
     const moodTags = this.list(request.moodTags);
     const composerIds = this.list(request.composerIds);
+    const credits = this.normalizeSongCredits(
+      request.credits,
+      artistIds,
+      composerIds,
+    );
+    const contributorCredits = this.normalizeSongContributorCredits(
+      request.contributorCredits,
+    );
     const genreNames = this.list(request.genreNames);
     const offers = this.list(request.offers);
 
     this.validateCommon(request.storefront, request.actorUserId);
     this.requireText(request.resourceId, 'resource_id', 128);
     this.requireText(request.name, 'name', 255);
-    this.validateCredits(artistIds, composerIds);
+    this.validateSongCredits(credits);
+    this.validateSongContributorCredits(contributorCredits);
     this.validateStringArray(audioTraits, 'audio_traits', 64);
     this.validateStringArray(moodTags, 'mood_tags', 64);
     this.validateStringArray(genreNames, 'genre_names', 128);
     this.validateDate(request.releaseDate, 'release_date');
-    this.rejectDirectAssetMetadata(request.artwork, 'artwork');
-    this.validateRichMetadata(request.editorialArtwork, 'editorial_artwork');
     this.validateRichMetadata(request.extendedAssetUrls, 'extended_asset_urls');
     this.validateOffers(offers);
 
@@ -110,9 +149,6 @@ export class CatalogAuthoringService {
         name: request.name.trim(),
         albumName: (request.albumName || '').trim(),
         artistName: (request.artistName || '').trim(),
-        artworkAssetId: (request.artworkAssetId || '').trim(),
-        editorialArtworkAssetId: (request.editorialArtworkAssetId || '').trim(),
-        editorialArtwork: this.unwrapStruct(request.editorialArtwork),
         extendedAssetUrls: this.unwrapStruct(request.extendedAssetUrls),
         offers: offers.map((offer) => this.unwrapStruct(offer) ?? {}),
         audioLocale: (request.audioLocale || '').trim(),
@@ -132,8 +168,8 @@ export class CatalogAuthoringService {
         releaseDate: (request.releaseDate || '').trim() || null,
         trackNumber: Math.max(0, request.trackNumber),
         url: (request.url || '').trim(),
-        artistIds: this.unique(artistIds),
-        composerIds: this.unique(composerIds),
+        credits,
+        contributorCredits,
       }),
     );
   }
@@ -150,13 +186,15 @@ export class CatalogAuthoringService {
     const genreNames = this.list(request.genreNames);
     const offers = this.list(request.offers);
     const tracks = this.list(request.tracks);
+    const releaseType = this.releaseType(request.releaseType);
 
     this.validateCommon(request.storefront, request.actorUserId);
     this.requireText(request.name, 'name', 255);
     if (canonicalReleaseId) {
       this.requireText(canonicalReleaseId, 'canonical_release_id', 128);
     }
-    if (ingestionSource) this.requireText(ingestionSource, 'ingestion_source', 32);
+    if (ingestionSource)
+      this.requireText(ingestionSource, 'ingestion_source', 32);
     if (ingestionKey) {
       this.requireText(ingestionKey, 'ingestion_key', 128);
     }
@@ -198,7 +236,7 @@ export class CatalogAuthoringService {
         isComplete: request.isComplete,
         isStudioMastered: request.isStudioMastered,
         isPrerelease: request.isPrerelease,
-        isSingle: request.isSingle,
+        releaseType,
         recordLabel: (request.recordLabel || '').trim(),
         releaseDate: (request.releaseDate || '').trim() || null,
         upc: (request.upc || '').trim(),
@@ -269,6 +307,31 @@ export class CatalogAuthoringService {
     );
   }
 
+  saveSongVideoDraft(
+    request: SaveCatalogSongVideoDraftRequest,
+  ): Promise<CatalogDraftInfo> {
+    const resourceId = request.resourceId || randomUUID();
+    const songId = (request.songId || '').trim();
+    const videoAssetId = (request.videoAssetId || '').trim();
+
+    this.validateCommon(request.storefront, request.actorUserId);
+    this.requireUuid(resourceId, 'resource_id');
+    this.requireText(songId, 'song_id', 128);
+    this.requireText(videoAssetId, 'video_asset_id', 128);
+
+    return this.saveDraft(
+      RESOURCE_TYPES.SONG_VIDEO,
+      resourceId,
+      request.storefront,
+      request.actorUserId,
+      this.json({
+        songId,
+        videoAssetId,
+        kind: this.songVideoKind(request.kind),
+      }),
+    );
+  }
+
   async getDraft(request: GetCatalogDraftRequest): Promise<CatalogDraftDetail> {
     const draft = await this.findDraft(request.draftId);
     return {
@@ -288,6 +351,7 @@ export class CatalogAuthoringService {
       where: {
         storefront: request.storefront || undefined,
         resourceType: request.resourceType || undefined,
+        resourceId: request.resourceId || undefined,
         status: this.prismaDraftStatus(request.status),
       },
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
@@ -309,6 +373,9 @@ export class CatalogAuthoringService {
   ): Promise<CatalogResponse> {
     this.requireText(request.actorUserId, 'actor_user_id', 128);
     const draft = await this.findDraft(request.draftId);
+    if (draft.status !== PrismaDraftStatus.SUBMITTED) {
+      this.failedPrecondition('CATALOG_DRAFT_MUST_BE_SUBMITTED');
+    }
     const lockKey = `${draft.resourceType}\u001f${draft.storefront}\u001f${draft.resourceId}`;
     const resolvedAssets = await this.catalogAssetsService.resolveForPublish(
       draft.resourceType,
@@ -346,6 +413,9 @@ export class CatalogAuthoringService {
           case RESOURCE_TYPES.PLAYLIST:
             await this.publishPlaylist(tx, current, payload);
             break;
+          case RESOURCE_TYPES.SONG_VIDEO:
+            await this.publishSongVideo(tx, current, payload);
+            break;
           default:
             this.invalidArgument('CATALOG_RESOURCE_TYPE_UNSUPPORTED');
         }
@@ -355,6 +425,8 @@ export class CatalogAuthoringService {
           data: {
             status: PrismaDraftStatus.PUBLISHED,
             publishedAt: new Date(),
+            reviewedAt: new Date(),
+            reviewedBy: request.actorUserId,
             updatedBy: request.actorUserId,
           },
         });
@@ -384,10 +456,77 @@ export class CatalogAuthoringService {
       { maxWait: 10_000, timeout: 30_000 },
     );
 
+    const publishedSongId =
+      draft.resourceType === RESOURCE_TYPES.SONG_VIDEO
+        ? this.requiredString(this.object(draft.payload).songId, 'song_id')
+        : draft.resourceId;
+
     return this.catalogService.getResources({
       storefront: draft.storefront,
-      resources: [{ type: draft.resourceType, id: draft.resourceId }],
+      // A video augments an existing Song; it is not a standalone catalog
+      // resource. Returning the Song keeps the generic publish contract valid.
+      resources: [
+        {
+          type:
+            draft.resourceType === RESOURCE_TYPES.SONG_VIDEO
+              ? RESOURCE_TYPES.SONG
+              : draft.resourceType,
+          id: publishedSongId,
+        },
+      ],
     });
+  }
+
+  async submitDraft(
+    request: SubmitCatalogDraftRequest,
+  ): Promise<CatalogDraftInfo> {
+    this.requireText(request.actorUserId, 'actor_user_id', 128);
+    const draft = await this.findDraft(request.draftId);
+    if (
+      draft.status !== PrismaDraftStatus.DRAFT &&
+      draft.status !== PrismaDraftStatus.CHANGES_REQUESTED
+    ) {
+      this.failedPrecondition('CATALOG_DRAFT_NOT_SUBMITTABLE');
+    }
+    const submitted = await this.prisma.catalogDraft.update({
+      where: { id: draft.id },
+      data: {
+        status: PrismaDraftStatus.SUBMITTED,
+        submittedAt: new Date(),
+        reviewedAt: null,
+        reviewedBy: null,
+        reviewNote: '',
+        updatedBy: request.actorUserId,
+      },
+    });
+    return this.draftInfo(submitted);
+  }
+
+  async reviewDraft(
+    request: ReviewCatalogDraftRequest,
+  ): Promise<CatalogDraftInfo> {
+    this.requireText(request.actorUserId, 'actor_user_id', 128);
+    const draft = await this.findDraft(request.draftId);
+    if (draft.status !== PrismaDraftStatus.SUBMITTED) {
+      this.failedPrecondition('CATALOG_DRAFT_NOT_IN_REVIEW');
+    }
+    const note = (request.reviewNote || '').trim();
+    if (note.length > 2000) {
+      this.invalidArgument('review_note must not exceed 2000 characters');
+    }
+    const reviewed = await this.prisma.catalogDraft.update({
+      where: { id: draft.id },
+      data: {
+        status: request.requestChanges
+          ? PrismaDraftStatus.CHANGES_REQUESTED
+          : PrismaDraftStatus.SUBMITTED,
+        reviewedAt: new Date(),
+        reviewedBy: request.actorUserId,
+        reviewNote: note,
+        updatedBy: request.actorUserId,
+      },
+    });
+    return this.draftInfo(reviewed);
   }
 
   async deleteDraft(
@@ -408,6 +547,19 @@ export class CatalogAuthoringService {
     payload: Prisma.InputJsonValue,
   ): Promise<CatalogDraftInfo> {
     this.requireText(resourceId, 'resource_id', 128);
+    const existing = await this.prisma.catalogDraft.findUnique({
+      where: {
+        resourceType_resourceId_storefront: {
+          resourceType,
+          resourceId,
+          storefront,
+        },
+      },
+      select: { status: true },
+    });
+    if (existing?.status === PrismaDraftStatus.SUBMITTED) {
+      this.failedPrecondition('CATALOG_DRAFT_IN_REVIEW');
+    }
     const draft = await this.prisma.catalogDraft.upsert({
       where: {
         resourceType_resourceId_storefront: {
@@ -428,6 +580,10 @@ export class CatalogAuthoringService {
         payload,
         status: PrismaDraftStatus.DRAFT,
         publishedAt: null,
+        submittedAt: null,
+        reviewedAt: null,
+        reviewedBy: null,
+        reviewNote: '',
         updatedBy: actorUserId,
         version: { increment: 1 },
       },
@@ -451,6 +607,10 @@ export class CatalogAuthoringService {
       ),
       artwork: this.jsonNullable(payload.artwork),
       genreNames: this.strings(payload.genreNames),
+      origin: this.optionalString(payload.origin),
+      birthDate: this.date(payload.birthDate),
+      biography: this.optionalString(payload.biography),
+      biographySourceUrl: this.optionalString(payload.biographySourceUrl),
       editorialVideoAssetId: this.string(payload.editorialVideoAssetId),
       editorialVideo: this.jsonNullable(payload.editorialVideo),
     };
@@ -476,14 +636,15 @@ export class CatalogAuthoringService {
     }
 
     const artistName = this.string(payload.artistName);
-    const artistIds = await this.resolveArtistCreditIds(
+    const credits = await this.resolveSongCredits(
       tx,
       draft.storefront,
       artistName,
-      this.strings(payload.artistIds),
+      payload.credits,
     );
-    const composerIds = this.strings(payload.composerIds);
-    await this.assertArtists(tx, composerIds, draft.storefront);
+    const contributorCredits = this.resolveSongContributorCredits(
+      payload.contributorCredits,
+    );
 
     await tx.song.update({
       where: { id: draft.resourceId },
@@ -493,13 +654,6 @@ export class CatalogAuthoringService {
         catalogTitle: this.requiredString(payload.name, 'name'),
         albumName: this.string(payload.albumName),
         artistName,
-        artworkAssetId: this.requiredString(
-          payload.artworkAssetId,
-          'artwork_asset_id',
-        ),
-        editorialArtworkAssetId: this.string(payload.editorialArtworkAssetId),
-        artwork: this.jsonNullable(payload.artwork),
-        editorialArtwork: this.jsonNullable(payload.editorialArtwork),
         extendedAssetUrls: this.jsonNullable(payload.extendedAssetUrls),
         offers: this.jsonNullable(payload.offers),
         audioLocale: this.string(payload.audioLocale),
@@ -535,22 +689,24 @@ export class CatalogAuthoringService {
     await tx.songArtistCredit.deleteMany({
       where: { songId: draft.resourceId },
     });
-    const credits = [
-      ...artistIds.map((artistId, position) => ({
-        songId: draft.resourceId,
-        artistId,
-        role: 'artist',
-        position,
-      })),
-      ...composerIds.map((artistId, position) => ({
-        songId: draft.resourceId,
-        artistId,
-        role: 'composer',
-        position,
-      })),
-    ];
     if (credits.length) {
-      await tx.songArtistCredit.createMany({ data: credits });
+      await tx.songArtistCredit.createMany({
+        data: credits.map((credit) => ({
+          ...credit,
+          songId: draft.resourceId,
+        })),
+      });
+    }
+    await tx.songContributorCredit.deleteMany({
+      where: { songId: draft.resourceId },
+    });
+    if (contributorCredits.length) {
+      await tx.songContributorCredit.createMany({
+        data: contributorCredits.map((credit) => ({
+          ...credit,
+          songId: draft.resourceId,
+        })),
+      });
     }
   }
 
@@ -589,6 +745,7 @@ export class CatalogAuthoringService {
           })
         : null;
     const albumId = existingIngestedAlbum?.id || draft.resourceId;
+    const releaseType = this.releaseType(this.string(payload.releaseType));
     const data = {
       storefront: draft.storefront,
       name: this.requiredString(payload.name, 'name'),
@@ -612,7 +769,7 @@ export class CatalogAuthoringService {
       isComplete: this.boolean(payload.isComplete),
       isStudioMastered: this.boolean(payload.isStudioMastered),
       isPrerelease: this.boolean(payload.isPrerelease),
-      isSingle: this.boolean(payload.isSingle),
+      releaseType,
       recordLabel: this.string(payload.recordLabel),
       releaseDate: this.date(payload.releaseDate),
       trackCount: tracks.length,
@@ -644,6 +801,7 @@ export class CatalogAuthoringService {
         data: artistIds.map((artistId, position) => ({
           albumId,
           artistId,
+          isPrimary: true,
           position,
         })),
       });
@@ -667,8 +825,8 @@ export class CatalogAuthoringService {
    * bonus track, or a reordered import). Resource IDs are intentionally opaque,
    * so reject a second catalog album when its release identity — normalised
    * name + artist + release date — matches an existing album in the same
-   * storefront. isSingle is deliberately excluded: the same release can surface
-   * as a single (≤3 tracks) and an album (>3 tracks) across two collection IDs,
+   * storefront. Release type is deliberately excluded: the same release can
+   * surface with a different collection shape across two collection IDs,
    * and both are one release to a listener. This matches the recommendation
    * display key and the seed tool's release key so a release cannot enter the
    * catalog twice and surface as two look-alike cards.
@@ -681,7 +839,6 @@ export class CatalogAuthoringService {
       artistName: string;
       releaseDate: Date | null;
       trackCount: number;
-      isSingle: boolean;
     },
     resourceId: string,
   ): Promise<void> {
@@ -749,6 +906,19 @@ export class CatalogAuthoringService {
       .replace(/[^a-z0-9]+/g, ' ')
       .trim()
       .replace(/\s+/g, ' ');
+  }
+
+  private releaseType(value: string): 'album' | 'ep' | 'single' {
+    const releaseType = value.trim().toLowerCase();
+    if (!releaseType) return 'album';
+    if (
+      releaseType === 'album' ||
+      releaseType === 'ep' ||
+      releaseType === 'single'
+    ) {
+      return releaseType;
+    }
+    this.invalidArgument('release_type must be album, ep, or single');
   }
 
   /**
@@ -879,6 +1049,43 @@ export class CatalogAuthoringService {
     }
   }
 
+  private async publishSongVideo(
+    tx: Prisma.TransactionClient,
+    draft: CatalogDraft,
+    payload: JsonObject,
+  ): Promise<void> {
+    const songId = this.requiredString(payload.songId, 'song_id');
+    const videoAssetId = this.requiredString(
+      payload.videoAssetId,
+      'video_asset_id',
+    );
+    const kind = this.songVideoKind(this.requiredString(payload.kind, 'kind'));
+
+    await this.assertSongs(tx, [songId], draft.storefront);
+
+    const sameSongKind = await tx.songVideo.findUnique({
+      where: { songId_kind: { songId, kind } },
+      select: { id: true },
+    });
+    if (sameSongKind && sameSongKind.id !== draft.resourceId) {
+      this.failedPrecondition('SONG_VIDEO_KIND_ALREADY_EXISTS');
+    }
+
+    const videoAsset = await tx.songVideo.findUnique({
+      where: { videoAssetId },
+      select: { id: true },
+    });
+    if (videoAsset && videoAsset.id !== draft.resourceId) {
+      this.failedPrecondition('VIDEO_ASSET_ALREADY_ATTACHED');
+    }
+
+    await tx.songVideo.upsert({
+      where: { id: draft.resourceId },
+      create: { id: draft.resourceId, songId, videoAssetId, kind },
+      update: { songId, videoAssetId, kind, publishedAt: new Date() },
+    });
+  }
+
   private async assertArtists(
     tx: Prisma.TransactionClient,
     artistIds: string[],
@@ -929,14 +1136,15 @@ export class CatalogAuthoringService {
       resourceType: draft.resourceType,
       resourceId: draft.resourceId,
       storefront: draft.storefront,
-      status:
-        draft.status === PrismaDraftStatus.PUBLISHED
-          ? CatalogDraftStatus.CATALOG_DRAFT_STATUS_PUBLISHED
-          : CatalogDraftStatus.CATALOG_DRAFT_STATUS_DRAFT,
+      status: this.protoDraftStatus(draft.status),
       version: draft.version,
       createdBy: draft.createdBy,
       updatedBy: draft.updatedBy,
       publishedAt: draft.publishedAt?.toISOString() ?? '',
+      submittedAt: draft.submittedAt?.toISOString() ?? '',
+      reviewedAt: draft.reviewedAt?.toISOString() ?? '',
+      reviewedBy: draft.reviewedBy ?? '',
+      reviewNote: draft.reviewNote,
       createdAt: draft.createdAt.toISOString(),
       updatedAt: draft.updatedAt.toISOString(),
     };
@@ -950,8 +1158,25 @@ export class CatalogAuthoringService {
         return PrismaDraftStatus.DRAFT;
       case CatalogDraftStatus.CATALOG_DRAFT_STATUS_PUBLISHED:
         return PrismaDraftStatus.PUBLISHED;
+      case CatalogDraftStatus.CATALOG_DRAFT_STATUS_SUBMITTED:
+        return PrismaDraftStatus.SUBMITTED;
+      case CatalogDraftStatus.CATALOG_DRAFT_STATUS_CHANGES_REQUESTED:
+        return PrismaDraftStatus.CHANGES_REQUESTED;
       default:
         return undefined;
+    }
+  }
+
+  private protoDraftStatus(status: PrismaDraftStatus): CatalogDraftStatus {
+    switch (status) {
+      case PrismaDraftStatus.SUBMITTED:
+        return CatalogDraftStatus.CATALOG_DRAFT_STATUS_SUBMITTED;
+      case PrismaDraftStatus.CHANGES_REQUESTED:
+        return CatalogDraftStatus.CATALOG_DRAFT_STATUS_CHANGES_REQUESTED;
+      case PrismaDraftStatus.PUBLISHED:
+        return CatalogDraftStatus.CATALOG_DRAFT_STATUS_PUBLISHED;
+      default:
+        return CatalogDraftStatus.CATALOG_DRAFT_STATUS_DRAFT;
     }
   }
 
@@ -969,6 +1194,147 @@ export class CatalogAuthoringService {
     if (artistIds.length > MAX_CREDITS || composerIds.length > MAX_CREDITS) {
       this.invalidArgument(`credits must contain at most ${MAX_CREDITS} IDs`);
     }
+  }
+
+  private normalizeSongCredits(
+    credits: SongCreditInput[],
+    artistIds: string[],
+    composerIds: string[],
+  ): NormalizedSongCredit[] {
+    if (credits.length) return credits;
+    return [
+      ...artistIds.map((artistId, position) => ({
+        artistId,
+        role: 'artist',
+        isPrimary: position === 0,
+        position,
+      })),
+      ...composerIds.map((artistId, position) => ({
+        artistId,
+        role: 'composer',
+        isPrimary: false,
+        position,
+      })),
+    ];
+  }
+
+  private validateSongCredits(credits: NormalizedSongCredit[]): void {
+    if (credits.length > MAX_CREDITS) {
+      this.invalidArgument(
+        `credits must contain at most ${MAX_CREDITS} entries`,
+      );
+    }
+    const artistRole = new Set<string>();
+    const rolePosition = new Set<string>();
+    for (const credit of credits) {
+      this.requireText(credit.artistId, 'credits.artist_id', 128);
+      const role = credit.role.trim().toLowerCase();
+      if (!SONG_CREDIT_ROLE_IDS.has(role))
+        this.invalidArgument('credits.role is invalid');
+      if (credit.isPrimary && role !== 'artist') {
+        this.invalidArgument('only artist credits can be primary');
+      }
+      if (!Number.isInteger(credit.position) || credit.position < 0) {
+        this.invalidArgument('credits.position must be a non-negative integer');
+      }
+      const artistRoleKey = `${credit.artistId}:${role}`;
+      const rolePositionKey = `${role}:${credit.position}`;
+      if (artistRole.has(artistRoleKey) || rolePosition.has(rolePositionKey)) {
+        this.invalidArgument(
+          'credits must use unique artist/role and role/position pairs',
+        );
+      }
+      artistRole.add(artistRoleKey);
+      rolePosition.add(rolePositionKey);
+    }
+  }
+
+  private normalizeSongContributorCredits(
+    credits: SongContributorCreditInput[],
+  ): NormalizedSongContributorCredit[] {
+    return credits;
+  }
+
+  private validateSongContributorCredits(
+    credits: NormalizedSongContributorCredit[],
+  ): void {
+    if (credits.length > MAX_CREDITS) {
+      this.invalidArgument(
+        `contributor_credits must contain at most ${MAX_CREDITS} entries`,
+      );
+    }
+    const rolePosition = new Set<string>();
+    for (const credit of credits) {
+      this.requireText(credit.name, 'contributor_credits.name', 255);
+      const role = credit.role.trim().toLowerCase();
+      if (!SONG_CREDIT_ROLE_IDS.has(role)) {
+        this.invalidArgument('contributor_credits.role is invalid');
+      }
+      if (!Number.isInteger(credit.position) || credit.position < 0) {
+        this.invalidArgument(
+          'contributor_credits.position must be a non-negative integer',
+        );
+      }
+      const rolePositionKey = `${role}:${credit.position}`;
+      if (rolePosition.has(rolePositionKey)) {
+        this.invalidArgument(
+          'contributor_credits must use unique role/position pairs',
+        );
+      }
+      rolePosition.add(rolePositionKey);
+    }
+  }
+
+  private async resolveSongCredits(
+    tx: Prisma.TransactionClient,
+    storefront: string,
+    artistName: string,
+    value: unknown,
+  ) {
+    const supplied: NormalizedSongCredit[] = this.objectArray(value).map(
+      (credit) => ({
+        artistId: this.requiredString(credit.artistId, 'credits.artist_id'),
+        role: this.requiredString(credit.role, 'credits.role').toLowerCase(),
+        isPrimary: this.boolean(credit.isPrimary),
+        position: this.integer(credit.position),
+      }),
+    );
+    const credits = supplied.length
+      ? supplied
+      : (await this.resolveArtistCreditIds(tx, storefront, artistName, [])).map(
+          (artistId, position) => ({
+            artistId,
+            role: 'artist',
+            isPrimary: position === 0,
+            position,
+          }),
+        );
+    this.validateSongCredits(credits);
+    await this.assertArtists(
+      tx,
+      credits.map((credit) => credit.artistId),
+      storefront,
+    );
+    return credits;
+  }
+
+  private resolveSongContributorCredits(
+    value: unknown,
+  ): NormalizedSongContributorCredit[] {
+    const credits = this.objectArray(value).map((credit) => ({
+      name: this.requiredString(credit.name, 'contributor_credits.name'),
+      role: this.requiredString(
+        credit.role,
+        'contributor_credits.role',
+      ).toLowerCase(),
+      position: this.integer(credit.position),
+    }));
+    this.validateSongContributorCredits(credits);
+    return credits;
+  }
+
+  private objectArray(value: unknown): JsonObject[] {
+    return Array.isArray(value) ? value.map((item) => this.object(item)) : [];
   }
 
   private validateAssignments(
@@ -1065,6 +1431,58 @@ export class CatalogAuthoringService {
     if (!value?.trim()) this.invalidArgument(`${field} is required`);
     if (value.length > maxLength) {
       this.invalidArgument(`${field} must not exceed ${maxLength} characters`);
+    }
+  }
+
+  private validateOptionalText(
+    value: string,
+    field: string,
+    maxLength: number,
+  ): void {
+    if (!value?.trim()) return;
+    if (value.length > maxLength) {
+      this.invalidArgument(`${field} must not exceed ${maxLength} characters`);
+    }
+  }
+
+  private validateOptionalUrl(
+    value: string,
+    field: string,
+    maxLength: number,
+  ): void {
+    if (!value) return;
+    this.validateOptionalText(value, field, maxLength);
+    try {
+      const url = new URL(value);
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+        this.invalidArgument(`${field} must use http or https`);
+      }
+    } catch {
+      this.invalidArgument(`${field} must be a valid URL`);
+    }
+  }
+
+  private requireUuid(value: string, field: string): void {
+    this.requireText(value, field, 128);
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        value,
+      )
+    ) {
+      this.invalidArgument(`${field} must be a UUID`);
+    }
+  }
+
+  private songVideoKind(value: string): SongVideoKind {
+    switch (value.trim().toLowerCase()) {
+      case 'official':
+        return SongVideoKind.OFFICIAL;
+      case 'lyric':
+        return SongVideoKind.LYRIC;
+      case 'live':
+        return SongVideoKind.LIVE;
+      default:
+        this.invalidArgument('kind must be official, lyric, or live');
     }
   }
 
@@ -1191,14 +1609,17 @@ export class CatalogAuthoringService {
   }
 
   private invalidArgument(message: string): never {
-    throw new RpcException({ code: status.INVALID_ARGUMENT, message });
+    throw new RpcException({ code: GRPC_STATUS.INVALID_ARGUMENT, message });
   }
 
   private notFound(message: string): never {
-    throw new RpcException({ code: status.NOT_FOUND, message });
+    throw new RpcException({ code: GRPC_STATUS.NOT_FOUND, message });
   }
 
   private failedPrecondition(message: string): never {
-    throw new RpcException({ code: status.FAILED_PRECONDITION, message });
+    throw new RpcException({
+      code: GRPC_STATUS.FAILED_PRECONDITION,
+      message,
+    });
   }
 }

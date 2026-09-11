@@ -12,6 +12,8 @@ import {
 
 loadEnvironment();
 
+const CATALOG_GRPC_MAX_MESSAGE_LENGTH = 16 * 1024 * 1024;
+
 async function bootstrap() {
   const configService = new ConfigService();
   const url = configService.getOrThrow<string>('SONG_GRPC_URL');
@@ -24,6 +26,8 @@ async function bootstrap() {
         protoPath: resolveProtoPath(SONG.PROTO_FILE),
         url,
         loader: GRPC_LOADER_OPTIONS,
+        maxSendMessageLength: CATALOG_GRPC_MAX_MESSAGE_LENGTH,
+        maxReceiveMessageLength: CATALOG_GRPC_MAX_MESSAGE_LENGTH,
       },
     },
   );
