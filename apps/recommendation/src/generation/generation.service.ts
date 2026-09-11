@@ -28,24 +28,24 @@ import {
 import { PRODUCTION_RECOMMENDATION_POLICY } from './production-recommendation-policy';
 import { developmentCacheDisabled } from '../common/configs/development-cache';
 import { GenerationLeaseService } from './generation-lease.service';
+import { ArtistStationService } from '../stations/artist-station.service';
 import {
   GENERATION_LEASE_LOST_MESSAGE,
   type GenerationLease,
 } from './generation-lease.types';
 
 const STALE_DURATION_MS = 6 * 60 * 60 * 1000;
-const RELEASE_RADAR_DAYS = 30;
 const MAX_PER_ARTIST = 3;
 const DAILY_MIX_MAX_PER_ARTIST = 2;
 const DAILY_MIX_TRACK_LIMIT = 25;
 const DAILY_MIX_MIN_TRACKS = 5;
 const DAILY_MIX_LIMIT = 4;
 const STATION_TRACK_LIMIT = 80;
-const STATION_MIN_TRACKS = 5;
 // Small local catalogs should still expose a truthful mood station once it has
 // enough variety to avoid immediately repeating a track.
 const MOOD_STATION_MIN_TRACKS = 5;
-const STATION_LIMIT = 8;
+const FAMILIAR_ARTIST_STATION_LIMIT = 9;
+const DISCOVERY_ARTIST_STATION_LIMIT = 3;
 const SYSTEM_VARIANT_MAX_OVERLAP_RATIO = 0.6;
 const SYSTEM_VARIANT_MIN_NOVEL_RATIO = 0.25;
 const MIN_LISTENED_SONGS = 3;
@@ -53,8 +53,6 @@ const HOME_SHELF_ITEM_MIN = 10;
 const HOME_SHELF_ITEM_LIMIT = 40;
 const GLOBAL_PUBLISH_MIN_SHELVES = 12;
 const GLOBAL_SHELF_LIMIT = 22;
-const GLOBAL_HERO_LIMIT = 10;
-const GLOBAL_GENRE_SECTION_LIMIT = 8;
 
 const TIMEZONE_REGEX = /^[+-](?:0\d|1[0-4]):[0-5]\d$/;
 const DEFAULT_TIMEZONE = '+07:00';
@@ -119,7 +117,7 @@ type SnapshotRow = {
   audioTraits?: string[];
   moodTags?: string[];
   releaseDate: string;
-  isSingle: boolean;
+  releaseType: string;
 };
 
 type MoodStationProfile = {
@@ -130,13 +128,6 @@ type MoodStationProfile = {
   genres: readonly string[];
   avoidTraits: readonly string[];
   allowGenreFallback: boolean;
-};
-
-type StationSeed = {
-  title: string;
-  description: string;
-  genres: readonly string[];
-  mood?: MoodStationProfile;
 };
 
 type GenerationWriteGuard = () => Promise<void>;
@@ -160,6 +151,7 @@ export class GenerationService {
     private readonly recommendationEngine: RecommendationEngineService,
     private readonly systemStationArtworkService: SystemStationArtworkService,
     private readonly generationLeaseService: GenerationLeaseService,
+    private readonly artistStationService: ArtistStationService,
   ) {}
 
   async generate(
@@ -253,7 +245,7 @@ export class GenerationService {
     const hasHistory = await this.listeningService.hasListeningHistory(userId);
     if (!hasHistory) {
       this.logger.warn(
-        `[lazy-user] skip: user ${userId} has < ${MIN_LISTENED_SONGS} listening stats`,
+        `[lazy-user] skip: user ${userId} has insufficient personalisation signals`,
       );
       return null;
     }
@@ -479,8 +471,9 @@ export class GenerationService {
       0,
       GLOBAL_SHELF_LIMIT,
     );
-    const publishableSections =
-      await this.deduplicateSemanticAlbumItems(uniqueSections);
+    const publishableSections = await this.deduplicateSemanticAlbumItems(
+      await this.excludeUnpublishedCatalogContent(uniqueSections),
+    );
 
     // Never replace a usable Home page with a thin, half-populated page while
     // catalog ingestion is still in progress. The user will continue to see
@@ -563,7 +556,10 @@ export class GenerationService {
     }
     const recentlyPlayed = await this.buildRecentlyPlayedSection(userId);
     const dailyMix = await this.buildDailyMixPlaylist(userId, profile);
-    const stations = await this.buildStationsForYouSection(userId, profile);
+    const stations = await this.buildArtistStationsForYouSection(
+      userId,
+      profile,
+    );
     const moodStations = await this.buildMoodStationsSection(userId, profile);
     const shelves = await this.recommendationEngine.generateUserShelves(
       userId,
@@ -611,8 +607,11 @@ export class GenerationService {
     // Two catalog album IDs can represent one release. The global page already
     // collapses them; the personalised page must do the same or the listener
     // sees the same album twice across their shelves.
-    const publishableSections =
-      await this.deduplicateSemanticAlbumItems(sections);
+    const publishableSections = await this.deduplicateSemanticAlbumItems(
+      await this.excludeUnpublishedCatalogContent(
+        this.excludeHiddenContent(sections, profile),
+      ),
+    );
 
     await assertLeaseHeldBeforeWrite();
     await this.recommendationsService.replaceHomeRecommendations(
@@ -684,12 +683,17 @@ export class GenerationService {
     limit: number,
     maxPerArtist = MAX_PER_ARTIST,
   ): ScoredItem[] {
-    const scored: ScoredItem[] = candidates.map((c) => ({
-      id: c.resourceId,
-      type: c.resourceType,
-      score: this.scoreSong(c, profile),
-      artistName: c.artistName,
-    }));
+    const scored: ScoredItem[] = candidates
+      .filter(
+        (candidate) =>
+          !this.isHidden(profile, candidate.resourceType, candidate.resourceId),
+      )
+      .map((c) => ({
+        id: c.resourceId,
+        type: c.resourceType,
+        score: this.scoreSong(c, profile),
+        artistName: c.artistName,
+      }));
 
     scored.sort((a, b) => b.score - a.score);
 
@@ -721,7 +725,13 @@ export class GenerationService {
     limit: number,
     maxPerArtist: number,
   ): Promise<ScoredItem[]> {
-    const candidateIds = candidates.map((candidate) => candidate.resourceId);
+    const visibleCandidates = candidates.filter(
+      (candidate) =>
+        !this.isHidden(profile, candidate.resourceType, candidate.resourceId),
+    );
+    const candidateIds = visibleCandidates.map(
+      (candidate) => candidate.resourceId,
+    );
     const [popularity, collaborative] = await Promise.all([
       this.dailyMixPopularityScores(candidateIds),
       this.dailyMixCollaborativeScores(
@@ -730,15 +740,18 @@ export class GenerationService {
         candidateIds,
       ),
     ]);
-    const scored = candidates
+    const scored = visibleCandidates
       .map((candidate) => ({
         id: candidate.resourceId,
         type: candidate.resourceType,
         artistName: candidate.artistName,
         score:
-          this.scoreSong(candidate, profile) * 0.65 +
-          (popularity.get(candidate.resourceId) ?? 0) * 0.15 +
-          (collaborative.get(candidate.resourceId) ?? 0) * 0.2,
+          this.scoreSong(candidate, profile) *
+            PRODUCTION_RECOMMENDATION_POLICY.dailyMixWeights.taste +
+          (popularity.get(candidate.resourceId) ?? 0) *
+            PRODUCTION_RECOMMENDATION_POLICY.dailyMixWeights.popularity +
+          (collaborative.get(candidate.resourceId) ?? 0) *
+            PRODUCTION_RECOMMENDATION_POLICY.dailyMixWeights.collaborative,
       }))
       .sort(
         (left, right) =>
@@ -759,6 +772,44 @@ export class GenerationService {
       result.push(item);
     }
     return result;
+  }
+
+  private isHidden(
+    profile: TasteProfile,
+    resourceType: string,
+    resourceId: string,
+  ): boolean {
+    return (
+      profile.hiddenResourceIds.get(resourceType)?.has(resourceId) ?? false
+    );
+  }
+
+  private excludeHiddenContent(
+    sections: PersonalRecommendationResource[],
+    profile: TasteProfile,
+  ): PersonalRecommendationResource[] {
+    return sections.flatMap((section) => {
+      const relationships = section.relationships;
+      const contents = relationships?.contents;
+      if (!relationships || !contents?.data?.length) return [section];
+      const visibleItems = contents.data.filter(
+        (item) => !this.isHidden(profile, item.type, item.id),
+      );
+      if (visibleItems.length === 0) return [];
+      return [
+        {
+          ...section,
+          relationships: {
+            ...relationships,
+            contents: { ...contents, data: visibleItems },
+            primaryContent: relationships.primaryContent ?? {
+              href: '',
+              data: [],
+            },
+          },
+        },
+      ];
+    });
   }
 
   /**
@@ -886,9 +937,17 @@ export class GenerationService {
 
   private async dailyMixPopularityScores(songIds: string[]) {
     if (!songIds.length) return new Map<string, number>();
+    const historyStart = new Date(
+      Date.now() -
+        PRODUCTION_RECOMMENDATION_POLICY.historyWindowDays * 86_400_000,
+    );
     const rows = await this.prisma.userListeningStats.groupBy({
       by: ['songId'],
-      where: { songId: { in: songIds }, playCount: { gt: 0 } },
+      where: {
+        songId: { in: songIds },
+        playCount: { gt: 0 },
+        lastPlayedAt: { gte: historyStart },
+      },
       _sum: { playCount: true, completionCount: true, skipCount: true },
       orderBy: { _sum: { playCount: 'desc' } },
     });
@@ -1163,7 +1222,7 @@ export class GenerationService {
       audioTraits: true,
       moodTags: true,
       releaseDate: true,
-      isSingle: true,
+      releaseType: true,
       name: true,
       artworkUrl: true,
       artworkBgColor: true,
@@ -1622,7 +1681,6 @@ export class GenerationService {
   ): Promise<boolean> {
     const digest = createHash('sha256').update(userId).digest('hex');
     const playlistPrefix = `daily-mix-${digest.slice(0, 32)}`;
-    const stationPrefix = `station-for-you-${digest.slice(0, 32)}-`;
     const snapshots = await this.prisma.recommendationResourceSnapshot.findMany(
       {
         where: {
@@ -1630,10 +1688,6 @@ export class GenerationService {
             {
               resourceType: 'playlists',
               resourceId: { startsWith: playlistPrefix },
-            },
-            {
-              resourceType: 'stations',
-              resourceId: { startsWith: stationPrefix },
             },
           ],
         },
@@ -1646,90 +1700,170 @@ export class GenerationService {
     );
   }
 
-  private async buildStationsForYouSection(
+  private async buildArtistStationsForYouSection(
     userId: string,
     profile: TasteProfile,
-    mode: 'personalized' | 'mood' = 'personalized',
   ): Promise<PersonalRecommendationResource | null> {
-    const isGlobalMood = mode === 'mood' && !userId;
-    if (
-      mode === 'personalized' &&
-      profile.listenedSongIds.size < MIN_LISTENED_SONGS
-    ) {
-      this.logger.warn(
-        `[stations] skip: only ${profile.listenedSongIds.size} listened songs (need ${MIN_LISTENED_SONGS})`,
-      );
-      return null;
+    if (profile.listenedSongIds.size < MIN_LISTENED_SONGS) return null;
+
+    const listenedArtistNames = profile.artists
+      .filter((artist) => artist.weight > 0)
+      .map((artist) => artist.name);
+    if (!listenedArtistNames.length) return null;
+
+    const artistSnapshots =
+      await this.prisma.recommendationResourceSnapshot.findMany({
+        where: {
+          resourceType: 'artists',
+          name: { in: listenedArtistNames },
+          artworkUrl: { not: '' },
+        },
+        select: { resourceId: true, name: true, genreNames: true },
+        orderBy: { resourceId: 'asc' },
+      });
+    const artistsByName = new Map<
+      string,
+      { resourceId: string; genreNames: string[] }
+    >();
+    for (const artist of artistSnapshots) {
+      if (!artistsByName.has(artist.name)) {
+        artistsByName.set(artist.name, {
+          resourceId: artist.resourceId,
+          genreNames: artist.genreNames,
+        });
+      }
     }
 
-    const preferredGenres =
-      mode === 'personalized'
-        ? profile.genres
-            .filter((genre) => genre.weight > 0.05)
-            .slice(0, STATION_LIMIT)
-            .map((genre) => genre.name)
-        : [];
-    if (mode === 'personalized' && preferredGenres.length === 0) {
-      this.logger.warn('[stations] skip: no preferred genres found');
-      return null;
-    }
-    const personalizedSeeds = [
-      ...preferredGenres.map((genre) => ({
-        title: `${genre} Station`,
-        description: `Endless ${genre} picks made for you.`,
-        genres: [genre],
-      })),
-      {
-        title: 'Your Favorites Station',
-        description: 'More of the music that fits your listening habits.',
-        genres: preferredGenres,
-      },
-      {
-        title: 'Fresh Discovery Station',
-        description: 'New artists and songs close to the music you love.',
-        genres: preferredGenres,
-      },
-      {
-        title: 'Deep Cuts Station',
-        description: 'More hidden gems from the styles you return to.',
-        genres: preferredGenres,
-      },
-      {
-        title: 'Feel Good Station',
-        description: 'Easy picks built around your favorite sounds.',
-        genres: preferredGenres,
-      },
-      {
-        title: 'Late Night Station',
-        description: 'A laid-back rotation selected for you.',
-        genres: preferredGenres,
-      },
-      {
-        title: 'Rediscovery Station',
-        description: 'Familiar sounds and overlooked favorites.',
-        genres: preferredGenres,
-      },
-      {
-        title: 'New Horizons Station',
-        description: 'A wider mix inspired by your listening taste.',
-        genres: preferredGenres,
-      },
-    ].slice(0, STATION_LIMIT);
-    const stationSeeds: StationSeed[] =
-      mode === 'mood'
-        ? PRODUCTION_RECOMMENDATION_POLICY.moodStations.map((mood) => ({
-            title: mood.title,
-            description: mood.subtitle,
-            genres: mood.genres,
-            mood,
-          }))
-        : personalizedSeeds;
-    const stationArtworkByKey: Map<string, SystemStationArtwork> =
-      mode === 'mood'
-        ? await this.systemStationArtworkService.byStationKeys(
-            stationSeeds.flatMap((seed) => (seed.mood ? [seed.mood.key] : [])),
+    const familiarArtists = listenedArtistNames
+      .map((name) => artistsByName.get(name))
+      .filter(
+        (
+          artist,
+        ): artist is { resourceId: string; genreNames: string[] } =>
+          Boolean(artist),
+      )
+      .filter(
+        (artist, index, artists) =>
+          artists.findIndex(
+            (candidate) => candidate.resourceId === artist.resourceId,
+          ) === index,
+      )
+      .slice(0, FAMILIAR_ARTIST_STATION_LIMIT);
+    if (!familiarArtists.length) return null;
+
+    const listenedArtistIds = new Set(
+      [...artistsByName.values()].map((artist) => artist.resourceId),
+    );
+    const familiarGenres = new Set(
+      familiarArtists.flatMap((artist) => artist.genreNames),
+    );
+    const discoveryArtists = familiarGenres.size
+      ? await this.prisma.recommendationResourceSnapshot
+          .findMany({
+            where: {
+              resourceType: 'artists',
+              artworkUrl: { not: '' },
+              resourceId: { notIn: [...listenedArtistIds] },
+              genreNames: { hasSome: [...familiarGenres] },
+            },
+            select: { resourceId: true, genreNames: true },
+            take: 250,
+          })
+          .then((artists) =>
+            artists
+              .sort(
+                (left, right) =>
+                  this.sharedGenreCount(right.genreNames, familiarGenres) -
+                    this.sharedGenreCount(left.genreNames, familiarGenres) ||
+                  this.artistDiscoveryRank(userId, left.resourceId).localeCompare(
+                    this.artistDiscoveryRank(userId, right.resourceId),
+                  ),
+              )
+              .slice(0, DISCOVERY_ARTIST_STATION_LIMIT),
           )
-        : new Map<string, SystemStationArtwork>();
+      : [];
+    const artistIds = [
+      ...familiarArtists.map((artist) => artist.resourceId),
+      ...discoveryArtists.map((artist) => artist.resourceId),
+    ];
+    const items = await this.ensureArtistStationItems(artistIds);
+    if (!items.length) return null;
+
+    return this.buildSection(
+      'user-stations-for-you',
+      'Stations for You',
+      'MusicCoverShelf',
+      ['stations'],
+      items,
+    );
+  }
+
+  private async ensureArtistStationItems(artistIds: string[]) {
+    const existingStations =
+      await this.prisma.recommendationResourceSnapshot.findMany({
+        where: {
+          resourceType: 'stations',
+          resourceId: {
+            in: artistIds.map((artistId) =>
+              this.artistStationService.canonicalStationId(artistId),
+            ),
+          },
+          stationKind: 'artist-context',
+        },
+        select: { resourceId: true, attributes: true },
+      });
+    const existingStationsById = new Map(
+      existingStations.map((station) => [station.resourceId, station]),
+    );
+
+    const items: Array<{ id: string; type: string }> = [];
+    for (const artistId of artistIds) {
+      const stationId = this.artistStationService.canonicalStationId(artistId);
+      const existing = existingStationsById.get(stationId);
+      if (existing && this.stationArtworkStateIsKnown(existing.attributes)) {
+        items.push({ id: stationId, type: 'stations' });
+        continue;
+      }
+      try {
+        const station =
+          await this.artistStationService.ensureCanonical(artistId);
+        items.push({ id: station.stationId, type: 'stations' });
+      } catch (error) {
+        this.logger.warn(
+          `[artist-stations] skip ${artistId}: ${error instanceof Error ? error.message : 'creation failed'}`,
+        );
+      }
+    }
+    return items;
+  }
+
+  private stationArtworkStateIsKnown(attributes: Prisma.JsonValue | null) {
+    return isRecord(attributes) && typeof attributes.stationArtworkReady === 'boolean';
+  }
+
+  private sharedGenreCount(genres: string[], expected: Set<string>) {
+    return genres.reduce(
+      (count, genre) => count + Number(expected.has(genre)),
+      0,
+    );
+  }
+
+  private artistDiscoveryRank(userId: string, artistId: string) {
+    return createHash('sha256')
+      .update(`${userId}:${artistId}`)
+      .digest('hex');
+  }
+
+  private async buildSystemStationsSection(
+    userId: string,
+    profile: TasteProfile,
+  ): Promise<PersonalRecommendationResource | null> {
+    const isGlobalMood = !userId;
+    const stationSeeds = PRODUCTION_RECOMMENDATION_POLICY.moodStations;
+    const stationArtworkByKey: Map<string, SystemStationArtwork> =
+      await this.systemStationArtworkService.byStationKeys(
+        stationSeeds.map((mood) => mood.key),
+      );
 
     const songSelection = {
       resourceId: true,
@@ -1739,36 +1873,27 @@ export class GenerationService {
       audioTraits: true,
       moodTags: true,
       releaseDate: true,
-      isSingle: true,
+      releaseType: true,
       artworkUrl: true,
       artworkBgColor: true,
       artworkWidth: true,
       artworkHeight: true,
       attributes: true,
     } as const;
-    const excludedSongIds = [...profile.listenedSongIds];
     const stationItems: Array<{ id: string; type: string }> = [];
     const stationTracklists: string[][] = [];
 
-    for (const [index, seed] of stationSeeds.entries()) {
-      const mood = seed.mood;
-      const minimumTracks = mood ? MOOD_STATION_MIN_TRACKS : STATION_MIN_TRACKS;
-      const candidateWhere = mood
-        ? {
-            resourceType: 'songs',
-            OR: [
-              { audioTraits: { hasSome: [...mood.traits] } },
-              { moodTags: { hasSome: [...mood.traits] } },
-              ...(mood.allowGenreFallback
-                ? [{ genreNames: { hasSome: [...mood.genres] } }]
-                : []),
-            ],
-          }
-        : {
-            resourceType: 'songs',
-            resourceId: { notIn: excludedSongIds },
-            genreNames: { hasSome: [...seed.genres] },
-          };
+    for (const [index, mood] of stationSeeds.entries()) {
+      const candidateWhere = {
+        resourceType: 'songs',
+        OR: [
+          { audioTraits: { hasSome: [...mood.traits] } },
+          { moodTags: { hasSome: [...mood.traits] } },
+          ...(mood.allowGenreFallback
+            ? [{ genreNames: { hasSome: [...mood.genres] } }]
+            : []),
+        ],
+      };
       const genreCandidates =
         await this.prisma.recommendationResourceSnapshot.findMany({
           where: candidateWhere,
@@ -1776,55 +1901,20 @@ export class GenerationService {
           take: 250,
           select: songSelection,
         });
-      let candidates =
-        !mood && genreCandidates.length < minimumTracks
-          ? await this.prisma.recommendationResourceSnapshot.findMany({
-              where: {
-                resourceType: 'songs',
-                resourceId: { notIn: excludedSongIds },
-                genreNames: { hasSome: preferredGenres },
-              },
-              orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
-              take: 250,
-              select: songSelection,
-            })
-          : genreCandidates;
-
-      if (!mood && candidates.length < minimumTracks) {
-        const listenedFallback =
-          await this.prisma.recommendationResourceSnapshot.findMany({
-            where: {
-              resourceType: 'songs',
-              genreNames: { hasSome: [...seed.genres] },
-            },
-            orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
-            take: 250,
-            select: songSelection,
-          });
-        const seenIds = new Set(candidates.map((c) => c.resourceId));
-        candidates = [
-          ...candidates,
-          ...listenedFallback.filter((c) => !seenIds.has(c.resourceId)),
-        ];
-      }
-
-      const ranked = mood
-        ? await this.rankMoodStationTracks(userId, candidates, profile, mood)
-        : await this.rankPersonalizedTracks(
-            userId,
-            candidates,
-            profile,
-            STATION_TRACK_LIMIT,
-            DAILY_MIX_MAX_PER_ARTIST,
-          );
-      if (ranked.length < minimumTracks) {
+      const ranked = await this.rankMoodStationTracks(
+        userId,
+        genreCandidates,
+        profile,
+        mood,
+      );
+      if (ranked.length < MOOD_STATION_MIN_TRACKS) {
         this.logger.warn(
-          `[stations] seed[${index}] skip: only ${ranked.length} mood-qualified tracks (need ${minimumTracks})`,
+          `[stations] seed[${index}] skip: only ${ranked.length} mood-qualified tracks (need ${MOOD_STATION_MIN_TRACKS})`,
         );
         continue;
       }
       const candidatesById = new Map(
-        candidates.map((candidate) => [candidate.resourceId, candidate]),
+        genreCandidates.map((candidate) => [candidate.resourceId, candidate]),
       );
       const selected = this.sequencePersonalizedTracks(
         this.selectDiverseSystemVariant(
@@ -1833,24 +1923,22 @@ export class GenerationService {
           stationTracklists,
           index * STATION_TRACK_LIMIT,
           STATION_TRACK_LIMIT,
-          minimumTracks,
-          mode === 'mood',
+          MOOD_STATION_MIN_TRACKS,
+          true,
         ),
       );
-      if (selected.length < minimumTracks) {
+      if (selected.length < MOOD_STATION_MIN_TRACKS) {
         this.logger.debug(
           `[stations] seed[${index}] skipped: insufficient novel tracks`,
         );
         continue;
       }
 
-      const stationId = this.stationId(userId, index, mode);
+      const stationId = this.stationId(userId, index);
       const artworkSource =
         selected.find((song) => song.artworkUrl) ?? selected[0];
-      const configuredArtwork = mood
-        ? stationArtworkByKey.get(mood.key)
-        : undefined;
-      const { title, description } = seed;
+      const configuredArtwork = stationArtworkByKey.get(mood.key);
+      const { title, subtitle: description } = mood;
       const relationships = {
         tracks: {
           href: `/me/system-stations/${stationId}/tracks`,
@@ -1885,11 +1973,11 @@ export class GenerationService {
         trackCount: selected.length,
         shortDescription: description,
         standardDescription: description,
-        stationKind: mode === 'mood' ? 'system-mood' : 'system-personalized',
+        stationKind: 'system-mood',
         mediaKind: 'audio',
         attributes: {
           name: title,
-          kind: mode === 'mood' ? 'system-mood' : 'system-personalized',
+          kind: 'system-mood',
           mediaKind: 'audio',
           trackCount: selected.length,
           description: { short: description, standard: description },
@@ -1927,50 +2015,11 @@ export class GenerationService {
       stationTracklists.push(selected.map((song) => song.resourceId));
     }
 
-    // Personalized Stations can stay stable when a catalog refresh is sparse.
-    // Mood Stations must not reuse an older list: its title is a content promise
-    // and an unqualified fallback would make that promise false.
-    if (mode === 'personalized' && stationItems.length < stationSeeds.length) {
-      const existingStations =
-        await this.prisma.recommendationResourceSnapshot.findMany({
-          where: {
-            resourceType: 'stations',
-            resourceId: {
-              in: Array.from({ length: stationSeeds.length }, (_, index) =>
-                this.stationId(userId, index, mode),
-              ),
-            },
-            stationKind: 'system-personalized',
-          },
-          select: { resourceId: true },
-        });
-      const existingStationIds = new Set(
-        stationItems.map((station) => station.id),
-      );
-
-      for (let index = 0; index < stationSeeds.length; index += 1) {
-        const stationId = this.stationId(userId, index, mode);
-        if (
-          existingStations.some(
-            (station) => station.resourceId === stationId,
-          ) &&
-          !existingStationIds.has(stationId)
-        ) {
-          stationItems.push({ id: stationId, type: 'stations' });
-          existingStationIds.add(stationId);
-        }
-      }
-    }
-
     if (stationItems.length === 0) return null;
 
     return this.buildSection(
-      isGlobalMood
-        ? 'global-find-your-mood'
-        : mode === 'mood'
-          ? 'user-find-your-mood'
-          : 'user-stations-for-you',
-      mode === 'mood' ? 'Find Your Mood' : 'Stations for You',
+      isGlobalMood ? 'global-find-your-mood' : 'user-find-your-mood',
+      'Find Your Mood',
       'MusicCoverShelf',
       ['stations'],
       stationItems,
@@ -1981,15 +2030,11 @@ export class GenerationService {
     userId: string,
     profile: TasteProfile,
   ): Promise<PersonalRecommendationResource | null> {
-    return this.buildStationsForYouSection(userId, profile, 'mood');
+    return this.buildSystemStationsSection(userId, profile);
   }
 
   private async buildGlobalMoodStationsSection(): Promise<PersonalRecommendationResource | null> {
-    return this.buildStationsForYouSection(
-      '',
-      this.emptyTasteProfile(),
-      'mood',
-    );
+    return this.buildSystemStationsSection('', this.emptyTasteProfile());
   }
 
   private emptyTasteProfile(): TasteProfile {
@@ -2001,17 +2046,13 @@ export class GenerationService {
       listenedSongIds: new Set(),
       listenedAlbumIds: new Set(),
       listenedAlbumNames: new Set(),
+      hiddenResourceIds: new Map(),
     };
   }
 
-  private stationId(
-    userId: string,
-    index: number,
-    mode: 'personalized' | 'mood' = 'personalized',
-  ): string {
+  private stationId(userId: string, index: number): string {
     const digest = createHash('sha256').update(userId).digest('hex');
-    const prefix = mode === 'mood' ? 'mood-station' : 'station-for-you';
-    return `${prefix}-${digest.slice(0, 32)}-${index}`;
+    return `mood-station-${digest.slice(0, 32)}-${index}`;
   }
 
   private async buildRecentlyPlayedSection(
@@ -2122,7 +2163,9 @@ export class GenerationService {
           where: {
             resourceType: 'stations',
             resourceId: { in: stationIds },
-            stationKind: { in: ['system-personalized', 'system-mood'] },
+            stationKind: {
+              in: ['system-mood', 'song-context', 'artist-context'],
+            },
           },
           select: { resourceId: true },
         })
@@ -2206,539 +2249,6 @@ export class GenerationService {
     );
   }
 
-  private async buildReleaseRadarSection(
-    profile: TasteProfile,
-  ): Promise<PersonalRecommendationResource | null> {
-    const topArtists = profile.artists.slice(0, 10).map((a) => a.name);
-    if (topArtists.length === 0) return null;
-
-    const cutoffDate = new Date(
-      Date.now() - RELEASE_RADAR_DAYS * 24 * 60 * 60 * 1000,
-    );
-    const cutoffStr = cutoffDate.toISOString().slice(0, 10);
-
-    const newReleases =
-      await this.prisma.recommendationResourceSnapshot.findMany({
-        where: {
-          resourceType: { in: ['albums', 'songs'] },
-          artistName: { in: topArtists },
-          releaseDate: { gte: cutoffStr },
-        },
-        orderBy: { releaseDate: 'desc' },
-        take: 30,
-        select: {
-          resourceId: true,
-          resourceType: true,
-          artistName: true,
-          isSingle: true,
-        },
-      });
-
-    if (newReleases.length < 3) return null;
-
-    // Prefer albums/singles over individual songs when album exists
-    const albumIds = new Set<string>();
-    const items: Array<{ id: string; type: string }> = [];
-
-    for (const release of newReleases) {
-      if (release.resourceType === 'albums') {
-        albumIds.add(release.resourceId);
-        items.push({ id: release.resourceId, type: 'albums' });
-      }
-    }
-
-    for (const release of newReleases) {
-      if (
-        release.resourceType === 'songs' &&
-        !profile.listenedSongIds.has(release.resourceId)
-      ) {
-        items.push({ id: release.resourceId, type: 'songs' });
-      }
-    }
-
-    const uniqueItems = items.slice(0, 20);
-    if (uniqueItems.length < 3) return null;
-
-    const grouped = await this.groupSongsByAlbum(uniqueItems);
-    if (grouped.length < 3) return null;
-
-    const resourceTypes = [...new Set(grouped.map((i) => i.type))];
-
-    return this.buildSection(
-      'user-release-radar',
-      'New Releases From Artists You Like',
-      'MusicCoverShelf',
-      resourceTypes,
-      grouped,
-    );
-  }
-
-  private async buildMadeForYouSection(
-    profile: TasteProfile,
-  ): Promise<PersonalRecommendationResource | null> {
-    if (profile.listenedSongIds.size < 5) return null;
-
-    // Use all weighted genres instead of just top 3
-    const topGenres = profile.genres
-      .filter((g) => g.weight > 0.05)
-      .slice(0, 10)
-      .map((g) => g.name);
-
-    if (topGenres.length === 0) return null;
-
-    const candidates =
-      await this.prisma.recommendationResourceSnapshot.findMany({
-        where: {
-          resourceType: 'songs',
-          genreNames: { hasSome: topGenres },
-          resourceId: { notIn: [...profile.listenedSongIds] },
-        },
-        take: 50,
-        select: {
-          resourceId: true,
-          resourceType: true,
-          artistName: true,
-          genreNames: true,
-          releaseDate: true,
-          isSingle: true,
-        },
-      });
-
-    if (candidates.length < 3) return null;
-
-    const ranked = this.scoreAndRank(candidates, profile, 20);
-
-    if (ranked.length < 3) return null;
-
-    const items = await this.groupSongsByAlbum(
-      ranked.map((r) => ({ id: r.id, type: r.type })),
-    );
-    if (items.length < 3) return null;
-
-    const resourceTypes = [...new Set(items.map((i) => i.type))];
-
-    return this.buildSection(
-      'user-made-for-you',
-      'Made For You',
-      'MusicCoverShelf',
-      resourceTypes,
-      items,
-    );
-  }
-
-  private async buildBecauseYouListenedSections(
-    profile: TasteProfile,
-  ): Promise<PersonalRecommendationResource[]> {
-    // Top 3 artists, generate max 2 sections
-    const topArtists = profile.artists.slice(0, 3);
-    const sections: PersonalRecommendationResource[] = [];
-
-    for (const artist of topArtists) {
-      if (sections.length >= 2) break;
-
-      const candidates =
-        await this.prisma.recommendationResourceSnapshot.findMany({
-          where: {
-            resourceType: 'songs',
-            artistName: artist.name,
-            resourceId: { notIn: [...profile.listenedSongIds] },
-          },
-          take: 30,
-          select: {
-            resourceId: true,
-            resourceType: true,
-            artistName: true,
-            genreNames: true,
-            releaseDate: true,
-            isSingle: true,
-          },
-        });
-
-      let items: Array<{ id: string; type: string }>;
-
-      if (candidates.length >= 3) {
-        const ranked = this.scoreAndRank(candidates, profile, 20);
-        items = ranked.map((r) => ({ id: r.id, type: r.type }));
-      } else {
-        // Fallback to popular songs from artist (including already listened)
-        const popular =
-          await this.prisma.recommendationResourceSnapshot.findMany({
-            where: { resourceType: 'songs', artistName: artist.name },
-            take: 20,
-            select: { resourceId: true, resourceType: true },
-          });
-        items = popular.map((s) => ({
-          id: s.resourceId,
-          type: s.resourceType,
-        }));
-      }
-
-      if (items.length < 3) continue;
-
-      const grouped = await this.groupSongsByAlbum(items);
-      if (grouped.length < 3) continue;
-
-      const resourceTypes = [...new Set(grouped.map((i) => i.type))];
-      const slug = this.slugify(artist.name);
-      sections.push(
-        this.buildSection(
-          `user-because-${slug}`,
-          `Because You Listened to ${artist.name}`,
-          'MusicCoverShelf',
-          resourceTypes,
-          grouped,
-        ),
-      );
-    }
-
-    return sections;
-  }
-
-  private async buildDiscoverSection(
-    profile: TasteProfile,
-  ): Promise<PersonalRecommendationResource | null> {
-    if (profile.genres.length < 2) return null;
-
-    // Find genres user likes but hasn't explored deeply (mid-weight)
-    const explorationGenres = profile.genres
-      .filter((g) => g.weight >= 0.1 && g.weight < 0.6)
-      .slice(0, 5)
-      .map((g) => g.name);
-
-    // Also add genres from top artists that user hasn't explored
-    const topArtistNames = profile.artists.slice(0, 5).map((a) => a.name);
-    if (topArtistNames.length > 0) {
-      const artistSnapshots =
-        await this.prisma.recommendationResourceSnapshot.findMany({
-          where: { resourceType: 'artists', name: { in: topArtistNames } },
-          select: { genreNames: true },
-        });
-      for (const snap of artistSnapshots) {
-        for (const genre of snap.genreNames) {
-          if (!explorationGenres.includes(genre)) {
-            explorationGenres.push(genre);
-          }
-        }
-      }
-    }
-
-    if (explorationGenres.length === 0) return null;
-
-    // Find artists the user hasn't listened to who share these genres
-    const listenedArtists = new Set(profile.artists.map((a) => a.name));
-    const newArtists =
-      await this.prisma.recommendationResourceSnapshot.findMany({
-        where: {
-          resourceType: 'artists',
-          genreNames: { hasSome: explorationGenres },
-          name: { notIn: [...listenedArtists] },
-        },
-        take: 10,
-        select: { name: true },
-      });
-
-    const discoveryArtistNames = newArtists.map((a) => a.name);
-    if (discoveryArtistNames.length === 0) return null;
-
-    const candidates =
-      await this.prisma.recommendationResourceSnapshot.findMany({
-        where: {
-          resourceType: 'songs',
-          artistName: { in: discoveryArtistNames },
-          resourceId: { notIn: [...profile.listenedSongIds] },
-        },
-        take: 50,
-        select: {
-          resourceId: true,
-          resourceType: true,
-          artistName: true,
-          genreNames: true,
-          releaseDate: true,
-          isSingle: true,
-        },
-      });
-
-    if (candidates.length < 3) return null;
-
-    const ranked = this.scoreAndRank(candidates, profile, 20);
-
-    if (ranked.length < 3) return null;
-
-    const items = await this.groupSongsByAlbum(
-      ranked.map((r) => ({ id: r.id, type: r.type })),
-    );
-    if (items.length < 3) return null;
-
-    const resourceTypes = [...new Set(items.map((i) => i.type))];
-
-    return this.buildSection(
-      'user-discover',
-      'New Discoveries',
-      'MusicCoverShelf',
-      resourceTypes,
-      items,
-    );
-  }
-
-  // ─── Global sections ───
-
-  private async buildFeaturedAlbumsSection(): Promise<PersonalRecommendationResource | null> {
-    const topAlbums = await this.listeningService.getTopAlbumsGlobal(
-      30,
-      GLOBAL_HERO_LIMIT,
-    );
-    const trendingItems = await this.albumItemsFromListening(topAlbums);
-
-    const latestItems = await this.latestAlbumItems(GLOBAL_HERO_LIMIT);
-    const items = this.uniqueItems([...trendingItems, ...latestItems]).slice(
-      0,
-      GLOBAL_HERO_LIMIT,
-    );
-    if (items.length < 3) return null;
-
-    return this.buildSection(
-      'global-featured-albums',
-      'Featured Now',
-      'MusicNotesHeroShelf',
-      ['albums'],
-      items,
-    );
-  }
-
-  private async buildTrendingSection(): Promise<PersonalRecommendationResource | null> {
-    const trending = await this.listeningService.getTrendingSongs(
-      7,
-      HOME_SHELF_ITEM_LIMIT * 2,
-    );
-    if (trending.length < 3) return null;
-
-    const grouped = await this.groupSongsByAlbum(
-      trending.map((t) => ({ id: t.songId, type: 'songs' })),
-    );
-    const items = this.albumItemsOnly(grouped).slice(0, HOME_SHELF_ITEM_LIMIT);
-    if (items.length < HOME_SHELF_ITEM_MIN) return null;
-
-    return this.buildSection(
-      'global-trending',
-      'Trending',
-      'MusicCoverShelf',
-      ['albums'],
-      items,
-    );
-  }
-
-  private async buildNewReleasesSection(): Promise<PersonalRecommendationResource | null> {
-    const newReleases =
-      await this.prisma.recommendationResourceSnapshot.findMany({
-        where: {
-          resourceType: 'albums',
-          releaseDate: { not: '' },
-        },
-        orderBy: { releaseDate: 'desc' },
-        take: HOME_SHELF_ITEM_LIMIT,
-        select: { resourceId: true, resourceType: true },
-      });
-
-    if (newReleases.length < HOME_SHELF_ITEM_MIN) return null;
-
-    return this.buildSection(
-      'global-new-releases',
-      'New Releases',
-      'MusicCoverShelf',
-      ['albums'],
-      newReleases.map((release) => ({
-        id: release.resourceId,
-        type: release.resourceType,
-      })),
-    );
-  }
-
-  private async buildTopAlbumsSection(): Promise<PersonalRecommendationResource | null> {
-    const topAlbums = await this.listeningService.getTopAlbumsGlobal(
-      30,
-      HOME_SHELF_ITEM_LIMIT * 2,
-    );
-    if (topAlbums.length < 3) return null;
-
-    const items = await this.albumItemsFromListening(topAlbums);
-
-    if (items.length < HOME_SHELF_ITEM_MIN) return null;
-
-    return this.buildSection(
-      'global-top-albums',
-      'Albums You Should Hear',
-      'MusicCoverShelf',
-      ['albums'],
-      items.slice(0, HOME_SHELF_ITEM_LIMIT),
-    );
-  }
-
-  private async buildGenreAlbumSections(): Promise<
-    PersonalRecommendationResource[]
-  > {
-    const albums = await this.prisma.recommendationResourceSnapshot.findMany({
-      where: {
-        resourceType: 'albums',
-        genreNames: { isEmpty: false },
-      },
-      orderBy: [{ releaseDate: 'desc' }, { updatedAt: 'desc' }],
-      take: 480,
-      select: {
-        resourceId: true,
-        genreNames: true,
-      },
-    });
-    if (albums.length < 9) return [];
-
-    const genreCounts = new Map<string, number>();
-    for (const album of albums) {
-      for (const genre of album.genreNames) {
-        const normalized = genre.trim();
-        if (!normalized || normalized.toLowerCase() === 'music') continue;
-        genreCounts.set(normalized, (genreCounts.get(normalized) ?? 0) + 1);
-      }
-    }
-
-    const genres = [...genreCounts.entries()]
-      .filter(([, count]) => count >= 3)
-      .sort((left, right) => right[1] - left[1])
-      .slice(0, GLOBAL_GENRE_SECTION_LIMIT)
-      .map(([genre]) => genre);
-
-    const sections: PersonalRecommendationResource[] = [];
-    const usedAlbums = new Set<string>();
-
-    for (const genre of genres) {
-      const items = albums
-        .filter(
-          (album) =>
-            album.genreNames.includes(genre) &&
-            !usedAlbums.has(album.resourceId),
-        )
-        .slice(0, HOME_SHELF_ITEM_LIMIT)
-        .map((album) => ({ id: album.resourceId, type: 'albums' }));
-
-      if (items.length < HOME_SHELF_ITEM_MIN) continue;
-      for (const item of items) usedAlbums.add(item.id);
-
-      sections.push(
-        this.buildSection(
-          `global-genre-${this.slugify(genre)}`,
-          genre,
-          'MusicCoverShelf',
-          ['albums'],
-          items,
-        ),
-      );
-    }
-
-    return sections;
-  }
-
-  private async buildDiscoveryAlbumsSection(): Promise<PersonalRecommendationResource | null> {
-    const items = await this.latestAlbumItems(HOME_SHELF_ITEM_LIMIT, 'asc');
-    if (items.length < HOME_SHELF_ITEM_MIN) return null;
-
-    return this.buildSection(
-      'global-discovery-albums',
-      'More to Discover',
-      'MusicCoverShelf',
-      ['albums'],
-      items,
-    );
-  }
-
-  private async albumItemsFromListening(
-    albums: Array<{ albumId: string | null; albumName: string }>,
-  ): Promise<Array<{ id: string; type: string }>> {
-    const albumIds = [
-      ...new Set(
-        albums
-          .map((album) => album.albumId)
-          .filter((id): id is string => Boolean(id)),
-      ),
-    ];
-    const legacyAlbumNames = [
-      ...new Set(
-        albums
-          .filter((album) => !album.albumId)
-          .map((album) => album.albumName)
-          .filter(Boolean),
-      ),
-    ];
-    if (albumIds.length === 0 && legacyAlbumNames.length === 0) return [];
-
-    const snapshots = await this.prisma.recommendationResourceSnapshot.findMany(
-      {
-        where: {
-          resourceType: 'albums',
-          OR: [
-            ...(albumIds.length ? [{ resourceId: { in: albumIds } }] : []),
-            ...(legacyAlbumNames.length
-              ? [{ name: { in: legacyAlbumNames } }]
-              : []),
-          ],
-        },
-        select: { resourceId: true, resourceType: true, name: true },
-      },
-    );
-    const byId = new Map(
-      snapshots.map((snapshot) => [snapshot.resourceId, snapshot]),
-    );
-    const byLegacyName = new Map(
-      snapshots.map((snapshot) => [snapshot.name, snapshot]),
-    );
-
-    return albums.flatMap((album) => {
-      const snapshot = album.albumId
-        ? byId.get(album.albumId)
-        : byLegacyName.get(album.albumName);
-      return snapshot
-        ? [{ id: snapshot.resourceId, type: snapshot.resourceType }]
-        : [];
-    });
-  }
-
-  // ─── Helpers ───
-
-  private async latestAlbumItems(
-    limit: number,
-    direction: 'asc' | 'desc' = 'desc',
-  ): Promise<Array<{ id: string; type: string }>> {
-    const albums = await this.prisma.recommendationResourceSnapshot.findMany({
-      where: {
-        resourceType: 'albums',
-        artworkUrl: { not: '' },
-      },
-      orderBy: [{ releaseDate: direction }, { updatedAt: 'desc' }],
-      take: limit,
-      select: { resourceId: true, resourceType: true },
-    });
-
-    return albums.map((album) => ({
-      id: album.resourceId,
-      type: album.resourceType,
-    }));
-  }
-
-  private albumItemsOnly(
-    items: Array<{ id: string; type: string }>,
-  ): Array<{ id: string; type: string }> {
-    return this.uniqueItems(items.filter((item) => item.type === 'albums'));
-  }
-
-  private uniqueItems(
-    items: Array<{ id: string; type: string }>,
-  ): Array<{ id: string; type: string }> {
-    const seen = new Set<string>();
-    return items.filter((item) => {
-      const key = `${item.type}:${item.id}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }
-
   private removeDuplicateSections(
     sections: PersonalRecommendationResource[],
   ): PersonalRecommendationResource[] {
@@ -2754,6 +2264,64 @@ export class GenerationService {
       if (!signature || signatures.has(signature)) return false;
       signatures.add(signature);
       return true;
+    });
+  }
+
+  /**
+   * Snapshots may outlive a catalog publish-state change. Resolve every catalog
+   * reference immediately before writing Home so private/deleted resources
+   * cannot invalidate an otherwise usable page.
+   */
+  private async excludeUnpublishedCatalogContent(
+    sections: PersonalRecommendationResource[],
+  ): Promise<PersonalRecommendationResource[]> {
+    const refs = sections.flatMap((section) => [
+      ...(section.relationships?.contents?.data ?? []),
+      ...(section.relationships?.primaryContent?.data ?? []),
+    ]);
+    const catalogRefs = [
+      ...new Map(
+        refs
+          .filter((ref) => this.catalogService.supports(ref.type))
+          .map((ref) => [
+            `${ref.type}:${ref.id}`,
+            { id: ref.id, type: ref.type },
+          ]),
+      ).values(),
+    ];
+    if (catalogRefs.length === 0) return sections;
+
+    const published = new Set(
+      (await this.catalogService.resolve(catalogRefs)).map(
+        (resource) => `${resource.type}:${resource.id}`,
+      ),
+    );
+    const isPublished = (ref: { id: string; type: string }) =>
+      !this.catalogService.supports(ref.type) ||
+      published.has(`${ref.type}:${ref.id}`);
+
+    return sections.flatMap((section) => {
+      const contents = section.relationships?.contents;
+      const primaryContent = section.relationships?.primaryContent;
+      const filteredContents = contents?.data.filter(isPublished);
+      const filteredPrimaryContent = primaryContent?.data.filter(isPublished);
+
+      // A content shelf without cards has no useful UI and must not be stored.
+      if (contents && filteredContents?.length === 0) return [];
+
+      return [
+        {
+          ...section,
+          relationships: {
+            contents: contents
+              ? { ...contents, data: filteredContents ?? [] }
+              : { href: '', data: [] },
+            primaryContent: primaryContent
+              ? { ...primaryContent, data: filteredPrimaryContent ?? [] }
+              : { href: '', data: [] },
+          },
+        },
+      ];
     });
   }
 
@@ -2790,7 +2358,7 @@ export class GenerationService {
         subtitle: true,
         releaseDate: true,
         trackCount: true,
-        isSingle: true,
+        releaseType: true,
         upc: true,
         canonicalReleaseId: true,
       },
@@ -2816,6 +2384,7 @@ export class GenerationService {
     }
 
     const displayedAlbumKeys = new Set<string>();
+    const displayedArtworkFamilyKeys = new Set<string>();
     return sections.flatMap((section) => {
       const contents = section.relationships?.contents;
       if (!contents) return [section];
@@ -2826,7 +2395,12 @@ export class GenerationService {
         const key = album ? this.albumPresentationKey(album) : `id:${item.id}`;
         if (album && preferredAlbumIdByKey.get(key) !== item.id) return false;
         if (displayedAlbumKeys.has(key)) return false;
+        const artworkFamilyKey = album
+          ? this.albumArtworkFamilyKey(album)
+          : `id:${item.id}`;
+        if (displayedArtworkFamilyKeys.has(artworkFamilyKey)) return false;
         displayedAlbumKeys.add(key);
+        displayedArtworkFamilyKeys.add(artworkFamilyKey);
         return true;
       });
 
@@ -2857,7 +2431,7 @@ export class GenerationService {
     subtitle: string;
     releaseDate: string;
     trackCount: number;
-    isSingle: boolean;
+    releaseType: string;
     upc: string;
     canonicalReleaseId: string;
   }): string {
@@ -2877,7 +2451,7 @@ export class GenerationService {
       return `id:${album.resourceId}`;
     }
 
-    // trackCount and isSingle are intentionally excluded: a deluxe/standard
+    // trackCount and releaseType are intentionally excluded: a deluxe/standard
     // pair or a provider tracklist that differs by one bonus track is still one
     // release to a listener, and the same release can surface as a single
     // (≤3 tracks) and an album (>3 tracks) across two collection IDs. Keeping
@@ -2897,12 +2471,51 @@ export class GenerationService {
       .replace(/\s+/g, ' ');
   }
 
+  /**
+   * Catalog imports can give a remix, a feature version and a single release
+   * separate IDs and processed artwork URLs even when the visible cover is
+   * identical. The asset IDs cannot identify that collision, so use the stable
+   * listener-facing work and primary artist as an additional page-wide guard.
+   */
+  private albumArtworkFamilyKey(album: {
+    resourceId: string;
+    name: string;
+    title: string;
+    artistName: string;
+    subtitle: string;
+    releaseDate: string;
+    trackCount: number;
+    releaseType: string;
+    upc: string;
+    canonicalReleaseId: string;
+  }): string {
+    const baseTitle = (album.name || album.title)
+      .replace(
+        /\([^)]*\b(?:feat(?:uring)?|ft\.?|remix|version|ver\.?|lo-?fi|sped\s*up)\b[^)]*\)/gi,
+        ' ',
+      )
+      .replace(/\b(?:feat(?:uring)?|ft\.?)\s+.+$/i, ' ')
+      .replace(
+        /\b(?:remix|version|ver\.?|radio\s+edit|acoustic|live|instrumental|lo-?fi|sped\s*up|speed\s*up)\b.*$/i,
+        ' ',
+      )
+      .replace(/\b(?:single|album)\b/gi, ' ')
+      .replace(/[-–—]+$/g, ' ');
+    const title = this.normalizedRecommendationText(baseTitle);
+    const artist = this.normalizedRecommendationText(
+      album.artistName || album.subtitle,
+    );
+
+    return title && artist ? `${title}::${artist}` : `id:${album.resourceId}`;
+  }
+
   private buildSection(
     sectionId: string,
     title: string,
     displayKind: string,
     resourceTypes: string[],
     items: Array<{ id: string; type: string }>,
+    hasSeeAll = false,
   ): PersonalRecommendationResource {
     return {
       id: sectionId,
@@ -2910,7 +2523,7 @@ export class GenerationService {
       href: `/me/recommendations/${sectionId}?name=listen-now`,
       attributes: {
         display: { kind: displayKind, decorations: [] },
-        hasSeeAll: false,
+        hasSeeAll,
         isGroupRecommendation: false,
         kind: 'music-recommendations',
         nextUpdateDate: '',
@@ -2953,6 +2566,7 @@ export class GenerationService {
       displayKind,
       ['albums'],
       shelf.items,
+      shelf.hasMore,
     );
     return {
       ...section,

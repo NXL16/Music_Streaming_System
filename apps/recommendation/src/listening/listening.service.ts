@@ -18,6 +18,7 @@ export type TasteProfile = {
   listenedSongIds: Set<string>;
   listenedAlbumIds: Set<string>;
   listenedAlbumNames: Set<string>;
+  hiddenResourceIds: Map<string, Set<string>>;
 };
 
 type RecentlyPlayedContext = {
@@ -29,6 +30,7 @@ const EVENT_TYPE_MAP: Record<number, string> = {
   [ListeningEventType.LISTENING_EVENT_TYPE_PLAY_START]: 'PLAY_START',
   [ListeningEventType.LISTENING_EVENT_TYPE_PLAY_COMPLETE]: 'PLAY_COMPLETE',
   [ListeningEventType.LISTENING_EVENT_TYPE_SKIP]: 'SKIP',
+  [ListeningEventType.LISTENING_EVENT_TYPE_PLAY_STOPPED]: 'PLAY_STOPPED',
 };
 
 const MAX_ID_LENGTH = 128;
@@ -38,6 +40,16 @@ const MAX_ARTWORK_COLOR_LENGTH = 16;
 const MAX_METADATA_TEXT_LENGTH = 4096;
 const MAX_DURATION_SECONDS = 86_400;
 const MAX_ANALYTICS_SONG_IDS = 1_000;
+// Let the profile adapt to a listener's current taste while retaining a
+// smaller durable signal from their older history.
+const TASTE_AFFINITY_HALF_LIFE_DAYS = 120;
+const PROFILE_ACTIVITY_LIMIT = 1_000;
+const EARLY_SKIP_SECONDS = 3;
+const SHORT_LISTEN_RATIO = 0.3;
+const ENGAGED_LISTEN_RATIO = 0.7;
+const COMPLETION_LISTEN_RATIO = 0.9;
+const MAX_REPLAY_AFFINITY = 3;
+const AFFINITY_EPSILON = 1e-6;
 
 type AggregateCount = bigint | number;
 
@@ -57,6 +69,38 @@ type ListeningAnalyticsTopSongRow = ListeningAnalyticsSummaryRow & {
   title: string;
   artistName: string;
 };
+
+function listeningQuality({
+  totalListenSec,
+  totalEligibleSec,
+  playCount,
+  skipCount,
+  earlySkipCount,
+}: {
+  totalListenSec: number;
+  totalEligibleSec: number;
+  playCount: number;
+  skipCount: number;
+  earlySkipCount: number;
+}): number {
+  if (totalEligibleSec <= 0 || playCount <= 0) return 0;
+
+  const listenedRatio = Math.min(1, totalListenSec / totalEligibleSec);
+  const ratioSignal =
+    listenedRatio >= COMPLETION_LISTEN_RATIO
+      ? 1
+      : listenedRatio >= ENGAGED_LISTEN_RATIO
+        ? 0.8
+        : listenedRatio >= SHORT_LISTEN_RATIO
+          ? 0.45
+          : 0.1;
+  const earlySkipRate = Math.min(1, earlySkipCount / playCount);
+  const skipRate = Math.min(1, skipCount / playCount);
+
+  // An early skip is deliberate negative evidence. A later switch has a much
+  // smaller penalty because the listener may already have enjoyed most of it.
+  return Math.max(0, ratioSignal - earlySkipRate * 0.8 - skipRate * 0.2);
+}
 
 function normalizeText(value: string | undefined, maxLength: number): string {
   return value?.trim().slice(0, maxLength) ?? '';
@@ -102,13 +146,27 @@ function isListeningEventIdempotencyConflict(error: unknown): boolean {
     return false;
   }
 
-  const target = error.meta?.target;
+  const meta = error.meta as Record<string, unknown> | undefined;
+  const target = meta?.target;
+  if (target === 'listening_events_userId_eventId_key') return true;
+
+  const adapterFields = (
+    meta?.driverAdapterError as
+      | { cause?: { constraint?: { fields?: unknown } } }
+      | undefined
+  )?.cause?.constraint?.fields;
+  const fields = Array.isArray(target)
+    ? target
+    : Array.isArray(adapterFields)
+      ? adapterFields
+      : [];
+  const normalizedFields = fields.map((field) =>
+    String(field).replaceAll('"', ''),
+  );
   return (
-    (Array.isArray(target) &&
-      target.length === 2 &&
-      target.includes('userId') &&
-      target.includes('eventId')) ||
-    target === 'listening_events_userId_eventId_key'
+    normalizedFields.length === 2 &&
+    normalizedFields.includes('userId') &&
+    normalizedFields.includes('eventId')
   );
 }
 
@@ -266,6 +324,15 @@ export class ListeningService {
       const isPlayStart = eventType === 'PLAY_START';
       const isComplete = eventType === 'PLAY_COMPLETE';
       const isSkip = eventType === 'SKIP';
+      // PLAY_START is intentionally emitted only after a qualified listen.
+      // Count an earlier skip as one attempted play as well, otherwise the
+      // strongest negative signal would have no denominator in skip rate.
+      const isEarlySkip = isSkip && durationSec < EARLY_SKIP_SECONDS;
+      // A session contributes its elapsed time only at its terminal event.
+      // Adding both the qualified start (3s) and completion previously
+      // overstated total listening time for every completed song.
+      const terminalListenSec = isPlayStart ? 0 : durationSec;
+      const terminalEligibleSec = isPlayStart ? 0 : totalSec;
       const context = isPlayStart
         ? this.resolveRecentlyPlayedContext({
             stationId,
@@ -304,10 +371,12 @@ export class ListeningService {
           create: {
             userId,
             songId,
-            playCount: isPlayStart ? 1 : 0,
+            playCount: isPlayStart || isEarlySkip ? 1 : 0,
             completionCount: isComplete ? 1 : 0,
             skipCount: isSkip ? 1 : 0,
-            totalListenSec: durationSec,
+            earlySkipCount: isEarlySkip ? 1 : 0,
+            totalListenSec: terminalListenSec,
+            totalEligibleSec: terminalEligibleSec,
             lastPlayedAt: new Date(),
             songTitle,
             artistName,
@@ -324,10 +393,14 @@ export class ListeningService {
             stationArtworkBgColor,
           },
           update: {
-            ...(isPlayStart && { playCount: { increment: 1 } }),
+            ...((isPlayStart || isEarlySkip) && {
+              playCount: { increment: 1 },
+            }),
             ...(isComplete && { completionCount: { increment: 1 } }),
             ...(isSkip && { skipCount: { increment: 1 } }),
-            totalListenSec: { increment: durationSec },
+            ...(isEarlySkip && { earlySkipCount: { increment: 1 } }),
+            totalListenSec: { increment: terminalListenSec },
+            totalEligibleSec: { increment: terminalEligibleSec },
             lastPlayedAt: new Date(),
             songTitle,
             artistName,
@@ -390,26 +463,62 @@ export class ListeningService {
   async getUserTasteProfile(userId: string): Promise<TasteProfile> {
     const stats = await this.prisma.userListeningStats.findMany({
       where: { userId },
-      orderBy: { playCount: 'desc' },
-      take: 1000,
+      // This query is backed by @@index([userId, lastPlayedAt]). A profile
+      // must include a listener's newest signals, not merely their historical
+      // favourites with the highest lifetime count.
+      orderBy: [{ lastPlayedAt: 'desc' }, { songId: 'asc' }],
+      take: PROFILE_ACTIVITY_LIMIT,
       select: {
         songId: true,
         playCount: true,
         completionCount: true,
         skipCount: true,
+        earlySkipCount: true,
         totalListenSec: true,
+        totalEligibleSec: true,
+        lastPlayedAt: true,
         artistName: true,
         albumName: true,
         albumId: true,
       },
     });
 
+    const [preferenceEvents, hiddenPreferences] = await Promise.all([
+      this.prisma.userPreferenceEvent.findMany({
+        where: { userId },
+        orderBy: { occurredAt: 'desc' },
+        take: PROFILE_ACTIVITY_LIMIT,
+        select: {
+          resourceType: true,
+          resourceId: true,
+          weight: true,
+          occurredAt: true,
+        },
+      }),
+      this.prisma.userContentPreference.findMany({
+        where: { userId, isHidden: true },
+        select: { resourceType: true, resourceId: true },
+      }),
+    ]);
+
     const songIds = stats.map((s) => s.songId);
+    const snapshotRefs = [
+      ...songIds.map((resourceId) => ({ resourceType: 'songs', resourceId })),
+      ...preferenceEvents.map(({ resourceType, resourceId }) => ({
+        resourceType,
+        resourceId,
+      })),
+    ];
     const snapshots =
-      songIds.length > 0
+      snapshotRefs.length > 0
         ? await this.prisma.recommendationResourceSnapshot.findMany({
-            where: { resourceType: 'songs', resourceId: { in: songIds } },
-            select: { resourceId: true, genreNames: true },
+            where: { OR: snapshotRefs },
+            select: {
+              resourceType: true,
+              resourceId: true,
+              genreNames: true,
+              artistName: true,
+            },
           })
         : [];
     const songGenres = new Map(
@@ -434,14 +543,26 @@ export class ListeningService {
       totalCompletions += stat.completionCount;
       totalListenSec += stat.totalListenSec;
 
-      const skipPenalty =
-        stat.playCount > 0
-          ? Math.max(0, 1 - (stat.skipCount / stat.playCount) * 0.5)
-          : 1;
-      // A qualified play is meaningful taste input even before a listener
-      // finishes a full track. Completions remain the stronger signal.
+      const quality = listeningQuality({
+        totalListenSec: stat.totalListenSec,
+        totalEligibleSec: stat.totalEligibleSec,
+        playCount: stat.playCount,
+        skipCount: stat.skipCount,
+        earlySkipCount: stat.earlySkipCount,
+      });
+      const ageDays =
+        Math.max(0, Date.now() - stat.lastPlayedAt.getTime()) / 86_400_000;
+      const recencyWeight = Math.pow(
+        0.5,
+        ageDays / TASTE_AFFINITY_HALF_LIFE_DAYS,
+      );
       const engagement =
-        (stat.completionCount + stat.playCount * 0.25) * skipPenalty;
+        Math.min(stat.playCount, MAX_REPLAY_AFFINITY) * quality * recencyWeight;
+
+      // Keep the song in listening history (so it is not immediately served
+      // again), but do not let a zero-quality listen create artist/genre
+      // affinity in the profile.
+      if (engagement <= 0) continue;
 
       if (stat.artistName) {
         artistScores.set(
@@ -456,14 +577,54 @@ export class ListeningService {
       }
     }
 
+    const snapshotByKey = new Map(
+      snapshots.map((snapshot) => [
+        `${snapshot.resourceType}:${snapshot.resourceId}`,
+        snapshot,
+      ]),
+    );
+    for (const event of preferenceEvents) {
+      const snapshot = snapshotByKey.get(
+        `${event.resourceType}:${event.resourceId}`,
+      );
+      if (!snapshot) continue;
+      const ageDays =
+        Math.max(0, Date.now() - event.occurredAt.getTime()) / 86_400_000;
+      const contribution =
+        event.weight * Math.pow(0.5, ageDays / TASTE_AFFINITY_HALF_LIFE_DAYS);
+      if (snapshot.artistName) {
+        artistScores.set(
+          snapshot.artistName,
+          (artistScores.get(snapshot.artistName) ?? 0) + contribution,
+        );
+      }
+      for (const genre of snapshot.genreNames) {
+        genreScores.set(genre, (genreScores.get(genre) ?? 0) + contribution);
+      }
+    }
+
     const normalize = (scores: Map<string, number>) => {
-      const entries = [...scores.entries()].sort((a, b) => b[1] - a[1]);
+      // Negative events cancel an earlier positive affinity. They are not
+      // candidates themselves; exclusion is handled separately by rankers.
+      const entries = [...scores.entries()]
+        // Time-decayed compensating events can leave IEEE-754 rounding dust
+        // around zero. Do not turn that numerical residue into a preference.
+        .filter(([, score]) => score > AFFINITY_EPSILON)
+        .sort((a, b) => b[1] - a[1]);
       const maxScore = entries[0]?.[1] ?? 1;
       return entries.map(([name, score]) => ({
         name,
         weight: maxScore > 0 ? score / maxScore : 0,
       }));
     };
+
+    const hiddenResourceIds = new Map<string, Set<string>>();
+    for (const hidden of hiddenPreferences) {
+      const ids =
+        hiddenResourceIds.get(hidden.resourceType) ?? new Set<string>();
+      ids.add(hidden.resourceId);
+      hiddenResourceIds.set(hidden.resourceType, ids);
+    }
 
     return {
       genres: normalize(genreScores),
@@ -473,14 +634,24 @@ export class ListeningService {
       listenedSongIds,
       listenedAlbumIds,
       listenedAlbumNames,
+      hiddenResourceIds,
     };
   }
 
   async hasListeningHistory(userId: string, minEvents = 3): Promise<boolean> {
-    const count = await this.prisma.userListeningStats.count({
-      where: { userId },
-    });
-    return count >= minEvents;
+    const [listeningCount, positivePreference] = await Promise.all([
+      this.prisma.userListeningStats.count({ where: { userId } }),
+      this.prisma.userPreferenceEvent.aggregate({
+        where: { userId, weight: { gt: 0 } },
+        _sum: { weight: true },
+      }),
+    ]);
+
+    // One explicit Favourite (+5) is a stronger cold-start signal than three
+    // incidental plays, so it may unlock a personalised Home immediately.
+    return (
+      listeningCount >= minEvents || (positivePreference._sum.weight ?? 0) >= 5
+    );
   }
 
   async getRecentlyPlayed(

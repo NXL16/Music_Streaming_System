@@ -53,10 +53,6 @@ jest.mock('./recommendation-catalog.service', () => ({
   RecommendationCatalogService: class RecommendationCatalogService {},
 }));
 
-jest.mock('../listening/listening.service', () => ({
-  ListeningService: class ListeningService {},
-}));
-
 function queryRawCalls(mock: jest.Mock): unknown[][] {
   return mock.mock.calls as unknown[][];
 }
@@ -114,7 +110,6 @@ describe('RecommendationsService bounded analytics', () => {
     const service = new RecommendationsService(
       { $queryRaw: queryRaw } as unknown as PrismaService,
       {} as never,
-      {} as never,
     );
 
     await expect(
@@ -155,6 +150,119 @@ describe('RecommendationsService bounded analytics', () => {
   });
 });
 
+describe('RecommendationsService Home preview reads', () => {
+  it('limits every Home shelf relation query to the preview size', async () => {
+    const findFirst = jest.fn().mockResolvedValue(null);
+    const service = new RecommendationsService(
+      {
+        recommendationPage: { findFirst },
+      } as unknown as PrismaService,
+      {} as never,
+    );
+
+    await expect(
+      service.getHomeRecommendations({
+        userId: '',
+        name: 'listen-now',
+        locale: 'en-GB',
+        timezone: '+07:00',
+        platform: 'web',
+      }),
+    ).resolves.toMatchObject({ data: [] });
+
+    expect(findFirst).toHaveBeenCalledTimes(1);
+    const calls = findFirst.mock.calls as unknown[][];
+    const [queryInput] = calls[0] ?? [];
+    const query = queryInput as {
+      include: { sections: { include: { items: { take: number } } } };
+    };
+    expect(query.include.sections.include.items.take).toBe(6);
+  });
+
+  it('hydrates referenced artists so Home cards can link their credits', async () => {
+    const findFirst = jest.fn().mockResolvedValue({
+      name: 'listen-now',
+      locale: 'en-GB',
+      sections: [
+        {
+          externalId: 'for-you',
+          title: 'For You',
+          titleWithoutName: '',
+          presentationMode: 'FIXED',
+          displayKind: 'MusicCoverShelf',
+          displayDecorations: [],
+          sectionKind: 'default',
+          resourceTypes: ['albums'],
+          hasSeeAll: false,
+          isGroupRecommendation: false,
+          nextUpdateAt: null,
+          version: 1,
+          attributes: null,
+          items: [
+            {
+              resourceType: 'albums',
+              resourceId: 'album-1',
+              sortOrder: 0,
+              isPrimary: false,
+              resource: {
+                name: 'Album',
+                href: '/catalog/vn/albums/album-1',
+                externalUrl: 'album',
+                raw: {
+                  relationships: {
+                    artists: { data: [{ id: 'artist-1', type: 'artists' }] },
+                  },
+                },
+              },
+            },
+          ],
+        },
+      ],
+      resourceLinks: [],
+    });
+    const findMany = jest.fn().mockResolvedValue([
+      {
+        resourceType: 'artists',
+        resourceId: 'artist-1',
+        name: 'Artist',
+        externalUrl: 'artist',
+      },
+    ]);
+    const service = new RecommendationsService(
+      {
+        recommendationPage: { findFirst },
+        recommendationResourceSnapshot: { findMany },
+      } as unknown as PrismaService,
+      {} as never,
+    );
+
+    const response = await service.getHomeRecommendations({
+      userId: '',
+      name: 'listen-now',
+      locale: 'en-GB',
+      timezone: '+07:00',
+      platform: 'web',
+    });
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        resourceType: 'artists',
+        resourceId: { in: ['artist-1'] },
+      },
+    });
+    expect(response.resources?.artists['artist-1']).toMatchObject({
+      id: 'artist-1',
+      type: 'artists',
+      attributes: {
+        fields: {
+          name: { stringValue: 'Artist' },
+          url: { stringValue: 'artist' },
+        },
+      },
+    });
+  });
+});
+
 describe('RecommendationsService runtime Recently Played', () => {
   it('loads at most one playback event per missing playlist snapshot', async () => {
     const queryRaw = jest.fn().mockResolvedValue([
@@ -191,7 +299,6 @@ describe('RecommendationsService runtime Recently Played', () => {
           name: 'Current playlist name',
         }),
       } as never,
-      {} as never,
     );
     const runtimeService = service as unknown as {
       addRuntimeRecentlyPlayedSection: (
@@ -229,7 +336,6 @@ describe('RecommendationsService generation lease fencing', () => {
     const service = new RecommendationsService(
       {} as PrismaService,
       {} as never,
-      {} as never,
     );
     const guardedService = service as unknown as {
       assertGenerationLease: (
@@ -255,7 +361,6 @@ describe('RecommendationsService generation lease fencing', () => {
   it('rejects a stale worker before it can replace a page', async () => {
     const service = new RecommendationsService(
       {} as PrismaService,
-      {} as never,
       {} as never,
     );
     const guardedService = service as unknown as {

@@ -36,6 +36,9 @@ jest.mock('./recommendation-engine.service', () => ({
 jest.mock('./generation-lease.service', () => ({
   GenerationLeaseService: class GenerationLeaseService {},
 }));
+jest.mock('../stations/artist-station.service', () => ({
+  ArtistStationService: class ArtistStationService {},
+}));
 
 const ABORTED_STATUS = 10;
 
@@ -62,6 +65,7 @@ describe('GenerationService lease cancellation', () => {
 
   it('treats a lazy lease-loss as a safe cancellation instead of a failure', async () => {
     const service = new GenerationService(
+      {} as never,
       {} as never,
       {} as never,
       {} as never,
@@ -120,6 +124,7 @@ describe('GenerationService lease cancellation', () => {
         release,
         renewIntervalMs: 60_000,
       } as never,
+      {} as never,
     );
     const internals = service as unknown as {
       generateGlobal: jest.Mock;

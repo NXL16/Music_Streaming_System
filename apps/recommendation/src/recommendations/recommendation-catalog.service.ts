@@ -1,4 +1,4 @@
-import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import type { ClientGrpc } from '@nestjs/microservices';
 import { RpcException } from '@nestjs/microservices';
 import { status } from '@grpc/grpc-js';
@@ -6,6 +6,7 @@ import {
   CatalogResource,
   CatalogResponse,
   BrowseCatalogResponse,
+  AudioAnalysisSong,
   SongServiceClient,
   UpsertSystemPlaylistRequest,
 } from '@musical/shared-proto';
@@ -22,6 +23,12 @@ export type CatalogBrowsePage = {
   hasMore: boolean;
 };
 
+export type AudioAnalysisBrowsePage = {
+  songs: AudioAnalysisSong[];
+  nextCursor: string;
+  hasMore: boolean;
+};
+
 type JsonObject = Record<string, unknown>;
 
 const CATALOG_RESOURCE_TYPES = new Set([
@@ -31,6 +38,8 @@ const CATALOG_RESOURCE_TYPES = new Set([
   'artists',
 ]);
 const MAX_SHORT_TEXT_LENGTH = 255;
+const CATALOG_RESOLVE_BATCH_SIZE = 100;
+const CATALOG_RESOLVE_CONCURRENCY = 3;
 
 const LIMITED_STRING_FIELDS = new Set([
   'artistName',
@@ -57,6 +66,7 @@ const LIMITED_STRING_ARRAY_FIELDS = new Set([
 @Injectable()
 export class RecommendationCatalogService implements OnModuleInit {
   private client!: SongServiceClient;
+  private readonly logger = new Logger(RecommendationCatalogService.name);
 
   constructor(
     @Inject('SONG_SERVICE')
@@ -80,19 +90,46 @@ export class RecommendationCatalogService implements OnModuleInit {
     );
     if (resources.length === 0) return [];
 
-    let response: CatalogResponse;
     try {
-      response = await firstValueFrom(
-        this.client.getCatalogResources({ storefront, resources }),
+      const resolved: CatalogResource[] = [];
+      for (
+        let index = 0;
+        index < resources.length;
+        index += CATALOG_RESOLVE_BATCH_SIZE * CATALOG_RESOLVE_CONCURRENCY
+      ) {
+        const window = resources.slice(
+          index,
+          index + CATALOG_RESOLVE_BATCH_SIZE * CATALOG_RESOLVE_CONCURRENCY,
+        );
+        const responses = await Promise.all(
+          Array.from(
+            { length: Math.ceil(window.length / CATALOG_RESOLVE_BATCH_SIZE) },
+            (_, batchIndex) =>
+              firstValueFrom(
+                this.client.getCatalogResources({
+                  storefront,
+                  resources: window.slice(
+                    batchIndex * CATALOG_RESOLVE_BATCH_SIZE,
+                    (batchIndex + 1) * CATALOG_RESOLVE_BATCH_SIZE,
+                  ),
+                }),
+              ),
+          ),
+        );
+        resolved.push(
+          ...responses.flatMap((response) => this.flatten(response)),
+        );
+      }
+      return this.requestedResources(resources, resolved);
+    } catch (error) {
+      this.logger.warn(
+        `Catalog resource resolve failed for ${resources.length} resource(s): ${this.errorMessage(error)}`,
       );
-    } catch {
       throw new RpcException({
         code: status.UNAVAILABLE,
         message: 'Catalog service is temporarily unavailable',
       });
     }
-
-    return this.flatten(response);
   }
 
   async browse(
@@ -167,6 +204,31 @@ export class RecommendationCatalogService implements OnModuleInit {
     };
   }
 
+  async browseAudioAnalysisPage(
+    cursor = '',
+    limit = 100,
+  ): Promise<AudioAnalysisBrowsePage> {
+    try {
+      const response = await firstValueFrom(
+        this.client.listAudioAnalysisSongs({
+          cursor,
+          limit,
+          onlyCatalog: true,
+        }),
+      );
+      return {
+        songs: response.songs,
+        nextCursor: response.nextCursor || '',
+        hasMore: Boolean(response.hasMore && response.nextCursor),
+      };
+    } catch {
+      throw new RpcException({
+        code: status.UNAVAILABLE,
+        message: 'Song audio analysis feed is temporarily unavailable',
+      });
+    }
+  }
+
   private flatten(response: CatalogResponse): CatalogResource[] {
     const resources = response.resources;
     if (!resources) return [];
@@ -208,6 +270,31 @@ export class RecommendationCatalogService implements OnModuleInit {
         ),
       ),
     ];
+  }
+
+  /**
+   * Catalog responses include related artists, albums and tracks for detail
+   * pages. A recommendation snapshot only owns the refs it requested. Keeping
+   * that boundary also makes batched resolves deterministic and duplicate-free.
+   */
+  private requestedResources(
+    refs: ResourceRef[],
+    resources: CatalogResource[],
+  ): CatalogResource[] {
+    const byKey = new Map(
+      resources.map((resource) => [
+        this.resourceKey(resource.type, resource.id),
+        resource,
+      ]),
+    );
+    const requested = new Map(
+      refs.map((ref) => [this.resourceKey(ref.type, ref.id), ref]),
+    );
+
+    return [...requested.entries()].flatMap(([key]) => {
+      const resource = byKey.get(key);
+      return resource ? [resource] : [];
+    });
   }
 
   private resource(
@@ -347,6 +434,15 @@ export class RecommendationCatalogService implements OnModuleInit {
       value.fields !== null &&
       !Array.isArray(value.fields)
     );
+  }
+
+  private errorMessage(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    return String(error);
+  }
+
+  private resourceKey(resourceType: string, resourceId: string): string {
+    return `${resourceType}:${resourceId}`;
   }
 
   private struct(value: object): CatalogResource['attributes'] {

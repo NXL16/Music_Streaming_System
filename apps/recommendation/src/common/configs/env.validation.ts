@@ -37,6 +37,16 @@ export function validateEnv(rawEnv: RawEnv): RawEnv {
     throw new Error('INTERNAL_GRPC_TOKEN must be at least 32 characters');
   }
 
+  const qdrantUrl = rawEnv.QDRANT_URL?.trim();
+  if (qdrantUrl) {
+    try {
+      const parsed = new URL(qdrantUrl);
+      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error();
+    } catch {
+      throw new Error('QDRANT_URL must be an http(s) URL');
+    }
+  }
+
   const leaseTtl = optionalDuration(
     rawEnv.RECOMMENDATION_GENERATION_LEASE_TTL_MS,
     'RECOMMENDATION_GENERATION_LEASE_TTL_MS',

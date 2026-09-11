@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
 import { ListeningService, TasteProfile } from '../listening/listening.service';
 import { RecommendationCatalogService } from '../recommendations/recommendation-catalog.service';
+import { QdrantAudioVectorService } from '../vector/qdrant-audio-vector.service';
 import { MORE_LIKE_SHELF_LIMIT } from '@musical/shared-constants';
 import {
   PRODUCTION_RECOMMENDATION_MODEL_VERSION,
@@ -12,7 +13,7 @@ export const PERSONALIZATION_MODEL_VERSION =
   PRODUCTION_RECOMMENDATION_MODEL_VERSION;
 
 type CandidateSource =
-  'taste' | 'content' | 'fresh' | 'popular' | 'collaborative';
+  'taste' | 'content' | 'audio' | 'fresh' | 'popular' | 'collaborative';
 type AlbumCandidate = {
   id: string;
   artistName: string;
@@ -24,6 +25,7 @@ type AlbumCandidate = {
   artistAffinity: number;
   genreAffinity: number;
   contentSimilarity: number;
+  audioSimilarity: number;
   collaborative: number;
   popularity: number;
   freshness: number;
@@ -31,10 +33,18 @@ type AlbumCandidate = {
   sources: Set<CandidateSource>;
 };
 
+type AlbumPopularityRow = {
+  albumId: string;
+  plays: bigint | number;
+  completions: bigint | number;
+  skips: bigint | number;
+};
+
 export type GeneratedShelf = {
   id: string;
   title: string;
   items: Array<{ id: string; type: 'albums' }>;
+  hasMore: boolean;
   modelVersion: number;
   sourceAlbumId?: string;
   sourceAlbumName?: string;
@@ -54,6 +64,7 @@ export class RecommendationEngineService {
     private readonly prisma: PrismaService,
     private readonly listeningService: ListeningService,
     private readonly catalogService: RecommendationCatalogService,
+    private readonly audioVectors: QdrantAudioVectorService,
   ) {}
 
   async generateUserShelves(
@@ -62,7 +73,10 @@ export class RecommendationEngineService {
   ): Promise<GeneratedShelf[]> {
     const resolvedProfile =
       profile ?? (await this.listeningService.getUserTasteProfile(userId));
-    const candidates = await this.collectAlbumCandidates(userId, resolvedProfile);
+    const candidates = await this.collectAlbumCandidates(
+      userId,
+      resolvedProfile,
+    );
     if (candidates.length < policy.minimumShelfSize) return [];
 
     const allocated = new Set<string>();
@@ -74,33 +88,26 @@ export class RecommendationEngineService {
     const topArtists = resolvedProfile.artists
       .map((artist) => artist.name)
       .slice(0, 3);
-    // Reserve the finite local catalog across all album-based Home slots. A
-    // 40-album catalog should show eight meaningful shelves, not one 16-card
-    // Top Picks shelf followed by empty gaps.
-    const albumShelfSlots = 8;
-    const perShelfLimit = Math.min(
-      policy.shelfLimit,
-      Math.max(
-        policy.minimumShelfSize,
-        Math.floor(candidates.length / albumShelfSlots),
-      ),
-    );
+    const perShelfLimit = policy.shelfLimit;
 
     const add = (
       id: string,
       title: string,
       ranked: AlbumCandidate[],
-      limit = perShelfLimit,
+      limit: number = perShelfLimit,
       sourceAlbumId?: string,
       sourceAlbumName?: string,
       sourceAlbumUrl?: string,
       sourceAlbumArtworkUrl?: string,
       sourceAlbumArtworkBgColor?: string,
     ) => {
+      // Keep the Home rail at 12 cards. The remaining unique, ranked albums
+      // belong to the same shelf detail instead of making every Home rail
+      // artificially short by dividing the candidate pool across slots.
       const items = this.allocate(
         this.diversifyArtwork(ranked),
         allocated,
-        limit,
+        Math.max(limit, policy.shelfDetailLimit),
       );
       if (items.length < policy.minimumShelfSize) return;
       items.forEach((item) => allocated.add(item.id));
@@ -108,6 +115,7 @@ export class RecommendationEngineService {
         id,
         title,
         items,
+        hasMore: items.length > perShelfLimit,
         modelVersion: PERSONALIZATION_MODEL_VERSION,
         sourceAlbumId,
         sourceAlbumName,
@@ -275,7 +283,9 @@ export class RecommendationEngineService {
     const profile = await this.listeningService.getUserTasteProfile(userId);
     const candidates = await this.collectAlbumCandidates(userId, profile);
     const sourceGenres = new Set(
-      source.genreNames.map((genre) => genre.trim().toLowerCase()).filter(Boolean),
+      source.genreNames
+        .map((genre) => genre.trim().toLowerCase())
+        .filter(Boolean),
     );
     const rotationKey = new Date().toISOString().slice(0, 10);
     const ranked = candidates
@@ -291,7 +301,9 @@ export class RecommendationEngineService {
           this.contentSimilarity(candidate, source) * 0.25 +
           genreMatch * 0.22 +
           candidate.freshness * 0.08 +
-          this.stableNoise(`${userId}:${albumId}:${rotationKey}:${candidate.id}`) *
+          this.stableNoise(
+            `${userId}:${albumId}:${rotationKey}:${candidate.id}`,
+          ) *
             0.16;
         return { candidate, contextualScore };
       })
@@ -308,26 +320,20 @@ export class RecommendationEngineService {
   /** Global Home is editorial-style: no user-history signals, only freshness,
    * audience quality and controlled catalog diversity. */
   async generateGlobalShelves(): Promise<GeneratedShelf[]> {
-    const albums = await this.prisma.recommendationResourceSnapshot.findMany({
-      where: { resourceType: 'albums' },
-      select: {
-        resourceId: true,
-        artistName: true,
-        attributes: true,
-        genreNames: true,
-        audioTraits: true,
-        releaseDate: true,
-      },
-      take: policy.candidateLimit,
-      orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
-    });
-    const [popularity, feedback] = await Promise.all([
+    const [popularity, feedback, freshAlbumIds] = await Promise.all([
       this.popularAlbumScores(),
       this.interactionScores(),
+      this.latestAlbumIds(policy.freshCandidateLimit),
     ]);
-    const publishedAlbumIds = await this.publishedAlbumIds(
-      albums.map((album) => album.resourceId),
+    const candidateIds = this.candidateIds(
+      this.rankedIds(popularity, policy.signalCandidateLimit),
+      this.rankedIds(feedback, policy.signalCandidateLimit),
+      freshAlbumIds,
     );
+    const [albums, publishedAlbumIds] = await Promise.all([
+      this.albumSnapshots(candidateIds),
+      this.publishedAlbumIds(candidateIds),
+    ]);
     const candidates = albums
       .filter((album) => publishedAlbumIds.has(album.resourceId))
       .map((album) => {
@@ -344,6 +350,7 @@ export class RecommendationEngineService {
           artistAffinity: 0,
           genreAffinity: 0,
           contentSimilarity: 0,
+          audioSimilarity: 0,
           collaborative: 0,
           popularity: popularityScore,
           freshness,
@@ -391,9 +398,8 @@ export class RecommendationEngineService {
       )
       .slice(0, policy.globalArtistShelfLimit)
       .map(([artist]) => artist);
-    // The global page must remain a complete Home even with a modest local
-    // catalog. Reserve candidates across its editorial slots rather than
-    // allowing the first shelf to consume all 16 cards.
+    // Global Home uses the same 12-card preview contract as Personal Home;
+    // detail pages retain the rest of each unique editorial collection.
     const perShelfLimit = Math.min(
       policy.globalShelfLimit,
       Math.max(policy.minimumShelfSize, candidates.length),
@@ -404,13 +410,18 @@ export class RecommendationEngineService {
       ranked: AlbumCandidate[],
       limit = perShelfLimit,
     ) => {
-      const items = this.allocateGlobal(ranked, allocated, limit);
+      const items = this.allocateGlobal(
+        ranked,
+        allocated,
+        Math.max(limit, policy.shelfDetailLimit),
+      );
       if (items.length < policy.globalMinimumShelfSize) return;
       items.forEach((item) => allocated.add(item.id));
       shelves.push({
         id,
         title,
         items,
+        hasMore: items.length > policy.globalShelfLimit,
         modelVersion: PERSONALIZATION_MODEL_VERSION,
       });
     };
@@ -522,29 +533,34 @@ export class RecommendationEngineService {
     userId: string,
     profile: TasteProfile,
   ): Promise<AlbumCandidate[]> {
-    const albums = await this.prisma.recommendationResourceSnapshot.findMany({
-      where: {
-        resourceType: 'albums',
-        resourceId: { notIn: [...profile.listenedAlbumIds] },
-      },
-      select: {
-        resourceId: true,
-        artistName: true,
-        attributes: true,
-        genreNames: true,
-        audioTraits: true,
-        releaseDate: true,
-      },
-      take: policy.candidateLimit,
-      orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
-    });
-    const publishedAlbumIds = await this.publishedAlbumIds(
-      albums.map((album) => album.resourceId),
-    );
-    const [collaborative, popularity, feedback] = await Promise.all([
+    const [
+      collaborative,
+      popularity,
+      feedback,
+      seeds,
+      freshAlbumIds,
+      affinityAlbumIds,
+      audioSimilarity,
+    ] = await Promise.all([
       this.collaborativeAlbumScores(userId, [...profile.listenedSongIds]),
       this.popularAlbumScores(),
       this.interactionScores(userId),
+      this.recentAlbumSeeds(userId),
+      this.latestAlbumIds(policy.freshCandidateLimit),
+      this.affinityAlbumIds(profile, [...profile.listenedAlbumIds]),
+      this.audioSimilarAlbumScores([...profile.listenedSongIds]),
+    ]);
+    const candidateIds = this.candidateIds(
+      affinityAlbumIds,
+      this.rankedIds(collaborative, policy.signalCandidateLimit),
+      this.rankedIds(popularity, policy.signalCandidateLimit),
+      this.rankedIds(feedback, policy.signalCandidateLimit),
+      this.rankedIds(audioSimilarity, policy.audioCandidateLimit),
+      freshAlbumIds,
+    );
+    const [albums, publishedAlbumIds] = await Promise.all([
+      this.albumSnapshots(candidateIds, [...profile.listenedAlbumIds]),
+      this.publishedAlbumIds(candidateIds),
     ]);
     const artists = new Map(
       profile.artists.map((entry) => [entry.name, entry.weight]),
@@ -552,9 +568,12 @@ export class RecommendationEngineService {
     const genres = new Map(
       profile.genres.map((entry) => [entry.name, entry.weight]),
     );
-    const seeds = await this.recentAlbumSeeds(userId);
     return albums
-      .filter((album) => publishedAlbumIds.has(album.resourceId))
+      .filter(
+        (album) =>
+          publishedAlbumIds.has(album.resourceId) &&
+          !profile.hiddenResourceIds.get('albums')?.has(album.resourceId),
+      )
       .map((album) => {
         const artistAffinity = artists.get(album.artistName) ?? 0;
         const genreAffinity = Math.min(
@@ -569,10 +588,12 @@ export class RecommendationEngineService {
         const popularityScore = popularity.get(album.resourceId) ?? 0;
         const feedbackScore = feedback.get(album.resourceId) ?? 0;
         const contentSimilarity = this.contentAffinity(album, seeds);
+        const audioSimilarityScore = audioSimilarity.get(album.resourceId) ?? 0;
         const novelty = artistAffinity === 0 ? 1 : 0;
         const sources = new Set<CandidateSource>();
         if (artistAffinity || genreAffinity) sources.add('taste');
         if (contentSimilarity > 0) sources.add('content');
+        if (audioSimilarityScore > 0) sources.add('audio');
         if (freshness > 0) sources.add('fresh');
         if (collaborativeScore > 0) sources.add('collaborative');
         if (popularityScore > 0) sources.add('popular');
@@ -586,6 +607,7 @@ export class RecommendationEngineService {
           artistAffinity,
           genreAffinity,
           contentSimilarity,
+          audioSimilarity: audioSimilarityScore,
           collaborative: collaborativeScore,
           popularity: popularityScore,
           freshness,
@@ -595,6 +617,7 @@ export class RecommendationEngineService {
             artistAffinity * policy.weights.artistAffinity +
             genreAffinity * policy.weights.genreAffinity +
             contentSimilarity * policy.weights.contentSimilarity +
+            audioSimilarityScore * policy.weights.audioSimilarity +
             collaborativeScore * policy.weights.collaborative +
             popularityScore * policy.weights.popularity +
             freshness * policy.weights.freshness +
@@ -606,6 +629,123 @@ export class RecommendationEngineService {
         (left, right) =>
           right.score - left.score || left.id.localeCompare(right.id),
       );
+  }
+
+  private async audioSimilarAlbumScores(
+    listenedSongIds: readonly string[],
+  ): Promise<Map<string, number>> {
+    if (!listenedSongIds.length || !this.audioVectors.isEnabled()) {
+      return new Map();
+    }
+
+    try {
+      const neighbours = await this.audioVectors.findNeighboursBySongIds(
+        listenedSongIds,
+        policy.audioNeighboursPerSeed,
+      );
+      const scores = new Map<string, number>();
+      for (const neighbour of neighbours) {
+        // Qdrant cosine similarity is normally [-1, 1]. Ignore weak/negative
+        // matches and retain the strongest evidence per album.
+        const score = Math.max(0, Math.min(1, neighbour.score));
+        if (score < policy.minimumAudioSimilarity) continue;
+        scores.set(
+          neighbour.albumId,
+          Math.max(scores.get(neighbour.albumId) ?? 0, score),
+        );
+      }
+      return scores;
+    } catch {
+      // Vector retrieval is an additive signal; keep Home generation available
+      // during a Qdrant restart or while a collection is being rebuilt.
+      return new Map();
+    }
+  }
+
+  private async latestAlbumIds(limit: number): Promise<string[]> {
+    const albums = await this.prisma.recommendationResourceSnapshot.findMany({
+      where: { resourceType: 'albums' },
+      select: { resourceId: true },
+      take: limit,
+      orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
+    });
+
+    return albums.map((album) => album.resourceId);
+  }
+
+  private async affinityAlbumIds(
+    profile: TasteProfile,
+    excludedIds: string[],
+  ): Promise<string[]> {
+    const artists = profile.artists
+      .filter((artist) => artist.weight > 0.05)
+      .slice(0, 10)
+      .map((artist) => artist.name);
+    const genres = profile.genres
+      .filter((genre) => genre.weight > 0.05)
+      .slice(0, 10)
+      .map((genre) => genre.name);
+    const affinityFilters = [
+      ...(artists.length ? [{ artistName: { in: artists } }] : []),
+      ...(genres.length ? [{ genreNames: { hasSome: genres } }] : []),
+    ];
+    if (affinityFilters.length === 0) return [];
+
+    const albums = await this.prisma.recommendationResourceSnapshot.findMany({
+      where: {
+        resourceType: 'albums',
+        ...(excludedIds.length ? { resourceId: { notIn: excludedIds } } : {}),
+        OR: affinityFilters,
+      },
+      select: { resourceId: true },
+      take: policy.affinityCandidateLimit,
+      orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
+    });
+
+    return albums.map((album) => album.resourceId);
+  }
+
+  private candidateIds(...sources: Array<readonly string[]>): string[] {
+    const ids = new Set<string>();
+    for (const source of sources) {
+      for (const id of source) {
+        if (!id) continue;
+        ids.add(id);
+        if (ids.size >= policy.candidatePoolLimit) return [...ids];
+      }
+    }
+    return [...ids];
+  }
+
+  private rankedIds(scores: Map<string, number>, limit: number): string[] {
+    return [...scores.entries()]
+      .sort(
+        (left, right) => right[1] - left[1] || left[0].localeCompare(right[0]),
+      )
+      .slice(0, limit)
+      .map(([id]) => id);
+  }
+
+  private async albumSnapshots(ids: string[], excludedIds: string[] = []) {
+    if (ids.length === 0) return [];
+
+    return this.prisma.recommendationResourceSnapshot.findMany({
+      where: {
+        resourceType: 'albums',
+        resourceId: {
+          in: ids,
+          ...(excludedIds.length ? { notIn: excludedIds } : {}),
+        },
+      },
+      select: {
+        resourceId: true,
+        artistName: true,
+        attributes: true,
+        genreNames: true,
+        audioTraits: true,
+        releaseDate: true,
+      },
+    });
   }
 
   private async recentAlbumSeeds(userId: string) {
@@ -832,7 +972,10 @@ export class RecommendationEngineService {
       const [next] = remaining.splice(index, 1);
       selected.push(next);
       previousArtist = next.artistName;
-      artistCounts.set(next.artistName, (artistCounts.get(next.artistName) ?? 0) + 1);
+      artistCounts.set(
+        next.artistName,
+        (artistCounts.get(next.artistName) ?? 0) + 1,
+      );
     }
 
     return this.diversifyArtwork(selected).map((candidate) => candidate.id);
@@ -849,7 +992,8 @@ export class RecommendationEngineService {
       const nextIndex = remaining.findIndex((candidate) =>
         cooldowns.every(
           ({ candidate: recent, until }) =>
-            position > until || !this.artworksVisuallySimilar(candidate, recent),
+            position > until ||
+            !this.artworksVisuallySimilar(candidate, recent),
         ),
       );
       const [next] = remaining.splice(nextIndex >= 0 ? nextIndex : 0, 1);
@@ -872,7 +1016,10 @@ export class RecommendationEngineService {
   }
 
   private artworkCooldown(candidate: AlbumCandidate, position: number): number {
-    return 7 + Math.floor(this.stableNoise(`${candidate.id}:${position}:artwork`) * 4);
+    return (
+      7 +
+      Math.floor(this.stableNoise(`${candidate.id}:${position}:artwork`) * 4)
+    );
   }
 
   private artworksVisuallySimilar(
@@ -881,7 +1028,11 @@ export class RecommendationEngineService {
   ): boolean {
     const leftHash = left.artworkPerceptualHash ?? '';
     const rightHash = right.artworkPerceptualHash ?? '';
-    return Boolean(leftHash && rightHash && this.perceptualHashDistance(leftHash, rightHash) <= 8);
+    return Boolean(
+      leftHash &&
+      rightHash &&
+      this.perceptualHashDistance(leftHash, rightHash) <= 8,
+    );
   }
 
   private perceptualHashDistance(left: string, right: string): number {
@@ -890,7 +1041,8 @@ export class RecommendationEngineService {
     }
     let distance = 0;
     for (let index = 0; index < left.length; index += 1) {
-      let difference = Number.parseInt(left[index], 16) ^ Number.parseInt(right[index], 16);
+      let difference =
+        Number.parseInt(left[index], 16) ^ Number.parseInt(right[index], 16);
       while (difference > 0) {
         distance += difference & 1;
         difference >>>= 1;
@@ -900,9 +1052,15 @@ export class RecommendationEngineService {
   }
 
   private artworkPerceptualHash(attributes: unknown): string {
-    if (!attributes || typeof attributes !== 'object' || Array.isArray(attributes)) return '';
+    if (
+      !attributes ||
+      typeof attributes !== 'object' ||
+      Array.isArray(attributes)
+    )
+      return '';
     const artwork = (attributes as Record<string, unknown>).artwork;
-    if (!artwork || typeof artwork !== 'object' || Array.isArray(artwork)) return '';
+    if (!artwork || typeof artwork !== 'object' || Array.isArray(artwork))
+      return '';
     const hash = (artwork as Record<string, unknown>).perceptualHash;
     return typeof hash === 'string' ? hash.trim() : '';
   }
@@ -916,51 +1074,50 @@ export class RecommendationEngineService {
     return (hash >>> 0) / 4_294_967_295;
   }
 
-  /**
-   * Editorial/global shelves aim for a complete Home. Prefer page-wide unique
-   * albums, then reuse the best themed candidates only when the local catalog
-   * is too small to fill another useful shelf. Personal Home never reuses this
-   * fallback and remains strictly de-duplicated.
-   */
+  /** Global and personal Home both keep album cards unique across shelves. */
   private allocateGlobal(
     candidates: AlbumCandidate[],
     allocated: Set<string>,
     limit: number,
   ) {
-    const unique = this.allocate(candidates, allocated, limit);
-    if (unique.length >= limit) return unique;
-
-    const selectedIds = new Set(unique.map((item) => item.id));
-    const fallback = this.allocate(
-      candidates,
-      selectedIds,
-      limit - unique.length,
-    );
-    unique.forEach((item) => allocated.add(item.id));
-    return [...unique, ...fallback];
+    return this.allocate(candidates, allocated, limit);
   }
 
   private async popularAlbumScores() {
-    const stats = await this.prisma.userListeningStats.groupBy({
-      by: ['albumId'],
-      where: { albumId: { not: '' }, playCount: { gt: 0 } },
-      _sum: { playCount: true, completionCount: true, skipCount: true },
-      orderBy: { _sum: { playCount: 'desc' } },
-      take: policy.candidateLimit,
+    const since = new Date(Date.now() - 90 * 86_400_000);
+    const rows = await this.prisma.$queryRaw<AlbumPopularityRow[]>`
+      SELECT
+        "albumId",
+        COUNT(*) FILTER (WHERE "eventType" = 'PLAY_START')::bigint AS plays,
+        COUNT(*) FILTER (WHERE "eventType" = 'PLAY_COMPLETE')::bigint AS completions,
+        COUNT(*) FILTER (WHERE "eventType" = 'SKIP')::bigint AS skips
+      FROM "listening_events"
+      WHERE "albumId" != ''
+        AND "createdAt" >= ${since}
+      GROUP BY "albumId"
+      HAVING COUNT(*) FILTER (WHERE "eventType" = 'PLAY_START') > 0
+      ORDER BY
+        (
+          COUNT(*) FILTER (WHERE "eventType" = 'PLAY_START') +
+          COUNT(*) FILTER (WHERE "eventType" = 'PLAY_COMPLETE') * 0.75 -
+          COUNT(*) FILTER (WHERE "eventType" = 'SKIP')
+        ) DESC,
+        "albumId" ASC
+      LIMIT ${policy.candidateLimit}
+    `;
+    const scores = rows.map((row) => {
+      const plays = Number(row.plays);
+      const completions = Number(row.completions);
+      const skips = Number(row.skips);
+      const quality = Math.max(
+        0.2,
+        1 + (completions * 0.75 - skips) / Math.max(1, plays),
+      );
+      return [row.albumId, plays * quality] as const;
     });
-    const maximum = stats[0]?._sum.playCount ?? 1;
-    return new Map(
-      stats.map((stat) => [
-        stat.albumId,
-        ((stat._sum.playCount ?? 0) / maximum) *
-          Math.max(
-            0.2,
-            1 +
-              ((stat._sum.completionCount ?? 0) - (stat._sum.skipCount ?? 0)) /
-                Math.max(1, stat._sum.playCount ?? 1),
-          ),
-      ]),
-    );
+    const maximum = Math.max(1, ...scores.map(([, score]) => score));
+
+    return new Map(scores.map(([id, score]) => [id, score / maximum]));
   }
 
   private async interactionScores(userId?: string) {
@@ -1093,19 +1250,22 @@ export class RecommendationEngineService {
     );
   }
 
-  /** Snapshots may lag publication changes. Validate candidates against the
-   * catalog source of truth before persisting a recommendation page. */
+  /**
+   * Recommendation snapshots are eventually consistent with catalog
+   * publication. Validate the candidate pool before allocation so an
+   * unpublished album is ignored, rather than rejecting the entire page
+   * during its final metadata hydration.
+   */
   private async publishedAlbumIds(ids: string[]): Promise<Set<string>> {
-    const published = new Set<string>();
-    for (let index = 0; index < ids.length; index += 100) {
-      const resources = await this.catalogService.resolve(
-        ids.slice(index, index + 100).map((id) => ({ id, type: 'albums' })),
-      );
-      for (const resource of resources) {
-        if (resource.type === 'albums') published.add(resource.id);
-      }
-    }
-    return published;
+    const resources = await this.catalogService.resolve(
+      [...new Set(ids)].map((id) => ({ id, type: 'albums' })),
+    );
+
+    return new Set(
+      resources
+        .filter((resource) => resource.type === 'albums')
+        .map((resource) => resource.id),
+    );
   }
 
   private slug(value: string) {

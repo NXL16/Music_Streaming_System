@@ -5,13 +5,26 @@
  */
 // Bump when the candidate/ranking contract changes so cached Home pages are
 // regenerated lazily instead of silently serving a previous model.
-export const PRODUCTION_RECOMMENDATION_MODEL_VERSION = 29;
+export const PRODUCTION_RECOMMENDATION_MODEL_VERSION = 33;
 
 export const PRODUCTION_RECOMMENDATION_POLICY = {
   candidateLimit: 600,
+  // Candidate retrieval is deliberately a portfolio, not merely the newest
+  // catalog rows. These budgets cap database/RPC work while preserving recall
+  // for long-lived tastes, neighbour signals and worthwhile older releases.
+  candidatePoolLimit: 1_200,
+  freshCandidateLimit: 320,
+  affinityCandidateLimit: 320,
+  signalCandidateLimit: 240,
+  audioCandidateLimit: 240,
+  audioNeighboursPerSeed: 24,
+  minimumAudioSimilarity: 0.2,
   maxHomeShelves: 22,
-  shelfLimit: 16,
-  topPicksLimit: 12,
+  // Home renders a compact preview; the complete ranked collection is kept
+  // for the shelf-detail route behind the disclosure affordance.
+  shelfLimit: 12,
+  shelfDetailLimit: 48,
+  topPicksLimit: 10,
   globalShelfLimit: 12,
   // Pages may grow while the catalog supports distinct, useful topics. The
   // upper bound protects rendering and interaction volume without forcing a
@@ -31,10 +44,16 @@ export const PRODUCTION_RECOMMENDATION_POLICY = {
   collaborativeCandidateLimit: 10_000,
   collaborativeNeighbourLimit: 100,
   minimumHistoryEvents: 3,
+  dailyMixWeights: {
+    taste: 0.65,
+    popularity: 0.15,
+    collaborative: 0.2,
+  },
   weights: {
     artistAffinity: 0.24,
     genreAffinity: 0.18,
     contentSimilarity: 0.18,
+    audioSimilarity: 0.2,
     collaborative: 0.16,
     popularity: 0.12,
     freshness: 0.08,
@@ -60,7 +79,15 @@ export const PRODUCTION_RECOMMENDATION_POLICY = {
       key: 'focus',
       title: 'Focus',
       subtitle: 'Limitless music to help you stay in the zone.',
-      traits: ['focus', 'study', 'concentration', 'instrumental', 'lofi', 'lo-fi', 'ambient'],
+      traits: [
+        'focus',
+        'study',
+        'concentration',
+        'instrumental',
+        'lofi',
+        'lo-fi',
+        'ambient',
+      ],
       genres: ['Ambient', 'Instrumental', 'Classical', 'Jazz', 'Lo-Fi'],
       avoidTraits: ['party', 'workout', 'high-energy'],
       allowGenreFallback: true,
@@ -69,7 +96,15 @@ export const PRODUCTION_RECOMMENDATION_POLICY = {
       key: 'feeling-blue',
       title: 'Feeling Blue',
       subtitle: 'Sad songs that understand exactly how you feel.',
-      traits: ['feeling-blue', 'sad', 'blue', 'melancholy', 'melancholic', 'somber', 'emotional'],
+      traits: [
+        'feeling-blue',
+        'sad',
+        'blue',
+        'melancholy',
+        'melancholic',
+        'somber',
+        'emotional',
+      ],
       genres: ['Ballad', 'Blues', 'Indie'],
       avoidTraits: ['party', 'upbeat', 'feel-good'],
       allowGenreFallback: false,
@@ -79,7 +114,15 @@ export const PRODUCTION_RECOMMENDATION_POLICY = {
       title: 'Energy',
       subtitle: 'Keep it moving with non-stop high-voltage tracks.',
       traits: ['energy', 'energetic', 'upbeat', 'dance', 'workout', 'party'],
-      genres: ['Dance', 'Electronic', 'EDM', 'Hip-Hop', 'Hip-Hop/Rap', 'Rap', 'Rock'],
+      genres: [
+        'Dance',
+        'Electronic',
+        'EDM',
+        'Hip-Hop',
+        'Hip-Hop/Rap',
+        'Rap',
+        'Rock',
+      ],
       avoidTraits: ['sleep', 'calm', 'meditation'],
       allowGenreFallback: true,
     },
@@ -96,7 +139,15 @@ export const PRODUCTION_RECOMMENDATION_POLICY = {
       key: 'relax',
       title: 'Relax',
       subtitle: 'Soothing sounds to help you unwind and breathe easy.',
-      traits: ['relax', 'relaxing', 'calm', 'chill', 'acoustic', 'ambient', 'sleep'],
+      traits: [
+        'relax',
+        'relaxing',
+        'calm',
+        'chill',
+        'acoustic',
+        'ambient',
+        'sleep',
+      ],
       genres: ['Ambient', 'Acoustic', 'Chillout', 'Jazz', 'Classical'],
       avoidTraits: ['workout', 'party', 'high-energy'],
       allowGenreFallback: true,
@@ -105,7 +156,14 @@ export const PRODUCTION_RECOMMENDATION_POLICY = {
       key: 'feel-good',
       title: 'Feel Good',
       subtitle: 'The most uplifting tracks to brighten your day.',
-      traits: ['feel-good', 'happy', 'positive', 'uplifting', 'sunny', 'upbeat'],
+      traits: [
+        'feel-good',
+        'happy',
+        'positive',
+        'uplifting',
+        'sunny',
+        'upbeat',
+      ],
       genres: ['Pop', 'Dance', 'Disco', 'Funk'],
       avoidTraits: ['sad', 'heartbreak', 'melancholy'],
       allowGenreFallback: false,

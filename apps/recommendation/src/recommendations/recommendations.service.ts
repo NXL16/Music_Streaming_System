@@ -21,6 +21,7 @@ import {
   RecommendationQualityAnalyticsResponse,
 } from '@musical/shared-proto';
 import {
+  HERO_SHELF_PREVIEW_LIMIT,
   HOME_SHELF_PREVIEW_LIMIT,
   RECENTLY_PLAYED_CONTEXT_LIMIT,
 } from '@musical/shared-constants';
@@ -35,7 +36,6 @@ import {
   RecommendationInteractionType as PrismaInteractionType,
 } from '../generated/prisma/client';
 import { RecommendationCatalogService } from './recommendation-catalog.service';
-import { ListeningService, TasteProfile } from '../listening/listening.service';
 import { randomUUID } from 'node:crypto';
 import { PRODUCTION_RECOMMENDATION_MODEL_VERSION } from '../generation/production-recommendation-policy';
 import {
@@ -63,7 +63,7 @@ const GLOBAL_TIMEZONE = '*';
 const DEFAULT_DISPLAY_KIND = 'MusicCoverShelf';
 const INTERACTION_DEDUPE_WINDOW_MS = 30_000;
 const SYSTEM_DAILY_MIX_ID_PATTERN = /^daily-mix-[a-f0-9]{32}(?:-\d+)?$/;
-const SYSTEM_STATION_ID_PATTERN = /^station-for-you-[a-f0-9]{32}-\d+$/;
+const MOOD_STATION_ID_PATTERN = /^mood-station-[a-f0-9]{32}-\d+$/;
 const SUPPORTED_DISPLAY_KINDS = new Set([
   'MusicCircleCoverShelf',
   'MusicConcertsEmptyShelf',
@@ -113,7 +113,7 @@ type RecommendationItemRecord = {
     isComplete: boolean;
     isStudioMastered: boolean;
     isPrerelease: boolean;
-    isSingle: boolean;
+    releaseType: string;
     playlistType: string;
     editorialPlaylistKind: string;
     hasCollaboration: boolean;
@@ -160,20 +160,6 @@ type RecommendationPageResourceRecord = Pick<
   sortOrder: number;
 };
 
-type RecommendationScoreSnapshot = {
-  resourceId: string;
-  resourceType: string;
-  artistName: string;
-  genreNames: string[];
-  releaseDate: string;
-};
-
-type UserSongSignal = {
-  playCount: number;
-  skipCount: number;
-  lastPlayedAt: Date;
-};
-
 type AggregateCount = bigint | number;
 
 type RecommendationQualityRow = {
@@ -215,7 +201,6 @@ export class RecommendationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly catalogService: RecommendationCatalogService,
-    private readonly listeningService: ListeningService,
   ) {}
 
   async recordRecommendationInteraction(
@@ -513,6 +498,12 @@ export class RecommendationsService {
               include: {
                 items: {
                   orderBy: { sortOrder: 'asc' },
+                  // Home is a preview surface. Loading every persisted
+                  // overflow item here made the read and serialization cost
+                  // grow with shelf-detail size even though the client can
+                  // render at most twelve cards. The section endpoint keeps
+                  // the unbounded detail query for an explicit See All.
+                  take: HOME_SHELF_PREVIEW_LIMIT,
                   include: { resource: true },
                 },
               },
@@ -529,7 +520,7 @@ export class RecommendationsService {
         return this.emptyResponse(request);
       }
 
-      response = this.homeResponseForPage(
+      response = await this.homeResponseForPage(
         page.name,
         page.locale,
         page.sections,
@@ -555,6 +546,7 @@ export class RecommendationsService {
               include: {
                 items: {
                   orderBy: { sortOrder: 'asc' },
+                  take: HOME_SHELF_PREVIEW_LIMIT,
                   include: { resource: true },
                 },
               },
@@ -570,7 +562,7 @@ export class RecommendationsService {
       if (userPage) {
         response = this.mergeHomeResponses(
           response,
-          this.homeResponseForPage(
+          await this.homeResponseForPage(
             userPage.name,
             userPage.locale,
             userPage.sections,
@@ -589,19 +581,50 @@ export class RecommendationsService {
       : response;
   }
 
-  private homeResponseForPage(
+  private async homeResponseForPage(
     name: string,
     locale: string,
     sections: RecommendationSectionRecord[],
     resourceLinks: RecommendationPageResourceRecord[],
     timezone: string,
     platform: string,
-  ): GetHomeRecommendationsResponse {
+  ): Promise<GetHomeRecommendationsResponse> {
+    const previewSections = this.limitHomePreviewSections(sections);
+    const resources = this.buildResources(previewSections, name, resourceLinks);
+
+    // Album and song cards only carry artist relationship refs. Include the
+    // corresponding artist resources so Home can render their names as links.
+    await this.hydrateReferencedArtists(
+      resources,
+      previewSections.flatMap((section) => section.items),
+    );
+
     return {
-      data: sections.map((section) => this.sectionRef(section, name)),
-      resources: this.buildResources(sections, name, resourceLinks),
+      data: previewSections.map((section) => this.sectionRef(section, name)),
+      resources,
       meta: { name, locale, timezone, platform },
     };
+  }
+
+  /** Home sends a compact, presentation-specific preview; section detail
+   * endpoints intentionally continue to return the complete shelf. */
+  private limitHomePreviewSections(
+    sections: RecommendationSectionRecord[],
+  ): RecommendationSectionRecord[] {
+    return sections.map((section) => {
+      const isHeroShelf =
+        this.resolveDisplayKind(section) === 'MusicNotesHeroShelf';
+      const limit = isHeroShelf
+        ? HERO_SHELF_PREVIEW_LIMIT
+        : HOME_SHELF_PREVIEW_LIMIT;
+
+      return {
+        ...section,
+        items: section.items.slice(0, limit),
+        // Hero shelves are a fixed ten-card rail, never a See All entry point.
+        hasSeeAll: isHeroShelf ? false : section.hasSeeAll,
+      };
+    });
   }
 
   private mergeHomeResponses(
@@ -1642,7 +1665,7 @@ export class RecommendationsService {
   }
 
   private snapshotRecord(
-    snapshot: RecommendationScoreSnapshot &
+    snapshot: Pick<RecommendationItemRecord, 'resourceType' | 'resourceId'> &
       Partial<NonNullable<RecommendationItemRecord['resource']>>,
   ): RecommendationItemRecord {
     return {
@@ -1652,189 +1675,6 @@ export class RecommendationsService {
       isPrimary: false,
       resource: snapshot as NonNullable<RecommendationItemRecord['resource']>,
     };
-  }
-
-  private async buildScoreContext(
-    userId: string,
-    response: GetHomeRecommendationsResponse,
-    profile: TasteProfile,
-  ) {
-    const refs = this.responseContentRefs(response);
-    const snapshotKeys = refs.map((ref) => ({
-      resourceType: ref.type,
-      resourceId: ref.id,
-    }));
-    const snapshots = snapshotKeys.length
-      ? await this.prisma.recommendationResourceSnapshot.findMany({
-          where: {
-            OR: snapshotKeys,
-          },
-          select: {
-            resourceId: true,
-            resourceType: true,
-            artistName: true,
-            genreNames: true,
-            releaseDate: true,
-          },
-        })
-      : [];
-    const snapshotByKey = new Map(
-      snapshots.map((snapshot) => [
-        this.resourceKey(snapshot.resourceType, snapshot.resourceId),
-        snapshot,
-      ]),
-    );
-
-    const userSignals = await this.prisma.userListeningStats.findMany({
-      where: { userId },
-      select: {
-        songId: true,
-        playCount: true,
-        skipCount: true,
-        lastPlayedAt: true,
-      },
-    });
-    const songSignals = new Map<string, UserSongSignal>(
-      userSignals.map((signal) => [
-        signal.songId,
-        {
-          playCount: signal.playCount,
-          skipCount: signal.skipCount,
-          lastPlayedAt: signal.lastPlayedAt,
-        },
-      ]),
-    );
-
-    const globalAlbums = await this.listeningService.getTopAlbumsGlobal(
-      30,
-      100,
-    );
-    const albumNameToId = await this.albumNameToId(
-      globalAlbums
-        .filter((album) => !album.albumId)
-        .map((album) => album.albumName),
-    );
-    const popularityByKey = new Map<string, number>();
-    const maxPlays = Number(globalAlbums[0]?.totalPlays ?? 0n) || 1;
-    for (const album of globalAlbums) {
-      const albumId = album.albumId || albumNameToId.get(album.albumName);
-      if (!albumId) continue;
-      popularityByKey.set(
-        `albums:${albumId}`,
-        Number(album.totalPlays) / maxPlays,
-      );
-    }
-
-    const recentAlbumIds = await this.recentAlbumIds(userId);
-
-    const artistWeights = new Map(
-      profile.artists.map((a) => [a.name, a.weight]),
-    );
-    const genreWeights = new Map(profile.genres.map((g) => [g.name, g.weight]));
-
-    return {
-      profile,
-      artistWeights,
-      genreWeights,
-      snapshotByKey,
-      songSignals,
-      popularityByKey,
-      recentAlbumIds,
-    };
-  }
-
-  private scoreRecommendationRef(
-    ref: RecommendationRef,
-    context: Awaited<ReturnType<RecommendationsService['buildScoreContext']>>,
-  ): number {
-    const key = `${ref.type}:${ref.id}`;
-    const snapshot = context.snapshotByKey.get(key);
-    const artistScore = snapshot?.artistName
-      ? (context.artistWeights.get(snapshot.artistName) ?? 0)
-      : 0;
-    const genreScore = snapshot?.genreNames?.length
-      ? Math.min(
-          1,
-          snapshot.genreNames.reduce(
-            (total, genre) => total + (context.genreWeights.get(genre) ?? 0),
-            0,
-          ),
-        )
-      : 0;
-    const popularityScore = context.popularityByKey.get(key) ?? 0;
-    const recentScore = context.recentAlbumIds.has(ref.id) ? 1 : 0;
-    const freshnessScore = this.releaseFreshnessScore(snapshot?.releaseDate);
-    const skipPenalty =
-      ref.type === 'songs'
-        ? this.skipPenalty(context.songSignals.get(ref.id))
-        : 1;
-
-    return (
-      (popularityScore * 0.35 +
-        artistScore * 0.22 +
-        genreScore * 0.18 +
-        recentScore * 0.15 +
-        freshnessScore * 0.1) *
-      skipPenalty
-    );
-  }
-
-  private responseContentRefs(
-    response: GetHomeRecommendationsResponse,
-  ): RecommendationRef[] {
-    const sections = response.resources?.personalRecommendation ?? {};
-    const seen = new Set<string>();
-    return Object.values(sections).flatMap((section) => {
-      const refs = section.relationships?.contents?.data ?? [];
-      return refs.filter((ref) => {
-        const key = `${ref.type}:${ref.id}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-    });
-  }
-
-  private async albumNameToId(
-    albumNames: string[],
-  ): Promise<Map<string, string>> {
-    if (albumNames.length === 0) return new Map();
-    const albums = await this.prisma.recommendationResourceSnapshot.findMany({
-      where: {
-        resourceType: 'albums',
-        name: { in: albumNames },
-      },
-      select: { name: true, resourceId: true },
-    });
-    return new Map(albums.map((album) => [album.name, album.resourceId]));
-  }
-
-  private async recentAlbumIds(userId: string): Promise<Set<string>> {
-    const recent = await this.listeningService.getRecentlyPlayed(userId, 30);
-    const directAlbumIds = recent.map((item) => item.albumId).filter(Boolean);
-    const albumNames = [
-      ...new Set(
-        recent
-          .filter((item) => !item.albumId)
-          .map((item) => item.albumName)
-          .filter(Boolean),
-      ),
-    ];
-    const nameToId = await this.albumNameToId(albumNames);
-    return new Set([...directAlbumIds, ...nameToId.values()]);
-  }
-
-  private releaseFreshnessScore(releaseDate: string | undefined): number {
-    if (!releaseDate) return 0;
-    const releasedAt = new Date(releaseDate).getTime();
-    if (!Number.isFinite(releasedAt)) return 0;
-    const ageDays = Math.max(0, (Date.now() - releasedAt) / 86_400_000);
-    return Math.max(0, 1 - ageDays / 120);
-  }
-
-  private skipPenalty(signal: UserSongSignal | undefined): number {
-    if (!signal || signal.playCount <= 0) return 1;
-    return Math.max(0.35, 1 - signal.skipCount / signal.playCount);
   }
 
   private mapSectionResource(
@@ -2027,7 +1867,7 @@ export class RecommendationsService {
           isComplete: resource?.isComplete ?? false,
           isStudioMastered: resource?.isStudioMastered ?? false,
           isPrerelease: resource?.isPrerelease ?? false,
-          isSingle: resource?.isSingle ?? false,
+          releaseType: resource?.releaseType || 'album',
           plainEditorialNotes: this.editorialNotes(resource),
           recordLabel: resource?.recordLabel || undefined,
           releaseDate: resource?.releaseDate || undefined,
@@ -2065,6 +1905,11 @@ export class RecommendationsService {
           plainEditorialNotes: this.editorialNotes(resource),
           radioUrl: resource?.radioUrl || undefined,
           requiresSubscription: resource?.requiresSubscription ?? false,
+          stationArtworkReady:
+            resource?.stationKind === 'artist-context'
+              ? this.jsonObject(resource.attributes)?.stationArtworkReady ===
+                true
+              : undefined,
         });
       case 'editorial-items':
         return this.compactObject({
@@ -2244,7 +2089,6 @@ export class RecommendationsService {
       'isComplete',
       'isStudioMastered',
       'isPrerelease',
-      'isSingle',
       'hasCollaboration',
       'isChart',
       'supportsSing',
@@ -2253,6 +2097,10 @@ export class RecommendationsService {
     ] as const) {
       this.optionalBoolean(attributes[field], `resource.attributes.${field}`);
     }
+    this.optionalReleaseType(
+      attributes.releaseType,
+      'resource.attributes.releaseType',
+    );
 
     this.optionalNonNegativeInteger(
       attributes.trackCount,
@@ -2656,7 +2504,13 @@ export class RecommendationsService {
       isComplete: this.booleanValue(attributes.isComplete),
       isStudioMastered: this.booleanValue(attributes.isStudioMastered),
       isPrerelease: this.booleanValue(attributes.isPrerelease),
-      isSingle: this.booleanValue(attributes.isSingle),
+      // Catalog owns release classification. The fallback accepts an old
+      // imported payload during a rolling deployment, without persisting a
+      // second boolean source of truth.
+      releaseType: this.releaseTypeValue(
+        attributes.releaseType,
+        attributes.isSingle,
+      ),
       playlistType: this.stringValue(attributes.playlistType),
       editorialPlaylistKind: this.stringValue(attributes.editorialPlaylistKind),
       hasCollaboration: this.booleanValue(attributes.hasCollaboration),
@@ -2731,7 +2585,7 @@ export class RecommendationsService {
     { column: 'isComplete', kind: 'bool' },
     { column: 'isStudioMastered', kind: 'bool' },
     { column: 'isPrerelease', kind: 'bool' },
-    { column: 'isSingle', kind: 'bool' },
+    { column: 'releaseType', kind: 'text' },
     { column: 'playlistType', kind: 'text' },
     { column: 'editorialPlaylistKind', kind: 'text' },
     { column: 'hasCollaboration', kind: 'bool' },
@@ -3422,6 +3276,22 @@ export class RecommendationsService {
     return typeof value === 'boolean' ? value : false;
   }
 
+  private optionalReleaseType(value: unknown, field: string): void {
+    if (value === undefined || value === null || value === '') return;
+
+    if (value !== 'album' && value !== 'ep' && value !== 'single') {
+      this.invalidArgument(`${field} must be album, ep, or single`);
+    }
+  }
+
+  private releaseTypeValue(value: unknown, legacyIsSingle: unknown): string {
+    if (value === 'album' || value === 'ep' || value === 'single') {
+      return value;
+    }
+
+    return this.booleanValue(legacyIsSingle) ? 'single' : 'album';
+  }
+
   private resourceKey(resourceType: string, resourceId: string): string {
     return `${resourceType}:${resourceId}`;
   }
@@ -3429,7 +3299,7 @@ export class RecommendationsService {
   private isSystemGeneratedRef(ref: { type: string; id: string }): boolean {
     return (
       (ref.type === 'playlists' && SYSTEM_DAILY_MIX_ID_PATTERN.test(ref.id)) ||
-      (ref.type === 'stations' && SYSTEM_STATION_ID_PATTERN.test(ref.id))
+      (ref.type === 'stations' && MOOD_STATION_ID_PATTERN.test(ref.id))
     );
   }
 

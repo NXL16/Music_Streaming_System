@@ -31,6 +31,26 @@ enum RecommendationInteractionType {
   DISMISS
 }
 
+// Product actions are stored independently from listening telemetry so their
+// preference contribution is explicit, reversible and safe to extend.
+enum PreferenceEventType {
+  LIBRARY_ADDED
+  LIBRARY_REMOVED
+  ALBUM_FAVOURITED
+  ALBUM_UNFAVOURITED
+  SONG_FAVOURITED
+  SONG_UNFAVOURITED
+  PLAYLIST_FAVOURITED
+  PLAYLIST_UNFAVOURITED
+  PLAYLIST_TRACK_ADDED
+  PLAYLIST_TRACK_REMOVED
+  ARTIST_FOLLOWED
+  ARTIST_UNFOLLOWED
+  SEARCH_CLICKED
+  CONTENT_HIDDEN
+  QUEUE_ADDED
+}
+
 model RecommendationPage {
   id          String                   @id @default(uuid())
   name        String                   @db.VarChar(64) // listen-now
@@ -68,6 +88,19 @@ model RecommendationGenerationLease {
 
   @@index([expiresAt])
   @@map("recommendation_generation_leases")
+}
+
+// Cursor for the rebuildable Qdrant audio index. This is deliberately tiny:
+// vector data stays owned by Song; deleting this row simply causes a reindex.
+model AudioVectorIndexState {
+  id             String   @id @db.VarChar(128)
+  collectionName String   @db.VarChar(128)
+  cursor         String   @default("") @db.VarChar(512)
+  synchronizedAt DateTime? @db.Timestamptz
+  createdAt      DateTime @default(now()) @db.Timestamptz
+  updatedAt      DateTime @updatedAt @db.Timestamptz
+
+  @@map("audio_vector_index_states")
 }
 
 model RecommendationPageResource {
@@ -155,6 +188,51 @@ model RecommendationInteraction {
   @@map("recommendation_interactions")
 }
 
+// The immutable event log is the source of truth for non-listening taste
+// signals. `eventId` makes retries idempotent; compensating events reverse a
+// previous action instead of deleting history needed for analytics.
+model UserPreferenceEvent {
+  id           String              @id @default(uuid())
+  userId       String              @db.VarChar(128)
+  eventId      String              @unique @db.VarChar(128)
+  eventType    PreferenceEventType
+  resourceType String              @db.VarChar(64)
+  resourceId   String              @db.VarChar(128)
+  weight       Float
+  occurredAt   DateTime            @default(now()) @db.Timestamptz
+  metadata     Json?
+
+  @@index([userId, occurredAt])
+  @@index([userId, resourceType, resourceId, occurredAt])
+  @@index([resourceType, resourceId, occurredAt])
+  @@map("user_preference_events")
+}
+
+// Current opt-out state is deliberately separate from the immutable event log.
+// The log explains why a profile changed; this table answers the latency-
+// sensitive question used while generating Home: must this resource be absent?
+model UserContentPreference {
+  userId       String   @db.VarChar(128)
+  resourceType String   @db.VarChar(64)
+  resourceId   String   @db.VarChar(128)
+  isHidden     Boolean  @default(true)
+  updatedAt    DateTime @updatedAt @db.Timestamptz
+
+  @@id([userId, resourceType, resourceId])
+  @@index([userId, isHidden, updatedAt])
+  @@map("user_content_preferences")
+}
+
+model UserArtistFollow {
+  userId    String   @db.VarChar(128)
+  artistId  String   @db.VarChar(128)
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  @@id([userId, artistId])
+  @@index([userId, createdAt])
+  @@map("user_artist_follows")
+}
+
 model RecommendationResourceSnapshot {
   id           String @id @default(uuid())
   resourceType String @db.VarChar(64)
@@ -200,7 +278,7 @@ model RecommendationResourceSnapshot {
   isComplete         Boolean @default(false)
   isStudioMastered   Boolean @default(false)
   isPrerelease       Boolean @default(false)
-  isSingle           Boolean @default(false)
+  releaseType        String  @default("album") @db.VarChar(16)
 
   playlistType          String  @default("") @db.VarChar(64)
   editorialPlaylistKind String  @default("") @db.VarChar(64)
@@ -276,6 +354,7 @@ model ListeningEvent {
   @@index([userId, createdAt])
   @@index([songId, createdAt])
   @@index([albumId, createdAt])
+  @@index([createdAt, eventType, albumId])
   @@index([playlistId, createdAt])
   @@index([stationId, createdAt])
   @@index([createdAt])
@@ -289,7 +368,9 @@ model UserListeningStats {
   playCount              Int      @default(0)
   completionCount        Int      @default(0)
   skipCount              Int      @default(0)
+  earlySkipCount         Int      @default(0)
   totalListenSec         Int      @default(0)
+  totalEligibleSec       Int      @default(0)
   lastPlayedAt           DateTime @default(now()) @db.Timestamptz
   songTitle              String   @default("") @db.Text
   artistName             String   @default("") @db.Text

@@ -24,6 +24,20 @@ import {
   SystemStationArtworkResponse,
   CleanupPlaylistHistoryRequest,
   CleanupPlaylistHistoryResponse,
+  RecordPreferenceEventRequest,
+  RecordPreferenceEventResponse,
+  SetArtistFollowRequest,
+  GetArtistFollowRequest,
+  ArtistFollowResponse,
+  CreateSongStationRequest,
+  GetSongStationRequest,
+  SongStationResponse,
+  GetSongStationTracksRequest,
+  SongStationTracksResponse,
+  CreateArtistStationRequest,
+  GetArtistStationRequest,
+  ArtistStationResponse,
+  GetArtistStationTracksRequest,
 } from '@musical/shared-proto';
 import { RecommendationsService } from './recommendations.service';
 import { ListeningService } from '../listening/listening.service';
@@ -33,6 +47,9 @@ import { RecommendationRpcMetricsInterceptor } from '../common/observability/rec
 import { SystemStationArtworkService } from './system-station-artwork.service';
 import { developmentCacheDisabled } from '../common/configs/development-cache';
 import { RecommendationEngineService } from '../generation/recommendation-engine.service';
+import { PreferenceService } from '../preferences/preference.service';
+import { SongStationService } from '../stations/song-station.service';
+import { ArtistStationService } from '../stations/artist-station.service';
 
 @Controller()
 @UseGuards(InternalGrpcGuard)
@@ -47,6 +64,9 @@ export class RecommendationsController implements RecommendationServiceControlle
     private readonly generationService: GenerationService,
     private readonly systemStationArtworkService: SystemStationArtworkService,
     private readonly recommendationEngine: RecommendationEngineService,
+    private readonly preferenceService: PreferenceService,
+    private readonly songStationService: SongStationService,
+    private readonly artistStationService: ArtistStationService,
   ) {}
 
   async cleanupPlaylistHistory(
@@ -57,6 +77,62 @@ export class RecommendationsController implements RecommendationServiceControlle
       request.playlistId,
     );
     return { success: true };
+  }
+
+  createSongStation(
+    request: CreateSongStationRequest,
+  ): Promise<SongStationResponse> {
+    return this.songStationService.create(
+      request.userId,
+      request.songId,
+      request.sourceAlbumId,
+      request.stationArtworkAssetId,
+      request.stationArtworkBgColor,
+    );
+  }
+
+  getSongStation(request: GetSongStationRequest): Promise<SongStationResponse> {
+    return this.songStationService.get(request.userId, request.stationId);
+  }
+
+  getSongStationTracks(
+    request: GetSongStationTracksRequest,
+  ): Promise<SongStationTracksResponse> {
+    return this.songStationService.getTracks(
+      request.userId,
+      request.stationId,
+      request.excludedSongIds,
+      request.limit,
+    );
+  }
+
+  createArtistStation(
+    request: CreateArtistStationRequest,
+  ): Promise<ArtistStationResponse> {
+    return this.artistStationService.create(
+      request.userId,
+      request.artistId,
+      request.stationArtworkAssetId,
+      request.stationArtworkBgColor,
+      request.artistOnly,
+    );
+  }
+
+  getArtistStation(
+    request: GetArtistStationRequest,
+  ): Promise<ArtistStationResponse> {
+    return this.artistStationService.get(request.userId, request.stationId);
+  }
+
+  getArtistStationTracks(
+    request: GetArtistStationTracksRequest,
+  ): Promise<SongStationTracksResponse> {
+    return this.artistStationService.getTracks(
+      request.userId,
+      request.stationId,
+      request.excludedSongIds,
+      request.limit,
+    );
   }
 
   async getAlbumRelatedRecommendations(
@@ -189,6 +265,31 @@ export class RecommendationsController implements RecommendationServiceControlle
     request: RecordRecommendationInteractionRequest,
   ): Promise<RecordRecommendationInteractionResponse> {
     return this.recommendationsService.recordRecommendationInteraction(request);
+  }
+
+  recordPreferenceEvent(
+    request: RecordPreferenceEventRequest,
+  ): Promise<RecordPreferenceEventResponse> {
+    return this.preferenceService.record(request);
+  }
+  listContentPreferences(request: { userId: string }) {
+    return this.preferenceService.listHiddenContent(request.userId);
+  }
+  setArtistFollow(
+    request: SetArtistFollowRequest,
+  ): Promise<ArtistFollowResponse> {
+    return this.preferenceService.setArtistFollow(
+      request.userId,
+      request.artistId,
+      request.isFollowed,
+    );
+  }
+  getArtistFollow(
+    request: GetArtistFollowRequest,
+  ): Promise<ArtistFollowResponse> {
+    return this.preferenceService
+      .isArtistFollowed(request.userId, request.artistId)
+      .then((result) => ({ success: true, ...result, changed: false }));
   }
 
   generateRecommendations(

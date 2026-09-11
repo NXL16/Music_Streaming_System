@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { developmentCacheDisabled } from '../common/configs/development-cache';
 import { RecommendationCatalogService } from './recommendation-catalog.service';
 import { RecommendationsService } from './recommendations.service';
+import { AudioVectorSynchronizationService } from '../vector/audio-vector-synchronization.service';
 
 const RESOURCE_TYPES = ['albums', 'songs', 'artists', 'playlists'] as const;
 const PAGE_SIZE = 100;
@@ -22,6 +23,7 @@ export class CatalogSynchronizationService {
   constructor(
     private readonly catalogService: RecommendationCatalogService,
     private readonly recommendationsService: RecommendationsService,
+    private readonly audioVectorSynchronizationService: AudioVectorSynchronizationService,
   ) {}
 
   async ensureFreshCatalog(): Promise<CatalogSynchronizationResult> {
@@ -32,7 +34,8 @@ export class CatalogSynchronizationService {
     }
     if (
       this.lastResult &&
-      Date.now() - this.lastResult.synchronizedAt.getTime() < MIN_SYNC_INTERVAL_MS
+      Date.now() - this.lastResult.synchronizedAt.getTime() <
+        MIN_SYNC_INTERVAL_MS
     ) {
       return this.lastResult;
     }
@@ -98,6 +101,15 @@ export class CatalogSynchronizationService {
       resourcesByType,
       synchronizedAt: new Date(),
     };
+    try {
+      await this.audioVectorSynchronizationService.ensureFreshIndex();
+    } catch (error) {
+      // Vector search is additive. Catalog/Home must remain available while an
+      // external Qdrant deployment is starting or temporarily unavailable.
+      this.logger.warn(
+        `Audio vector index synchronization failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     this.lastResult = result;
     this.logger.log(
       `Synchronized ${result.totalResources} catalog resources from ${storefront}`,

@@ -20,11 +20,19 @@ import { RecommendationRpcMetricsService } from '../common/observability/recomme
 import { RecommendationRpcMetricsInterceptor } from '../common/observability/recommendation-rpc-metrics.interceptor';
 import { SystemStationArtworkService } from './system-station-artwork.service';
 import { GenerationLeaseService } from '../generation/generation-lease.service';
+import { PreferencesModule } from '../preferences/preferences.module';
+import { QdrantAudioVectorService } from '../vector/qdrant-audio-vector.service';
+import { AudioVectorSynchronizationService } from '../vector/audio-vector-synchronization.service';
+import { SongStationService } from '../stations/song-station.service';
+import { ArtistStationService } from '../stations/artist-station.service';
+
+const CATALOG_GRPC_MAX_MESSAGE_LENGTH = 16 * 1024 * 1024;
 
 @Module({
   imports: [
     DatabaseModule,
     ListeningModule,
+    PreferencesModule,
     ClientsModule.registerAsync([
       {
         name: 'SONG_SERVICE',
@@ -37,6 +45,8 @@ import { GenerationLeaseService } from '../generation/generation-lease.service';
             package: SONG.PACKAGE,
             protoPath: resolveProtoPath(SONG.PROTO_FILE),
             loader: GRPC_LOADER_OPTIONS,
+            maxSendMessageLength: CATALOG_GRPC_MAX_MESSAGE_LENGTH,
+            maxReceiveMessageLength: CATALOG_GRPC_MAX_MESSAGE_LENGTH,
           },
         }),
       },
@@ -67,6 +77,10 @@ import { GenerationLeaseService } from '../generation/generation-lease.service';
     RecommendationRpcMetricsService,
     RecommendationRpcMetricsInterceptor,
     SystemStationArtworkService,
+    QdrantAudioVectorService,
+    AudioVectorSynchronizationService,
+    SongStationService,
+    ArtistStationService,
     InternalGrpcGuard,
   ],
   exports: [RecommendationsService],
