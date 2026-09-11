@@ -2,6 +2,7 @@ import type { UserRole } from '@musical/shared-types';
 
 export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
   USER: [],
+  ARTIST_PENDING: [],
   ARTIST: [],
   SUPER_ADMIN: [
     'user.read',

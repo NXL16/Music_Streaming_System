@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Post,
@@ -16,19 +17,26 @@ import type {
   GetRecommendationPageForAdminRequest,
   PublishRecommendationPageRequest,
   ReplaceHomeRecommendationsRequest,
+  SongStationResponse,
+  ArtistStationResponse,
 } from '@musical/shared-proto';
+import { randomUUID } from 'crypto';
 import {
   RecommendationPageScope,
   RecommendationPageStatus,
   RecommendationPresentationMode,
   ListeningEventType,
   RecommendationInteractionType,
+  PreferenceEventType,
 } from '@musical/shared-proto';
 import { StrictJwtAuthGuard } from '../common/guards/strict-jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { RecommendationsService } from './recommendations.service';
+import { SongStationArtworkService } from './song-station-artwork.service';
+import { ArtistStationArtworkService } from './artist-station-artwork.service';
+import { PREFERENCE_SIGNAL_WEIGHT } from '@musical/shared-constants';
 
 function normalizePageScope(value: unknown): RecommendationPageScope {
   if (typeof value === 'number') return value;
@@ -47,6 +55,33 @@ function normalizePageScope(value: unknown): RecommendationPageScope {
     default:
       throw new BadRequestException('scope must be GLOBAL or USER');
   }
+}
+
+function publicSongStationResponse(
+  station: SongStationResponse,
+): Omit<SongStationResponse, 'seedArtworkUrl' | 'seedSongId'> {
+  return Object.fromEntries(
+    Object.entries(station).filter(
+      ([key, value]) =>
+        value !== undefined && key !== 'seedArtworkUrl' && key !== 'seedSongId',
+    ),
+  ) as Omit<SongStationResponse, 'seedArtworkUrl' | 'seedSongId'>;
+}
+
+function publicArtistStationResponse(
+  station: ArtistStationResponse,
+): Omit<ArtistStationResponse, 'featuredArtistArtworkUrls' | 'seedArtistId'> {
+  return Object.fromEntries(
+    Object.entries(station).filter(
+      ([key, value]) =>
+        value !== undefined &&
+        key !== 'featuredArtistArtworkUrls' &&
+        key !== 'seedArtistId',
+    ),
+  ) as Omit<
+    ArtistStationResponse,
+    'featuredArtistArtworkUrls' | 'seedArtistId'
+  >;
 }
 
 function normalizePresentationMode(
@@ -108,19 +143,28 @@ function normalizeEventType(value: unknown): ListeningEventType {
       return ListeningEventType.LISTENING_EVENT_TYPE_PLAY_COMPLETE;
     case 'SKIP':
       return ListeningEventType.LISTENING_EVENT_TYPE_SKIP;
+    case 'PLAY_STOPPED':
+      return ListeningEventType.LISTENING_EVENT_TYPE_PLAY_STOPPED;
     default:
       return ListeningEventType.LISTENING_EVENT_TYPE_PLAY_START;
   }
 }
 
-function normalizeInteractionType(value: unknown): RecommendationInteractionType {
+function normalizeInteractionType(
+  value: unknown,
+): RecommendationInteractionType {
   if (typeof value === 'number') return value;
   switch (String(value).toUpperCase()) {
-    case 'IMPRESSION': return RecommendationInteractionType.RECOMMENDATION_INTERACTION_TYPE_IMPRESSION;
-    case 'OPEN': return RecommendationInteractionType.RECOMMENDATION_INTERACTION_TYPE_OPEN;
-    case 'PLAY': return RecommendationInteractionType.RECOMMENDATION_INTERACTION_TYPE_PLAY;
-    case 'DISMISS': return RecommendationInteractionType.RECOMMENDATION_INTERACTION_TYPE_DISMISS;
-    default: return RecommendationInteractionType.RECOMMENDATION_INTERACTION_TYPE_UNSPECIFIED;
+    case 'IMPRESSION':
+      return RecommendationInteractionType.RECOMMENDATION_INTERACTION_TYPE_IMPRESSION;
+    case 'OPEN':
+      return RecommendationInteractionType.RECOMMENDATION_INTERACTION_TYPE_OPEN;
+    case 'PLAY':
+      return RecommendationInteractionType.RECOMMENDATION_INTERACTION_TYPE_PLAY;
+    case 'DISMISS':
+      return RecommendationInteractionType.RECOMMENDATION_INTERACTION_TYPE_DISMISS;
+    default:
+      return RecommendationInteractionType.RECOMMENDATION_INTERACTION_TYPE_UNSPECIFIED;
   }
 }
 
@@ -129,6 +173,8 @@ function normalizeInteractionType(value: unknown): RecommendationInteractionType
 export class RecommendationsController {
   constructor(
     private readonly recommendationsService: RecommendationsService,
+    private readonly songStationArtworkService: SongStationArtworkService,
+    private readonly artistStationArtworkService: ArtistStationArtworkService,
   ) {}
 
   @Get()
@@ -148,6 +194,39 @@ export class RecommendationsController {
       timezone: timezone || '+07:00',
       platform: platform || 'web',
     });
+  }
+
+  @Get('suggest-less')
+  async listSuggestLess(@Req() req: Request) {
+    const user = req.user as JwtUser;
+    return this.recommendationsService.listContentPreferences(user.userId);
+  }
+
+  @Get('song-stations/:stationId')
+  async getSongStation(
+    @Req() req: Request,
+    @Param('stationId') stationId: string,
+  ) {
+    const user = req.user as JwtUser;
+    const station = await this.recommendationsService.getSongStation({
+      userId: user.userId,
+      stationId,
+    });
+    return publicSongStationResponse(station);
+  }
+
+  @Get('artist-stations/:stationId')
+  async getArtistStation(
+    @Req() req: Request,
+    @Param('stationId') stationId: string,
+  ) {
+    const user = req.user as JwtUser;
+    return publicArtistStationResponse(
+      await this.recommendationsService.getArtistStation({
+        userId: user.userId,
+        stationId,
+      }),
+    );
   }
 
   @Get(':id')
@@ -224,12 +303,203 @@ export class RecommendationsController {
     });
   }
 
+  @Post('song-stations')
+  async createSongStation(
+    @Req() req: Request,
+    @Body() body: { songId?: string; sourceAlbumId?: string },
+  ) {
+    const songId = body.songId?.trim();
+    if (!songId) {
+      throw new BadRequestException('SONG_STATION_SEED_REQUIRED');
+    }
+    const user = req.user as JwtUser;
+    const station = await this.recommendationsService.createSongStation({
+      userId: user.userId,
+      songId,
+      sourceAlbumId: body.sourceAlbumId?.trim() ?? '',
+      stationArtworkAssetId: '',
+      stationArtworkBgColor: '',
+    });
+    return publicSongStationResponse(station);
+  }
+
+  @Post('artist-stations')
+  async createArtistStation(
+    @Req() req: Request,
+    @Body() body: { artistId?: string; artistOnly?: boolean },
+  ) {
+    const artistId = body.artistId?.trim();
+    if (!artistId)
+      throw new BadRequestException('ARTIST_STATION_SEED_REQUIRED');
+    const user = req.user as JwtUser;
+    return publicArtistStationResponse(
+      await this.recommendationsService.createArtistStation({
+        userId: user.userId,
+        artistId,
+        stationArtworkAssetId: '',
+        stationArtworkBgColor: '',
+        artistOnly: body.artistOnly === true,
+      }),
+    );
+  }
+
+  @Post('artist-stations/:stationId/artwork')
+  async renderArtistStationArtwork(
+    @Req() req: Request,
+    @Param('stationId') stationId: string,
+    @Body() body: { primaryArtworkUrl?: unknown },
+  ) {
+    const user = req.user as JwtUser;
+    const draft = await this.recommendationsService.getArtistStation({
+      userId: user.userId,
+      stationId,
+    });
+    if (draft.artworkReady) {
+      // Older canonical Station rows can already own a ready asset while
+      // their Home snapshot predates `stationArtworkReady`. Rebind the asset
+      // through Recommendation once so Home can expose the ready state.
+      return publicArtistStationResponse(
+        await this.recommendationsService.createArtistStation({
+          userId: user.userId,
+          artistId: draft.seedArtistId,
+          stationArtworkAssetId: '',
+          stationArtworkBgColor: '',
+          artistOnly: draft.artistOnly,
+        }),
+      );
+    }
+    if (!draft.seedArtistId)
+      throw new BadRequestException('ARTIST_STATION_SEED_REQUIRED');
+    const primaryArtworkUrl =
+      this.trustedArtworkUrl(body.primaryArtworkUrl) ??
+      draft.featuredArtistArtworkUrls[0];
+    const artwork = await this.artistStationArtworkService.create({
+      actorUserId: user.userId,
+      stationId: draft.stationId,
+      artworkUrls: draft.artistOnly
+        ? [primaryArtworkUrl]
+        : [primaryArtworkUrl, ...draft.featuredArtistArtworkUrls.slice(1)],
+      layout: draft.artistOnly ? 'portrait' : 'composite',
+    });
+    return publicArtistStationResponse(
+      await this.recommendationsService.createArtistStation({
+        userId: user.userId,
+        artistId: draft.seedArtistId,
+        stationArtworkAssetId: artwork.assetId,
+        stationArtworkBgColor: artwork.backgroundColor,
+        artistOnly: draft.artistOnly,
+      }),
+    );
+  }
+
+  private trustedArtworkUrl(value: unknown): string | undefined {
+    if (typeof value !== 'string' || !value) return undefined;
+    try {
+      const url = new URL(value);
+      return url.protocol === 'https:' && url.hostname === 'r2.404hz.me'
+        ? url.toString()
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  @Post('song-stations/:stationId/artwork')
+  async renderSongStationArtwork(
+    @Req() req: Request,
+    @Param('stationId') stationId: string,
+  ) {
+    const user = req.user as JwtUser;
+    const draft = await this.recommendationsService.getSongStation({
+      userId: user.userId,
+      stationId,
+    });
+    // Rendering is an expensive asset job. This endpoint is safe to retry and
+    // must never regenerate a Station cover that is already ready.
+    if (draft.artworkReady) {
+      return publicSongStationResponse(draft);
+    }
+    if (!draft.seedSongId || !draft.seedArtworkUrl) {
+      throw new BadRequestException('SONG_STATION_ARTWORK_SOURCE_UNAVAILABLE');
+    }
+    const artwork = await this.songStationArtworkService.create({
+      actorUserId: user.userId,
+      stationId: draft.stationId,
+      sourceArtworkUrl: draft.seedArtworkUrl,
+    });
+    const station = await this.recommendationsService.createSongStation({
+      userId: user.userId,
+      songId: draft.seedSongId,
+      sourceAlbumId: draft.seedAlbumId,
+      stationArtworkAssetId: artwork.assetId,
+      stationArtworkBgColor: artwork.backgroundColor,
+    });
+    return publicSongStationResponse(station);
+  }
+
+  @Post('song-stations/:stationId/tracks')
+  async getSongStationTracks(
+    @Req() req: Request,
+    @Param('stationId') stationId: string,
+    @Body() body: { excludedSongIds?: unknown; limit?: unknown },
+  ) {
+    const excludedSongIds = Array.isArray(body.excludedSongIds)
+      ? body.excludedSongIds
+          .filter((songId): songId is string => typeof songId === 'string')
+          .map((songId) => songId.trim())
+          .filter(Boolean)
+          .slice(0, 1_000)
+      : [];
+    const requestedLimit =
+      typeof body.limit === 'number' && Number.isInteger(body.limit)
+        ? body.limit
+        : 20;
+    const user = req.user as JwtUser;
+    return this.recommendationsService.getSongStationTracks({
+      userId: user.userId,
+      stationId,
+      excludedSongIds,
+      limit: Math.min(30, Math.max(1, requestedLimit)),
+    });
+  }
+
+  @Post('artist-stations/:stationId/tracks')
+  async getArtistStationTracks(
+    @Req() req: Request,
+    @Param('stationId') stationId: string,
+    @Body() body: { excludedSongIds?: unknown; limit?: unknown },
+  ) {
+    const excludedSongIds = Array.isArray(body.excludedSongIds)
+      ? body.excludedSongIds
+          .filter((id): id is string => typeof id === 'string')
+          .map((id) => id.trim())
+          .filter(Boolean)
+          .slice(0, 1_000)
+      : [];
+    const limit =
+      typeof body.limit === 'number' && Number.isInteger(body.limit)
+        ? Math.min(30, Math.max(1, body.limit))
+        : 20;
+    const user = req.user as JwtUser;
+    return this.recommendationsService.getArtistStationTracks({
+      userId: user.userId,
+      stationId,
+      excludedSongIds,
+      limit,
+    });
+  }
+
   @Post('interactions')
   recordRecommendationInteraction(
     @Req() req: Request,
-    @Body() body: {
-      sectionId: string; resourceType: string; resourceId: string;
-      position?: number; modelVersion?: number; eventType: string;
+    @Body()
+    body: {
+      sectionId: string;
+      resourceType: string;
+      resourceId: string;
+      position?: number;
+      modelVersion?: number;
+      eventType: string;
     },
   ) {
     const user = req.user as JwtUser;
@@ -242,6 +512,94 @@ export class RecommendationsController {
       modelVersion: body.modelVersion ?? 1,
       eventType: normalizeInteractionType(body.eventType),
     });
+  }
+
+  @Post('suggest-less')
+  async setSuggestLess(
+    @Req() req: Request,
+    @Body()
+    body: { resourceType?: string; resourceId?: string; active?: boolean },
+  ) {
+    const resourceType = body.resourceType?.trim();
+    const resourceId = body.resourceId?.trim();
+    if (!resourceType || !resourceId) {
+      throw new BadRequestException('SUGGEST_LESS_RESOURCE_REQUIRED');
+    }
+    if (!['songs', 'albums', 'artists', 'playlists'].includes(resourceType)) {
+      throw new BadRequestException('SUGGEST_LESS_RESOURCE_TYPE_INVALID');
+    }
+
+    const user = req.user as JwtUser;
+    return this.recommendationsService.recordPreferenceEvent({
+      userId: user.userId,
+      eventId: randomUUID(),
+      eventType: PreferenceEventType.PREFERENCE_EVENT_TYPE_CONTENT_HIDDEN,
+      resourceType,
+      resourceId,
+      weight:
+        body.active === false
+          ? PREFERENCE_SIGNAL_WEIGHT.CONTENT_RESTORED
+          : PREFERENCE_SIGNAL_WEIGHT.CONTENT_HIDDEN,
+    });
+  }
+
+  @Post('queue-intent')
+  async recordQueueIntent(
+    @Req() req: Request,
+    @Body() body: { resourceType?: string; resourceId?: string },
+  ) {
+    const resourceType = body.resourceType?.trim();
+    const resourceId = body.resourceId?.trim();
+    if (!resourceType || !resourceId) {
+      throw new BadRequestException('QUEUE_INTENT_RESOURCE_REQUIRED');
+    }
+    if (!['songs', 'albums', 'playlists', 'stations'].includes(resourceType)) {
+      throw new BadRequestException('QUEUE_INTENT_RESOURCE_TYPE_INVALID');
+    }
+
+    const user = req.user as JwtUser;
+    return this.recommendationsService.recordPreferenceEvent({
+      userId: user.userId,
+      eventId: randomUUID(),
+      eventType: PreferenceEventType.PREFERENCE_EVENT_TYPE_QUEUE_ADDED,
+      resourceType,
+      resourceId,
+      // Explicit queueing indicates intent, but is deliberately weaker than
+      // adding a track to a playlist or marking it as Favourite.
+      weight: PREFERENCE_SIGNAL_WEIGHT.QUEUE_ADDED,
+    });
+  }
+
+  @Get('artists/:artistId/follow')
+  async getArtistFollow(
+    @Req() req: Request,
+    @Param('artistId') artistId: string,
+  ) {
+    const user = req.user as JwtUser;
+    return this.recommendationsService.isArtistFollowed(user.userId, artistId);
+  }
+
+  @Post('artists/:artistId/follow')
+  async followArtist(@Req() req: Request, @Param('artistId') artistId: string) {
+    const user = req.user as JwtUser;
+    return this.recommendationsService.setArtistFollow(
+      user.userId,
+      artistId,
+      true,
+    );
+  }
+
+  @Delete('artists/:artistId/follow')
+  async unfollowArtist(
+    @Req() req: Request,
+    @Param('artistId') artistId: string,
+  ) {
+    const user = req.user as JwtUser;
+    return this.recommendationsService.setArtistFollow(
+      user.userId,
+      artistId,
+      false,
+    );
   }
 
   @Post('interactions/batch')

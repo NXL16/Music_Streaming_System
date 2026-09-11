@@ -19,6 +19,7 @@ import type {
   ListUsersResponse,
   SetUserStatusRequest,
   SetUserRoleRequest,
+  GrantArtistWorkspaceSeatRequest,
   RequestPasswordResetRequest,
   ResetPasswordRequest,
   RequestEmailVerificationRequest,
@@ -38,15 +39,12 @@ import type {
   RequestAssetUploadResponse,
   AssetResponse,
 } from '@musical/shared-proto';
-import {
-  AssetKind,
-  AssetPurpose,
-  AssetStatus,
-} from '@musical/shared-proto';
+import { AssetKind, AssetPurpose, AssetStatus } from '@musical/shared-proto';
 import { grpcFirstValueFrom } from '../common/utils/grpc-timeout';
 import { ConfigService } from '@nestjs/config';
 import { Metadata } from '@grpc/grpc-js';
 import { AssetsService } from '../assets/assets.service';
+import type { SessionMetadata } from './session-metadata';
 
 @Injectable()
 export class AuthService implements OnModuleInit {
@@ -58,12 +56,16 @@ export class AuthService implements OnModuleInit {
     private readonly assetsService: AssetsService,
   ) {}
 
-  private metadata(): Metadata {
+  private metadata(sessionMeta?: SessionMetadata): Metadata {
     const metadata = new Metadata();
     metadata.set(
       'x-internal-token',
       this.configService.getOrThrow<string>('INTERNAL_GRPC_TOKEN'),
     );
+    if (sessionMeta?.ipAddress)
+      metadata.set('x-client-ip', sessionMeta.ipAddress);
+    if (sessionMeta?.userAgent)
+      metadata.set('x-client-user-agent', sessionMeta.userAgent);
     return metadata;
   }
 
@@ -72,31 +74,57 @@ export class AuthService implements OnModuleInit {
       this.client.getService<IdentityServiceClient>('IdentityService');
   }
 
-  async signUp(request: SignUpRequest): Promise<AuthResponse> {
+  async signUp(
+    request: SignUpRequest,
+    sessionMeta?: SessionMetadata,
+  ): Promise<AuthResponse> {
     return await grpcFirstValueFrom(
-      this.identityService.signUp(request, this.metadata()),
+      this.identityService.signUp(request, this.metadata(sessionMeta)),
     );
   }
 
-  async login(request: LoginRequest): Promise<AuthResponse> {
+  async signUpArtist(request: SignUpRequest): Promise<UserProfile> {
     return await grpcFirstValueFrom(
-      this.identityService.login(request, this.metadata()),
+      this.identityService.signUpArtist(request, this.metadata()),
+    );
+  }
+
+  async login(
+    request: LoginRequest,
+    sessionMeta?: SessionMetadata,
+  ): Promise<AuthResponse> {
+    return await grpcFirstValueFrom(
+      this.identityService.login(request, this.metadata(sessionMeta)),
+    );
+  }
+
+  async loginArtist(
+    request: LoginRequest,
+    sessionMeta?: SessionMetadata,
+  ): Promise<AuthResponse> {
+    return await grpcFirstValueFrom(
+      this.identityService.loginArtist(request, this.metadata(sessionMeta)),
     );
   }
 
   async loginWithGoogle(
     request: LoginWithGoogleRequest,
+    sessionMeta?: SessionMetadata,
   ): Promise<AuthResponse> {
     return await grpcFirstValueFrom(
-      this.identityService.loginWithGoogle(request, this.metadata()),
+      this.identityService.loginWithGoogle(request, this.metadata(sessionMeta)),
     );
   }
 
   async verifyTwoFactorLogin(
     request: VerifyTwoFactorLoginRequest,
+    sessionMeta?: SessionMetadata,
   ): Promise<AuthResponse> {
     return await grpcFirstValueFrom(
-      this.identityService.verifyTwoFactorLogin(request, this.metadata()),
+      this.identityService.verifyTwoFactorLogin(
+        request,
+        this.metadata(sessionMeta),
+      ),
     );
   }
 
@@ -141,6 +169,18 @@ export class AuthService implements OnModuleInit {
   async updateProfile(request: UpdateProfileRequest): Promise<UserProfile> {
     return await grpcFirstValueFrom(
       this.identityService.updateProfile(request, this.metadata()),
+    );
+  }
+
+  async verifyArtistTwoFactorLogin(
+    request: VerifyTwoFactorLoginRequest,
+    sessionMeta?: SessionMetadata,
+  ): Promise<AuthResponse> {
+    return await grpcFirstValueFrom(
+      this.identityService.verifyArtistTwoFactorLogin(
+        request,
+        this.metadata(sessionMeta),
+      ),
     );
   }
 
@@ -238,6 +278,14 @@ export class AuthService implements OnModuleInit {
   async setUserRole(request: SetUserRoleRequest): Promise<UserProfile> {
     return await grpcFirstValueFrom(
       this.identityService.setUserRole(request, this.metadata()),
+    );
+  }
+
+  async grantArtistWorkspaceSeat(
+    request: GrantArtistWorkspaceSeatRequest,
+  ): Promise<UserProfile> {
+    return await grpcFirstValueFrom(
+      this.identityService.grantArtistWorkspaceSeat(request, this.metadata()),
     );
   }
 

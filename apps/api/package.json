@@ -25,6 +25,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1093.0",
     "@grpc/grpc-js": "^1.14.4",
     "@grpc/proto-loader": "^0.8.0",
+    "@musical/shared-constants": "workspace:*",
     "@musical/shared-proto": "workspace:*",
     "@musical/shared-types": "workspace:*",
     "@musical/playlist-cover-renderer": "workspace:*",
@@ -46,7 +47,8 @@
     "ioredis": "^5.11.1",
     "passport-jwt": "^4.0.1",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "sharp": "^0.35.3"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.6",

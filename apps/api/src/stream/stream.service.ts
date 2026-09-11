@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { status } from '@grpc/grpc-js';
 import { hkdf } from 'crypto';
 import { promisify } from 'util';
 import { MetadataService } from '../metadata/metadata.service';
@@ -75,22 +74,19 @@ export class StreamService {
     return { streamUrl, ...derived };
   }
 
-  async getPlaybackManifest(songId: string) {
-    try {
+  async getPlaybackManifest(
+    songId: string,
+    audioMode: 'STANDARD' | 'SING' = 'STANDARD',
+  ) {
+    if (audioMode === 'STANDARD') {
       const [main, metadata] = await Promise.all([
         this.getStreamUrl(songId),
         this.metadata.getCompactStreamData(songId),
       ]);
-
       return {
         mode: 'STANDARD' as const,
         main: { ...main, metadata },
       };
-    } catch (error) {
-      // SING assets deliberately have no mixed stream metadata. Only that
-      // expected absence selects the two-stem manifest; operational errors
-      // must remain visible to the caller.
-      if (!isGrpcNotFound(error)) throw error;
     }
 
     const [instrumental, vocal, instrumentalMetadata, vocalMetadata] =
@@ -107,15 +103,6 @@ export class StreamService {
       vocal: { ...vocal, metadata: vocalMetadata },
     };
   }
-}
-
-function isGrpcNotFound(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === status.NOT_FOUND
-  );
 }
 
 function normalizeVariant(value: string): '' | 'instrumental' | 'vocal' {

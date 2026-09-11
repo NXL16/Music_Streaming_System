@@ -45,6 +45,7 @@ import {
 import { GoogleLoginDto } from './dto/google-login.dto';
 import { SetUserRoleDto } from './dto/set-user-role.dto';
 import { AvatarUploadDto } from './dto/avatar-upload.dto';
+import { getSessionMetadata } from './session-metadata';
 
 @Controller('auth')
 export class AuthController {
@@ -58,9 +59,13 @@ export class AuthController {
   @Post('signup')
   async signup(
     @Body() signupDto: SignupDto,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const data = await this.authService.signUp(signupDto);
+    const data = await this.authService.signUp(
+      signupDto,
+      getSessionMetadata(req),
+    );
     this.setRefreshTokenCookie(res, data);
     return this.formatResponse(
       this.withoutRefreshToken(data),
@@ -73,9 +78,13 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async login(
     @Body() loginDto: LoginDto,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const data = await this.authService.login(loginDto);
+    const data = await this.authService.login(
+      loginDto,
+      getSessionMetadata(req),
+    );
 
     if (data.twoFactorRequired) {
       return this.formatResponse(
@@ -98,13 +107,17 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async loginWithGoogle(
     @Body() dto: GoogleLoginDto,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const data = await this.authService.loginWithGoogle({
-      idToken: dto.idToken ?? '',
-      authorizationCode: dto.authorizationCode ?? dto.code,
-      deviceId: dto.deviceId,
-    });
+    const data = await this.authService.loginWithGoogle(
+      {
+        idToken: dto.idToken ?? '',
+        authorizationCode: dto.authorizationCode ?? dto.code,
+        deviceId: dto.deviceId,
+      },
+      getSessionMetadata(req),
+    );
 
     this.setRefreshTokenCookie(res, data);
 
@@ -122,8 +135,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const cookies = req.cookies as unknown as
-      | Record<string, string | undefined>
-      | undefined;
+      Record<string, string | undefined> | undefined;
     const refreshToken = cookies?.[AuthController.REFRESH_COOKIE_NAME];
 
     if (!refreshToken) {
@@ -159,13 +171,17 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async verifyTwoFactorLogin(
     @Body() dto: VerifyTwoFactorLoginDto,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const data = await this.authService.verifyTwoFactorLogin({
-      challengeId: dto.challengeId,
-      code: dto.code,
-      recoveryCode: dto.recoveryCode,
-    });
+    const data = await this.authService.verifyTwoFactorLogin(
+      {
+        challengeId: dto.challengeId,
+        code: dto.code,
+        recoveryCode: dto.recoveryCode,
+      },
+      getSessionMetadata(req),
+    );
 
     this.setRefreshTokenCookie(res, data);
 
@@ -198,10 +214,7 @@ export class AuthController {
 
   @Post('me/avatar/uploads')
   @UseGuards(StrictJwtAuthGuard)
-  async requestAvatarUpload(
-    @Req() req: Request,
-    @Body() dto: AvatarUploadDto,
-  ) {
+  async requestAvatarUpload(@Req() req: Request, @Body() dto: AvatarUploadDto) {
     const user = req.user as JwtUser;
     const data = await this.authService.requestAvatarUpload(user.userId, dto);
     return this.formatResponse(
@@ -218,7 +231,10 @@ export class AuthController {
     @Param('assetId') assetId: string,
   ) {
     const user = req.user as JwtUser;
-    const data = await this.authService.finalizeAvatarUpload(user.userId, assetId);
+    const data = await this.authService.finalizeAvatarUpload(
+      user.userId,
+      assetId,
+    );
     return this.formatResponse(
       data,
       'AUTH_AVATAR_UPLOAD_FINALIZED',

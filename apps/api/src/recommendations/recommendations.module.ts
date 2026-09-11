@@ -11,12 +11,16 @@ import {
   RecommendationsController,
 } from './recommendations.controller';
 import { RecommendationsService } from './recommendations.service';
+import { AssetsModule } from '../assets/assets.module';
+import { SongStationArtworkService } from './song-station-artwork.service';
+import { ArtistStationArtworkService } from './artist-station-artwork.service';
 
 const RECOMMENDATION_GRPC_MAX_MESSAGE_LENGTH = 16 * 1024 * 1024;
 
 @Module({
   imports: [
     ConfigModule,
+    AssetsModule,
     ClientsModule.registerAsync([
       {
         name: 'RECOMMENDATION_SERVICE',
@@ -37,7 +41,7 @@ const RECOMMENDATION_GRPC_MAX_MESSAGE_LENGTH = 16 * 1024 * 1024;
     ]),
   ],
   controllers: [RecommendationsController, RecommendationAdminController],
-  providers: [RecommendationsService],
+  providers: [RecommendationsService, SongStationArtworkService, ArtistStationArtworkService],
   exports: [RecommendationsService],
 })
 export class RecommendationsModule {}

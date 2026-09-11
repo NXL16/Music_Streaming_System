@@ -32,10 +32,17 @@ export class ListUsersQueryDto {
     typeof value === 'string' ? value.toUpperCase() : value,
   )
   @IsIn(
-    ['USER', 'ARTIST', 'SUPER_ADMIN', 'ADMIN_USER_OPS', 'ADMIN_SECURITY_OPS'],
+    [
+      'USER',
+      'ARTIST_PENDING',
+      'ARTIST',
+      'SUPER_ADMIN',
+      'ADMIN_USER_OPS',
+      'ADMIN_SECURITY_OPS',
+    ],
     {
       message:
-        'role phải là USER, ARTIST, SUPER_ADMIN, ADMIN_USER_OPS hoặc ADMIN_SECURITY_OPS',
+        'role phải là USER, ARTIST_PENDING, ARTIST, SUPER_ADMIN, ADMIN_USER_OPS hoặc ADMIN_SECURITY_OPS',
     },
   )
   role?: string;

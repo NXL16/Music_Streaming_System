@@ -30,6 +30,14 @@ import {
   UpdateSongProcessingResultResponse,
   FavoriteRequest,
   FavoriteResponse,
+  AlbumFavoriteRequest,
+  AlbumFavoriteResponse,
+  ListAlbumFavoriteIdsRequest,
+  ListAlbumFavoriteIdsResponse,
+  PlaylistFavoriteRequest,
+  PlaylistFavoriteResponse,
+  ListPlaylistFavoriteIdsRequest,
+  ListPlaylistFavoriteIdsResponse,
   FavoriteArtworkResponse,
   ListFavoriteSongsRequest,
   UpsertFavoriteArtworkRequest,
@@ -52,6 +60,16 @@ import {
   GetCatalogResourcesRequest,
   GetCatalogArtistAlbumsRequest,
   GetCatalogArtistSongsRequest,
+  GetCatalogSimilarArtistsRequest,
+  GetCatalogSongVideosRequest,
+  GetCatalogSongVideosResponse,
+  GetCatalogAlbumSongVideosRequest,
+  GetCatalogArtistSongVideosRequest,
+  GetCatalogSongVideoRequest,
+  GetCatalogRelatedSongVideosRequest,
+  CatalogSongVideo,
+  ResolveMusicVideoPlaybackRequest,
+  ResolveMusicVideoPlaybackResponse,
   GetCatalogAlbumRelatedRequest,
   GetCatalogAlbumRelatedResponse,
   CatalogResponse,
@@ -60,6 +78,7 @@ import {
   SaveCatalogSongDraftRequest,
   SaveCatalogAlbumDraftRequest,
   SaveCatalogPlaylistDraftRequest,
+  SaveCatalogSongVideoDraftRequest,
   CatalogDraftInfo,
   CatalogArtwork,
   CatalogSongAttributes,
@@ -70,6 +89,8 @@ import {
   CatalogDraftDetail,
   ListCatalogDraftsRequest,
   ListCatalogDraftsResponse,
+  SubmitCatalogDraftRequest,
+  ReviewCatalogDraftRequest,
   PublishCatalogDraftRequest,
   DeleteCatalogDraftRequest,
   DeleteCatalogDraftResponse,
@@ -83,6 +104,16 @@ import {
   PlaylistTrackRequest,
   PlaylistTrackResponse,
   UserPlaylistInfo,
+  ListArtistWorkspacesRequest,
+  ListArtistWorkspacesResponse,
+  ListArtistMembersRequest,
+  ListArtistMembersResponse,
+  UpsertArtistMemberRequest,
+  ArtistMembership,
+  RemoveArtistMemberRequest,
+  RemoveArtistMemberResponse,
+  CheckArtistPermissionRequest,
+  CheckArtistPermissionResponse,
 } from '@musical/shared-proto';
 import { grpcFirstValueFrom } from '../common/utils/grpc-timeout';
 import { R2Service } from '../common/r2/r2.service';
@@ -99,6 +130,19 @@ import {
 import { mapWithConcurrency } from '../common/utils/concurrency';
 
 const LIBRARY_CASCADE_WRITE_CONCURRENCY = 8;
+type TrackSource = { songId: string; sourceAlbumId: string };
+type PlaylistSource = {
+  kind: 'song' | 'collection';
+  songId?: string;
+  songIds?: string[];
+  trackSources?: TrackSource[];
+  resourceType?: 'albums' | 'playlists';
+  resourceId?: string;
+  sourceAlbumId?: string;
+  sourceOrigin?: 'catalog' | 'favorite' | 'user-playlist';
+  /** A Library Album contains only its user's saved song memberships. */
+  isLibraryView?: boolean;
+};
 const LIBRARY_CASCADE_CATALOG_BATCH_SIZE = 100;
 const LIBRARY_CASCADE_CATALOG_CONCURRENCY = 2;
 
@@ -167,6 +211,52 @@ export class SongsService {
     );
   }
 
+  async addAlbumFavorite(data: AlbumFavoriteRequest): Promise<AlbumFavoriteResponse> {
+    return grpcFirstValueFrom(this.songServiceClient.addAlbumFavorite(data));
+  }
+
+  async removeAlbumFavorite(data: AlbumFavoriteRequest): Promise<AlbumFavoriteResponse> {
+    return grpcFirstValueFrom(this.songServiceClient.removeAlbumFavorite(data));
+  }
+
+  async getAlbumFavorite(data: AlbumFavoriteRequest): Promise<AlbumFavoriteResponse> {
+    return grpcFirstValueFrom(this.songServiceClient.getAlbumFavorite(data));
+  }
+
+  async listAlbumFavoriteIds(
+    data: ListAlbumFavoriteIdsRequest,
+  ): Promise<ListAlbumFavoriteIdsResponse> {
+    return grpcFirstValueFrom(this.songServiceClient.listAlbumFavoriteIds(data));
+  }
+
+  async addPlaylistFavorite(
+    data: PlaylistFavoriteRequest,
+  ): Promise<PlaylistFavoriteResponse> {
+    return grpcFirstValueFrom(this.songServiceClient.addPlaylistFavorite(data));
+  }
+
+  async removePlaylistFavorite(
+    data: PlaylistFavoriteRequest,
+  ): Promise<PlaylistFavoriteResponse> {
+    return grpcFirstValueFrom(
+      this.songServiceClient.removePlaylistFavorite(data),
+    );
+  }
+
+  async getPlaylistFavorite(
+    data: PlaylistFavoriteRequest,
+  ): Promise<PlaylistFavoriteResponse> {
+    return grpcFirstValueFrom(this.songServiceClient.getPlaylistFavorite(data));
+  }
+
+  async listPlaylistFavoriteIds(
+    data: ListPlaylistFavoriteIdsRequest,
+  ): Promise<ListPlaylistFavoriteIdsResponse> {
+    return grpcFirstValueFrom(
+      this.songServiceClient.listPlaylistFavoriteIds(data),
+    );
+  }
+
   async listFavoriteSongs(data: ListFavoriteSongsRequest) {
     const response = await grpcFirstValueFrom(
       this.songServiceClient.listFavoriteSongs(data),
@@ -188,26 +278,25 @@ export class SongsService {
     data: LibraryResourceRequest & {
       sourceOrigin?: 'catalog' | 'favorite' | 'user-playlist';
       songIds?: string[];
+      trackSources?: TrackSource[];
     },
   ): Promise<LibraryResourceResponse> {
     const result = await grpcFirstValueFrom(
       this.songServiceClient.addLibraryResource(data),
     );
 
-    if (
-      data.sourceOrigin &&
-      (data.resourceType === 'albums' || data.resourceType === 'playlists')
-    ) {
-      const songIds = await this.resolvePlaylistSourceTracks(data.userId, {
+    if (data.sourceOrigin && data.resourceType === 'albums') {
+      const tracks = await this.resolvePlaylistSourceTracks(data.userId, {
         kind: 'collection',
         resourceType: data.resourceType,
         resourceId: data.resourceId,
         sourceOrigin: data.sourceOrigin,
         songIds: data.songIds,
+        trackSources: data.trackSources,
       });
       const songResources = await this.resolveLibrarySongResources(
         data.userId,
-        songIds,
+        tracks,
       );
       await mapWithConcurrency(
         songResources,
@@ -215,9 +304,38 @@ export class SongsService {
         (song) =>
           grpcFirstValueFrom(this.songServiceClient.addLibraryResource(song)),
       );
+      await this.addAlbumMusicVideosToLibrary(data.userId, data.resourceId);
     }
 
     return result;
+  }
+
+  /**
+   * Music Videos belong to their release in Library. They are derived
+   * memberships, so saving an album does not create an extra preference
+   * signal for every video it happens to contain.
+   */
+  private async addAlbumMusicVideosToLibrary(userId: string, albumId: string) {
+    const { videos } = await this.getCatalogAlbumSongVideos({
+      storefront: 'vn',
+      albumId,
+    });
+    await mapWithConcurrency(
+      videos,
+      LIBRARY_CASCADE_WRITE_CONCURRENCY,
+      (video) =>
+        grpcFirstValueFrom(
+          this.songServiceClient.addLibraryResource({
+            userId,
+            resourceType: 'music-videos',
+            resourceId: video.id,
+            title: video.songTitle,
+            subtitle: video.artistName,
+            artworkUrl: video.posterUrl || video.songArtwork?.url || '',
+            sourceAlbumId: albumId,
+          }),
+        ),
+    );
   }
 
   /**
@@ -226,39 +344,42 @@ export class SongsService {
    */
   private async resolveLibrarySongResources(
     userId: string,
-    songIds: string[],
+    tracks: TrackSource[],
   ): Promise<LibraryResourceRequest[]> {
-    const uniqueSongIds = [...new Set(songIds.filter(Boolean))];
-    if (!uniqueSongIds.length) return [];
+    const uniqueTracks = this.uniqueTrackSources(tracks);
+    if (!uniqueTracks.length) return [];
 
     const batches = this.chunk(
-      uniqueSongIds,
+      uniqueTracks,
       LIBRARY_CASCADE_CATALOG_BATCH_SIZE,
     );
     const resolvedBatches = await mapWithConcurrency(
       batches,
       LIBRARY_CASCADE_CATALOG_CONCURRENCY,
-      (batch) => this.resolveLibrarySongResourceBatch(userId, batch),
+      (batch) =>
+        this.resolveLibrarySongResourceBatch(userId, batch),
     );
     return resolvedBatches.flat();
   }
 
   private async resolveLibrarySongResourceBatch(
     userId: string,
-    songIds: string[],
+    tracks: TrackSource[],
   ): Promise<LibraryResourceRequest[]> {
     let catalog: CatalogResponse | undefined;
     try {
       catalog = await this.getCatalogResources({
         storefront: 'vn',
-        resources: songIds.map((id) => ({ type: 'songs', id })),
+        resources: tracks.map(({ songId }) => ({ type: 'songs', id: songId })),
       });
     } catch {
       // Private uploads are not catalog entries; resolve those individually.
     }
 
     const catalogSongs = catalog?.resources?.songs ?? {};
-    const missingSongIds = songIds.filter((id) => !catalogSongs[id]);
+    const missingSongIds = tracks
+      .map(({ songId }) => songId)
+      .filter((id) => !catalogSongs[id]);
     const privateSongs = new Map<string, GetSongResponse['song']>();
     await mapWithConcurrency(
       missingSongIds,
@@ -277,7 +398,7 @@ export class SongsService {
       },
     );
 
-    return songIds.map((songId) => {
+    return tracks.map(({ songId, sourceAlbumId }) => {
       const catalogSong = catalogSongs[songId];
       const attributes = catalogSong?.attributes;
       const privateSong = privateSongs.get(songId);
@@ -288,6 +409,7 @@ export class SongsService {
         title: attributes?.name || privateSong?.title || '',
         subtitle: attributes?.artistName || privateSong?.artist || '',
         artworkUrl: attributes?.artwork?.url || '',
+        sourceAlbumId,
       };
     });
   }
@@ -336,10 +458,17 @@ export class SongsService {
       if (songResources.length) {
         catalog = await this.getCatalogResources({
           storefront: 'vn',
-          resources: songResources.map((resource) => ({
-            type: 'songs',
-            id: resource.resourceId,
-          })),
+          resources: [
+            ...songResources.map((resource) => ({
+              type: 'songs',
+              id: resource.resourceId,
+            })),
+            ...[...new Set(
+              songResources
+                .map((resource) => resource.sourceAlbumId)
+                .filter(Boolean),
+            )].map((id) => ({ type: 'albums', id })),
+          ],
         });
       }
     } catch {
@@ -352,12 +481,23 @@ export class SongsService {
         const catalogSong = catalog?.resources?.songs[resource.resourceId];
         const attributes = catalogSong?.attributes;
         if (attributes) {
-          const albumReference = catalogSong.relationships?.albums?.data[0];
-          const album = albumReference
+          const albumReference = resource.sourceAlbumId
+            ? catalogSong.relationships?.albums?.data.find(
+                (reference) => reference.id === resource.sourceAlbumId,
+              )
+            : catalogSong.relationships?.albums?.data[0];
+          const album = resource.sourceAlbumId
+            ? catalog?.resources?.albums[resource.sourceAlbumId]
+            : albumReference
             ? catalog?.resources?.albums[albumReference.id]
             : undefined;
+          // A Library row represents a song. Its Artist column must therefore
+          // come from the song credits, never from the contextual album (a
+          // track can feature artists who are not album artists).
           const artists = (
-            catalogSong.relationships?.artists?.data ?? []
+            catalogSong.relationships?.artists?.data ??
+            album?.relationships?.artists?.data ??
+            []
           ).flatMap((reference) => {
             const artist = catalog?.resources?.artists[reference.id];
             if (!artist?.attributes?.name) return [];
@@ -372,15 +512,22 @@ export class SongsService {
           return {
             id: catalogSong.id,
             title: attributes.name || resource.title,
-            artist: attributes.artistName || resource.subtitle,
-            album: attributes.albumName,
+            artist: attributes.artistName || album?.attributes?.artistName || resource.subtitle,
+            album: album?.attributes?.name || attributes.albumName,
             isPublic: true,
             status: 3,
             durationSec: Math.round(attributes.durationInMillis / 1000),
             createdAt: resource.createdAt,
-            coverUrl: attributes.artwork?.url || resource.artworkUrl,
+            coverUrl:
+              album?.attributes?.artwork?.url ||
+              attributes.artwork?.url ||
+              resource.artworkUrl,
             thumbnailCoverSrcSet:
-              getArtworkRenditionSrcSet(attributes.artwork, [40, 80]) ||
+              getArtworkRenditionSrcSet(
+                album?.attributes?.artwork ?? attributes.artwork,
+                [40, 80],
+              ) ||
+              album?.attributes?.artwork?.url ||
               attributes.artwork?.url ||
               '',
             artists,
@@ -388,6 +535,7 @@ export class SongsService {
             artistUrl: artists[0]?.url || '',
             albumId: album?.id || '',
             albumUrl: album?.attributes?.url || '',
+            releaseTrackId: albumReference?.meta?.releaseTrackId || '',
             contentRating: attributes.contentRating || '',
           };
         }
@@ -449,14 +597,7 @@ export class SongsService {
     const userPlaylistById = new Map(
       userPlaylists.playlists.map((playlist) => [playlist.id, playlist]),
     );
-    const catalogReferences = collectionResources
-      .filter(
-        (resource) =>
-          resource.resourceType === 'albums' ||
-          (resource.resourceType === 'playlists' &&
-            !userPlaylistById.has(resource.resourceId)),
-      )
-      .map((resource) => ({
+    const catalogReferences = collectionResources.map((resource) => ({
         type: resource.resourceType,
         id: resource.resourceId,
       }));
@@ -481,7 +622,20 @@ export class SongsService {
           resource.resourceType === 'playlists'
             ? userPlaylistById.get(resource.resourceId)
             : undefined;
-        if (userPlaylist) {
+        const album =
+          resource.resourceType === 'albums'
+            ? catalog?.resources?.albums[resource.resourceId]
+            : undefined;
+        const playlist =
+          resource.resourceType === 'playlists'
+            ? catalog?.resources?.playlists[resource.resourceId]
+            : undefined;
+
+        // Catalog is authoritative for a saved public playlist. A seeded or
+        // generated UserPlaylist can share a human-readable id (for example
+        // "daily-mix-3"), but it must not turn a public Library entry into the
+        // private `/library/playlist/:id` route.
+        if (userPlaylist && !playlist) {
           return {
             resourceType: resource.resourceType,
             resourceId: resource.resourceId,
@@ -494,15 +648,6 @@ export class SongsService {
             createdAt: resource.createdAt,
           };
         }
-
-        const album =
-          resource.resourceType === 'albums'
-            ? catalog?.resources?.albums[resource.resourceId]
-            : undefined;
-        const playlist =
-          resource.resourceType === 'playlists'
-            ? catalog?.resources?.playlists[resource.resourceId]
-            : undefined;
         const attributes = album?.attributes ?? playlist?.attributes;
         const artistReferences = album?.relationships?.artists?.data ?? [];
         const trackReferences =
@@ -553,55 +698,12 @@ export class SongsService {
     data: LibraryResourceRequest & {
       sourceOrigin?: 'catalog' | 'favorite' | 'user-playlist';
       songIds?: string[];
+      trackSources?: TrackSource[];
     },
   ): Promise<LibraryResourceResponse> {
-    // Collection saves create Library Song memberships. Resolve the same source
-    // before deleting the collection so its derived Song memberships stay in sync.
-    let derivedSongIds: string[] = [];
-    if (
-      (data.resourceType === 'albums' || data.resourceType === 'playlists') &&
-      data.sourceOrigin
-    ) {
-      try {
-        derivedSongIds = await this.resolvePlaylistSourceTracks(data.userId, {
-          kind: 'collection',
-          resourceType: data.resourceType,
-          resourceId: data.resourceId,
-          sourceOrigin: data.sourceOrigin,
-          songIds: data.songIds,
-        });
-      } catch (error) {
-        // Deleting the collection must still succeed if its source is temporarily
-        // unavailable. A later library cleanup can remove any leftover songs.
-        this.logger.warn(
-          `Could not resolve songs for removed ${data.resourceType} ${data.resourceId}: ${error instanceof Error ? error.message : 'unknown error'}`,
-        );
-      }
-    }
-
-    const result = await grpcFirstValueFrom(
+    return grpcFirstValueFrom(
       this.songServiceClient.removeLibraryResource(data),
     );
-
-    if (result.success && derivedSongIds.length) {
-      await mapWithConcurrency(
-        derivedSongIds,
-        LIBRARY_CASCADE_WRITE_CONCURRENCY,
-        (resourceId) =>
-          grpcFirstValueFrom(
-            this.songServiceClient.removeLibraryResource({
-              userId: data.userId,
-              resourceType: 'songs',
-              resourceId,
-              title: '',
-              subtitle: '',
-              artworkUrl: '',
-            }),
-          ),
-      );
-    }
-
-    return result;
   }
 
   async pinLibraryResource(
@@ -658,14 +760,7 @@ export class SongsService {
     input: {
       name: string;
       description?: string;
-      source: {
-        kind: 'song' | 'collection';
-        songId?: string;
-        songIds?: string[];
-        resourceType?: 'albums' | 'playlists';
-        resourceId?: string;
-        sourceOrigin?: 'catalog' | 'favorite' | 'user-playlist';
-      };
+      source: PlaylistSource;
     },
   ) {
     const playlist = await this.createUserPlaylist({
@@ -675,15 +770,16 @@ export class SongsService {
       isPublic: false,
     });
     try {
-      const songIds = await this.resolvePlaylistSourceTracks(
+      const tracks = await this.resolvePlaylistSourceTracks(
         userId,
         input.source,
       );
-      for (const songId of songIds) {
+      for (const { songId, sourceAlbumId } of tracks) {
         await this.addTrackToPlaylist({
           userId,
           playlistId: playlist.id,
           songId,
+          sourceAlbumId,
         });
       }
       return playlist;
@@ -698,41 +794,37 @@ export class SongsService {
   async addPlaylistSource(
     userId: string,
     playlistId: string,
-    source: {
-      kind: 'song' | 'collection';
-      songId?: string;
-      songIds?: string[];
-      resourceType?: 'albums' | 'playlists';
-      resourceId?: string;
-    },
+    source: PlaylistSource,
   ) {
-    const songIds = await this.resolvePlaylistSourceTracks(userId, source);
+    const tracks = await this.resolvePlaylistSourceTracks(userId, source);
     let addedCount = 0;
+    const addedSongIds: string[] = [];
 
-    for (const songId of songIds) {
+    for (const { songId, sourceAlbumId } of tracks) {
       try {
-        await this.addTrackToPlaylist({ userId, playlistId, songId });
+        await this.addTrackToPlaylist({
+          userId,
+          playlistId,
+          songId,
+          sourceAlbumId,
+        });
         addedCount += 1;
+        addedSongIds.push(songId);
       } catch (error) {
         if (!this.isTrackAlreadyInPlaylist(error)) throw error;
       }
     }
 
-    return { addedCount };
+    return { addedCount, addedSongIds };
   }
 
   async getPlaylistSourceMembershipForUser(
     userId: string,
-    source: {
-      kind: 'song' | 'collection';
-      songId?: string;
-      songIds?: string[];
-      resourceType?: 'albums' | 'playlists';
-      resourceId?: string;
-      sourceOrigin?: 'catalog' | 'favorite' | 'user-playlist';
-    },
+    source: PlaylistSource,
   ): Promise<PlaylistSourceMembershipResponse> {
-    const songIds = await this.resolvePlaylistSourceTracks(userId, source);
+    const songIds = (await this.resolvePlaylistSourceTracks(userId, source)).map(
+      ({ songId }) => songId,
+    );
     return await grpcFirstValueFrom(
       this.songServiceClient.getPlaylistSourceMembership({ userId, songIds }),
     );
@@ -749,24 +841,46 @@ export class SongsService {
 
   private async resolvePlaylistSourceTracks(
     requesterUserId: string,
-    source: {
-      kind: 'song' | 'collection';
-      songId?: string;
-      songIds?: string[];
-      resourceType?: 'albums' | 'playlists';
-      resourceId?: string;
-      sourceOrigin?: 'catalog' | 'favorite' | 'user-playlist';
-    },
-  ) {
+    source: PlaylistSource,
+  ): Promise<TrackSource[]> {
     if (source.kind === 'song') {
       if (!source.songId) {
         throw new BadRequestException('PLAYLIST_SOURCE_INVALID');
       }
-      return [source.songId];
+      if (!source.sourceAlbumId) {
+        throw new BadRequestException('SOURCE_ALBUM_ID_REQUIRED');
+      }
+      return [{ songId: source.songId, sourceAlbumId: source.sourceAlbumId }];
     }
 
-    if (source.songIds?.length) {
-      return [...new Set(source.songIds.filter(Boolean))];
+    if (
+      source.kind === 'collection' &&
+      source.resourceType === 'albums' &&
+      source.resourceId &&
+      source.isLibraryView
+    ) {
+      // Do not trust a browser-provided track list for a Library Album. Its
+      // parent Album resource may have been created from one selected song,
+      // while the public catalog release contains many more.
+      const library = await this.listLibraryResources({
+        userId: requesterUserId,
+      });
+      return this.uniqueTrackSources(
+        library.resources
+          .filter(
+            (resource) =>
+              resource.resourceType === 'songs' &&
+              resource.sourceAlbumId === source.resourceId,
+          )
+          .map((resource) => ({
+            songId: resource.resourceId,
+            sourceAlbumId: source.resourceId!,
+          })),
+      );
+    }
+
+    if (source.trackSources?.length) {
+      return this.uniqueTrackSources(source.trackSources);
     }
 
     if (
@@ -783,13 +897,13 @@ export class SongsService {
         albumId: source.resourceId,
       });
 
-      return (
+      return this.uniqueTrackSources((
         catalog.resources?.albums?.[
           source.resourceId
         ]?.relationships?.tracks?.data
           ?.filter((item) => item.type === 'songs')
-          .map((item) => item.id) ?? []
-      );
+          .map((item) => ({ songId: item.id, sourceAlbumId: source.resourceId! })) ?? []
+      ));
     }
 
     if (source.sourceOrigin === 'user-playlist') {
@@ -798,7 +912,13 @@ export class SongsService {
         requesterUserId,
         includeSongs: true,
       });
-      return userPlaylist.playlist?.songs.map((song) => song.id) ?? [];
+      return this.uniqueTrackSources(
+        userPlaylist.playlist?.songs.flatMap((song) =>
+          song.albumId
+            ? [{ songId: song.id, sourceAlbumId: song.albumId }]
+            : [],
+        ) ?? [],
+      );
     }
 
     if (source.sourceOrigin === 'favorite') {
@@ -815,9 +935,7 @@ export class SongsService {
         playlistId: source.resourceId,
       });
 
-      return catalog.data
-        .filter((item) => item.type === 'songs')
-        .map((item) => item.id);
+      return this.catalogTrackSources(catalog);
     } catch (tracksError) {
       if (!this.isNotFound(tracksError)) throw tracksError;
 
@@ -828,13 +946,7 @@ export class SongsService {
         storefront: 'vn',
         playlistId: source.resourceId,
       });
-      return (
-        catalog.resources?.playlists?.[
-          source.resourceId
-        ]?.relationships?.tracks?.data
-          ?.filter((item) => item.type === 'songs')
-          .map((item) => item.id) ?? []
-      );
+      return this.catalogTrackSources(catalog);
     }
   }
 
@@ -844,6 +956,33 @@ export class SongsService {
       error !== null &&
       'code' in error &&
       (error as { code?: number }).code === status.NOT_FOUND
+    );
+  }
+
+  private uniqueTrackSources(tracks: TrackSource[]) {
+    const seen = new Set<string>();
+    return tracks.filter(({ songId, sourceAlbumId }) => {
+      if (!songId || !sourceAlbumId || seen.has(songId)) return false;
+      seen.add(songId);
+      return true;
+    });
+  }
+
+  private catalogTrackSources(catalog: CatalogResponse): TrackSource[] {
+    const directTracks = catalog.data.filter((item) => item.type === 'songs');
+    const root = catalog.data[0];
+    const relationshipTracks =
+      root?.type === 'playlists'
+        ? catalog.resources?.playlists?.[root.id]?.relationships?.tracks?.data ?? []
+        : [];
+    const tracks = directTracks.length ? directTracks : relationshipTracks;
+    return this.uniqueTrackSources(
+      tracks.flatMap((item) => {
+        if (item.type !== 'songs') return [];
+        const sourceAlbumId =
+          catalog.resources?.songs?.[item.id]?.relationships?.albums?.data[0]?.id;
+        return sourceAlbumId ? [{ songId: item.id, sourceAlbumId }] : [];
+      }),
     );
   }
 
@@ -901,6 +1040,16 @@ export class SongsService {
     const response = await grpcFirstValueFrom(
       this.songServiceClient.getCatalogAlbum(data),
     );
+    return this.unwrapCatalogResponse(response);
+  }
+
+  async getCatalogReleaseTrack(
+    data: { storefront: string; releaseTrackId: string },
+  ): Promise<CatalogResponse> {
+    const response = await grpcFirstValueFrom(this.songServiceClient.getCatalogResources({
+      storefront: data.storefront,
+      resources: [{ type: 'release-tracks', id: data.releaseTrackId }],
+    }));
     return this.unwrapCatalogResponse(response);
   }
 
@@ -992,6 +1141,59 @@ export class SongsService {
     };
   }
 
+  async getCatalogSimilarArtists(
+    data: GetCatalogSimilarArtistsRequest,
+  ): Promise<CatalogResponse> {
+    const response = await grpcFirstValueFrom(
+      this.songServiceClient.getCatalogSimilarArtists(data),
+    );
+    return this.unwrapCatalogResponse(response);
+  }
+
+  async getCatalogSongVideos(
+    data: GetCatalogSongVideosRequest,
+  ): Promise<GetCatalogSongVideosResponse> {
+    return grpcFirstValueFrom(this.songServiceClient.getCatalogSongVideos(data));
+  }
+
+  async getCatalogSongVideo(
+    data: GetCatalogSongVideoRequest,
+  ): Promise<CatalogSongVideo> {
+    return grpcFirstValueFrom(this.songServiceClient.getCatalogSongVideo(data));
+  }
+
+  async getCatalogRelatedSongVideos(
+    data: GetCatalogRelatedSongVideosRequest,
+  ): Promise<GetCatalogSongVideosResponse> {
+    return grpcFirstValueFrom(
+      this.songServiceClient.getCatalogRelatedSongVideos(data),
+    );
+  }
+
+  async getCatalogAlbumSongVideos(
+    data: GetCatalogAlbumSongVideosRequest,
+  ): Promise<GetCatalogSongVideosResponse> {
+    return grpcFirstValueFrom(
+      this.songServiceClient.getCatalogAlbumSongVideos(data),
+    );
+  }
+
+  async getCatalogArtistSongVideos(
+    data: GetCatalogArtistSongVideosRequest,
+  ): Promise<GetCatalogSongVideosResponse> {
+    return grpcFirstValueFrom(
+      this.songServiceClient.getCatalogArtistSongVideos(data),
+    );
+  }
+
+  resolveMusicVideoPlayback(
+    data: ResolveMusicVideoPlaybackRequest,
+  ): Promise<ResolveMusicVideoPlaybackResponse> {
+    return grpcFirstValueFrom(
+      this.songServiceClient.resolveMusicVideoPlayback(data),
+    );
+  }
+
   async searchCatalog(data: SearchCatalogRequest): Promise<CatalogResponse> {
     const response = await grpcFirstValueFrom(
       this.songServiceClient.searchCatalog(data),
@@ -1005,6 +1207,10 @@ export class SongsService {
     return grpcFirstValueFrom(
       this.songServiceClient.saveCatalogArtistDraft({
         ...data,
+        origin: data.origin?.trim() ?? '',
+        birthDate: data.birthDate?.trim() ?? '',
+        biography: data.biography?.trim() ?? '',
+        biographySourceUrl: data.biographySourceUrl?.trim() ?? '',
         editorialVideo: wrapStructInput(data.editorialVideo),
       }),
     );
@@ -1016,7 +1222,6 @@ export class SongsService {
     return grpcFirstValueFrom(
       this.songServiceClient.saveCatalogSongDraft({
         ...data,
-        editorialArtwork: wrapStructInput(data.editorialArtwork),
         extendedAssetUrls: wrapStructInput(data.extendedAssetUrls),
         offers: wrapStructInputs(data.offers),
       }),
@@ -1052,6 +1257,14 @@ export class SongsService {
     );
   }
 
+  async saveCatalogSongVideoDraft(
+    data: SaveCatalogSongVideoDraftRequest,
+  ): Promise<CatalogDraftInfo> {
+    return grpcFirstValueFrom(
+      this.songServiceClient.saveCatalogSongVideoDraft(data),
+    );
+  }
+
   async getCatalogDraft(
     data: GetCatalogDraftRequest,
   ): Promise<CatalogDraftDetail> {
@@ -1070,6 +1283,18 @@ export class SongsService {
     return grpcFirstValueFrom(this.songServiceClient.listCatalogDrafts(data));
   }
 
+  async submitCatalogDraft(
+    data: SubmitCatalogDraftRequest,
+  ): Promise<CatalogDraftInfo> {
+    return grpcFirstValueFrom(this.songServiceClient.submitCatalogDraft(data));
+  }
+
+  async reviewCatalogDraft(
+    data: ReviewCatalogDraftRequest,
+  ): Promise<CatalogDraftInfo> {
+    return grpcFirstValueFrom(this.songServiceClient.reviewCatalogDraft(data));
+  }
+
   async publishCatalogDraft(
     data: PublishCatalogDraftRequest,
   ): Promise<CatalogResponse> {
@@ -1083,6 +1308,38 @@ export class SongsService {
     data: DeleteCatalogDraftRequest,
   ): Promise<DeleteCatalogDraftResponse> {
     return grpcFirstValueFrom(this.songServiceClient.deleteCatalogDraft(data));
+  }
+
+  async listArtistWorkspaces(
+    data: ListArtistWorkspacesRequest,
+  ): Promise<ListArtistWorkspacesResponse> {
+    return grpcFirstValueFrom(this.songServiceClient.listArtistWorkspaces(data));
+  }
+
+  async listArtistMembers(
+    data: ListArtistMembersRequest,
+  ): Promise<ListArtistMembersResponse> {
+    return grpcFirstValueFrom(this.songServiceClient.listArtistMembers(data));
+  }
+
+  async upsertArtistMember(
+    data: UpsertArtistMemberRequest,
+  ): Promise<ArtistMembership> {
+    return grpcFirstValueFrom(this.songServiceClient.upsertArtistMember(data));
+  }
+
+  async removeArtistMember(
+    data: RemoveArtistMemberRequest,
+  ): Promise<RemoveArtistMemberResponse> {
+    return grpcFirstValueFrom(this.songServiceClient.removeArtistMember(data));
+  }
+
+  async checkArtistPermission(
+    data: CheckArtistPermissionRequest,
+  ): Promise<CheckArtistPermissionResponse> {
+    return grpcFirstValueFrom(
+      this.songServiceClient.checkArtistPermission(data),
+    );
   }
 
   async requestUpload(request: RequestUploadDto, userId: string) {
@@ -1509,7 +1766,6 @@ export class SongsService {
 
   private unwrapSongAttributes(attrs: CatalogSongAttributes): void {
     this.unwrapArtwork(attrs.artwork);
-    attrs.editorialArtwork = unwrapStructOutput(attrs.editorialArtwork);
     attrs.extendedAssetUrls = unwrapStructOutput(attrs.extendedAssetUrls);
     attrs.offers = attrs.offers.map((offer) => unwrapStructOutput(offer) ?? {});
   }

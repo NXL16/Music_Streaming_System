@@ -9,6 +9,11 @@ import { RecommendationsModule } from '../recommendations/recommendations.module
 import { PlaylistsController } from './playlists.controller';
 import { FavoriteArtworkAdminController } from './favorite-artwork.controller';
 import {
+  ArtistWorkspaceAdminController,
+  ArtistWorkspacesController,
+} from './artist-workspaces.controller';
+import { AuthModule } from '../auth/auth.module';
+import {
   CatalogAdminController,
   ArtistStudioCatalogController,
   CatalogController,
@@ -22,6 +27,7 @@ import {
 @Module({
   imports: [
     R2Module,
+    AuthModule,
     RecommendationsModule,
     ClientsModule.registerAsync([
       {
@@ -47,6 +53,8 @@ import {
     CatalogAdminController,
     ArtistStudioCatalogController,
     FavoriteArtworkAdminController,
+    ArtistWorkspacesController,
+    ArtistWorkspaceAdminController,
   ],
   providers: [SongsService, ArtistOrAdminGuard],
   exports: [SongsService],

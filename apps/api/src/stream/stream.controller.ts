@@ -29,8 +29,11 @@ export class StreamController {
     @Req() request: { user: JwtUser },
   ) {
     try {
-      await this.playbackAccess.assertCanPlay(songId, request.user);
-      return await this.streamService.getPlaybackManifest(songId);
+      const audioMode = await this.playbackAccess.assertCanPlay(
+        songId,
+        request.user,
+      );
+      return await this.streamService.getPlaybackManifest(songId, audioMode);
     } catch (error) {
       // A missing song has neither its mixed stream metadata nor both stems.
       if (isGrpcNotFound(error)) {

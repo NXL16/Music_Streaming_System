@@ -70,6 +70,10 @@ class AddTrackDto {
   @IsString()
   @IsNotEmpty()
   songId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  sourceAlbumId!: string;
 }
 
 class CreatePlaylistFromSourceDto extends CreatePlaylistDto {
@@ -79,9 +83,12 @@ class CreatePlaylistFromSourceDto extends CreatePlaylistDto {
     kind: 'song' | 'collection';
     songId?: string;
     songIds?: string[];
+    trackSources?: Array<{ songId: string; sourceAlbumId: string }>;
     resourceType?: 'albums' | 'playlists';
     resourceId?: string;
+    sourceAlbumId?: string;
     sourceOrigin?: 'catalog' | 'favorite' | 'user-playlist';
+    isLibraryView?: boolean;
   };
 }
 
@@ -329,11 +336,13 @@ export class PlaylistsController {
     @Body() dto: AddTrackDto,
   ) {
     const user = req.user as JwtUser;
-    return await this.songsService.addTrackToPlaylist({
+    const result = await this.songsService.addTrackToPlaylist({
       userId: user.userId,
       playlistId: id,
       songId: dto.songId,
+      sourceAlbumId: dto.sourceAlbumId,
     });
+    return result;
   }
 
   @Post(':id/from-source')
@@ -344,7 +353,13 @@ export class PlaylistsController {
     @Body() dto: AddPlaylistSourceDto,
   ) {
     const user = req.user as JwtUser;
-    return this.songsService.addPlaylistSource(user.userId, id, dto.source);
+    const result = await this.songsService.addPlaylistSource(
+      user.userId,
+      id,
+      dto.source,
+    );
+
+    return { addedCount: result.addedCount };
   }
 
   @Delete(':id/tracks/:songId')
@@ -355,10 +370,12 @@ export class PlaylistsController {
     @Param('songId') songId: string,
   ) {
     const user = req.user as JwtUser;
-    return await this.songsService.removeTrackFromPlaylist({
+    const result = await this.songsService.removeTrackFromPlaylist({
       userId: user.userId,
       playlistId: id,
       songId,
+      sourceAlbumId: '',
     });
+    return result;
   }
 }

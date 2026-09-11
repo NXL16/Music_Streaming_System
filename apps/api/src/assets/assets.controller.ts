@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   Post,
@@ -114,6 +115,12 @@ export class AssetsController {
     ) {
       return AssetPurpose.ASSET_PURPOSE_EDITORIAL_VIDEO;
     }
+    if (
+      value === AssetPurpose.ASSET_PURPOSE_MUSIC_VIDEO ||
+      String(value).toUpperCase() === 'MUSIC_VIDEO'
+    ) {
+      return AssetPurpose.ASSET_PURPOSE_MUSIC_VIDEO;
+    }
     return AssetPurpose.ASSET_PURPOSE_UNSPECIFIED;
   }
 
@@ -142,14 +149,12 @@ export class ArtistStudioAssetsController {
     return this.assetsService.requestUpload({
       ...body,
       actorUserId: (req.user as JwtUser).userId,
-      kind:
-        body.kind === AssetKind.ASSET_KIND_VIDEO
-          ? AssetKind.ASSET_KIND_VIDEO
-          : AssetKind.ASSET_KIND_IMAGE,
-      purpose:
-        body.purpose === AssetPurpose.ASSET_PURPOSE_EDITORIAL_VIDEO
-          ? AssetPurpose.ASSET_PURPOSE_EDITORIAL_VIDEO
-          : AssetPurpose.ASSET_PURPOSE_ARTWORK,
+      // REST clients send the human-readable protobuf enum names, while
+      // generated clients commonly send their numeric counterparts. Preserve
+      // both forms; otherwise a MUSIC_VIDEO JSON payload was silently
+      // converted to an artwork upload before it reached Asset service.
+      kind: this.kind(body.kind),
+      purpose: this.purpose(body.purpose),
     });
   }
 
@@ -159,5 +164,52 @@ export class ArtistStudioAssetsController {
       assetId,
       actorUserId: (req.user as JwtUser).userId,
     });
+  }
+
+  @Get(':assetId')
+  async getAsset(@Req() req: Request, @Param('assetId') assetId: string) {
+    const response = await this.assetsService.getAsset({ assetId });
+    if (response.asset?.createdBy !== (req.user as JwtUser).userId) {
+      throw new ForbiddenException('ASSET_ACCESS_DENIED');
+    }
+    return response;
+  }
+
+  private kind(value: AssetKind | string | undefined): AssetKind {
+    if (
+      value === AssetKind.ASSET_KIND_IMAGE ||
+      String(value).toUpperCase() === 'IMAGE'
+    ) {
+      return AssetKind.ASSET_KIND_IMAGE;
+    }
+    if (
+      value === AssetKind.ASSET_KIND_VIDEO ||
+      String(value).toUpperCase() === 'VIDEO'
+    ) {
+      return AssetKind.ASSET_KIND_VIDEO;
+    }
+    return AssetKind.ASSET_KIND_UNSPECIFIED;
+  }
+
+  private purpose(value: AssetPurpose | string | undefined): AssetPurpose {
+    if (
+      value === AssetPurpose.ASSET_PURPOSE_ARTWORK ||
+      String(value).toUpperCase() === 'ARTWORK'
+    ) {
+      return AssetPurpose.ASSET_PURPOSE_ARTWORK;
+    }
+    if (
+      value === AssetPurpose.ASSET_PURPOSE_EDITORIAL_VIDEO ||
+      String(value).toUpperCase() === 'EDITORIAL_VIDEO'
+    ) {
+      return AssetPurpose.ASSET_PURPOSE_EDITORIAL_VIDEO;
+    }
+    if (
+      value === AssetPurpose.ASSET_PURPOSE_MUSIC_VIDEO ||
+      String(value).toUpperCase() === 'MUSIC_VIDEO'
+    ) {
+      return AssetPurpose.ASSET_PURPOSE_MUSIC_VIDEO;
+    }
+    return AssetPurpose.ASSET_PURPOSE_UNSPECIFIED;
   }
 }

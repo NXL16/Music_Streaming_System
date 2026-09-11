@@ -31,6 +31,17 @@ import { ArtistOrAdminGuard } from '../common/guards/artist-or-admin.guard';
 
 @Controller('songs')
 export class SongsController {
+  private static readonly UPLOAD_MEMBER_ROLES = [
+    'OWNER',
+    'MANAGER',
+    'PRODUCTION',
+  ];
+  private static readonly ADMIN_ROLES = new Set([
+    'SUPER_ADMIN',
+    'ADMIN_USER_OPS',
+    'ADMIN_SECURITY_OPS',
+  ]);
+
   constructor(
     private readonly songsService: SongsService,
     private readonly configService: ConfigService,
@@ -45,6 +56,19 @@ export class SongsController {
     @Body() requestDto: RequestUploadDto,
   ) {
     const user = req.user as JwtUser;
+    if (!SongsController.ADMIN_ROLES.has(user.role)) {
+      const permission = await this.songsService.checkArtistPermission({
+        artistId: requestDto.artistId,
+        userId: user.userId,
+        allowedRoles: SongsController.UPLOAD_MEMBER_ROLES,
+      });
+      if (!permission.allowed) {
+        throw new UnauthorizedException({
+          code: 'ARTIST_WORKSPACE_ACCESS_DENIED',
+          message: 'Bạn không có quyền upload cho Artist workspace này',
+        });
+      }
+    }
     return await this.songsService.requestUpload(requestDto, user.userId);
   }
 
@@ -127,21 +151,26 @@ export class SongsController {
       title?: string;
       subtitle?: string;
       artworkUrl?: string;
+      sourceAlbumId?: string;
       sourceOrigin?: 'catalog' | 'favorite' | 'user-playlist';
       songIds?: string[];
+      trackSources?: Array<{ songId: string; sourceAlbumId: string }>;
     },
   ) {
     const user = req.user as JwtUser;
-    return this.songsService.addLibraryResource({
+    const result = await this.songsService.addLibraryResource({
       userId: user.userId,
       resourceType: body.resourceType,
       resourceId: body.resourceId,
       title: body.title || '',
       subtitle: body.subtitle || '',
       artworkUrl: body.artworkUrl || '',
+      sourceAlbumId: body.sourceAlbumId || '',
       sourceOrigin: body.sourceOrigin,
       songIds: body.songIds,
+      trackSources: body.trackSources,
     });
+    return result;
   }
 
   @Get('library/resources')
@@ -184,6 +213,89 @@ export class SongsController {
     );
   }
 
+  @Get('albums/:albumId/favorite')
+  @UseGuards(StrictJwtAuthGuard)
+  async getAlbumFavorite(
+    @Req() req: Request,
+    @Param('albumId') albumId: string,
+  ) {
+    const user = req.user as JwtUser;
+    return this.songsService.getAlbumFavorite({ userId: user.userId, albumId });
+  }
+
+  @Get('albums/favorites')
+  @UseGuards(StrictJwtAuthGuard)
+  async listAlbumFavoriteIds(@Req() req: Request) {
+    const user = req.user as JwtUser;
+    return this.songsService.listAlbumFavoriteIds({ userId: user.userId });
+  }
+
+  @Post('albums/:albumId/favorite')
+  @UseGuards(StrictJwtAuthGuard)
+  async favoriteAlbum(@Req() req: Request, @Param('albumId') albumId: string) {
+    const user = req.user as JwtUser;
+    return this.songsService.addAlbumFavorite({ userId: user.userId, albumId });
+  }
+
+  @Delete('albums/:albumId/favorite')
+  @UseGuards(StrictJwtAuthGuard)
+  async unfavoriteAlbum(
+    @Req() req: Request,
+    @Param('albumId') albumId: string,
+  ) {
+    const user = req.user as JwtUser;
+    return this.songsService.removeAlbumFavorite({
+      userId: user.userId,
+      albumId,
+    });
+  }
+
+  @Get('playlists/:playlistId/favorite')
+  @UseGuards(StrictJwtAuthGuard)
+  async getPlaylistFavorite(
+    @Req() req: Request,
+    @Param('playlistId') playlistId: string,
+  ) {
+    const user = req.user as JwtUser;
+    return this.songsService.getPlaylistFavorite({
+      userId: user.userId,
+      playlistId,
+    });
+  }
+
+  @Get('playlists/favorites')
+  @UseGuards(StrictJwtAuthGuard)
+  async listPlaylistFavoriteIds(@Req() req: Request) {
+    const user = req.user as JwtUser;
+    return this.songsService.listPlaylistFavoriteIds({ userId: user.userId });
+  }
+
+  @Post('playlists/:playlistId/favorite')
+  @UseGuards(StrictJwtAuthGuard)
+  async favoritePlaylist(
+    @Req() req: Request,
+    @Param('playlistId') playlistId: string,
+  ) {
+    const user = req.user as JwtUser;
+    return this.songsService.addPlaylistFavorite({
+      userId: user.userId,
+      playlistId,
+    });
+  }
+
+  @Delete('playlists/:playlistId/favorite')
+  @UseGuards(StrictJwtAuthGuard)
+  async unfavoritePlaylist(
+    @Req() req: Request,
+    @Param('playlistId') playlistId: string,
+  ) {
+    const user = req.user as JwtUser;
+    return this.songsService.removePlaylistFavorite({
+      userId: user.userId,
+      playlistId,
+    });
+  }
+
   @Get(':songId/lyrics')
   async getLyrics(@Param('songId') songId: string) {
     // Lyrics are published independently of the Song row. Resolve the song
@@ -203,6 +315,7 @@ export class SongsController {
     body: {
       sourceOrigin?: 'catalog' | 'favorite' | 'user-playlist';
       songIds?: string[];
+      trackSources?: Array<{ songId: string; sourceAlbumId: string }>;
     },
   ) {
     const user = req.user as JwtUser;
@@ -213,8 +326,10 @@ export class SongsController {
       title: '',
       subtitle: '',
       artworkUrl: '',
+      sourceAlbumId: '',
       sourceOrigin: body?.sourceOrigin,
       songIds: body?.songIds,
+      trackSources: body?.trackSources,
     });
     if (result.deletedUserPlaylist) {
       await this.recommendationsService.cleanupPlaylistHistory({
@@ -240,6 +355,7 @@ export class SongsController {
       title: '',
       subtitle: '',
       artworkUrl: '',
+      sourceAlbumId: '',
     });
   }
 
@@ -258,6 +374,7 @@ export class SongsController {
       title: '',
       subtitle: '',
       artworkUrl: '',
+      sourceAlbumId: '',
     });
   }
 
@@ -298,19 +415,30 @@ export class SongsController {
 
   @Post(':id/favorite')
   @UseGuards(StrictJwtAuthGuard)
-  async favorite(@Req() req: Request, @Param('id') songId: string) {
+  async favorite(
+    @Req() req: Request,
+    @Param('id') songId: string,
+    @Body() body: { sourceAlbumId?: string },
+  ) {
     const user = req.user as JwtUser;
-    return await this.songsService.addFavorite({ userId: user.userId, songId });
+    const result = await this.songsService.addFavorite({
+      userId: user.userId,
+      songId,
+      sourceAlbumId: body.sourceAlbumId || '',
+    });
+    return result;
   }
 
   @Delete(':id/favorite')
   @UseGuards(StrictJwtAuthGuard)
   async unfavorite(@Req() req: Request, @Param('id') songId: string) {
     const user = req.user as JwtUser;
-    return await this.songsService.removeFavorite({
+    const result = await this.songsService.removeFavorite({
       userId: user.userId,
       songId,
+      sourceAlbumId: '',
     });
+    return result;
   }
 
   @Delete(':id')

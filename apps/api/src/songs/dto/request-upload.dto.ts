@@ -22,6 +22,10 @@ export class RequestUploadDto {
   @IsString()
   artist?: string;
 
+  @IsString()
+  @IsNotEmpty()
+  artistId!: string;
+
   @IsOptional()
   @IsString()
   album?: string;

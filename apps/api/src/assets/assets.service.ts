@@ -7,6 +7,8 @@ import {
   DeleteAssetResponse,
   FinalizeAssetUploadRequest,
   GetAssetRequest,
+  GetMusicVideoKeyRequest,
+  GetMusicVideoKeyResponse,
   ListAssetsRequest,
   ListAssetsResponse,
   ListAssetUsagesResponse,
@@ -51,9 +53,7 @@ export class AssetsService implements OnModuleInit {
     );
   }
 
-  finalizeUpload(
-    request: FinalizeAssetUploadRequest,
-  ): Promise<AssetResponse> {
+  finalizeUpload(request: FinalizeAssetUploadRequest): Promise<AssetResponse> {
     return grpcFirstValueFrom(
       this.client.finalizeAssetUpload(request, this.metadata()),
     );
@@ -61,6 +61,14 @@ export class AssetsService implements OnModuleInit {
 
   getAsset(request: GetAssetRequest): Promise<AssetResponse> {
     return grpcFirstValueFrom(this.client.getAsset(request, this.metadata()));
+  }
+
+  getMusicVideoKey(
+    request: GetMusicVideoKeyRequest,
+  ): Promise<GetMusicVideoKeyResponse> {
+    return grpcFirstValueFrom(
+      this.client.getMusicVideoKey(request, this.metadata()),
+    );
   }
 
   listAssets(request: ListAssetsRequest): Promise<ListAssetsResponse> {
@@ -74,7 +82,9 @@ export class AssetsService implements OnModuleInit {
   }
 
   deleteAsset(request: DeleteAssetRequest): Promise<DeleteAssetResponse> {
-    return grpcFirstValueFrom(this.client.deleteAsset(request, this.metadata()));
+    return grpcFirstValueFrom(
+      this.client.deleteAsset(request, this.metadata()),
+    );
   }
 
   reconcileUsages(

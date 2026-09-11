@@ -24,6 +24,7 @@ const REQUIRED_KEYS = [
   'JWT_ACCESS_SECRET',
   'MASTER_SECRET_KEY',
   'STREAM_WORKER_URL',
+  'VIDEO_CDN_SIGNING_SECRET',
   'CORS_ORIGIN',
 ] as const;
 
@@ -83,6 +84,10 @@ export const validateEnv = (rawEnv: RawEnv): RawEnv => {
     throw new Error(
       'MASTER_SECRET_KEY must be a hex string of at least 32 bytes (64 hex chars)',
     );
+  }
+
+  if ((rawEnv.VIDEO_CDN_SIGNING_SECRET as string).length < 32) {
+    throw new Error('VIDEO_CDN_SIGNING_SECRET must be at least 32 characters');
   }
 
   return rawEnv;

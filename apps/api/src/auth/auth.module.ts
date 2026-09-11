@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
+import { ArtistAuthController } from './artist-auth.controller';
 import {
   GRPC_LOADER_OPTIONS,
   IDENTITY,
@@ -32,7 +33,7 @@ import { AssetsModule } from '../assets/assets.module';
       },
     ]),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, ArtistAuthController],
   providers: [AuthService, JwtStrategy, StrictJwtAuthGuard, PermissionsGuard],
   exports: [AuthService],
 })
