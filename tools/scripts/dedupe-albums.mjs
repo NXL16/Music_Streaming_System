@@ -119,7 +119,7 @@ function exactCloneKey(album, trackSignature) {
   const artist = normalizeText(album.artistName);
   const artwork = String(album.artworkAssetId || '').trim();
   if (!name || !artist || !artwork || !trackSignature) return `id:${album.id}`;
-  return [name, artist, artwork, album.isSingle ? 'single' : 'album', trackSignature].join('::');
+  return [name, artist, artwork, album.releaseType || 'album', trackSignature].join('::');
 }
 
 // survivor: nhiều track nhất → có artwork → tạo sớm nhất → id nhỏ nhất
@@ -145,7 +145,7 @@ async function main() {
     const { rows: albums } = await client.query(
       `SELECT id, storefront, name, "artistName", "artworkAssetId", artwork,
               "editorialArtworkAssetId", upc, url, "releaseDate", "trackCount",
-              "isSingle", "createdAt"
+              "releaseType", "createdAt"
          FROM albums`,
     );
     const { rows: albumTracks } = await client.query(

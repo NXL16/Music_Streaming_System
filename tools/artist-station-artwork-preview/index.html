@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Artist Station Artwork Preview</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #161616; color: #f5f5f7; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-width: 320px; }
+      main { display: grid; grid-template-columns: minmax(280px, 390px) minmax(300px, 1fr); gap: 32px; max-width: 1100px; min-height: 100vh; margin: 0 auto; padding: 48px 24px; }
+      h1 { font-size: 28px; margin: 0 0 8px; }
+      p { color: #a1a1a6; line-height: 1.45; margin: 0; }
+      .panel { align-self: start; padding: 20px; border: 1px solid #3a3a3c; border-radius: 16px; background: #212122; }
+      .fields { display: grid; gap: 18px; margin-top: 24px; }
+      label { display: grid; gap: 8px; color: #d1d1d6; font-size: 13px; font-weight: 600; }
+      input { width: 100%; padding: 10px 12px; color: #f5f5f7; background: #2c2c2e; border: 1px solid #48484a; border-radius: 8px; font: inherit; }
+      input[type="file"], button { cursor: pointer; }
+      input[type="color"] { height: 42px; padding: 4px; }
+      .color-row { display: grid; grid-template-columns: 48px 1fr; gap: 8px; }
+      button { padding: 10px 12px; border: 0; border-radius: 8px; color: white; background: #ff375f; font: inherit; font-weight: 650; }
+      button:disabled { cursor: not-allowed; opacity: .45; }
+      .hint { font-size: 12px; }
+      .preview-area { display: grid; min-height: 520px; place-items: center; border-radius: 20px; background: radial-gradient(circle at center, #2c2c2e, #191919 72%); }
+      .station-card { width: min(440px, 78vw); aspect-ratio: 1; overflow: hidden; border-radius: 10px; box-shadow: 0 16px 40px rgb(0 0 0 / .35); }
+      canvas { display: block; width: 100%; height: 100%; }
+      @media (max-width: 760px) { main { grid-template-columns: 1fr; padding: 28px 16px; } .preview-area { min-height: 360px; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="panel">
+        <h1>Artist Station Artwork</h1>
+        <p>Ảnh lớn là artist được chọn. Hai ảnh nhỏ là các artist xuất hiện nhiều nhất trong Station.</p>
+        <div class="fields">
+          <label>Artist chính <input id="primary" type="file" accept="image/png,image/jpeg,image/webp" /></label>
+          <label>Artist phụ thứ nhất <input id="secondary-one" type="file" accept="image/png,image/jpeg,image/webp" /></label>
+          <label>Artist phụ thứ hai <input id="secondary-two" type="file" accept="image/png,image/jpeg,image/webp" /></label>
+          <label>Base color <span class="color-row"><input id="color-picker" type="color" value="#00A9DE" /><input id="color-value" value="#00A9DE" maxlength="7" /></span></label>
+          <button id="download" type="button" disabled>Download PNG</button>
+          <p class="hint">Preview chỉ chạy local, không upload hay lưu ảnh.</p>
+        </div>
+      </section>
+      <section class="preview-area" aria-label="Artist Station preview"><div class="station-card"><canvas id="canvas" width="1080" height="1080"></canvas></div></section>
+    </main>
+    <script>
+      const size = 1080;
+      const canvas = document.querySelector('#canvas');
+      const context = canvas.getContext('2d');
+      const images = { primary: null, one: null, two: null };
+      const picker = document.querySelector('#color-picker');
+      const value = document.querySelector('#color-value');
+      const download = document.querySelector('#download');
+
+      function normalizeHex(input) { const hex = input.trim().replace(/^#/, ''); return /^[0-9a-f]{6}$/i.test(hex) ? `#${hex.toUpperCase()}` : null; }
+      function darken(color, amount) { const hex = color.slice(1); return `rgb(${[0, 2, 4].map((offset) => Math.round(Number.parseInt(hex.slice(offset, offset + 2), 16) * (1 - amount))).join(',')})`; }
+      function vividHue(red, green, blue) {
+        const channels = [red, green, blue].map((channel) => channel / 255);
+        const maximum = Math.max(...channels);
+        const minimum = Math.min(...channels);
+        const chroma = maximum - minimum;
+        if (chroma === 0) return '#808080';
+        const [r, g, b] = channels;
+        const hue = (60 * (maximum === r ? ((g - b) / chroma) % 6 : maximum === g ? (b - r) / chroma + 2 : (r - g) / chroma + 4) + 360) % 360;
+        const segment = hue / 60;
+        const secondary = 1 - Math.abs((segment % 2) - 1);
+        const brightness = .86;
+        const saturation = .81;
+        const values = [segment < 1 ? 1 : segment < 2 ? secondary : segment < 4 ? 0 : segment < 5 ? secondary : 1, segment < 1 ? secondary : segment < 3 ? 1 : segment < 4 ? secondary : 0, segment < 2 ? 0 : segment < 3 ? secondary : segment < 5 ? 1 : secondary];
+        return `#${values.map((channel) => Math.round(brightness * (1 - saturation + channel * saturation) * 255).toString(16).padStart(2, '0')).join('').toUpperCase()}`;
+      }
+      function primaryBackgroundColor(image) {
+        const sample = document.createElement('canvas');
+        sample.width = 72; sample.height = 72;
+        const sampleContext = sample.getContext('2d', { willReadFrequently: true });
+        sampleContext.drawImage(image, 0, 0, 72, 72);
+        const pixels = sampleContext.getImageData(0, 0, 72, 72).data;
+        const buckets = new Map();
+        for (let index = 0; index < pixels.length; index += 16) {
+          const [red, green, blue, alpha] = [pixels[index], pixels[index + 1], pixels[index + 2], pixels[index + 3]];
+          if (alpha < 220) continue;
+          const maximum = Math.max(red, green, blue);
+          const minimum = Math.min(red, green, blue);
+          const lightness = (maximum + minimum) / 510;
+          if (lightness < .22 || lightness > .9) continue;
+          const saturation = maximum === 0 ? 0 : (maximum - minimum) / maximum;
+          const bucket = [red, green, blue].map((channel) => Math.min(255, Math.floor(channel / 24) * 24 + 12));
+          const key = bucket.join(',');
+          buckets.set(key, (buckets.get(key) || 0) + 1 + saturation * 5);
+        }
+        const winner = [...buckets.entries()].sort((left, right) => right[1] - left[1])[0];
+        if (!winner) return '#808080';
+        return vividHue(...winner[0].split(',').map(Number));
+      }
+      function circle(image, x, y, diameter) {
+        if (!image) return;
+        context.save();
+        context.beginPath();
+        context.arc(x + diameter / 2, y + diameter / 2, diameter / 2, 0, Math.PI * 2);
+        context.clip();
+        const scale = Math.max(diameter / image.width, diameter / image.height);
+        context.drawImage(image, x + (diameter - image.width * scale) / 2, y + (diameter - image.height * scale) / 2, image.width * scale, image.height * scale);
+        context.restore();
+      }
+      function render() {
+        const color = normalizeHex(value.value) || '#00A9DE';
+        const gradient = context.createLinearGradient(0, 0, 0, size);
+        gradient.addColorStop(0, darken(color, .52)); gradient.addColorStop(.48, darken(color, .2)); gradient.addColorStop(1, color);
+        context.fillStyle = gradient; context.fillRect(0, 0, size, size);
+        context.fillStyle = 'rgba(255,255,255,.86)'; context.font = '700 58px Inter,Arial,sans-serif'; context.textAlign = 'right'; context.textBaseline = 'top'; context.fillText('404Hz', 1028, 48);
+        context.shadowColor = 'rgba(0,0,0,.2)';
+        context.shadowBlur = 28;
+        context.shadowOffsetY = 14;
+        circle(images.primary, 69, 42, 620);
+        circle(images.one, 606, 486, 400);
+        circle(images.two, 289, 689, 320);
+        context.shadowColor = 'transparent';
+      }
+      function load(input, key) { input.addEventListener('change', () => { const [file] = input.files || []; if (!file) return; const reader = new FileReader(); reader.onload = () => { const image = new Image(); image.onload = () => { images[key] = image; if (key === 'primary') { const color = primaryBackgroundColor(image); picker.value = color; value.value = color; } download.disabled = !images.primary; render(); }; image.src = String(reader.result); }; reader.readAsDataURL(file); }); }
+      load(document.querySelector('#primary'), 'primary'); load(document.querySelector('#secondary-one'), 'one'); load(document.querySelector('#secondary-two'), 'two');
+      picker.addEventListener('input', () => { value.value = picker.value.toUpperCase(); render(); });
+      value.addEventListener('input', () => { const color = normalizeHex(value.value); if (color) picker.value = color; render(); });
+      download.addEventListener('click', () => { const link = document.createElement('a'); link.download = 'artist-station-artwork.png'; link.href = canvas.toDataURL('image/png'); link.click(); });
+      render();
+    </script>
+  </body>
+</html>

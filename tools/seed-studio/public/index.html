@@ -15,6 +15,11 @@
         --key: #ff375f;
         --ok: #30d158;
         --bad: #ff696f;
+        --space-1: 4px;
+        --space-2: 8px;
+        --space-3: 12px;
+        --space-4: 16px;
+        --space-5: 24px;
       }
       * {
         box-sizing: border-box;
@@ -85,7 +90,10 @@
       }
       .panel-body {
         display: grid;
-        grid-template-columns: minmax(300px, 0.9fr) minmax(540px, 1.65fr) minmax(360px, 1.05fr);
+        grid-template-columns: minmax(300px, 0.9fr) minmax(
+            540px,
+            1.65fr
+          ) minmax(360px, 1.05fr);
         gap: 24px;
       }
       .column {
@@ -354,13 +362,18 @@
         background: #ffffff05;
         font-size: 12px;
       }
-      .empty-step b { display: block; margin-bottom: 3px; color: var(--text); }
+      .empty-step b {
+        display: block;
+        margin-bottom: 3px;
+        color: var(--text);
+      }
       .mode-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
         border: 1px solid var(--line);
         border-radius: 9px;
         overflow: hidden;
+        margin-top: var(--space-3);
       }
       .mode {
         position: relative;
@@ -390,8 +403,8 @@
       }
       .options {
         display: grid;
-        gap: 8px;
-        margin-top: 14px;
+        gap: var(--space-2);
+        margin-top: var(--space-3);
         color: var(--muted);
         font-size: 12px;
       }
@@ -409,12 +422,9 @@
         flex: 1;
         flex-direction: column;
         overflow: hidden;
-        margin-top: 18px;
-        gap: 14px;
-        padding: 16px;
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        background: #ffffff04;
+        margin-top: var(--space-5);
+        gap: var(--space-3);
+        padding: 14px 0 0;
       }
       .health-list,
       .progress-summary,
@@ -439,17 +449,30 @@
         text-align: right;
         overflow-wrap: anywhere;
       }
-      .badge-ok { color: var(--ok); }
-      .badge-error { color: var(--bad); }
-      .badge-unknown { color: var(--muted); }
+      .badge-ok {
+        color: var(--ok);
+      }
+      .badge-error {
+        color: var(--bad);
+      }
+      .badge-unknown {
+        color: var(--muted);
+      }
       .progress-summary {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
         gap: 8px;
         padding: 10px 0;
       }
-      .metric { color: var(--muted); font-size: 11px; }
-      .metric strong { display: block; color: var(--text); font-size: 16px; }
+      .metric {
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .metric strong {
+        display: block;
+        color: var(--text);
+        font-size: 16px;
+      }
       .song-list,
       .history-list {
         min-height: 0;
@@ -457,7 +480,7 @@
         overflow: auto;
       }
       .job-overview {
-        padding-bottom: 12px;
+        padding-bottom: var(--space-4);
         border-bottom: 1px solid var(--line);
       }
       .job-overview .section-label,
@@ -466,15 +489,13 @@
       }
       .job-block {
         min-height: 0;
-        padding: 10px 12px;
+        padding: var(--space-3);
         border: 1px solid #ffffff12;
         border-radius: 8px;
         background: #00000016;
       }
-      .job-block:not(.job-activity) {
+      .job-block.current-songs {
         display: flex;
-        height: 132px;
-        flex: 0 0 132px;
         flex-direction: column;
         overflow: hidden;
       }
@@ -500,6 +521,90 @@
         flex: 1;
         flex-direction: column;
         overflow: hidden;
+      }
+      .utility-details,
+      .job-details {
+        border-bottom: 1px solid var(--line);
+      }
+      .utility-details {
+        padding-bottom: var(--space-4);
+      }
+      .utility-details summary,
+      .job-details summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        cursor: pointer;
+        color: var(--text);
+        font-weight: 650;
+        list-style: none;
+      }
+      .utility-details summary::-webkit-details-marker,
+      .job-details summary::-webkit-details-marker {
+        display: none;
+      }
+      .utility-details summary::after,
+      .job-details summary::after {
+        content: "›";
+        color: var(--muted);
+        font-size: 18px;
+        transform: rotate(0deg);
+      }
+      .utility-details[open] summary::after,
+      .job-details[open] summary::after {
+        transform: rotate(90deg);
+      }
+      .utility-details .health-list {
+        margin-top: var(--space-3);
+      }
+      .utility-details .btn {
+        margin-top: var(--space-3);
+      }
+      .job-details {
+        padding: var(--space-1) 0 var(--space-3);
+      }
+      .job-details > .job-block {
+        margin-top: var(--space-3);
+      }
+      .job-details .history-list,
+      .job-details .activity-list {
+        max-height: 180px;
+      }
+      .current-songs .song-list {
+        max-height: 140px;
+      }
+      #credit-review {
+        flex: 0 0 auto;
+        padding: var(--space-4);
+        border-color: #ffffff20;
+        background: #ffffff06;
+      }
+      #credit-review .song-list {
+        display: grid;
+        gap: var(--space-2);
+        max-height: min(32vh, 260px);
+        margin-top: var(--space-3);
+      }
+      #credit-review .song-row {
+        align-items: center;
+        gap: var(--space-2);
+        padding: 0 0 var(--space-2);
+      }
+      #credit-review .song-row .field {
+        min-width: 0;
+      }
+      #credit-review .song-row .btn {
+        flex: none;
+      }
+      #credit-review .job-actions {
+        margin-top: var(--space-4);
+      }
+      .job-view:has(#credit-review:not(.hidden)) {
+        overflow-y: auto;
+      }
+      .job-view:has(#credit-review:not(.hidden)) .current-songs,
+      .job-view:has(#credit-review:not(.hidden)) .job-details {
+        display: none;
       }
       .run-hint {
         margin: 0;
@@ -568,8 +673,13 @@
       .processing > .section + .section {
         border-top: 1px solid var(--line);
       }
+      .processing > .utility-details + .section {
+        padding-top: var(--space-5);
+      }
       .processing > .job-view {
-        border-top: 0;
+        margin-top: var(--space-5);
+        padding-top: 20px;
+        border-top: 1px solid var(--line);
       }
       @media (max-width: 1000px) {
         .app {
@@ -694,25 +804,66 @@
                   <span>Khám phá catalog</span>
                   <span id="artist-result-count" class="muted"></span>
                 </div>
-                <div class="discovery-tabs" role="tablist" aria-label="Cách tìm catalog">
-                  <button id="artist-tab" class="discovery-tab" role="tab" aria-selected="true">Theo nghệ sĩ</button>
-                  <button id="track-tab" class="discovery-tab" role="tab" aria-selected="false">Theo bài hát</button>
+                <div
+                  class="discovery-tabs"
+                  role="tablist"
+                  aria-label="Cách tìm catalog"
+                >
+                  <button
+                    id="artist-tab"
+                    class="discovery-tab"
+                    role="tab"
+                    aria-selected="true"
+                  >
+                    Theo nghệ sĩ
+                  </button>
+                  <button
+                    id="track-tab"
+                    class="discovery-tab"
+                    role="tab"
+                    aria-selected="false"
+                  >
+                    Theo bài hát
+                  </button>
                 </div>
                 <div id="artist-search-panel" class="discovery-mode">
-                  <p class="discovery-copy">Phù hợp khi bạn muốn chọn nhiều release của một nghệ sĩ.</p>
+                  <p class="discovery-copy">
+                    Phù hợp khi bạn muốn chọn nhiều release của một nghệ sĩ.
+                  </p>
                   <div class="search-row">
-                    <input id="artist-query" class="field" placeholder="Nhập tên nghệ sĩ" />
+                    <input
+                      id="artist-query"
+                      class="field"
+                      placeholder="Nhập tên nghệ sĩ"
+                    />
                     <button id="search-button" class="btn">Tìm</button>
                   </div>
-                  <div id="artists" class="artists" style="margin-top: 12px"></div>
+                  <div
+                    id="artists"
+                    class="artists"
+                    style="margin-top: 12px"
+                  ></div>
                 </div>
                 <div id="track-search-panel" class="discovery-mode hidden">
-                  <p class="discovery-copy">Tìm nhanh bài đang hot; sau đó Studio mở đúng release gốc để seed toàn bộ.</p>
+                  <p class="discovery-copy">
+                    Tìm nhanh bài đang hot; sau đó Studio mở đúng release gốc để
+                    seed toàn bộ.
+                  </p>
                   <div class="search-row">
-                    <input id="track-query" class="field" placeholder="Nhập tên bài hát" />
-                    <button id="track-search-button" class="btn">Tìm bài</button>
+                    <input
+                      id="track-query"
+                      class="field"
+                      placeholder="Nhập tên bài hát"
+                    />
+                    <button id="track-search-button" class="btn">
+                      Tìm bài
+                    </button>
                   </div>
-                  <div id="tracks" class="artists" style="margin-top: 12px"></div>
+                  <div
+                    id="tracks"
+                    class="artists"
+                    style="margin-top: 12px"
+                  ></div>
                 </div>
               </section>
             </div>
@@ -733,11 +884,21 @@
                   <div class="empty-workspace">
                     <div>
                       <strong>Chọn điểm bắt đầu</strong>
-                      <span>Tìm theo nghệ sĩ để duyệt catalog, hoặc tìm theo bài để mở đúng release gốc.</span>
+                      <span
+                        >Tìm theo nghệ sĩ để duyệt catalog, hoặc tìm theo bài để
+                        mở đúng release gốc.</span
+                      >
                       <div class="empty-steps">
-                        <div class="empty-step"><b>1. Tìm</b>Nhập tên nghệ sĩ hoặc bài hát.</div>
-                        <div class="empty-step"><b>2. Chọn release</b>Chọn một hoặc nhiều release cần seed.</div>
-                        <div class="empty-step"><b>3. Theo dõi</b>Kiểm tra hệ thống rồi bắt đầu job.</div>
+                        <div class="empty-step">
+                          <b>1. Tìm</b>Nhập tên nghệ sĩ hoặc bài hát.
+                        </div>
+                        <div class="empty-step">
+                          <b>2. Chọn release</b>Chọn một hoặc nhiều release cần
+                          seed.
+                        </div>
+                        <div class="empty-step">
+                          <b>3. Theo dõi</b>Kiểm tra hệ thống rồi bắt đầu job.
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -745,15 +906,13 @@
               </section>
             </div>
             <div class="column processing">
-              <section class="section">
-                <div class="section-label">
-                  <span>Kiểm tra hệ thống</span
-                  ><button id="health-button" class="btn btn-ghost">Kiểm tra</button>
-                </div>
+              <details class="utility-details">
+                <summary>Kiểm tra hệ thống</summary>
+                <button id="health-button" class="btn btn-ghost">Kiểm tra</button>
                 <div id="health-list" class="health-list">
                   <div class="empty">Chưa kiểm tra.</div>
                 </div>
-              </section>
+              </details>
               <section class="section">
                 <div class="section-label"><span>Chế độ xử lý</span></div>
                 <div class="mode-grid">
@@ -795,24 +954,40 @@
                   </p>
                   <div id="progress-summary" class="progress-summary"></div>
                 </div>
-                <div class="job-block">
+                <div id="credit-review" class="job-block hidden">
+                  <div class="job-block-title">Duyệt credit bài hát</div>
+                  <p id="credit-review-track" class="run-hint"></p>
+                  <p id="credit-review-lookup" class="muted"></p>
+                  <p class="muted">Nghệ sĩ biểu diễn đã lấy từ iTunes. Có thể thêm cùng một người ở nhiều dòng nếu họ có nhiều vai trò.</p>
+                  <div id="credit-review-rows" class="song-list"></div>
+                  <div class="job-actions">
+                    <button id="credit-add-button" class="btn btn-secondary">Thêm credit</button>
+                    <button id="credit-skip-button" class="btn btn-secondary">Không thêm</button>
+                    <button id="credit-confirm-button" class="btn">Xác nhận &amp; tiếp tục</button>
+                  </div>
+                </div>
+                <div class="job-block current-songs">
                   <div class="job-block-title">Bài trong job</div>
                   <div id="song-list" class="song-list">
                     <div class="empty">Chưa có bài hát trong job.</div>
                   </div>
                 </div>
-                <div class="job-block">
-                  <div class="job-block-title">Lịch sử job</div>
-                  <div id="history-list" class="history-list">
-                    <div class="empty">Chưa có job đã lưu.</div>
+                <details class="job-details">
+                  <summary>Lịch sử job</summary>
+                  <div class="job-block">
+                    <div id="history-list" class="history-list">
+                      <div class="empty">Chưa có job đã lưu.</div>
+                    </div>
                   </div>
-                </div>
-                <div class="job-block job-activity">
-                  <div class="job-block-title">Nhật ký hoạt động</div>
-                  <div id="activity-list" class="activity-list">
-                    <div class="empty-activity">Chưa có hoạt động.</div>
+                </details>
+                <details class="job-details">
+                  <summary>Nhật ký hoạt động</summary>
+                  <div class="job-block job-activity">
+                    <div id="activity-list" class="activity-list">
+                      <div class="empty-activity">Chưa có hoạt động.</div>
+                    </div>
                   </div>
-                </div>
+                </details>
                 <div class="job-actions">
                   <button id="stop-button" class="btn btn-secondary">
                     Dừng job</button
@@ -837,6 +1012,7 @@
           running: false,
           progress: null,
           history: [],
+          creditReview: null,
         },
         authStatus = $("auth-status"),
         artistsBox = $("artists"),
@@ -849,6 +1025,10 @@
         activityList = $("activity-list"),
         jobStatus = $("job-status"),
         progressSummary = $("progress-summary"),
+        creditReviewBox = $("credit-review"),
+        creditReviewTrack = $("credit-review-track"),
+        creditReviewLookup = $("credit-review-lookup"),
+        creditReviewRows = $("credit-review-rows"),
         songList = $("song-list"),
         historyList = $("history-list"),
         retryButton = $("retry-button"),
@@ -862,11 +1042,17 @@
         const header = document.createElement("div");
         header.className = "activity-header";
         header.append(
-          Object.assign(document.createElement("div"), { className: "activity-title", textContent: a.title }),
+          Object.assign(document.createElement("div"), {
+            className: "activity-title",
+            textContent: a.title,
+          }),
           Object.assign(document.createElement("time"), {
             className: "activity-time",
             dateTime: a.at || "",
-            textContent: new Date(a.at || Date.now()).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+            textContent: new Date(a.at || Date.now()).toLocaleTimeString(
+              "vi-VN",
+              { hour: "2-digit", minute: "2-digit", second: "2-digit" },
+            ),
           }),
         );
         n.append(header);
@@ -883,12 +1069,100 @@
       function clear(n) {
         n.replaceChildren();
       }
+      let creditRoleGroups = [];
+      async function loadCreditRoleGroups() {
+        const { groups } = await request("/api/song-credit-roles");
+        creditRoleGroups = Array.isArray(groups) ? groups : [];
+      }
+      // A stale Seed Studio process may briefly serve this newer HTML before it
+      // is restarted. Role options can retry later; they must never prevent
+      // /api/status from restoring the existing authenticated session.
+      const creditRoleGroupsReady = loadCreditRoleGroups().catch((error) => {
+        console.warn("Không tải được danh sách role credit:", error);
+        creditRoleGroups = [];
+      });
+      function addCreditRow(credit = {}) {
+        const row = document.createElement("div");
+        row.className = "song-row";
+        const name = document.createElement("input");
+        name.className = "field";
+        name.placeholder = "Tên người được credit";
+        name.value = credit.name || "";
+        const role = document.createElement("select");
+        role.className = "field";
+        for (const { section, roles } of creditRoleGroups) {
+          const group = document.createElement("optgroup");
+          group.label = section;
+          for (const { id, label } of roles) {
+            group.append(new Option(label, id, false, id === (credit.role || "producer")));
+          }
+          role.append(group);
+        }
+        const remove = document.createElement("button");
+        remove.className = "btn btn-ghost";
+        remove.textContent = "Xóa";
+        remove.onclick = () => row.remove();
+        row.append(name, role, remove);
+        creditReviewRows.append(row);
+      }
+      async function renderCreditReview(review) {
+        state.creditReview = review || null;
+        creditReviewBox.classList.toggle("hidden", !review);
+        if (!review) {
+          clear(creditReviewRows);
+          return;
+        }
+        await creditRoleGroupsReady;
+        if (state.creditReview?.id !== review.id) return;
+        clear(creditReviewRows);
+        creditReviewBox.querySelectorAll("button").forEach((button) => {
+          button.disabled = false;
+        });
+        const track = review.track || {};
+        creditReviewTrack.textContent = `${track.name} · ${track.artistName || "Không rõ nghệ sĩ"}${track.albumName ? ` · ${track.albumName}` : ""}`;
+        const lookupStatus = {
+          suggested: `MusicBrainz tìm thấy ${review.suggestions?.length || 0} credit để bạn kiểm tra.`,
+          no_credits: "MusicBrainz tìm thấy bản ghi nhưng chưa có credit chi tiết.",
+          not_found: "MusicBrainz chưa có bản ghi khớp chắc chắn với bài này.",
+          unavailable: "Không truy cập được MusicBrainz lúc này; bạn vẫn có thể thêm thủ công.",
+        };
+        creditReviewLookup.textContent = lookupStatus[review.lookup?.status] || "Đang kiểm tra MusicBrainz…";
+        for (const suggestion of review.suggestions || []) addCreditRow(suggestion);
+      }
+      async function resolveCreditReview(credits) {
+        const review = state.creditReview;
+        if (!review) return;
+        const buttons = creditReviewBox.querySelectorAll("button");
+        buttons.forEach((button) => (button.disabled = true));
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 12000);
+        try {
+          await request(`/api/job/credit-review/${encodeURIComponent(review.id)}`, {
+            method: "POST", body: { credits }, signal: controller.signal,
+          });
+          // The Server-Sent Event owns the next visual state. Clearing it here
+          // could erase the next track's review when requests resolve quickly.
+        } catch (error) {
+          alert(error.name === "AbortError" ? "Xác nhận mất quá lâu. Bạn có thể thử lại." : error.message);
+          buttons.forEach((button) => (button.disabled = false));
+        } finally {
+          clearTimeout(timeout);
+        }
+      }
       function outcomeText(outcome) {
-        return { success: "Hoàn tất", failed: "Lỗi", cancelled: "Đã dừng", running: "Đang chạy" }[outcome] || "Chưa rõ";
+        return (
+          {
+            success: "Hoàn tất",
+            failed: "Lỗi",
+            cancelled: "Đã dừng",
+            running: "Đang chạy",
+          }[outcome] || "Chưa rõ"
+        );
       }
       function syncRetryButton() {
         const latest = state.history[0];
-        const canRetry = !state.running && ["failed", "cancelled"].includes(latest?.outcome);
+        const canRetry =
+          !state.running && ["failed", "cancelled"].includes(latest?.outcome);
         retryButton.disabled = !canRetry;
         retryButton.classList.toggle("hidden", !canRetry);
       }
@@ -897,27 +1171,61 @@
         clear(progressSummary);
         clear(songList);
         if (!progress) {
-          songList.append(Object.assign(document.createElement("div"), { className: "empty", textContent: "Chưa có bài hát trong job." }));
+          songList.append(
+            Object.assign(document.createElement("div"), {
+              className: "empty",
+              textContent: "Chưa có bài hát trong job.",
+            }),
+          );
           return;
         }
         const expected = progress.expectedSongs || "?";
-        for (const [label, value] of [["Hoàn thành", `${progress.processed}/${expected}`], ["READY", progress.ready], ["Lỗi", progress.failed], ["Bỏ qua", progress.skipped]]) {
+        for (const [label, value] of [
+          ["Hoàn thành", `${progress.processed}/${expected}`],
+          ["READY", progress.ready],
+          ["Lỗi", progress.failed],
+          ["Bỏ qua", progress.skipped],
+        ]) {
           const metric = document.createElement("div");
           metric.className = "metric";
-          metric.append(Object.assign(document.createElement("strong"), { textContent: String(value) }), document.createTextNode(label));
+          metric.append(
+            Object.assign(document.createElement("strong"), {
+              textContent: String(value),
+            }),
+            document.createTextNode(label),
+          );
           progressSummary.append(metric);
         }
         const songs = [...(progress.songs || [])].reverse();
         if (!songs.length) {
-          songList.append(Object.assign(document.createElement("div"), { className: "empty", textContent: progress.activeTitle ? `Đang xử lý: ${progress.activeTitle}` : "Đang chờ log bài hát…" }));
+          songList.append(
+            Object.assign(document.createElement("div"), {
+              className: "empty",
+              textContent: progress.activeTitle
+                ? `Đang xử lý: ${progress.activeTitle}`
+                : "Đang chờ log bài hát…",
+            }),
+          );
           return;
         }
         for (const song of songs) {
-          const row = document.createElement("div"), left = document.createElement("span"), right = document.createElement("span");
+          const row = document.createElement("div"),
+            left = document.createElement("span"),
+            right = document.createElement("span");
           row.className = "song-row";
           left.textContent = song.title;
           right.className = `song-detail ${song.status === "failed" ? "badge-error" : song.status === "ready" ? "badge-ok" : ""}`;
-          right.textContent = song.detail || ({ queued: "Đang chờ", uploading: "Đang upload", processing: "Đang xử lý", ready: "READY", failed: "Lỗi", skipped: "Bỏ qua" }[song.status] || song.status);
+          right.textContent =
+            song.detail ||
+            {
+              queued: "Đang chờ",
+              uploading: "Đang upload",
+              processing: "Đang xử lý",
+              ready: "READY",
+              failed: "Lỗi",
+              skipped: "Bỏ qua",
+            }[song.status] ||
+            song.status;
           row.append(left, right);
           songList.append(row);
         }
@@ -927,11 +1235,18 @@
         syncRetryButton();
         clear(historyList);
         if (!state.history.length) {
-          historyList.append(Object.assign(document.createElement("div"), { className: "empty", textContent: "Chưa có job đã lưu." }));
+          historyList.append(
+            Object.assign(document.createElement("div"), {
+              className: "empty",
+              textContent: "Chưa có job đã lưu.",
+            }),
+          );
           return;
         }
         for (const item of state.history.slice(0, 3)) {
-          const row = document.createElement("div"), left = document.createElement("span"), right = document.createElement("span");
+          const row = document.createElement("div"),
+            left = document.createElement("span"),
+            right = document.createElement("span");
           row.className = "history-row";
           left.textContent = item.options?.artistQuery || "Job seed";
           right.className = `history-detail ${item.outcome === "success" ? "badge-ok" : item.outcome === "failed" ? "badge-error" : ""}`;
@@ -942,8 +1257,15 @@
       }
       function renderHealth(health) {
         clear(healthList);
-        for (const [name, value] of [["API", health.api], ["Modal / R2", health.modal], ["Worker / Redis", health.worker]]) {
-          const row = document.createElement("div"), left = document.createElement("span"), right = document.createElement("span");
+        for (const [name, value] of [
+          ["API", health.api],
+          ["Modal / R2", health.modal],
+          ["Tài khoản Artist seed", health.artistAccount],
+          ["Worker / Redis", health.worker],
+        ]) {
+          const row = document.createElement("div"),
+            left = document.createElement("span"),
+            right = document.createElement("span");
           row.className = "health-row";
           left.textContent = name;
           right.className = `health-detail badge-${value.status === "ok" ? "ok" : value.status === "error" ? "error" : "unknown"}`;
@@ -954,9 +1276,19 @@
       }
       async function checkHealth() {
         $("health-button").disabled = true;
-        try { renderHealth(await request("/api/health")); }
-        catch (e) { clear(healthList); healthList.append(Object.assign(document.createElement("div"), { className: "empty badge-error", textContent: e.message })); }
-        finally { $("health-button").disabled = false; }
+        try {
+          renderHealth(await request("/api/health"));
+        } catch (e) {
+          clear(healthList);
+          healthList.append(
+            Object.assign(document.createElement("div"), {
+              className: "empty badge-error",
+              textContent: e.message,
+            }),
+          );
+        } finally {
+          $("health-button").disabled = false;
+        }
       }
       function img(src, c) {
         const n = document.createElement("img");
@@ -965,11 +1297,12 @@
         n.addEventListener("error", () => (n.style.display = "none"));
         return n;
       }
-      async function request(path, { method = "GET", body } = {}) {
+      async function request(path, { method = "GET", body, signal } = {}) {
         const r = await fetch(path, {
             method,
             headers: body ? { "Content-Type": "application/json" } : {},
             body: body ? JSON.stringify(body) : undefined,
+            signal,
           }),
           j = await r.json();
         if (!r.ok) throw Error(j.error || "Request failed");
@@ -986,7 +1319,12 @@
       }
       function trackMessage(t) {
         clear(tracksBox);
-        tracksBox.append(Object.assign(document.createElement("div"), { className: "empty", textContent: t }));
+        tracksBox.append(
+          Object.assign(document.createElement("div"), {
+            className: "empty",
+            textContent: t,
+          }),
+        );
       }
       function selected() {
         return [...albumsBox.querySelectorAll("input:checked")].map(
@@ -1026,13 +1364,13 @@
           ? "Đang xử lý"
           : previousOutcome && previousOutcome !== "running"
             ? outcomeText(previousOutcome)
-          : !state.authenticated
-            ? "Cần đăng nhập"
-            : !state.artist
-              ? "Chọn nghệ sĩ"
-              : !count
-                ? "Chọn release"
-                : "Sẵn sàng";
+            : !state.authenticated
+              ? "Cần đăng nhập"
+              : !state.artist
+                ? "Chọn nghệ sĩ"
+                : !count
+                  ? "Chọn release"
+                  : "Sẵn sàng";
       }
       function artists(items) {
         state.artist = null;
@@ -1101,7 +1439,8 @@
         try {
           state.albums = (
             await request(
-              "/api/discover/albums?artistId=" + encodeURIComponent(a.id),
+              "/api/discover/albums?artistId=" + encodeURIComponent(a.id) +
+                "&artistName=" + encodeURIComponent(a.name),
             )
           ).albums;
           renderAlbums();
@@ -1120,37 +1459,68 @@
         if (!q) return trackMessage("Nhập tên bài hát để tìm.");
         trackMessage("Đang tìm bài hát…");
         try {
-          const items = (await request("/api/discover/tracks?query=" + encodeURIComponent(q))).tracks;
+          const items = (
+            await request("/api/discover/tracks?query=" + encodeURIComponent(q))
+          ).tracks;
           clear(tracksBox);
-          if (!items.length) return trackMessage("Không tìm thấy bài hát phù hợp.");
+          if (!items.length)
+            return trackMessage("Không tìm thấy bài hát phù hợp.");
           for (const track of items) {
-            const row = document.createElement("div"), info = document.createElement("div"), actions = document.createElement("div");
+            const row = document.createElement("div"),
+              info = document.createElement("div"),
+              actions = document.createElement("div");
             row.className = "artist-card";
             info.style.minWidth = "0";
             info.append(
-              Object.assign(document.createElement("div"), { className: "artist-name", textContent: track.name }),
-              Object.assign(document.createElement("div"), { className: "artist-meta", textContent: `${track.artistName} · ${track.albumName || "Không rõ release"}` }),
+              Object.assign(document.createElement("div"), {
+                className: "artist-name",
+                textContent: track.name,
+              }),
+              Object.assign(document.createElement("div"), {
+                className: "artist-meta",
+                textContent: `${track.artistName} · ${track.albumName || "Không rõ release"}`,
+              }),
             );
             actions.className = "search-row";
-            const release = Object.assign(document.createElement("button"), { className: "btn btn-secondary", textContent: "Chọn release" });
+            const release = Object.assign(document.createElement("button"), {
+              className: "btn btn-secondary",
+              textContent: "Chọn release",
+            });
             release.onclick = async () => {
               state.artist = { id: track.artistId, name: track.artistName };
               $("artist-query").value = track.artistName;
               clear(albumsBox);
-              albumsBox.append(Object.assign(document.createElement("div"), { className: "empty", textContent: "Đang tải release…" }));
+              albumsBox.append(
+                Object.assign(document.createElement("div"), {
+                  className: "empty",
+                  textContent: "Đang tải release…",
+                }),
+              );
               try {
-                state.albums = (await request("/api/discover/albums?artistId=" + encodeURIComponent(track.artistId))).albums;
+                state.albums = (
+                  await request(
+                    "/api/discover/albums?artistId=" +
+                      encodeURIComponent(track.artistId) +
+                      "&artistName=" + encodeURIComponent(track.artistName),
+                  )
+                ).albums;
                 renderAlbums();
-                const input = [...albumsBox.querySelectorAll("input")].find((item) => item.value === track.albumId);
+                const input = [...albumsBox.querySelectorAll("input")].find(
+                  (item) => item.value === track.albumId,
+                );
                 if (input) input.checked = true;
                 update();
-              } catch (e) { trackMessage(e.message); }
+              } catch (e) {
+                trackMessage(e.message);
+              }
             };
             actions.append(release);
             row.append(img(track.artworkUrl, "avatar"), info, actions);
             tracksBox.append(row);
           }
-        } catch (e) { trackMessage(e.message); }
+        } catch (e) {
+          trackMessage(e.message);
+        }
       }
       function renderAlbums() {
         clear(albumsBox);
@@ -1258,7 +1628,10 @@
               noSoundcloud: $("no-soundcloud").checked,
               expectedSongs: state.albums
                 .filter((album) => selected().includes(album.id))
-                .reduce((total, album) => total + Number(album.trackCount || 0), 0),
+                .reduce(
+                  (total, album) => total + Number(album.trackCount || 0),
+                  0,
+                ),
             },
           });
         } catch (e) {
@@ -1284,7 +1657,11 @@
         try {
           await request("/api/job/retry-last", { method: "POST" });
         } catch (e) {
-          addActivity({ kind: "error", title: "Không thể tiếp tục job", detail: e.message });
+          addActivity({
+            kind: "error",
+            title: "Không thể tiếp tục job",
+            detail: e.message,
+          });
         }
       }
       function bindButton(id, action) {
@@ -1322,6 +1699,15 @@
       bindButton("stop-button", stop);
       bindButton("retry-button", retryLast);
       bindButton("health-button", checkHealth);
+      $("credit-add-button").onclick = () => addCreditRow();
+      $("credit-skip-button").onclick = () => resolveCreditReview([]);
+      $("credit-confirm-button").onclick = () => {
+        const credits = [...creditReviewRows.querySelectorAll(".song-row")].map((row) => ({
+          name: row.querySelector("input").value.trim(),
+          role: row.querySelector("select").value,
+        })).filter((credit) => credit.name);
+        resolveCreditReview(credits);
+      };
       for (const x of document.querySelectorAll('input[name="audio-mode"]'))
         x.onchange = updateMode;
       const events = new EventSource("/api/events");
@@ -1333,12 +1719,18 @@
         jobStatus.textContent = state.running ? "Đang xử lý" : "Sẵn sàng";
         update();
       });
-      events.addEventListener("progress", (e) => renderProgress(JSON.parse(e.data)));
-      request("/api/status").then((s) => {
+      events.addEventListener("progress", (e) =>
+        renderProgress(JSON.parse(e.data)),
+      );
+      events.addEventListener("credit-review", (e) =>
+        void renderCreditReview(JSON.parse(e.data)),
+      );
+      Promise.all([creditRoleGroupsReady, request("/api/status")]).then(([, s]) => {
         state.running = s.running;
         jobStatus.textContent = s.running ? "Đang xử lý" : "Sẵn sàng";
         renderProgress(s.progress);
         renderHistory(s.history);
+        void renderCreditReview(s.creditReview);
         if (s.authenticated) authenticated();
         else update();
       });

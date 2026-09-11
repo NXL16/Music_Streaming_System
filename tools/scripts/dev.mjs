@@ -28,6 +28,7 @@ function readEnvFile(file) {
 const appEnv = process.argv[2] === 'production' ? 'production' : 'development';
 const values = readEnvFile('.env.development');
 const webEnv = readEnvFile(`apps/web/.env.${appEnv}`);
+const artistEnv = readEnvFile(`apps/artist/.env.${appEnv}`);
 const mode = (values.DEV_CACHE_MODE || 'on').trim().toLowerCase();
 const turboBin = require.resolve('turbo/bin/turbo');
 const cloudflaredBin = process.env.CLOUDFLARED_BIN || values.CLOUDFLARED_BIN || 'cloudflared';
@@ -38,6 +39,7 @@ const child = spawn(process.execPath, [turboBin, 'run', 'dev', '--concurrency=32
     ...process.env,
     ...values,
     ...webEnv,
+    ...artistEnv,
     APP_ENV: appEnv,
     NEXT_PUBLIC_DEV_CACHE_MODE: mode,
   },

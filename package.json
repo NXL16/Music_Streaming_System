@@ -7,6 +7,8 @@
     "dev": "node tools/scripts/dev.mjs development",
     "predev:production": "pnpm --filter @musical/shared-constants build && pnpm proto:gen",
     "dev:production": "node tools/scripts/dev.mjs production",
+    "station-artwork:preview": "pnpm --dir tools/station-artwork-preview start",
+    "artist-station-artwork:preview": "pnpm --dir tools/artist-station-artwork-preview start",
     "prebuild": "pnpm proto:gen",
     "build": "turbo run build",
     "test": "turbo run test -- --passWithNoTests",
@@ -23,7 +25,20 @@
   "pnpm": {
     "overrides": {
       "@pixi/core": "7.2.4"
-    }
+    },
+    "onlyBuiltDependencies": [
+      "@nestjs/core",
+      "@prisma/engines",
+      "@swc/core",
+      "argon2",
+      "esbuild",
+      "msgpackr-extract",
+      "prisma",
+      "protobufjs",
+      "sharp",
+      "unrs-resolver",
+      "workerd"
+    ]
   },
   "keywords": [],
   "author": "",

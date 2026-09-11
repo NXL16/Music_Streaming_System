@@ -4,15 +4,21 @@ import { readFileSync, existsSync, mkdirSync, renameSync, writeFileSync } from '
 import { spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..', '..');
+const require = createRequire(import.meta.url);
+const { SONG_CREDIT_ROLE_GROUPS } = require(
+  join(root, 'packages', 'shared-constants', 'dist', 'index.js'),
+);
 const config = loadEnv(join(here, '.env'));
 const workerConfig = loadEnv(join(root, 'apps', 'worker', '.env'));
 const baseUrl = (config.BASE_URL || 'http://localhost:9999/v1').replace(/\/+$/, '');
 const port = Number(config.PORT || 4311);
 const finalizerInternalToken =
   config.FINALIZER_INTERNAL_TOKEN || config.INTERNAL_TOKEN || '';
+const seedArtistPassword = config.SEED_ARTIST_PASSWORD || process.env.SEED_ARTIST_PASSWORD || '';
 const runtimeDir = join(here, '.tmp');
 const historyPath = join(runtimeDir, 'job-history.json');
 const deviceIdentityPath = join(runtimeDir, 'device.json');
@@ -29,6 +35,7 @@ const job = {
   activities: [],
   outputBuffers: { stdout: '', stderr: '' },
   cancelRequested: false,
+  creditReview: null,
   current: null,
   history: readHistory(),
 };
@@ -47,8 +54,54 @@ class RequestError extends Error {
   }
 }
 
+function normalizeArtistName(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function collectionIncludesArtist(collectionArtistName, selectedArtistName) {
+  const selected = normalizeArtistName(selectedArtistName);
+  if (!selected) return false;
+  return String(collectionArtistName || '')
+    .split(/\s*(?:,|&|feat\.?|ft\.?|featuring|x|với|and)\s+/i)
+    .some((name) => {
+      const candidate = normalizeArtistName(name);
+      if (candidate === selected || candidate.includes(selected)) return true;
+      const selectedTokens = new Set(selected.split(' '));
+      const candidateTokens = candidate.split(' ').filter(Boolean);
+      // Allow the common source alias "MCK" for the selected "RPT MCK",
+      // while still requiring every meaningful candidate token to match.
+      return candidateTokens.length > 0 && candidateTokens.every(
+        (token) => token.length >= 3 && selectedTokens.has(token),
+      );
+    });
+}
+
 function jobIsRunning() {
   return Boolean(job.child || job.starting);
+}
+
+function validJobSecret(req) {
+  const provided = Buffer.from(req.headers['x-seed-job-secret'] || '');
+  const expected = Buffer.from(job.secret);
+  return Boolean(
+    job.child && expected.length > 0 && provided.length === expected.length
+      && timingSafeEqual(provided, expected),
+  );
+}
+
+function clearCreditReview(result = { credits: [] }) {
+  const pending = job.creditReview;
+  if (!pending) return;
+  job.creditReview = null;
+  pending.resolve(result);
+  publish('credit-review', null);
 }
 
 function readHistory() {
@@ -278,6 +331,11 @@ async function restoreSession(req) {
   }
 }
 
+function hasLocalStudioSession(req) {
+  const refreshToken = requestCookies(req)[localRefreshCookieName];
+  return Boolean(auth.refreshToken) && (!refreshToken || refreshToken === auth.refreshToken);
+}
+
 function publish(type, data) {
   const event = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const client of job.clients) client.write(event);
@@ -403,6 +461,9 @@ async function healthSnapshot() {
     checkedAt: new Date().toISOString(),
     api,
     modal,
+    artistAccount: seedArtistPassword
+      ? { status: 'ok', detail: 'Mật khẩu tài khoản Artist seed đã được cấu hình.' }
+      : { status: 'error', detail: 'Thiếu SEED_ARTIST_PASSWORD trong tools/seed-studio/.env.' },
     worker: workerConfigured
       ? { status: 'unknown', detail: 'Worker/Redis đã có cấu hình; chưa có health endpoint để probe trực tiếp.' }
       : { status: 'error', detail: 'Thiếu cấu hình Worker hoặc Redis.' },
@@ -420,6 +481,11 @@ async function startJob(options) {
         'FINALIZER_INTERNAL_TOKEN is missing in tools/seed-studio/.env',
       );
     }
+    if (!options.dryRun && !seedArtistPassword) {
+      throw new Error(
+        'SEED_ARTIST_PASSWORD is missing in tools/seed-studio/.env',
+      );
+    }
 
     const args = [
       join(root, 'tools', 'scripts', 'seed-artist.mjs'),
@@ -433,30 +499,30 @@ async function startJob(options) {
     if (!['STANDARD', 'SING'].includes(audioMode)) {
       throw new Error('Audio mode must be STANDARD or SING');
     }
-    args.push(
-      '--artist-id',
-      options.artistId.trim(),
-      '--album-ids',
-      options.albumIds.join(','),
-      '--audio-mode',
-      audioMode,
+      args.push(
+        '--artist-id',
+        options.artistId.trim(),
+        '--album-ids',
+        (options.albumIds || []).join(','),
+        '--audio-mode',
+        audioMode,
     );
     if (options.dryRun) args.push('--dry-run');
-    if (options.noYoutube) args.push('--no-youtube');
-    if (options.noSoundcloud) args.push('--no-soundcloud');
+      if (options.noYoutube) args.push('--no-youtube');
+      if (options.noSoundcloud) args.push('--no-soundcloud');
 
-    if (!options.dryRun) await assertFinalizerReady();
+      if (!options.dryRun) await assertFinalizerReady();
 
-    job.secret = randomUUID();
+      job.secret = randomUUID();
     job.cancelRequested = false;
     job.current = {
       id: randomUUID(),
       startedAt: new Date().toISOString(),
       options: {
         artistQuery: options.artistQuery.trim(),
-        artistId: options.artistId.trim(),
-        albumIds: options.albumIds,
-        audioMode,
+          artistId: options.artistId.trim(),
+          albumIds: options.albumIds,
+          audioMode,
         dryRun: Boolean(options.dryRun),
         noYoutube: Boolean(options.noYoutube),
         noSoundcloud: Boolean(options.noSoundcloud),
@@ -467,10 +533,11 @@ async function startJob(options) {
       activeTitle: '',
       stopRequested: false,
       songs: {},
-    };
-    job.activities = [];
-    job.outputBuffers = { stdout: '', stderr: '' };
-    publishActivity('working', 'Đang chuẩn bị job');
+      };
+      job.activities = [];
+      job.outputBuffers = { stdout: '', stderr: '' };
+      job.creditReview = null;
+      publishActivity('working', 'Đang chuẩn bị job');
     publishProgress();
     const child = spawn(process.execPath, args, {
       cwd: root,
@@ -478,6 +545,7 @@ async function startJob(options) {
         ...process.env,
         BASE_URL: baseUrl,
         FINALIZER_INTERNAL_TOKEN: finalizerInternalToken,
+        SEED_ARTIST_PASSWORD: seedArtistPassword,
         SEED_STUDIO_TOKEN_URL: `http://127.0.0.1:${port}/api/job-token`,
         SEED_STUDIO_JOB_SECRET: job.secret,
         ...(config.SEED_READY_WAIT_TIMEOUT_MS
@@ -488,21 +556,21 @@ async function startJob(options) {
           : {}),
         ...(config.SEED_ASSET_READY_WAIT_TIMEOUT_MS
           ? {
-              SEED_ASSET_READY_WAIT_TIMEOUT_MS:
-                config.SEED_ASSET_READY_WAIT_TIMEOUT_MS,
-            }
+            SEED_ASSET_READY_WAIT_TIMEOUT_MS:
+              config.SEED_ASSET_READY_WAIT_TIMEOUT_MS,
+          }
           : {}),
         ...(config.SEED_ASSET_READY_WAIT_POLL_MS
           ? {
-              SEED_ASSET_READY_WAIT_POLL_MS:
-                config.SEED_ASSET_READY_WAIT_POLL_MS,
-            }
+            SEED_ASSET_READY_WAIT_POLL_MS:
+              config.SEED_ASSET_READY_WAIT_POLL_MS,
+          }
           : {}),
         ...(config.SEED_API_REQUEST_TIMEOUT_MS
           ? {
-              SEED_API_REQUEST_TIMEOUT_MS:
-                config.SEED_API_REQUEST_TIMEOUT_MS,
-            }
+            SEED_API_REQUEST_TIMEOUT_MS:
+              config.SEED_API_REQUEST_TIMEOUT_MS,
+          }
           : {}),
       },
       // The dashboard passes every required selection as arguments. No terminal
@@ -526,6 +594,7 @@ async function startJob(options) {
         saveHistory();
       }
       publishActivity(kind, title, detail);
+      clearCreditReview({ credits: [] });
       job.child = null;
       job.starting = false;
       job.secret = '';
@@ -579,6 +648,7 @@ const server = createServer(async (req, res) => {
       for (const activity of job.activities) res.write(`event: activity\ndata: ${JSON.stringify(activity)}\n\n`);
       res.write(`event: status\ndata: ${JSON.stringify({ running: jobIsRunning() })}\n\n`);
       res.write(`event: progress\ndata: ${JSON.stringify(progressSnapshot())}\n\n`);
+      res.write(`event: credit-review\ndata: ${JSON.stringify(job.creditReview?.public || null)}\n\n`);
       req.on('close', () => job.clients.delete(res));
       return;
     }
@@ -592,10 +662,14 @@ const server = createServer(async (req, res) => {
         baseUrl,
         progress: progressSnapshot(),
         history: job.history,
+        creditReview: job.creditReview?.public || null,
       }, session.cookie ? { 'Set-Cookie': session.cookie } : {});
     }
     if (req.method === 'GET' && url.pathname === '/api/health') {
       return sendJson(res, 200, await healthSnapshot());
+    }
+    if (req.method === 'GET' && url.pathname === '/api/song-credit-roles') {
+      return sendJson(res, 200, { groups: SONG_CREDIT_ROLE_GROUPS });
     }
     if (req.method === 'GET' && url.pathname === '/api/discover/artists') {
       const query = url.searchParams.get('query')?.trim();
@@ -631,13 +705,22 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/api/discover/albums') {
       const artistId = url.searchParams.get('artistId')?.trim();
-      if (!artistId) return sendJson(res, 400, { error: 'Artist ID is required' });
+      const artistName = url.searchParams.get('artistName')?.trim();
+      if (!artistId || !artistName) {
+        return sendJson(res, 400, { error: 'Artist ID and name are required' });
+      }
       const response = await fetch(`https://itunes.apple.com/lookup?id=${encodeURIComponent(artistId)}&entity=album&country=vn&limit=200`);
       if (!response.ok) throw new Error(`iTunes album lookup failed: ${response.status}`);
       const payload = await response.json();
-      const albums = (payload.results || []).filter((item) => item.wrapperType === 'collection').map((album) => ({
+      const albums = (payload.results || [])
+        .filter((item) => item.wrapperType === 'collection')
+        .filter((album) => collectionIncludesArtist(
+          album.artistName || album.collectionArtistName,
+          artistName,
+        ))
+        .map((album) => ({
         id: String(album.collectionId), name: album.collectionName, trackCount: album.trackCount || 0, releaseDate: album.releaseDate?.slice(0, 10) || '', artworkUrl: album.artworkUrl100 || '',
-      }));
+        }));
       return sendJson(res, 200, { albums });
     }
     if (req.method === 'POST' && url.pathname === '/api/login') {
@@ -675,10 +758,61 @@ const server = createServer(async (req, res) => {
       });
     }
     if (req.method === 'GET' && url.pathname === '/api/job-token') {
-      const provided = Buffer.from(req.headers['x-seed-job-secret'] || '');
-      const expected = Buffer.from(job.secret);
-      if (!job.child || provided.length !== expected.length || !timingSafeEqual(provided, expected)) return sendJson(res, 401, { error: 'unauthorized' });
+      if (!validJobSecret(req)) return sendJson(res, 401, { error: 'unauthorized' });
       return sendJson(res, 200, { accessToken: await accessToken() });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/job/credit-review') {
+      if (!validJobSecret(req)) return sendJson(res, 401, { error: 'unauthorized' });
+      if (job.creditReview) return sendJson(res, 409, { error: 'Một credit review khác đang chờ duyệt.' });
+      const body = await readJson(req);
+      const track = body?.track;
+      if (!track || typeof track.name !== 'string' || !track.name.trim()) {
+        return sendJson(res, 400, { error: 'Thông tin bài hát không hợp lệ.' });
+      }
+      const id = randomUUID();
+      const publicReview = {
+        id,
+        track: {
+          id: String(track.id || ''),
+          name: track.name.trim(),
+          artistName: String(track.artistName || ''),
+          albumName: String(track.albumName || ''),
+          artworkUrl: String(track.artworkUrl || ''),
+        },
+        suggestions: Array.isArray(body.suggestions) ? body.suggestions.slice(0, 30).map((credit) => ({
+          name: String(credit?.name || '').trim().slice(0, 255),
+          role: String(credit?.role || '').trim().slice(0, 32),
+          source: String(credit?.source || '').trim().slice(0, 64),
+        })).filter((credit) => credit.name && credit.role) : [],
+        lookup: {
+          source: 'MusicBrainz',
+          status: ['suggested', 'no_credits', 'not_found', 'unavailable'].includes(body.lookup?.status)
+            ? body.lookup.status
+            : 'unavailable',
+        },
+      };
+      const result = await new Promise((resolve) => {
+        job.creditReview = { public: publicReview, resolve };
+        publishActivity('info', 'Đang chờ duyệt credit', publicReview.track.name);
+        publish('credit-review', publicReview);
+      });
+      return sendJson(res, 200, result);
+    }
+    if (req.method === 'POST' && url.pathname.startsWith('/api/job/credit-review/')) {
+      // Releasing the local seed child does not require a network token refresh.
+      // A pending refresh here previously made this action look permanently stuck.
+      if (!hasLocalStudioSession(req)) return sendJson(res, 401, { error: 'Login required' });
+      const id = url.pathname.split('/').pop();
+      if (!job.creditReview || job.creditReview.public.id !== id) {
+        return sendJson(res, 404, { error: 'Credit review này không còn chờ duyệt.' });
+      }
+      const body = await readJson(req);
+      const credits = Array.isArray(body.credits) ? body.credits.slice(0, 30).map((credit) => ({
+        name: String(credit?.name || '').trim().slice(0, 255),
+        role: String(credit?.role || '').trim().slice(0, 32),
+      })) : [];
+      clearCreditReview({ credits });
+      return sendJson(res, 200, { ok: true });
     }
     if (req.method === 'POST' && url.pathname === '/api/job/start') {
       const body = await readJson(req);
@@ -704,6 +838,7 @@ const server = createServer(async (req, res) => {
       job.cancelRequested = true;
       if (job.current) job.current.stopRequested = true;
       publishActivity('info', 'Đang dừng job theo yêu cầu');
+      clearCreditReview({ credits: [] });
       publishProgress();
       job.child.kill('SIGTERM');
       return sendJson(res, 200, { ok: true, message: 'Đang dừng job; state đã lưu để có thể tiếp tục.' });
