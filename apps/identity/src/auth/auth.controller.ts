@@ -1,6 +1,6 @@
 import { Controller, UseGuards } from '@nestjs/common';
-import { GrpcMethod, Payload, RpcException } from '@nestjs/microservices';
-import { status } from '@grpc/grpc-js';
+import { Ctx, GrpcMethod, Payload, RpcException } from '@nestjs/microservices';
+import { Metadata, status } from '@grpc/grpc-js';
 import { AuthService } from './auth.service';
 import type {
   SignUpRequest,
@@ -15,6 +15,7 @@ import type {
   ChangePasswordRequest,
   AdminUserActionRequest,
   SetUserRoleRequest,
+  GrantArtistWorkspaceSeatRequest,
   RequestPasswordResetRequest,
   ResetPasswordRequest,
   RequestEmailVerificationRequest,
@@ -42,31 +43,70 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @GrpcMethod('IdentityService', 'SignUp')
-  async signUp(@Payload() request: SignUpRequest): Promise<AuthResponse> {
-    return this.authService.signUp(request);
+  async signUp(
+    @Payload() request: SignUpRequest,
+    @Ctx() metadata: Metadata,
+  ): Promise<AuthResponse> {
+    return this.authService.signUp(request, sessionMeta(metadata));
+  }
+
+  @GrpcMethod('IdentityService', 'SignUpArtist')
+  async signUpArtist(@Payload() request: SignUpRequest): Promise<UserProfile> {
+    return mapUserProfile(await this.authService.signUpArtist(request));
   }
 
   @GrpcMethod('IdentityService', 'Login')
-  async login(@Payload() request: LoginRequest): Promise<AuthResponse> {
-    return this.authService.login(request);
+  async login(
+    @Payload() request: LoginRequest,
+    @Ctx() metadata: Metadata,
+  ): Promise<AuthResponse> {
+    return this.authService.login(request, 'listener', sessionMeta(metadata));
+  }
+
+  @GrpcMethod('IdentityService', 'LoginArtist')
+  async loginArtist(
+    @Payload() request: LoginRequest,
+    @Ctx() metadata: Metadata,
+  ): Promise<AuthResponse> {
+    return this.authService.loginArtist(request, sessionMeta(metadata));
   }
 
   @GrpcMethod('IdentityService', 'LoginWithGoogle')
   async loginWithGoogle(
     @Payload() request: LoginWithGoogleRequest,
+    @Ctx() metadata: Metadata,
   ): Promise<AuthResponse> {
-    return this.authService.loginWithGoogleInternal({
-      idToken: request.idToken,
-      authorizationCode: request.authorizationCode,
-      deviceId: request.deviceId,
-    });
+    return this.authService.loginWithGoogleInternal(
+      {
+        idToken: request.idToken,
+        authorizationCode: request.authorizationCode,
+        deviceId: request.deviceId,
+      },
+      sessionMeta(metadata),
+    );
   }
 
   @GrpcMethod('IdentityService', 'VerifyTwoFactorLogin')
   async verifyTwoFactorLogin(
     @Payload() request: VerifyTwoFactorLoginRequest,
+    @Ctx() metadata: Metadata,
   ): Promise<AuthResponse> {
-    return this.authService.verifyTwoFactorLogin(request);
+    return this.authService.verifyTwoFactorLogin(
+      request,
+      'listener',
+      sessionMeta(metadata),
+    );
+  }
+
+  @GrpcMethod('IdentityService', 'VerifyArtistTwoFactorLogin')
+  async verifyArtistTwoFactorLogin(
+    @Payload() request: VerifyTwoFactorLoginRequest,
+    @Ctx() metadata: Metadata,
+  ): Promise<AuthResponse> {
+    return this.authService.verifyArtistTwoFactorLogin(
+      request,
+      sessionMeta(metadata),
+    );
   }
 
   @GrpcMethod('IdentityService', 'RefreshToken')
@@ -215,6 +255,25 @@ export class AuthController {
     return mapUserProfile(user);
   }
 
+  @GrpcMethod('IdentityService', 'GrantArtistWorkspaceSeat')
+  async grantArtistWorkspaceSeat(
+    @Payload() request: GrantArtistWorkspaceSeatRequest,
+  ): Promise<UserProfile> {
+    if (!request.actorUserId || !request.targetUserId) {
+      throw new RpcException({
+        code: status.INVALID_ARGUMENT,
+        message: 'actorUserId và targetUserId là bắt buộc',
+      });
+    }
+
+    return mapUserProfile(
+      await this.authService.grantArtistWorkspaceSeat(
+        request.actorUserId,
+        request.targetUserId,
+      ),
+    );
+  }
+
   @GrpcMethod('IdentityService', 'RequestPasswordReset')
   async requestPasswordReset(
     @Payload() request: RequestPasswordResetRequest,
@@ -273,4 +332,14 @@ export class AuthController {
   ): Promise<TwoFactorRecoveryCodesResponse> {
     return this.authService.regenerateTwoFactorRecoveryCodes(request);
   }
+}
+
+function sessionMeta(metadata: Metadata) {
+  const ipAddress = metadata.get('x-client-ip')[0];
+  const userAgent = metadata.get('x-client-user-agent')[0];
+
+  return {
+    ipAddress: typeof ipAddress === 'string' ? ipAddress : undefined,
+    userAgent: typeof userAgent === 'string' ? userAgent : undefined,
+  };
 }

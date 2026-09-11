@@ -31,6 +31,7 @@ type CreateUserInput = {
   email: string;
   password: string;
   displayName: string;
+  role?: UserRole;
 };
 
 type UpdateUserInput = {
@@ -99,7 +100,12 @@ export class UsersService {
   // ================================
   async create(data: CreateUserInput): Promise<UserEntity> {
     const user = await this.prisma.$transaction(async (tx) => {
-      const createdUser = await tx.user.create({ data });
+      const createdUser = await tx.user.create({
+        data: {
+          ...data,
+          role: data.role ?? UserRole.USER,
+        },
+      });
 
       // PostgreSQL is the source of truth for identity. Persist both external
       // provisioning requests in this same transaction so a process crash

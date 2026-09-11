@@ -85,6 +85,32 @@ describe('AuthService TOTP replay protection', () => {
     );
   });
 
+  it('preserves stored session metadata when a refresh token is rotated', async () => {
+    redis.get.mockResolvedValue(
+      JSON.stringify({
+        deviceId: 'device-1',
+        ipAddress: '::1',
+        userAgent: 'Mozilla/5.0 Chrome/140.0',
+        lastSeenAt: 123,
+      }),
+    );
+
+    await expect(
+      service['getSessionMetadata']('user-1', 'device-1'),
+    ).resolves.toEqual({
+      ipAddress: '::1',
+      userAgent: 'Mozilla/5.0 Chrome/140.0',
+    });
+  });
+
+  it('does not fail token refresh when old session metadata is malformed', async () => {
+    redis.get.mockResolvedValue('{not-json');
+
+    await expect(
+      service['getSessionMetadata']('user-1', 'device-1'),
+    ).resolves.toBeUndefined();
+  });
+
   it('caps active sessions atomically and removes credentials for evicted devices', async () => {
     const cleanup = {
       del: jest.fn().mockReturnThis(),
@@ -99,9 +125,7 @@ describe('AuthService TOTP replay protection', () => {
       {} as never,
       {
         get: (key: string) =>
-          key === 'AUTH_MAX_ACTIVE_SESSIONS'
-              ? '2'
-              : undefined,
+          key === 'AUTH_MAX_ACTIVE_SESSIONS' ? '2' : undefined,
         getOrThrow: (key: string) =>
           key === 'JWT_REFRESH_EXPIRES_IN' ? '7d' : '',
       } as never,
@@ -129,12 +153,8 @@ describe('AuthService TOTP replay protection', () => {
       expect.any(String),
       '2',
     );
-    expect(cleanup.del).toHaveBeenCalledWith(
-      'auth:refresh:user-1:old-device',
-    );
-    expect(cleanup.del).toHaveBeenCalledWith(
-      'auth:session:user-1:old-device',
-    );
+    expect(cleanup.del).toHaveBeenCalledWith('auth:refresh:user-1:old-device');
+    expect(cleanup.del).toHaveBeenCalledWith('auth:session:user-1:old-device');
     expect(cleanup.del).toHaveBeenCalledWith(
       'auth:2fa:trusted:user-1:old-device',
     );

@@ -10,6 +10,7 @@ datasource db {
 
 enum UserRole {
     USER
+    ARTIST_PENDING
     ARTIST
     SUPER_ADMIN
     ADMIN_USER_OPS

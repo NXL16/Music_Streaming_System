@@ -67,6 +67,11 @@ type TwoFactorChallenge = {
   deviceId: string;
 };
 
+type SessionMeta = {
+  ipAddress?: string;
+  userAgent?: string;
+};
+
 type TwoFactorCheckInput = {
   userId: string;
   encryptedSecret: string;
@@ -215,7 +220,10 @@ export class AuthService {
     @Inject('REDIS_INSTANCE') private readonly redis: Redis,
   ) {}
 
-  async signUp(request: SignUpRequest): Promise<AuthResponse> {
+  async signUp(
+    request: SignUpRequest,
+    sessionMeta?: SessionMeta,
+  ): Promise<AuthResponse> {
     const normalizedRequest = normalizeAndValidateSignUpRequest(request);
     const { username, email, password, displayName, deviceId } =
       normalizedRequest;
@@ -234,7 +242,12 @@ export class AuthService {
       const tokens = this.generateTokens(newUser, finalDeviceId);
 
       await Promise.all([
-        this.saveRefreshToken(newUser.id, tokens.refreshToken, finalDeviceId),
+        this.saveRefreshToken(
+          newUser.id,
+          tokens.refreshToken,
+          finalDeviceId,
+          sessionMeta,
+        ),
         this.saveAuthState(newUser),
       ]);
 
@@ -278,7 +291,56 @@ export class AuthService {
     }
   }
 
-  async login(request: LoginRequest): Promise<AuthResponse> {
+  async signUpArtist(request: SignUpRequest): Promise<UserEntity> {
+    const normalizedRequest = normalizeAndValidateSignUpRequest(request);
+    const { username, email, password, displayName } = normalizedRequest;
+
+    try {
+      const user = await this.usersService.create({
+        username,
+        email,
+        password: await argon2.hash(password),
+        displayName,
+        role: PrismaUserRole.ARTIST_PENDING,
+      });
+
+      await this.saveAuthState(user);
+      await this.writeAuditLog({
+        actorUserId: user.id,
+        targetUserId: user.id,
+        action: 'ARTIST_APPLICATION_CREATED',
+        status: 'SUCCESS',
+      });
+      return user;
+    } catch (error: unknown) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const field = /username/i.test(error.message || '')
+          ? 'Username'
+          : /email/i.test(error.message || '')
+            ? 'Email'
+            : 'Thông tin';
+        throw new RpcException({
+          code: status.ALREADY_EXISTS,
+          message: `${field} đã tồn tại`,
+        });
+      }
+
+      if (error instanceof RpcException) throw error;
+      throw new RpcException({
+        code: status.INTERNAL,
+        message: 'Không thể gửi yêu cầu đăng ký Artist',
+      });
+    }
+  }
+
+  async login(
+    request: LoginRequest,
+    audience: 'listener' | 'artist' = 'listener',
+    sessionMeta?: SessionMeta,
+  ): Promise<AuthResponse> {
     const normalizedRequest = normalizeAndValidateLoginRequest(request);
     const { identifier, password, deviceId } = normalizedRequest;
 
@@ -286,7 +348,16 @@ export class AuthService {
 
     const user = await this.usersService.findAuthUserByIdentifier(identifier);
 
-    if (!user || !(await argon2.verify(user.password, password))) {
+    const passwordMatches =
+      user !== null && (await argon2.verify(user.password, password));
+    const isArtistAccount =
+      user?.role === PrismaUserRole.ARTIST ||
+      user?.role === PrismaUserRole.ARTIST_PENDING;
+    const isAudienceAllowed =
+      user !== null &&
+      (audience === 'artist' ? isArtistAccount : !isArtistAccount);
+
+    if (!user || !passwordMatches || !isAudienceAllowed) {
       await this.writeAuditLog({
         action: 'AUTH_LOGIN',
         status: 'FAILURE',
@@ -333,7 +404,12 @@ export class AuthService {
     const tokens = this.generateTokens(user, finalDeviceId);
 
     await Promise.all([
-      this.saveRefreshToken(user.id, tokens.refreshToken, finalDeviceId),
+      this.saveRefreshToken(
+        user.id,
+        tokens.refreshToken,
+        finalDeviceId,
+        sessionMeta,
+      ),
       this.saveAuthState(user),
       this.usersService.updateLastLogin(user.id),
     ]);
@@ -348,11 +424,21 @@ export class AuthService {
     return tokens;
   }
 
-  async loginWithGoogleInternal(input: {
-    idToken?: string;
-    authorizationCode?: string;
-    deviceId?: string;
-  }): Promise<AuthResponse> {
+  async loginArtist(
+    request: LoginRequest,
+    sessionMeta?: SessionMeta,
+  ): Promise<AuthResponse> {
+    return this.login(request, 'artist', sessionMeta);
+  }
+
+  async loginWithGoogleInternal(
+    input: {
+      idToken?: string;
+      authorizationCode?: string;
+      deviceId?: string;
+    },
+    sessionMeta?: SessionMeta,
+  ): Promise<AuthResponse> {
     if (!input.idToken && !input.authorizationCode) {
       throw new RpcException({
         code: status.INVALID_ARGUMENT,
@@ -465,6 +551,16 @@ export class AuthService {
       }
     }
 
+    if (
+      user?.role === PrismaUserRole.ARTIST ||
+      user?.role === PrismaUserRole.ARTIST_PENDING
+    ) {
+      throw new RpcException({
+        code: status.UNAUTHENTICATED,
+        message: 'Email hoặc mật khẩu không chính xác',
+      });
+    }
+
     if (!user || !user.isActive) {
       throw new RpcException({
         code: status.PERMISSION_DENIED,
@@ -488,7 +584,12 @@ export class AuthService {
     const tokens = this.generateTokens(user, finalDeviceId);
 
     await Promise.all([
-      this.saveRefreshToken(user.id, tokens.refreshToken, finalDeviceId),
+      this.saveRefreshToken(
+        user.id,
+        tokens.refreshToken,
+        finalDeviceId,
+        sessionMeta,
+      ),
       this.saveAuthState(user),
       this.usersService.updateLastLogin(user.id),
     ]);
@@ -671,6 +772,8 @@ export class AuthService {
 
   async verifyTwoFactorLogin(
     request: VerifyTwoFactorLoginRequest,
+    audience: 'listener' | 'artist' = 'listener',
+    sessionMeta?: SessionMeta,
   ): Promise<AuthResponse> {
     const {
       code: resolvedCode,
@@ -715,6 +818,16 @@ export class AuthService {
       });
     }
 
+    const isArtistAccount =
+      user.role === PrismaUserRole.ARTIST ||
+      user.role === PrismaUserRole.ARTIST_PENDING;
+    if (audience === 'artist' ? !isArtistAccount : isArtistAccount) {
+      throw new RpcException({
+        code: status.UNAUTHENTICATED,
+        message: 'Phiên xác thực 2FA không hợp lệ',
+      });
+    }
+
     const isValidVerification = await this.verifyTwoFactorCodeOrRecovery({
       userId: user.id,
       encryptedSecret: user.twoFactorSecret,
@@ -740,12 +853,24 @@ export class AuthService {
 
     const tokens = this.generateTokens(user, challenge.deviceId);
     await Promise.all([
-      this.saveRefreshToken(user.id, tokens.refreshToken, challenge.deviceId),
+      this.saveRefreshToken(
+        user.id,
+        tokens.refreshToken,
+        challenge.deviceId,
+        sessionMeta,
+      ),
       this.saveAuthState(user),
       this.usersService.updateLastLogin(user.id),
     ]);
 
     return tokens;
+  }
+
+  async verifyArtistTwoFactorLogin(
+    request: VerifyTwoFactorLoginRequest,
+    sessionMeta?: SessionMeta,
+  ): Promise<AuthResponse> {
+    return this.verifyTwoFactorLogin(request, 'artist', sessionMeta);
   }
 
   async changePassword(request: ChangePasswordRequest): Promise<void> {
@@ -1375,12 +1500,60 @@ export class AuthService {
     await this.writeAuditLog({
       actorUserId,
       targetUserId,
-      action: 'AUTH_SET_USER_ROLE',
+      action:
+        currentUser.role === PrismaUserRole.ARTIST_PENDING &&
+        normalizedRole === PrismaUserRole.ARTIST
+          ? 'ARTIST_APPLICATION_APPROVED'
+          : 'AUTH_SET_USER_ROLE',
       status: 'SUCCESS',
       metadata: { role: normalizedRole },
     });
 
     return updatedUser;
+  }
+
+  /**
+   * A workspace owner may invite an existing platform account to help with an
+   * artist. The API has already authorised that owner against the workspace;
+   * this internal Identity operation only grants the product-level Artist
+   * Portal seat needed for the invited account to sign in.
+   */
+  async grantArtistWorkspaceSeat(
+    actorUserId: string,
+    targetUserId: string,
+  ): Promise<UserEntity> {
+    const target = await this.usersService.findAuthUserById(targetUserId);
+    if (!target || !target.isActive) {
+      throw new RpcException({
+        code: status.NOT_FOUND,
+        message: 'Tài khoản thành viên không tồn tại hoặc đã bị khóa',
+      });
+    }
+
+    if (target.role === PrismaUserRole.ARTIST_PENDING) {
+      throw new RpcException({
+        code: status.FAILED_PRECONDITION,
+        message:
+          'Tài khoản này đang chờ duyệt Artist claim; hãy để admin xử lý claim trước',
+      });
+    }
+
+    const user =
+      target.role === PrismaUserRole.USER
+        ? await this.usersService.updateRole(
+            targetUserId,
+            PrismaUserRole.ARTIST,
+          )
+        : target;
+
+    await this.saveAuthState(user);
+    await this.writeAuditLog({
+      actorUserId,
+      targetUserId,
+      action: 'ARTIST_WORKSPACE_SEAT_GRANTED',
+      status: 'SUCCESS',
+    });
+    return user;
   }
 
   private async assertRateLimit(
@@ -1498,10 +1671,19 @@ export class AuthService {
         });
       }
 
+      const sessionMeta = await this.getSessionMetadata(
+        payload.sub,
+        payload.deviceId,
+      );
       const tokens = this.generateTokens(user, payload.deviceId);
 
       await Promise.all([
-        this.saveRefreshToken(user.id, tokens.refreshToken, payload.deviceId),
+        this.saveRefreshToken(
+          user.id,
+          tokens.refreshToken,
+          payload.deviceId,
+          sessionMeta,
+        ),
         this.saveAuthState(user),
       ]);
 
@@ -1543,7 +1725,7 @@ export class AuthService {
     userId: string,
     token: string,
     deviceId: string,
-    sessionMeta?: { ipAddress?: string; userAgent?: string },
+    sessionMeta?: SessionMeta,
   ) {
     const rfExpiresIn = this.configService.getOrThrow<string>(
       'JWT_REFRESH_EXPIRES_IN',
@@ -1570,7 +1752,7 @@ export class AuthService {
       lastSeenAt,
     } satisfies SessionState);
 
-    const evictedDeviceIds = (await this.redis.eval(
+    const evictedDeviceIds = await this.redis.eval(
       AuthService.SAVE_REFRESH_SESSION_LUA,
       4,
       key,
@@ -1583,7 +1765,7 @@ export class AuthService {
       deviceId,
       String(lastSeenAt),
       String(this.maxActiveSessions()),
-    ));
+    );
     const evicted = Array.isArray(evictedDeviceIds)
       ? evictedDeviceIds.filter(
           (candidate): candidate is string => typeof candidate === 'string',
@@ -1602,6 +1784,26 @@ export class AuthService {
     this.logger.warn(
       `Evicted ${evicted.length} oldest session(s) for user ${userId} after reaching the active-session limit`,
     );
+  }
+
+  private async getSessionMetadata(
+    userId: string,
+    deviceId: string,
+  ): Promise<SessionMeta | undefined> {
+    const raw = await this.redis.get(authSessionKey(userId, deviceId));
+    if (!raw) return undefined;
+
+    try {
+      const parsed = JSON.parse(raw) as Partial<SessionState>;
+      const ipAddress =
+        typeof parsed.ipAddress === 'string' ? parsed.ipAddress : undefined;
+      const userAgent =
+        typeof parsed.userAgent === 'string' ? parsed.userAgent : undefined;
+
+      return ipAddress || userAgent ? { ipAddress, userAgent } : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private async listSessionDeviceIds(userId: string): Promise<string[]> {
@@ -1638,7 +1840,9 @@ export class AuthService {
     const configured = Number(
       this.configService.get<string>('AUTH_MAX_ACTIVE_SESSIONS'),
     );
-    return Number.isSafeInteger(configured) && configured >= 1 && configured <= 100
+    return Number.isSafeInteger(configured) &&
+      configured >= 1 &&
+      configured <= 100
       ? configured
       : DEFAULT_MAX_ACTIVE_SESSIONS;
   }
