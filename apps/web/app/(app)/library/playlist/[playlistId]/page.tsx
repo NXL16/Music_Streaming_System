@@ -22,6 +22,12 @@ import {
 } from "@/lib/playlists/playlist-events";
 import { playlistArtworkVariants } from "@/lib/playlists/generated-playlist-cover";
 import {
+  getCatalogPlaylist,
+  getCatalogPlaylistTracks,
+} from "@/lib/catalog/catalog.api";
+import { mapCatalogTracks } from "@/lib/catalog/catalog.mapper";
+import { getLibraryResources } from "@/lib/library/library-resources.api";
+import {
   getUserPlaylist,
   getAllUserPlaylistTracks,
   listUserPlaylistTracks,
@@ -79,6 +85,8 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
 
   // ── State cho trường hợp 2: Playlist do user tạo ─────────────────────────
   const [playlist, setPlaylist] = useState<PlaylistDetail | null>(null);
+  const [catalogPlaylist, setCatalogPlaylist] =
+    useState<GenericPlaylist | null>(null);
   const [loading, setLoading] = useState(!isFavorites);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [nextCursor, setNextCursor] = useState("");
@@ -102,28 +110,75 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
     if (isFavorites) {
       void hydrateFavorites();
     } else {
-      Promise.all([
-        getUserPlaylist(playlistId),
-        listUserPlaylistTracks(playlistId),
-      ])
-        .then(([playlistDetail, firstPage]) => {
+      void (async () => {
+        try {
+          const library = await getLibraryResources();
+          const isSavedPlaylist = library.some(
+            (resource) =>
+              resource.resourceType === "playlists" &&
+              resource.resourceId === playlistId,
+          );
+          if (!isSavedPlaylist) throw new Error("PLAYLIST_NOT_IN_LIBRARY");
+
+          // A Library Playlist can be a saved public playlist or a personal
+          // one. Resolve Catalog first: it is the authoritative source for
+          // public ids, even when a seeded personal playlist shares that id.
+          try {
+            const catalog = await getCatalogPlaylist(playlistId);
+            const playlistReference = catalog.data.find(
+              (resource) => resource.type === "playlists",
+            );
+            const catalogResource = playlistReference
+              ? catalog.resources.playlists[playlistReference.id]
+              : catalog.resources.playlists[playlistId];
+            if (catalogResource) {
+              const attributes = catalogResource.attributes;
+              if (!active || requestVersion !== pageRequestVersionRef.current)
+                return;
+              setCatalogPlaylist({
+                id: playlistId,
+                title: attributes.name,
+                curatorName: attributes.curatorName || "",
+                description:
+                  attributes.descriptionStandard || attributes.descriptionShort || "",
+                artwork: attributes.artwork,
+                sourcePlaylistHref: `/library/playlist/${encodeURIComponent(playlistId)}`,
+                playlistKind: "catalog",
+                isLibraryView: true,
+                tracks: mapCatalogTracks(catalog),
+              });
+              setPlaylist(null);
+              setTracks([]);
+              setNextCursor("");
+              setError("");
+              return;
+            }
+          } catch {
+            // A private/user playlist is resolved through its own service below.
+          }
+
+          const [playlistDetail, firstPage] = await Promise.all([
+            getUserPlaylist(playlistId),
+            listUserPlaylistTracks(playlistId),
+          ]);
           if (!active || requestVersion !== pageRequestVersionRef.current)
             return;
+          setCatalogPlaylist(null);
           setPlaylist(playlistDetail);
           setTracks(firstPage.songs ?? []);
           setNextCursor(getSafeNextCursor(firstPage, seenCursorsRef.current));
           setError("");
-        })
-        .catch(() => {
+        } catch {
           if (!active || requestVersion !== pageRequestVersionRef.current)
             return;
+          setCatalogPlaylist(null);
           setError("Could not load playlist.");
-        })
-        .finally(() => {
+        } finally {
           if (active && requestVersion === pageRequestVersionRef.current) {
             setLoading(false);
           }
-        });
+        }
+      })();
     }
 
     return () => {
@@ -132,7 +187,7 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
   }, [playlistId, isFavorites, hydrateFavorites, revision]);
 
   const loadMore = useCallback(async () => {
-    if (!nextCursor || loadingMore || isFavorites) return;
+    if (!nextCursor || loadingMore || isFavorites || catalogPlaylist) return;
     const requestVersion = pageRequestVersionRef.current;
     setLoadingMore(true);
     try {
@@ -146,11 +201,11 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
       if (requestVersion === pageRequestVersionRef.current)
         setLoadingMore(false);
     }
-  }, [isFavorites, loadingMore, nextCursor, playlistId]);
+  }, [catalogPlaylist, isFavorites, loadingMore, nextCursor, playlistId]);
 
   const { sentinelRef: loadMoreSentinelRef, showLoadingMore } =
     useInfiniteScrollLoadMore({
-      enabled: !isFavorites && Boolean(nextCursor),
+      enabled: !isFavorites && !catalogPlaylist && Boolean(nextCursor),
       loading: loadingMore,
       onLoadMore: loadMore,
     });
@@ -189,7 +244,7 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
     return <CatalogPageLoading />;
   }
 
-  if (error || (!isFavorites && !playlist)) {
+  if (error || (!isFavorites && !playlist && !catalogPlaylist)) {
     return (
       <div className="mx-(--bodyGutter) py-20 text-center text-(--keyColor)">
         {error || "Could not load playlist."}
@@ -198,9 +253,11 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
   }
 
   // ── MAP DỮ LIỆU SANG CHUẨN GENERICPLAYLIST ──────────────────────────────
-  const rawTracks = isFavorites ? favoriteSongs : tracks;
-
-  const formattedTracks: GenericTrack[] = rawTracks.map(projectSongSummary);
+  const formattedTracks: GenericTrack[] = isFavorites
+    ? favoriteSongs.map(projectSongSummary)
+    : catalogPlaylist
+      ? catalogPlaylist.tracks
+      : tracks.map(projectSongSummary);
   const playlistArtwork = isFavorites
     ? ((favoriteCollection?.artwork as GenericArtwork | undefined) ?? {
         bgColor: "2c2c2e",
@@ -216,20 +273,17 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
         "2c2c2e",
       );
 
-  const formattedPlaylist: GenericPlaylist = {
+  const formattedPlaylist: GenericPlaylist = catalogPlaylist ?? {
     id: isFavorites ? "favorite" : playlist?.id || playlistId,
     title: isFavorites
       ? favoriteCollection?.title || "Favourite Songs"
       : playlist?.name || "Playlist",
     curatorName: user?.displayName || "You",
-    description: isFavorites
-      ? favoriteCollection?.description ||
-        `Songs you loved • ${user?.displayName || "You"}`
-      : playlist?.description || undefined,
     sourcePlaylistHref: isFavorites
       ? undefined
       : `/library/playlist/${encodeURIComponent(playlistId)}`,
     playlistKind: isFavorites ? "favorite" : "user",
+    isLibraryView: true,
     artwork: playlistArtwork,
     tracks: formattedTracks,
   };
@@ -241,13 +295,15 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
       resolvePlaybackTracks={
         isFavorites
           ? undefined
-          : async () =>
-              (await getAllUserPlaylistTracks(playlistId)).map(
-                projectSongSummary,
-              )
+          : catalogPlaylist
+            ? async () => mapCatalogTracks(await getCatalogPlaylistTracks(playlistId))
+            : async () =>
+                (await getAllUserPlaylistTracks(playlistId)).map(
+                  projectSongSummary,
+                )
       }
       afterTracks={
-        !isFavorites && (showLoadingMore || nextCursor) ? (
+        !isFavorites && !catalogPlaylist && (showLoadingMore || nextCursor) ? (
           <>
             {showLoadingMore && <Loading fullScreen={false} size={26} />}
             {nextCursor && (

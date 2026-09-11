@@ -10,9 +10,12 @@ type ResourceLoader<T> = (signal?: AbortSignal) => Promise<T>;
 export function useAsyncResource<T>(
   loadResource: ResourceLoader<T>,
   fallbackErrorMessage: string,
+  options?: { initialData?: T; enabled?: boolean },
 ) {
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useMinimumLoadingState(true);
+  const initialData = options?.initialData;
+  const enabled = options?.enabled ?? true;
+  const [data, setData] = useState<T | null>(() => initialData ?? null);
+  const [loading, setLoading] = useMinimumLoadingState(!initialData && enabled);
   const [error, setError] = useState("");
   const requestVersion = useRef(0);
 
@@ -43,13 +46,17 @@ export function useAsyncResource<T>(
   );
 
   useEffect(() => {
+    // `initialData` is a page-owned snapshot used when this component mounts
+    // again after a detail view closes. It must not trigger a duplicate fetch.
+    if (initialData || !enabled) return;
+
     const controller = new AbortController();
     queueMicrotask(() => {
       if (!controller.signal.aborted) void load(controller.signal);
     });
 
     return () => controller.abort();
-  }, [load]);
+  }, [enabled, initialData, load, setLoading]);
 
   return { data, loading, error, reload: load };
 }

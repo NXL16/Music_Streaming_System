@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { isAxiosError } from "axios";
-import { searchCatalog } from "./catalog.api";
+import { recordCatalogSearchClick, searchCatalog } from "./catalog.api";
 import { mapSearchResults, type SearchResults } from "./search.mapper";
 import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 
@@ -14,6 +14,26 @@ const EMPTY_RESULTS: SearchResults = {
   albums: [],
   isEmpty: true,
 };
+
+function withSearchClickTracking(results: SearchResults): SearchResults {
+  const track = (resourceType: string, resourceId: string) => {
+    void recordCatalogSearchClick(resourceType, resourceId).catch(
+      () => undefined,
+    );
+  };
+  const attach = (cards: SearchResults["songs"]) =>
+    cards.map((card) => ({
+      ...card,
+      onOpen: () => track(card.resourceType, card.resourceId),
+    }));
+
+  return {
+    ...results,
+    songs: attach(results.songs),
+    artists: attach(results.artists),
+    albums: attach(results.albums),
+  };
+}
 
 export function useCatalogSearch(query: string) {
   const [results, setResults] = useState<SearchResults>(EMPTY_RESULTS);
@@ -31,7 +51,7 @@ export function useCatalogSearch(query: string) {
       setLoading(true);
       searchCatalog(trimmed, controller.signal)
         .then((response) => {
-          setResults(mapSearchResults(response));
+          setResults(withSearchClickTracking(mapSearchResults(response)));
           setError(null);
         })
         .catch((cause) => {

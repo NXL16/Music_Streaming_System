@@ -10,6 +10,15 @@ import {
   notifyFavoriteChanged,
   subscribeFavoriteChanges,
 } from "./favorite-events";
+import {
+  optimisticallyAddLibraryResource,
+  revalidateLibraryResources,
+  rollbackOptimisticLibraryAddition,
+} from "@/lib/library/library-resources.api";
+import {
+  isSuggestLessActive,
+  setSuggestLess,
+} from "@/lib/recommendations/suggest-less.api";
 
 let hydrationRequest: Promise<void> | null = null;
 let hydrationVersion = 0;
@@ -24,7 +33,7 @@ type FavoriteState = {
   loading: boolean;
   loaded: boolean;
   hydrate: (force?: boolean) => Promise<void>;
-  toggle: (songId: string) => Promise<boolean>;
+  toggle: (songId: string, sourceAlbumId?: string) => Promise<boolean>;
 };
 
 export const useFavoriteStore = create<FavoriteState>((set, get) => ({
@@ -92,11 +101,11 @@ export const useFavoriteStore = create<FavoriteState>((set, get) => ({
     hydrationRequest = request;
     return request;
   },
-  async toggle(songId) {
+  async toggle(songId, sourceAlbumId) {
     await get().hydrate();
     const currentlyFavorite = get().songIds.has(songId);
     if (currentlyFavorite) {
-      await removeFavoriteSong(songId);
+      const previousSong = get().songs.find((song) => song.id === songId);
       set((state) => {
         const songIds = new Set(state.songIds);
         songIds.delete(songId);
@@ -105,17 +114,69 @@ export const useFavoriteStore = create<FavoriteState>((set, get) => ({
           songIds,
         };
       });
-      favoritesCacheExpiresAt = Date.now() + FAVORITES_CACHE_TTL_MS;
       notifyFavoriteChanged(songId, false);
-      return false;
+      try {
+        await removeFavoriteSong(songId);
+        favoritesCacheExpiresAt = Date.now() + FAVORITES_CACHE_TTL_MS;
+        return false;
+      } catch (error) {
+        set((state) => {
+          const songIds = new Set(state.songIds);
+          songIds.add(songId);
+          return {
+            songs:
+              previousSong && !state.songs.some((song) => song.id === songId)
+                ? [previousSong, ...state.songs]
+                : state.songs,
+            songIds,
+          };
+        });
+        notifyFavoriteChanged(songId, true);
+        throw error;
+      }
     }
 
-    await addFavoriteSong(songId);
-    // The card/player may only have partial song metadata. Reloading preserves
-    // one canonical Library list and puts the newly-liked song at the top.
-    await get().hydrate(true);
+    if (!sourceAlbumId) throw new Error("SOURCE_ALBUM_ID_REQUIRED");
+    if (isSuggestLessActive("songs", songId)) {
+      void setSuggestLess("songs", songId, false).catch(() => undefined);
+    }
+    const addedSongLibraryResource = optimisticallyAddLibraryResource({
+      resourceType: "songs",
+      resourceId: songId,
+      sourceAlbumId,
+    });
+      const addedAlbumLibraryResource = optimisticallyAddLibraryResource({
+      resourceType: "albums",
+      resourceId: sourceAlbumId,
+    });
+    set((state) => {
+      const songIds = new Set(state.songIds);
+      songIds.add(songId);
+      return { songIds };
+    });
     notifyFavoriteChanged(songId, true);
-    return true;
+    try {
+      await addFavoriteSong(songId, sourceAlbumId);
+      revalidateLibraryResources({
+        resourceType: "songs",
+        resourceId: songId,
+        operation: "sync",
+      });
+      // The current surface only needs the id for its immediate state. Fetch
+      // the canonical projection in the background for Favourite Songs.
+      void get().hydrate(true).catch(() => undefined);
+      return true;
+    } catch (error) {
+      set((state) => {
+        const songIds = new Set(state.songIds);
+        songIds.delete(songId);
+        return { songIds };
+      });
+      rollbackOptimisticLibraryAddition(addedSongLibraryResource);
+      rollbackOptimisticLibraryAddition(addedAlbumLibraryResource);
+      notifyFavoriteChanged(songId, false);
+      throw error;
+    }
   },
 }));
 
@@ -141,5 +202,34 @@ export function clearFavoriteStore() {
     collection: undefined,
     loading: false,
     loaded: false,
+  });
+}
+
+/** Applies a Library Album cascade without waiting for another favourites fetch. */
+export function removeFavoriteSongsFromStore(songIds: string[]) {
+  if (!songIds.length) return;
+  const removedSongIds = new Set(songIds);
+  useFavoriteStore.setState((state) => {
+    const nextSongIds = new Set(state.songIds);
+    for (const songId of removedSongIds) nextSongIds.delete(songId);
+    return {
+      songs: state.songs.filter((song) => !removedSongIds.has(song.id)),
+      songIds: nextSongIds,
+    };
+  });
+}
+
+/** Restores optimistic Library deletion changes when the user chooses Undo. */
+export function restoreFavoriteSongsToStore(songs: SongSummary[]) {
+  if (!songs.length) return;
+  useFavoriteStore.setState((state) => {
+    const existingSongIds = new Set(state.songIds);
+    const restoredSongs = songs.filter((song) => !existingSongIds.has(song.id));
+    if (!restoredSongs.length) return state;
+    for (const song of restoredSongs) existingSongIds.add(song.id);
+    return {
+      songs: [...restoredSongs, ...state.songs],
+      songIds: existingSongIds,
+    };
   });
 }

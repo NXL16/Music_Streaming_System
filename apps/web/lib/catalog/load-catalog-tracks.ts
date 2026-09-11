@@ -8,6 +8,7 @@ import { mapCatalogTracks } from "./catalog.mapper";
 export async function loadCatalogTracks(
   songIds: string[],
   signal?: AbortSignal,
+  options?: { albumId?: string },
 ) {
   const uniqueSongIds = [...new Set(songIds.filter(Boolean))];
   if (!uniqueSongIds.length) return [];
@@ -36,7 +37,7 @@ export async function loadCatalogTracks(
       .filter((id) => !catalog.resources.albums[id])
       .map((id) => ({ id, type: "albums" })),
   ];
-  if (!relationResources.length) return mapCatalogTracks(catalog);
+  if (!relationResources.length) return mapCatalogTracks(catalog, options);
 
   const relatedCatalog = await getCatalogResources(relationResources, signal);
   return mapCatalogTracks({
@@ -52,5 +53,5 @@ export async function loadCatalogTracks(
         ...relatedCatalog.resources.albums,
       },
     },
-  });
+  }, options);
 }

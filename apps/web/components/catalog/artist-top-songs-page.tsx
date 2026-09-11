@@ -176,6 +176,7 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
                         }`}
                         onClick={(event) => event.stopPropagation()}
                         songId={song.id}
+                        sourceAlbumId={song.albumId}
                         title="Tells us more about the kind of music you like."
                       />
                     </div>
@@ -301,7 +302,9 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
                         {song.url ? (
                           <Link
                             href={song.url}
-                            onClick={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                            }}
                             className="overflow-hidden [--linkColor:var(--systemPrimary)] group-[.selected]:[--linkColor:#fff] hover:underline"
                           >
                             <div className="overflow-hidden text-ellipsis inline text-pretty whitespace-normal text-left">
@@ -364,6 +367,7 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
                         title={song.title}
                         artist={song.artist}
                         artworkUrl={song.artworkUrl}
+                        sourceAlbumId={song.albumId}
                       />
                     </div>
 
@@ -387,6 +391,8 @@ function ArtistTopSongsContent({ artistId }: ArtistTopSongsPageProps) {
                         context={{
                           kind: "song",
                           songId: song.id,
+                          releaseTrackId: song.releaseTrackId,
+                          sourceAlbumId: song.albumId,
                           title: song.title,
                           userId,
                           isFavorite: favoriteSongIds.has(song.id),

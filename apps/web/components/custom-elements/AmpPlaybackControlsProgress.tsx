@@ -1,6 +1,7 @@
 "use client";
 
 import React, { ElementType, useLayoutEffect, useRef } from "react";
+import { videoPlaybackController } from "@/lib/player/video-playback-controller";
 
 const APPLE_CSS = `@charset "UTF-8";:host{margin:0 0 11px 0;width:100%;height:auto;display:grid;visibility:visible;grid-template-columns:var(--progress-bar-grid-template-columns, auto 1fr auto);grid-template-rows:var(--progress-bar-grid-template-rows, var(--progress-thumb-height, 9px) auto);grid-template-areas:var(--progress-bar-grid-template-areas, "scrubber scrubber scrubber" "elapsed . remaining");flex:1 1 100%;align-items:center;justify-content:stretch;column-gap:var(--progress-bar-grid-column-gap, 0);font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif;row-gap:var(--progress-bar-grid-row-gap, 4px)}:host *{box-sizing:border-box}[lang]:lang(ar){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Arabic UI Text", "SF Pro Icons", "Segoe UI", "Helvetica Neue", "Helvetica", "Arial", sans-serif}[lang]:lang(bn){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Bengali", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}[lang]:lang(gu){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Gujarati", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}[lang]:lang(he){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Arial Hebrew", "SF Pro Icons", "Segoe UI", "Helvetica Neue", "Helvetica", "Arial", sans-serif}[lang]:lang(hi){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Devanagari", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}[lang]:lang(ja){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Hiragino Sans", "SF Pro Icons", "Hiragino Kaku Gothic Pro", "ヒラギノ角ゴ Pro W3", "メイリオ", "Meiryo", "ＭＳ Ｐゴシック", "Helvetica Neue", "Helvetica", "Arial", sans-serif}[lang]:lang(kn){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Kannada", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}[lang]:lang(ko){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Apple SD Gothic Neo", "SF Pro Icons", "Apple Gothic", "HY Gulim", "MalgunGothic", "HY Dotum", "Lexi Gulim", "Helvetica Neue", "Helvetica", "Arial", sans-serif}[lang]:lang(ml){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Malayalam", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}[lang]:lang(mr){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Devanagari", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}[lang]:lang(or){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Odia", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}[lang]:lang(pa){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Gurmukhi", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}[lang]:lang(ta){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Tamil", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}[lang]:lang(te){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Telugu", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}[lang]:lang(th){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Thonburi Pro", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}[lang]:lang(ur){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Geeza Pro", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}[lang]:lang(zh-CN){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang SC", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}[lang]:lang(zh-HK){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang HK", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}[lang]:lang(zh-MO){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang HK", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}[lang]:lang(zh-TW){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang TC", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}@keyframes progress-buffering{0%{opacity:1}50%{opacity:0.45}100%{opacity:1}}.scrubber{grid-area:scrubber;flex:1 1 100%}.scrubber.scrubber--buffering{animation-name:progress-buffering;animation-duration:3s;animation-iteration-count:infinite}.time{font-size:11px;line-height:1.2727272727;font-weight:500;letter-spacing:0em;font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif;flex-shrink:0;overflow:hidden;color:var(--progress-time, rgba(255, 255, 255, 0.55));font-feature-settings:"tnum";font-variant-numeric:tabular-nums}.time:lang(bn){line-height:1.9091009091;font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Bengali", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}.time:lang(gu){line-height:1.9091009091;font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Gujarati", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}.time:lang(hi){line-height:1.9091009091;font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Devanagari", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}.time:lang(kn){line-height:1.9091009091;font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Kannada", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}.time:lang(ml){line-height:1.9091009091;font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Malayalam", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}.time:lang(mr){line-height:1.9091009091;font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Devanagari", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}.time:lang(or){line-height:1.9091009091;font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Odia", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}.time:lang(pa){line-height:1.9091009091;font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Gurmukhi", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}.time:lang(ta){line-height:1.9091009091;font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Tamil", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}.time:lang(te){line-height:1.9091009091;font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Telugu", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}.time:lang(ur){line-height:1.9091009091;font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Geeza Pro", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}.time:lang(th){line-height:1.5082018182;font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Thonburi Pro", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}.time:lang(ar){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Arabic UI Text", "SF Pro Icons", "Segoe UI", "Helvetica Neue", "Helvetica", "Arial", sans-serif}.time:lang(he){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Arial Hebrew", "SF Pro Icons", "Segoe UI", "Helvetica Neue", "Helvetica", "Arial", sans-serif}.time:lang(ja){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Hiragino Sans", "SF Pro Icons", "Hiragino Kaku Gothic Pro", "ヒラギノ角ゴ Pro W3", "メイリオ", "Meiryo", "ＭＳ Ｐゴシック", "Helvetica Neue", "Helvetica", "Arial", sans-serif}.time:lang(ko){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Apple SD Gothic Neo", "SF Pro Icons", "Apple Gothic", "HY Gulim", "MalgunGothic", "HY Dotum", "Lexi Gulim", "Helvetica Neue", "Helvetica", "Arial", sans-serif}.time:lang(zh-CN){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang SC", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}.time:lang(zh-HK){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang HK", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}.time:lang(zh-MO){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang HK", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}.time:lang(zh-TW){font-family:-apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang TC", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif}.elapsed{grid-area:elapsed}.remaining{grid-area:remaining}`;
 
@@ -8,12 +9,15 @@ interface AmpPlaybackControlsProgressProps {
   audioRef: React.RefObject<HTMLAudioElement | null>;
   isProgressExpanded?: boolean;
   inDetailView?: boolean;
+  /** Keeps the established progress UI while swapping only its media source. */
+  videoSource?: string;
 }
 
 export default function AmpPlaybackControlsProgress({
   audioRef,
   isProgressExpanded,
   inDetailView,
+  videoSource,
 }: AmpPlaybackControlsProgressProps) {
   const containerRef = useRef<HTMLElement>(null);
 
@@ -161,9 +165,26 @@ export default function AmpPlaybackControlsProgress({
     };
 
     const syncFromAudio = () => {
+      if (videoSource) return;
       const audio = audioRef.current;
       if (!audio || isScrubbingRef.current) return;
       updateProgress(audio.currentTime, audio.duration);
+    };
+    const syncFromVideo = (event: {
+      type: "timeupdate" | "ended";
+      src: string;
+      currentTime?: number;
+      duration?: number;
+    }) => {
+      if (
+        !videoSource ||
+        isScrubbingRef.current ||
+        event.type !== "timeupdate" ||
+        event.src !== videoSource
+      ) {
+        return;
+      }
+      updateProgress(event.currentTime ?? 0, event.duration ?? 0);
     };
 
     const handleInput = (e: Event) => {
@@ -172,13 +193,20 @@ export default function AmpPlaybackControlsProgress({
       const currentValue = Number.parseFloat(
         (e.target as HTMLInputElement).value,
       );
-      updateProgress(currentValue, audio?.duration ?? 0);
+      updateProgress(
+        currentValue,
+        videoSource
+          ? Number.parseFloat(inputEl?.max || "0")
+          : (audio?.duration ?? 0),
+      );
     };
 
     const handleChange = (e: Event) => {
       const audio = audioRef.current;
       const nextTime = Number.parseFloat((e.target as HTMLInputElement).value);
-      if (audio && Number.isFinite(nextTime)) {
+      if (videoSource && Number.isFinite(nextTime)) {
+        videoPlaybackController.seek(nextTime);
+      } else if (audio && Number.isFinite(nextTime)) {
         audio.currentTime = Math.min(
           Math.max(nextTime, 0),
           Number.isFinite(audio.duration) ? audio.duration : nextTime,
@@ -195,6 +223,7 @@ export default function AmpPlaybackControlsProgress({
     audio?.addEventListener("loadedmetadata", syncFromAudio);
     audio?.addEventListener("durationchange", syncFromAudio);
     audio?.addEventListener("emptied", syncFromAudio);
+    const unsubscribeVideo = videoPlaybackController.subscribe(syncFromVideo);
     syncFromAudio();
 
     return () => {
@@ -204,8 +233,9 @@ export default function AmpPlaybackControlsProgress({
       audio?.removeEventListener("loadedmetadata", syncFromAudio);
       audio?.removeEventListener("durationchange", syncFromAudio);
       audio?.removeEventListener("emptied", syncFromAudio);
+      unsubscribeVideo();
     };
-  }, [audioRef]);
+  }, [audioRef, videoSource]);
 
   const AmpProgressTag = "amp-playback-controls-progress" as ElementType;
 

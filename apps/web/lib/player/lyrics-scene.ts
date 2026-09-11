@@ -39,7 +39,7 @@ export class LyricsScene {
     this.addSprites(this.currentSprites);
     this.initFilters();
     this.addOverlays();
-    this.app.ticker.maxFPS = 15;
+    this.app.ticker.maxFPS = 30;
     this.app.ticker.add(this.animate);
     this.updateArtwork(artworkURL);
   }

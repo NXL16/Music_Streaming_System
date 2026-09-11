@@ -1,14 +1,23 @@
 import { loadCatalogTracks } from "@/lib/catalog/load-catalog-tracks";
 import { getArtworkRenditionUrl, getArtworkSrcSet } from "@/lib/media/artwork";
 import { usePlayerStore } from "@/lib/player/use-player-store";
+import {
+  getSongStation,
+  playSongStation,
+  type SongStationResponse,
+} from "./song-station";
+import {
+  getArtistStation,
+  playArtistStation,
+  type ArtistStationResponse,
+} from "./artist-station";
 import { getHomeRecommendations } from "./recommendation.api";
 import type { CatalogResourceAttributes } from "./recommendation.types";
 
-const SYSTEM_STATION_ID_PATTERN = /^(?:station-for-you|mood-station)-[a-f0-9]{32}-\d+$/;
-const PLAYABLE_SYSTEM_STATION_KINDS = new Set([
-  "system-personalized",
-  "system-mood",
-]);
+const MOOD_STATION_ID_PATTERN = /^mood-station-[a-f0-9]{32}-\d+$/;
+const SONG_STATION_ID_PATTERN = /^song-station-[a-f0-9]{32}$/;
+const ARTIST_STATION_ID_PATTERN = /^(artist|artist-play)-station-[a-f0-9]{32}$/;
+const PLAYABLE_PERSISTED_STATION_KINDS = new Set(["system-mood"]);
 
 export type SystemStationDetail = {
   id: string;
@@ -17,21 +26,74 @@ export type SystemStationDetail = {
   artwork: CatalogResourceAttributes["artwork"];
 };
 
-export function isPlayableSystemStationId(stationId: string): boolean {
-  return SYSTEM_STATION_ID_PATTERN.test(stationId);
+type ContextStationResponse = Pick<
+  SongStationResponse | ArtistStationResponse,
+  "stationId" | "name" | "description" | "artworkUrl" | "artworkBgColor"
+>;
+
+function contextStationDetail(
+  station: ContextStationResponse,
+): SystemStationDetail {
+  return {
+    id: station.stationId,
+    name: station.name,
+    description: station.description,
+    artwork: {
+      url: station.artworkUrl,
+      bgColor: station.artworkBgColor,
+      width: 1080,
+      height: 1080,
+    },
+  };
 }
 
-/** Reads the existing Home recommendation snapshot; it never regenerates a station. */
+async function getContextStationDetail<T extends ContextStationResponse>(
+  load: () => Promise<T>,
+): Promise<SystemStationDetail | null> {
+  try {
+    return contextStationDetail(await load());
+  } catch {
+    return null;
+  }
+}
+
+async function playContextStation<T extends ContextStationResponse>(
+  load: () => Promise<T>,
+  play: (station: T) => Promise<boolean>,
+): Promise<boolean> {
+  try {
+    return play(await load());
+  } catch {
+    return false;
+  }
+}
+
+export function isPlayableSystemStationId(stationId: string): boolean {
+  return (
+    MOOD_STATION_ID_PATTERN.test(stationId) ||
+    SONG_STATION_ID_PATTERN.test(stationId) ||
+    ARTIST_STATION_ID_PATTERN.test(stationId)
+  );
+}
+
+/** Reads persisted Station data without generating a new Station. */
 export async function getSystemStationDetail(
   stationId: string,
 ): Promise<SystemStationDetail | null> {
   if (!isPlayableSystemStationId(stationId)) return null;
 
+  if (SONG_STATION_ID_PATTERN.test(stationId)) {
+    return getContextStationDetail(() => getSongStation(stationId));
+  }
+  if (ARTIST_STATION_ID_PATTERN.test(stationId)) {
+    return getContextStationDetail(() => getArtistStation(stationId));
+  }
+
   const response = await getHomeRecommendations();
   const station = response.resources?.stations[stationId];
   const attributes = station?.attributes;
   const kind = typeof attributes?.kind === "string" ? attributes.kind : "";
-  if (!station || !attributes || !PLAYABLE_SYSTEM_STATION_KINDS.has(kind)) {
+  if (!station || !attributes || !PLAYABLE_PERSISTED_STATION_KINDS.has(kind)) {
     return null;
   }
 
@@ -54,11 +116,24 @@ export async function getSystemStationDetail(
 export async function playSystemStation(stationId: string): Promise<boolean> {
   if (!isPlayableSystemStationId(stationId)) return false;
 
+  if (SONG_STATION_ID_PATTERN.test(stationId)) {
+    return playContextStation(
+      () => getSongStation(stationId),
+      playSongStation,
+    );
+  }
+  if (ARTIST_STATION_ID_PATTERN.test(stationId)) {
+    return playContextStation(
+      () => getArtistStation(stationId),
+      playArtistStation,
+    );
+  }
+
   const response = await getHomeRecommendations();
   const station = response.resources?.stations[stationId];
   const attributes = station?.attributes;
   const kind = typeof attributes?.kind === "string" ? attributes.kind : "";
-  if (!station || !attributes || !PLAYABLE_SYSTEM_STATION_KINDS.has(kind)) {
+  if (!station || !attributes || !PLAYABLE_PERSISTED_STATION_KINDS.has(kind)) {
     return false;
   }
 
@@ -95,6 +170,9 @@ export async function playSystemStation(stationId: string): Promise<boolean> {
   });
   if (tracks.length === 0) return false;
 
-  usePlayerStore.getState().startStation(tracks);
+  usePlayerStore.getState().startStation(
+    tracks,
+    undefined,
+  );
   return true;
 }

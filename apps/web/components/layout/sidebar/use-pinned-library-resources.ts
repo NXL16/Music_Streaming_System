@@ -10,7 +10,6 @@ import {
   getLibraryResources,
   getLibraryMediaCards,
   isLibraryResourcePendingRemoval,
-  subscribeLibraryResourcesChanged,
   type LibraryResource,
 } from "@/lib/library/library-resources.api";
 import { useLibraryResourcesRevision } from "@/lib/library/use-library-resources-revision";
@@ -30,7 +29,7 @@ type PinnedLibraryResource = LibraryResource & {
 
 export function usePinnedLibraryResources(userId?: string) {
   const [resources, setResources] = useState<PinnedLibraryResource[]>([]);
-  useLibraryResourcesRevision();
+  const revision = useLibraryResourcesRevision();
 
   useEffect(() => {
     if (!userId) {
@@ -140,13 +139,11 @@ export function usePinnedLibraryResources(userId?: string) {
     };
 
     void load();
-    const unsubscribe = subscribeLibraryResourcesChanged(() => void load());
     return () => {
       active = false;
       requestVersion += 1;
-      unsubscribe();
     };
-  }, [userId]);
+  }, [revision, userId]);
 
   return userId
     ? resources.filter(

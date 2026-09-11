@@ -59,6 +59,7 @@
   --systemStandardThickMaterialSover-default_IC: #1e1e1e;
   --modalScrimColor: rgba(0, 0, 0, .45);
   --nowPlayingBackdropBG: #878787;
+  --lockupHoverBGColor: rgba(51, 51, 51, .3);
 
   --global-transition-property: opacity;
   --global-transition-duration: .1s;
@@ -89,6 +90,8 @@
   --large-title: 400 22px/ 1.2007692308 var(--apple-music-font);
   --large-title-emphasized: 700 26px/ 1.2307692308 var(--apple-music-font);
   --large-title-emphasized-short: 700 26px/ 1.1538461538 var(--apple-music-font);
+  --headline-emphasized: 800 13px/ 1.2307692308 var(--apple-music-font);
+  --callout-tall: 400 12px/ 1.4166666667 var(--apple-music-font);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -99,7 +102,7 @@
 
     --systemPrimary: hsla(0, 0%, 100%, .92);
     --systemSecondary: hsla(0, 0%, 100%, .64);
-    --systemPrimary-vibrant: #f5f5f7;
+    --systemPrimary-vibrant: hsl(240, 11%, 96%);
     --systemBlue: hsl(210, 100%, 52%);
     --systemTertiary: hsla(0, 0%, 100%, 0.4);
     --systemStandardThinMaterialSover: rgba(40, 40, 40, .5);
@@ -125,7 +128,7 @@
     --metadata-color-override: #fff;
     --artworkShadowInset: inset 0 0 0 1px var(--containerInnerStroke);
 
-    --mobileNavigationBG: rgba(31, 31, 34, 0.8);
+    --mobileNavigationBG: hsla(240, 5%, 13%, 0.8);
     --navSidebarBG: rgba(38, 38, 41, 0.82);
     --navSidebarSelectedState: hsla(0, 0%, 100%, .05);
     --navigation-border-color: var(--glassMaterialInnerStrokeCombined);
@@ -784,6 +787,22 @@ html[dir=rtl] .chrome-volume__slider {
 .shelf-grid__list[data-dragging="true"] {
   scroll-snap-type: none;
   user-select: none;
+}
+
+/* Artist Top Songs keeps its distinct row layout but shares Shelf drag state. */
+.shelf-grid__list--artist[data-dragging="true"] {
+  scroll-behavior: auto;
+  scroll-snap-type: none;
+  user-select: none;
+  will-change: scroll-position;
+}
+
+@media (hover: hover) and (pointer: fine) {
+
+  .shelf-grid__list--artist[data-dragging="true"],
+  .shelf-grid__list--artist[data-dragging="true"] * {
+    cursor: grabbing !important;
+  }
 }
 
 @media (hover:hover) and (pointer:fine) {
@@ -1775,6 +1794,12 @@ m404-contextual-menu-item:first-child>li>button {
   }
 }
 
+@media (min-width: 1260px) and (max-width: 1579px) {
+  .app-container.is-drawer-open .shelf-grid__list--artist {
+    grid-auto-columns: var(--grid-max-content-medium, calc((100% - (var(--grid-medium) - 2) * var(--grid-column-gap-medium)) / (var(--grid-medium) - 1)));
+  }
+}
+
 @media (min-width: 1580px) and (max-width: 1939px) {
   .shelf-grid__list--artist {
     -moz-column-gap: var(--grid-column-gap-large);
@@ -1782,6 +1807,16 @@ m404-contextual-menu-item:first-child>li>button {
     grid-auto-columns: var(--grid-max-content-large, calc((100% - (var(--grid-large) - 1) * var(--grid-column-gap-large)) / var(--grid-large)));
     grid-template-rows: repeat(var(--grid-rows), max-content);
     row-gap: var(--grid-row-gap-large);
+  }
+}
+
+@media (min-width: 1940px) {
+  .shelf-grid__list--artist {
+    -moz-column-gap: var(--grid-column-gap-xlarge);
+    column-gap: var(--grid-column-gap-xlarge);
+    grid-auto-columns: var(--grid-max-content-xlarge, calc((100% - (var(--grid-xlarge) - 1) * var(--grid-column-gap-xlarge)) / var(--grid-xlarge)));
+    grid-template-rows: repeat(var(--grid-rows), max-content);
+    row-gap: var(--grid-row-gap-xlarge);
   }
 }
 

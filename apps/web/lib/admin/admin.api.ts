@@ -31,9 +31,46 @@ export async function publishCatalogDraft(draftId: string) {
   return response;
 }
 
+export async function submitCatalogDraft(draftId: string) {
+  return (
+    await http.post(
+      "/admin/catalog/drafts/" + encodeURIComponent(draftId) + "/submit",
+    )
+  ).data;
+}
+
+export async function requestCatalogDraftChanges(
+  draftId: string,
+  reviewNote = "",
+) {
+  return (
+    await http.post(
+      "/admin/catalog/drafts/" +
+        encodeURIComponent(draftId) +
+        "/request-changes",
+      { reviewNote },
+    )
+  ).data;
+}
+
 export async function deleteCatalogDraft(draftId: string) {
   return (
     await http.delete(`/admin/catalog/drafts/${encodeURIComponent(draftId)}`)
+  ).data;
+}
+
+export async function assignArtistWorkspaceMember(
+  artistId: string,
+  payload: {
+    userId: string;
+    role: "OWNER" | "MANAGER" | "EDITOR" | "PRODUCTION" | "ANALYST";
+  },
+) {
+  return (
+    await http.post(
+      "/admin/artists/" + encodeURIComponent(artistId) + "/members",
+      payload,
+    )
   ).data;
 }
 

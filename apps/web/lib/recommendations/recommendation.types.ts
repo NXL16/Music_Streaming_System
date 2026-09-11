@@ -60,6 +60,7 @@ export type CatalogResourceAttributes = {
   };
   url?: string;
   contentRating?: string;
+  stationArtworkReady?: boolean;
   [key: string]: unknown;
 };
 

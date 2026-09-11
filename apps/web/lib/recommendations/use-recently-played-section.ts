@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MediaCardProps } from "@/components/media/media-card.types";
 import { RECENTLY_PLAYED_CONTEXT_LIMIT } from "@musical/shared-constants";
 import {
@@ -61,6 +61,33 @@ function mergeRecentlyPlayedItems(
     .slice(0, RECENTLY_PLAYED_CONTEXT_LIMIT);
 }
 
+function buildRecentlyPlayedShelf(
+  serverShelf: HomeShelf | null,
+  optimisticItems: MediaCardProps[],
+) {
+  if (!serverShelf && optimisticItems.length === 0) return null;
+
+  const fallbackShelf = {
+    id: RECENTLY_PLAYED_SHELF_ID,
+    title: "Recently Played",
+    displayKind: "MusicCoverShelf",
+    sourceDisplayKind: "MusicCoverShelf",
+    modelVersion: 1,
+    hasMore: false,
+    items: [],
+  } satisfies HomeShelf;
+
+  const baseShelf = serverShelf ?? fallbackShelf;
+  return {
+    ...baseShelf,
+    displayKind: "MusicCoverShelf" as const,
+    sourceDisplayKind: "MusicCoverShelf",
+    items: mergeRecentlyPlayedItems(optimisticItems, baseShelf.items).map(
+      normalizeRecentlyPlayedCard,
+    ),
+  };
+}
+
 async function hydrateFavoriteArtwork(shelf: HomeShelf | undefined) {
   const hasFavorite = shelf?.items.some(
     (item) =>
@@ -106,6 +133,7 @@ export function useRecentlyPlayedSection() {
     initialShelf ?? null,
   );
   const [optimisticItems, setOptimisticItems] = useState<MediaCardProps[]>([]);
+  const optimisticItemsRef = useRef<MediaCardProps[]>([]);
   const [loading, setLoading] = useMinimumLoadingState(
     initialShelf === undefined,
   );
@@ -124,9 +152,15 @@ export function useRecentlyPlayedSection() {
         ),
       );
 
-      const nextSnapshot = nextShelf ?? null;
+      // A refresh can resolve after PLAY_START. Persist the same merged view
+      // that is on screen so navigation away from Home cannot drop the new
+      // card before its server record appears in the response.
+      const nextSnapshot = buildRecentlyPlayedShelf(
+        nextShelf ?? null,
+        optimisticItemsRef.current,
+      );
       if (!developmentCacheDisabled) setRecentlyPlayedSnapshot(nextSnapshot);
-      setServerShelf(nextSnapshot);
+      setServerShelf(nextShelf ?? null);
     } catch {
       if (!developmentCacheDisabled) setRecentlyPlayedSnapshot(null);
       setServerShelf(null);
@@ -175,7 +209,9 @@ export function useRecentlyPlayedSection() {
           ),
         ];
 
-        return nextItems.slice(0, RECENTLY_PLAYED_CONTEXT_LIMIT);
+        const next = nextItems.slice(0, RECENTLY_PLAYED_CONTEXT_LIMIT);
+        optimisticItemsRef.current = next;
+        return next;
       });
     };
 
@@ -196,9 +232,13 @@ export function useRecentlyPlayedSection() {
     const handleRecentlyPlayedItemRejected = (event: Event) => {
       const item = (event as CustomEvent<MediaCardProps>).detail;
       if (!item) return;
-      setOptimisticItems((items) =>
-        items.filter((current) => itemKey(current) !== itemKey(item)),
-      );
+      setOptimisticItems((items) => {
+        const next = items.filter(
+          (current) => itemKey(current) !== itemKey(item),
+        );
+        optimisticItemsRef.current = next;
+        return next;
+      });
       void refresh();
     };
     window.addEventListener(
@@ -258,7 +298,11 @@ export function useRecentlyPlayedSection() {
           ? { ...item, title: update.title }
           : item;
 
-      setOptimisticItems((items) => items.map(updateItem));
+      setOptimisticItems((items) => {
+        const next = items.map(updateItem);
+        optimisticItemsRef.current = next;
+        return next;
+      });
       setServerShelf((current) =>
         current
           ? { ...current, items: current.items.map(updateItem) }
@@ -282,9 +326,11 @@ export function useRecentlyPlayedSection() {
       const playlistId = (event as CustomEvent<string>).detail;
       if (!playlistId) return;
 
-      setOptimisticItems((items) =>
-        items.filter((item) => item.resourceId !== playlistId),
-      );
+      setOptimisticItems((items) => {
+        const next = items.filter((item) => item.resourceId !== playlistId);
+        optimisticItemsRef.current = next;
+        return next;
+      });
       setServerShelf((current) =>
         current
           ? {
@@ -308,32 +354,10 @@ export function useRecentlyPlayedSection() {
       );
   }, [setLoading]);
 
-  const shelf = useMemo(() => {
-    if (!serverShelf && optimisticItems.length === 0) return null;
-
-    const fallbackShelf = {
-      id: RECENTLY_PLAYED_SHELF_ID,
-      title: "Recently Played",
-      displayKind: "MusicCoverShelf",
-      sourceDisplayKind: "MusicCoverShelf",
-      modelVersion: 1,
-      hasMore: false,
-      items: [],
-    } satisfies HomeShelf;
-
-    const baseShelf = serverShelf ?? fallbackShelf;
-    const mergedItems = mergeRecentlyPlayedItems(
-      optimisticItems,
-      baseShelf.items,
-    );
-
-    return {
-      ...baseShelf,
-      displayKind: "MusicCoverShelf" as const,
-      sourceDisplayKind: "MusicCoverShelf",
-      items: mergedItems.map(normalizeRecentlyPlayedCard),
-    };
-  }, [optimisticItems, serverShelf]);
+  const shelf = useMemo(
+    () => buildRecentlyPlayedShelf(serverShelf, optimisticItems),
+    [optimisticItems, serverShelf],
+  );
 
   return {
     shelf,

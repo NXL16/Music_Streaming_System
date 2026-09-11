@@ -1,4 +1,5 @@
 import { getArtworkRenditionUrl } from "@/lib/media/artwork";
+import { SYSTEM_FAVORITE_PLAYLIST_ID } from "@musical/shared-constants";
 import type { MediaArtwork } from "@/lib/media/media-card.types";
 import {
   addLibraryResource,
@@ -6,7 +7,6 @@ import {
 } from "@/lib/library/library-resources.api";
 import { listFavoriteSongs } from "@/lib/songs/song.api";
 
-const FAVORITE_RESOURCE_ID = "favorite";
 let pendingEnsure: Promise<void> | null = null;
 
 /** Ensures the virtual Favourite playlist is persisted in the user's Library. */
@@ -15,7 +15,7 @@ async function ensureFavoriteLibraryResourceInternal() {
   const existing = resources.find(
     (resource) =>
       resource.resourceType === "playlists" &&
-      resource.resourceId === FAVORITE_RESOURCE_ID,
+      resource.resourceId === SYSTEM_FAVORITE_PLAYLIST_ID,
   );
 
   // A pre-existing resource with complete display metadata needs no further
@@ -28,7 +28,7 @@ async function ensureFavoriteLibraryResourceInternal() {
   const artwork = collection?.artwork as MediaArtwork | undefined;
   await addLibraryResource({
     resourceType: "playlists",
-    resourceId: FAVORITE_RESOURCE_ID,
+    resourceId: SYSTEM_FAVORITE_PLAYLIST_ID,
     title: collection?.title || "Favourite Songs",
     subtitle: "You",
     artworkUrl: getArtworkRenditionUrl(artwork, 316),

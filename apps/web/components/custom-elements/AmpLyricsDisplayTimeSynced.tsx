@@ -11,11 +11,13 @@ const SLOW_LINE_SPRING = { stiffness: 90, damping: 15 };
 const MIN_LINE_INTERVAL_MS = 100;
 const MAX_LINE_INTERVAL_MS = 800;
 const MIN_LINE_STIFFNESS = 170;
-const MAX_LINE_STIFFNESS = 220;
+const MAX_LINE_STIFFNESS = 200;
 const LINE_DAMPING_MULTIPLIER = 2.2;
 const LINE_INTERVAL_EXPONENT = 0.2;
 const LINE_SPRING_FALLBACK = "cubic-bezier(.16, 1, .3, 1)";
 const LINE_SPRING_SAMPLE_COUNT = 32;
+const PAST_LINE_FADE_LEAD_MS = 160;
+const MIN_PAST_LINE_FADE_DURATION_MS = 120;
 const INSTRUMENTAL_TRANSITION_DURATION_MS = 300;
 const INSTRUMENTAL_SCROLL_DURATION_MS = 720;
 const INSTRUMENTAL_FADE_IN_MS = 180;
@@ -165,7 +167,7 @@ export class AmpLyricsDisplayTimeSynced extends HTMLElement {
       runtimeStyle.textContent = RUNTIME_CSS;
 
       const instrumentalTransitionStyle = document.createElement("style");
-      instrumentalTransitionStyle.textContent = `.display-synced-line.collapsible { animation: none; transition: height ${INSTRUMENTAL_TRANSITION_DURATION_MS}ms ease-in-out; } .display-synced-line.is-current.collapsible { height: var(--instrumental-line-height, 0px); animation: none; } amp-lyrics-display-synced-line[data-past] .line { animation-name: none; opacity: var(--lyrics-display-synced-line-opacity, 1); }`;
+      instrumentalTransitionStyle.textContent = `.display-synced-line.collapsible { animation: none; transition: height ${INSTRUMENTAL_TRANSITION_DURATION_MS}ms ease-in-out; } .display-synced-line.is-current.collapsible { height: var(--instrumental-line-height, 0px); animation: none; } amp-lyrics-display-synced-line[data-past] .line { animation-name: none; opacity: var(--lyrics-display-synced-line-opacity, 1); } :host([detail-line-motion]) amp-lyrics-display-synced-line:has(~ [is-current]) .line { animation-duration: var(--lyrics-past-line-fade-duration, 1s); }`;
 
       shadow.append(
         this.topSpacer,
@@ -225,6 +227,17 @@ export class AmpLyricsDisplayTimeSynced extends HTMLElement {
     if (!value) this.cancelLineAnimations();
   }
 
+  private getLineTransitionMotion(index: number) {
+    const currentLyric = this.lines[index];
+    const previousLyric = this.lines[index - 1];
+    return getLineSpringMotion(
+      currentLyric && previousLyric
+        ? currentLyric.startTimeMs - previousLyric.startTimeMs
+        : undefined,
+      previousLyric?.kind === "INSTRUMENTAL",
+    );
+  }
+
   setActiveIndex(index: number, shouldScroll: boolean) {
     if (this.activeIndex === index) return;
 
@@ -245,6 +258,20 @@ export class AmpLyricsDisplayTimeSynced extends HTMLElement {
       });
     } else if (index < previousIndex) {
       elements?.forEach((element) => element.removeAttribute("data-past"));
+    }
+    if (
+      this.lineStaggerEnabled &&
+      previousIndex >= 0 &&
+      index > previousIndex
+    ) {
+      const fadeDuration = Math.max(
+        MIN_PAST_LINE_FADE_DURATION_MS,
+        this.getLineTransitionMotion(index).duration - PAST_LINE_FADE_LEAD_MS,
+      );
+      this.style.setProperty(
+        "--lyrics-past-line-fade-duration",
+        `${fadeDuration}ms`,
+      );
     }
     setCurrent(previousIndex, false);
     setCurrent(index, true);
@@ -436,14 +463,7 @@ export class AmpLyricsDisplayTimeSynced extends HTMLElement {
     this.cancelScrollAnimation();
     this.scrollTop = targetScrollTop;
     const scrollDelta = targetScrollTop - previousScrollTop;
-    const currentLyric = this.lines[index];
-    const previousLyric = this.lines[index - 1];
-    const lineSpring = getLineSpringMotion(
-      currentLyric && previousLyric
-        ? currentLyric.startTimeMs - previousLyric.startTimeMs
-        : undefined,
-      previousLyric?.kind === "INSTRUMENTAL",
-    );
+    const lineSpring = this.getLineTransitionMotion(index);
 
     let delay = 0;
     let baseDelay = LINE_STAGGER_DELAY_MS;

@@ -16,6 +16,8 @@ export type SongSummary = {
   artists?: Array<{ id: string; name: string; url: string }>;
   albumId?: string;
   albumUrl?: string;
+  /** UUID of the release-specific album_tracks row. */
+  releaseTrackId?: string;
   contentRating?: string;
 };
 

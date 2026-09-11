@@ -7,8 +7,9 @@ import type {
   CatalogSongResource,
 } from "./catalog.types";
 import { formatArtistNames } from "@/lib/media/artist-names";
+import { formatReleaseYear } from "@/lib/format/release-date";
 import { createMediaResourceCard } from "@/lib/media/normalize-media-resource";
-import { catalogArtists } from "./catalog-artists";
+import { catalogArtists, catalogArtistsFromResources } from "./catalog-artists";
 
 export type SearchResults = {
   songs: MediaCardProps[];
@@ -49,9 +50,17 @@ function mapArtist(artist: CatalogArtistResource): MediaCardProps {
   );
 }
 
+export function mapCatalogArtists(response: CatalogResponse): MediaCardProps[] {
+  return response.data.flatMap((reference) => {
+    if (reference.type !== "artists") return [];
+    const artist = response.resources.artists[reference.id];
+    return artist ? [mapArtist(artist)] : [];
+  });
+}
+
 function mapAlbum(
-  response: CatalogResponse,
   album: CatalogAlbumResource,
+  artists?: MediaCardProps["artists"],
 ): MediaCardProps {
   return createMediaResourceCard(
     {
@@ -65,7 +74,7 @@ function mapAlbum(
     },
     {
       cardType: "collection",
-      artists: catalogArtists(response, album.relationships.artists?.data),
+      artists,
     },
   );
 }
@@ -84,11 +93,55 @@ function mapPlaylist(playlist: CatalogPlaylistResource): MediaCardProps {
   );
 }
 
-export function mapCatalogAlbums(response: CatalogResponse): MediaCardProps[] {
+type CatalogAlbumCardOptions = {
+  subtitle?: (album: CatalogAlbumResource) => string;
+};
+
+export const catalogAlbumReleaseYearCardOptions: CatalogAlbumCardOptions = {
+  subtitle: (album) => formatReleaseYear(album.attributes.releaseDate),
+};
+
+export function mapCatalogAlbums(
+  response: CatalogResponse,
+  options: CatalogAlbumCardOptions = {},
+): MediaCardProps[] {
   return response.data.flatMap((reference) => {
     if (reference.type !== "albums") return [];
     const album = response.resources.albums[reference.id];
-    return album ? [mapAlbum(response, album)] : [];
+    if (!album) return [];
+
+    const card = mapAlbum(
+      album,
+      catalogArtists(response, album.relationships.artists?.data),
+    );
+    const subtitle = options.subtitle?.(album);
+
+    return [
+      subtitle === undefined ? card : { ...card, subtitle, artists: undefined },
+    ];
+  });
+}
+
+export function mapCatalogAlbumResources(
+  albums: CatalogAlbumResource[],
+  options: CatalogAlbumCardOptions = {},
+  artistResources?: Record<string, CatalogArtistResource>,
+): MediaCardProps[] {
+  return albums.map((album) => {
+    const card = mapAlbum(
+      album,
+      artistResources
+        ? catalogArtistsFromResources(
+            artistResources,
+            album.relationships.artists?.data,
+          )
+        : undefined,
+    );
+    const subtitle = options.subtitle?.(album);
+
+    return subtitle === undefined
+      ? card
+      : { ...card, subtitle, artists: undefined };
   });
 }
 
@@ -119,7 +172,14 @@ export function mapSearchResults(response: CatalogResponse): SearchResults {
       if (artist) artists.push(mapArtist(artist));
     } else if (reference.type === "albums") {
       const album = response.resources.albums[reference.id];
-      if (album) albums.push(mapAlbum(response, album));
+      if (album) {
+        albums.push(
+          mapAlbum(
+            album,
+            catalogArtists(response, album.relationships.artists?.data),
+          ),
+        );
+      }
     }
   }
 

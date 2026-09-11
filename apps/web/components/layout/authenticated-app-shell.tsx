@@ -7,6 +7,7 @@ import { ProtectedOnly } from "@/components/auth/protected-only";
 import { usePlayerStore } from "@/lib/player/use-player-store";
 import { AppFooter } from "./app-footer";
 import { usePathname } from "next/navigation";
+import MusicVideoPlayer from "../custom-elements/music-video/music-video-player";
 
 type AuthenticatedAppShellProps = {
   children?: ReactNode;
@@ -41,8 +42,10 @@ export function AuthenticatedAppShell({
               </div>
             </main>
 
-            {pathname !== "/lyrics-sync" && <AppFooter />}
+            <AppFooter />
           </div>
+
+          <MusicVideoPlayer />
         </div>
       </div>
     </ProtectedOnly>

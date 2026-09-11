@@ -21,7 +21,12 @@ export default function StationCard(props: StationCardProps) {
   const cardId = props.resourceId || props.id;
 
   return (
-    <MediaCardShell id={cardId} artworkColor={props.artworkColors.main}>
+    <MediaCardShell
+      id={cardId}
+      artworkColor={props.artworkColors.main}
+      href={props.slug}
+      onOpen={props.onOpen}
+    >
       <div className="media-card-artwork rounded-(--global-border-radius-medium,7px) shadow-[0_1px_1px_rgba(0,0,0,0.01),0_2px_2px_rgba(0,0,0,0.01),0_4px_4px_rgba(0,0,0,0.02),0_8px_8px_rgba(0,0,0,0.03),0_14px_14px_rgba(0,0,0,0.03)] relative z-(--z-default) after:content-[''] after:absolute after:inset-0 after:rounded-[inherit] after:bg-[#333333]/30 after:opacity-(--scrimOpacity,0) after:transition-opacity after:duration-100 after:ease-in after:z-1">
         <CardArtwork
           variant="cover"

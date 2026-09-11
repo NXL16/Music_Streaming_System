@@ -1,10 +1,5 @@
 import { memo, type CSSProperties } from "react";
-
-type MediaShelfDisplayKind =
-  | "MusicNotesHeroShelf"
-  | "MusicCoverShelf"
-  | "MusicCircleCoverShelf"
-  | "MusicSocialCardShelf";
+import type { MediaShelfDisplayKind } from "@/components/media/media-shelf";
 
 interface MediaShelfSkeletonProps {
   displayKind: MediaShelfDisplayKind;
@@ -53,6 +48,26 @@ const mediaShelfPresets = {
     "--grid-rows": "1",
     "--standard-lockup-shadow-offset": "15px",
   },
+  MusicVideoShelf: {
+    "--grid-max-content-xsmall": "298px",
+    "--grid-column-gap-xsmall": "10px",
+    "--grid-row-gap-xsmall": "24px",
+    "--grid-small": "2",
+    "--grid-column-gap-small": "20px",
+    "--grid-row-gap-small": "24px",
+    "--grid-medium": "3",
+    "--grid-column-gap-medium": "20px",
+    "--grid-row-gap-medium": "24px",
+    "--grid-large": "4",
+    "--grid-column-gap-large": "20px",
+    "--grid-row-gap-large": "24px",
+    "--grid-xlarge": "4",
+    "--grid-column-gap-xlarge": "20px",
+    "--grid-row-gap-xlarge": "24px",
+    "--grid-type": "B",
+    "--grid-rows": "1",
+    "--standard-lockup-shadow-offset": "15px",
+  },
   MusicCircleCoverShelf: {
     "--grid-max-content-xsmall": "120px",
     "--grid-column-gap-xsmall": "10px",
@@ -73,26 +88,6 @@ const mediaShelfPresets = {
     "--grid-rows": "1",
     "--standard-lockup-shadow-offset": "15px",
   },
-  MusicSocialCardShelf: {
-    "--grid-max-content-xsmall": "280px",
-    "--grid-column-gap-xsmall": "10px",
-    "--grid-row-gap-xsmall": "24px",
-    "--grid-small": "2",
-    "--grid-column-gap-small": "20px",
-    "--grid-row-gap-small": "24px",
-    "--grid-medium": "3",
-    "--grid-column-gap-medium": "20px",
-    "--grid-row-gap-medium": "24px",
-    "--grid-large": "3",
-    "--grid-column-gap-large": "20px",
-    "--grid-row-gap-large": "24px",
-    "--grid-xlarge": "4",
-    "--grid-column-gap-xlarge": "20px",
-    "--grid-row-gap-xlarge": "24px",
-    "--grid-type": "G",
-    "--grid-rows": "1",
-    "--standard-lockup-shadow-offset": "15px",
-  },
 };
 
 const mediaShelfVisibility = {
@@ -104,13 +99,13 @@ const mediaShelfVisibility = {
     contentVisibility: "auto",
     containIntrinsicSize: "auto 380px",
   },
+  MusicVideoShelf: {
+    contentVisibility: "auto",
+    containIntrinsicSize: "auto 260px",
+  },
   MusicCircleCoverShelf: {
     contentVisibility: "auto",
     containIntrinsicSize: "auto 320px",
-  },
-  MusicSocialCardShelf: {
-    contentVisibility: "auto",
-    containIntrinsicSize: "auto 200px",
   },
 } satisfies Record<MediaShelfDisplayKind, CSSProperties>;
 
@@ -121,10 +116,8 @@ export default memo(function MediaShelfSkeleton({
 }: MediaShelfSkeletonProps) {
   const isHeroShelf = displayKind === "MusicNotesHeroShelf";
   const isCircleShelf = displayKind === "MusicCircleCoverShelf";
-  const isSocialShelf = displayKind === "MusicSocialCardShelf";
-  const skeletonItems = Array.from({
-    length: isSocialShelf ? 4 : 7,
-  });
+  const isVideoShelf = displayKind === "MusicVideoShelf";
+  const skeletonItems = Array.from({ length: 7 });
 
   return (
     <div
@@ -226,28 +219,16 @@ export default memo(function MediaShelfSkeleton({
                                 </div>
                               </div>
                             </>
-                          ) : isSocialShelf ? (
-                            <div className="flex flex-row gap-3 items-start">
-                              <div className="w-20 shrink-0 rounded-(--global-border-radius-medium,7px) shadow-[0_1px_1px_rgba(0,0,0,0.01),0_2px_2px_rgba(0,0,0,0.01),0_4px_4px_rgba(0,0,0,0.02),0_8px_8px_rgba(0,0,0,0.03),0_14px_14px_rgba(0,0,0,0.03)] relative z-(--z-default) overflow-hidden">
-                                <div
-                                  className="rounded-[inherit] relative w-full perfect-sync-shimmer"
-                                  style={{ aspectRatio: "1" }}
-                                />
-                              </div>
-
-                              <div className="flex-1 min-w-0 py-1 space-y-2">
-                                <div className="h-2.5 w-1/4 rounded perfect-sync-shimmer" />
-                                <div className="h-3.5 w-10/12 rounded perfect-sync-shimmer" />
-                                <div className="h-3 w-7/12 rounded perfect-sync-shimmer" />
-                                <div className="h-3 w-9/12 rounded perfect-sync-shimmer" />
-                              </div>
-                            </div>
                           ) : (
                             <>
                               <div className="rounded-(--global-border-radius-medium,7px) shadow-[0_1px_1px_rgba(0,0,0,0.01),0_2px_2px_rgba(0,0,0,0.01),0_4px_4px_rgba(0,0,0,0.02),0_8px_8px_rgba(0,0,0,0.03),0_14px_14px_rgba(0,0,0,0.03)] relative z-(--z-default)">
                                 <div
                                   className="rounded-[inherit] relative w-full perfect-sync-shimmer"
-                                  style={{ aspectRatio: "1" }}
+                                  style={{
+                                    aspectRatio: isVideoShelf
+                                      ? "1.7777777777777777"
+                                      : "1",
+                                  }}
                                 />
                               </div>
 

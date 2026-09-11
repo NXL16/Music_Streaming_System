@@ -5,10 +5,12 @@ import {
   catalogArtworkUrl,
   mapCatalogTracks,
 } from "@/lib/catalog/catalog.mapper";
+import { toTrackSources } from "@/lib/songs/track-sources";
 import {
   type CatalogDetailType,
   useCatalogDetail,
 } from "@/lib/catalog/use-catalog-detail";
+import { useAlbumRelatedShelfState } from "@/lib/catalog/use-album-related-shelf-state";
 import { usePlayerStore } from "@/lib/player/use-player-store";
 import { playbackIntentProps } from "@/lib/player/playback-intent";
 import { useTrackRowSelection } from "@/lib/player/use-track-row-selection";
@@ -24,6 +26,10 @@ import CardArtwork from "../media/common/card-artwork";
 import AmpContextMenuButton from "../custom-elements/AmpContextMenuButton";
 import Link from "next/link";
 import { formatDuration, formatSummaryDuration } from "@/lib/format/duration";
+import {
+  formatReleaseDate,
+  formatReleaseYear,
+} from "@/lib/format/release-date";
 import { catalogArtists } from "@/lib/catalog/catalog-artists";
 import { ArtistLinks } from "../media/artist-links";
 import CatalogPageLoading from "../loading/catalog-page-loading";
@@ -41,18 +47,24 @@ import {
 import { useAppScrollToTop } from "@/lib/layout/use-app-scroll-to-top";
 import { getCatalogAlbumRelated } from "@/lib/catalog/catalog.api";
 import {
+  catalogAlbumReleaseYearCardOptions,
   mapCatalogAlbums,
   mapCatalogPlaylists,
 } from "@/lib/catalog/search.mapper";
 import { ExplicitBadgeIcon } from "../icons/explicit-badge-icon";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
+import {
+  getAlbumFavorite,
+  subscribeAlbumFavoriteChanges,
+} from "@/lib/favorites/album-favorite.api";
 import dynamic from "next/dynamic";
 import PlaylistDetailView, {
   type GenericPlaylist,
 } from "./playlist-detail-view";
 import { playlistRoute } from "@/lib/catalog/playlist-route";
 import { albumRoute } from "@/lib/catalog/album-route";
+import { CatalogMusicVideosShelf } from "../music-videos/catalog-music-videos-shelf";
 
 const AmbientVideo = dynamic(() => import("../custom-elements/AmpVideo"), {
   ssr: false,
@@ -62,25 +74,16 @@ const AmbientVideo = dynamic(() => import("../custom-elements/AmpVideo"), {
 type CatalogDetailPageProps = {
   resourceType: CatalogDetailType;
   resourceId: string;
+  initialSelectedTrackId?: string;
+  /** Library keeps the saved-album experience focused on its tracklist. */
+  isLibraryView?: boolean;
+  /** Saved songs belonging to this Library album; the rest can be revealed on demand. */
+  librarySongIds?: string[];
 };
 
 const VIRTUALIZE_THRESHOLD = 50;
 const ESTIMATED_ROW_HEIGHT = 46;
 const OVERSCAN = 8;
-
-const releaseDateFormatter = new Intl.DateTimeFormat("en-GB", {
-  day: "numeric",
-  month: "long",
-  year: "numeric",
-  timeZone: "UTC",
-});
-
-function formatReleaseDate(dateValue: string) {
-  const date = new Date(`${dateValue}T00:00:00Z`);
-  if (Number.isNaN(date.getTime())) return dateValue;
-
-  return releaseDateFormatter.format(date);
-}
 
 function CatalogTrackTitle({ title, url }: { title: string; url?: string }) {
   const content = (
@@ -107,6 +110,9 @@ function CatalogTrackTitle({ title, url }: { title: string; url?: string }) {
 export function CatalogDetailPage({
   resourceType,
   resourceId,
+  initialSelectedTrackId,
+  isLibraryView = false,
+  librarySongIds,
 }: CatalogDetailPageProps) {
   const { data, loading, error, reload } = useCatalogDetail(
     resourceType,
@@ -120,10 +126,56 @@ export function CatalogDetailPage({
   const togglePlayback = usePlayerStore((state) => state.togglePlayback);
   const userId = useAuthStore((state) => state.user?.userId);
   const favoriteSongIds = useFavoriteStore((state) => state.songIds);
-  const [relatedShelvesAvailability, setRelatedShelvesAvailability] = useState({
-    albumId: "",
-    hasShelves: false,
-  });
+  const [isAlbumFavorite, setIsAlbumFavorite] = useState(false);
+  const albumFavoriteRevisionRef = useRef(0);
+  const isAlbumFavoriteVisible = Boolean(userId) && isAlbumFavorite;
+  useEffect(() => {
+    if (resourceType !== "albums" || !userId) {
+      albumFavoriteRevisionRef.current += 1;
+      return;
+    }
+    const requestRevision = ++albumFavoriteRevisionRef.current;
+    let cancelled = false;
+    void getAlbumFavorite(resourceId)
+      .then((isFavorite) => {
+        if (
+          !cancelled &&
+          requestRevision === albumFavoriteRevisionRef.current
+        ) {
+          setIsAlbumFavorite(isFavorite);
+        }
+      })
+      .catch(() => {
+        if (
+          !cancelled &&
+          requestRevision === albumFavoriteRevisionRef.current
+        ) {
+          setIsAlbumFavorite(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [resourceId, resourceType, userId]);
+  useEffect(() => {
+    if (resourceType !== "albums") return;
+    return subscribeAlbumFavoriteChanges(({ albumId, isFavorite }) => {
+      if (albumId === resourceId) {
+        albumFavoriteRevisionRef.current += 1;
+        setIsAlbumFavorite(isFavorite);
+      }
+    });
+  }, [resourceId, resourceType]);
+  const {
+    initialData: relatedShelvesInitialData,
+    showSpacer: showRelatedShelfSpacer,
+    onAvailabilityChange: handleRelatedShelvesAvailability,
+    onLoadingChange: handleRelatedShelvesLoading,
+    onDataLoaded: handleRelatedShelvesData,
+  } = useAlbumRelatedShelfState(
+    resourceId,
+    resourceType === "albums" && !isLibraryView,
+  );
   const [selectedRelatedShelf, setSelectedRelatedShelf] = useState<{
     title: string;
     section: string;
@@ -131,27 +183,38 @@ export function CatalogDetailPage({
     nextCursor: string;
     loadingMore: boolean;
   } | null>(null);
+  const [expandedLibraryAlbumId, setExpandedLibraryAlbumId] = useState<
+    string | null
+  >(null);
   const selectedRelatedShelfSection = selectedRelatedShelf?.section;
+
   useAppScrollToTop(resourceId);
   useAppScrollToTop(
     selectedRelatedShelfSection
       ? `${resourceId}:related-shelf:${selectedRelatedShelfSection}`
       : null,
   );
-  const tracks = useMemo(() => (data ? mapCatalogTracks(data) : []), [data]);
-  const hasRelatedShelves =
-    resourceType === "albums" &&
-    relatedShelvesAvailability.albumId === resourceId &&
-    relatedShelvesAvailability.hasShelves;
-  const handleRelatedShelvesAvailability = useCallback(
-    (hasShelves: boolean) => {
-      setRelatedShelvesAvailability((current) =>
-        current.albumId === resourceId && current.hasShelves === hasShelves
-          ? current
-          : { albumId: resourceId, hasShelves },
-      );
-    },
-    [resourceId],
+  const catalogTracks = useMemo(
+    () => (data ? mapCatalogTracks(data) : []),
+    [data],
+  );
+  const showFullLibraryAlbum = expandedLibraryAlbumId === resourceId;
+  const hasHiddenLibraryTracks = Boolean(
+    isLibraryView &&
+    librarySongIds?.length &&
+    librarySongIds.length < catalogTracks.length,
+  );
+  const tracks = useMemo(() => {
+    if (!librarySongIds?.length || showFullLibraryAlbum) return catalogTracks;
+    const savedSongIds = new Set(librarySongIds);
+    return catalogTracks.filter((track) => savedSongIds.has(track.id));
+  }, [catalogTracks, librarySongIds, showFullLibraryAlbum]);
+  const catalogTrackPositions = useMemo(
+    () =>
+      new Map(
+        catalogTracks.map((track, index) => [track.id, index + 1] as const),
+      ),
+    [catalogTracks],
   );
   const loadMoreRelatedShelf = useCallback(async () => {
     if (
@@ -179,6 +242,9 @@ export function CatalogDetailPage({
               section === "more-by"
                 ? response.moreBy
                 : response.youMightAlsoLike,
+              section === "more-by"
+                ? catalogAlbumReleaseYearCardOptions
+                : undefined,
             );
       setSelectedRelatedShelf((current) => {
         if (
@@ -226,6 +292,7 @@ export function CatalogDetailPage({
   const description =
     playlistResource?.attributes.descriptionStandard ??
     playlistResource?.attributes.descriptionShort;
+
   const catalogPlaylist = useMemo<GenericPlaylist | null>(() => {
     if (!playlistResource) return null;
 
@@ -262,12 +329,15 @@ export function CatalogDetailPage({
       },
     };
   }, [artworkData, artworkUrl, title]);
+
   const headerIsExplicit =
     albumResource?.attributes.contentRating === "explicit";
+
   const totalDurationSec = useMemo(
     () => tracks.reduce((total, track) => total + track.durationSec, 0),
     [tracks],
   );
+
   const albumSummary = useMemo(() => {
     if (!albumResource) return "Playlist";
 
@@ -277,14 +347,16 @@ export function CatalogDetailPage({
       albumResource.attributes.copyright,
     ].join("\n");
   }, [albumResource, tracks.length, totalDurationSec]);
+
   const detailLine = albumResource
     ? [
         albumResource.attributes.genreNames[0],
-        albumResource.attributes.releaseDate.slice(0, 4),
+        formatReleaseYear(albumResource.attributes.releaseDate),
       ]
         .filter(Boolean)
         .join(" · ")
     : "Playlist";
+
   const playableTrackCount = useMemo(
     () =>
       tracks.reduce(
@@ -293,20 +365,95 @@ export function CatalogDetailPage({
       ),
     [tracks],
   );
+
   const hasPlayableTrack = playableTrackCount > 0;
 
   // --- Windowing danh sách bài hát ---
   const {
     activateTrack,
     activeTrackId,
+    clearTrackSelection,
     listRef,
     selectTrack,
     selectedTrackId,
   } = useTrackRowSelection<HTMLDivElement>();
   const firstRowRef = useRef<HTMLDivElement | null>(null);
+  const appliedInitialSelectionRef = useRef<string | null>(null);
+  const scrolledInitialSelectionRef = useRef<string | null>(null);
   const shouldVirtualize = tracks.length > VIRTUALIZE_THRESHOLD;
   const [rowHeight, setRowHeight] = useState(ESTIMATED_ROW_HEIGHT);
   const [range, setRange] = useState({ start: 0, end: tracks.length });
+
+  const scrollInitialSelectedTrackIntoView = useCallback(
+    (row: HTMLDivElement | null) => {
+      if (!row || !initialSelectedTrackId) return;
+      if (scrolledInitialSelectionRef.current === initialSelectedTrackId) {
+        return;
+      }
+
+      scrolledInitialSelectionRef.current = initialSelectedTrackId;
+      requestAnimationFrame(() => {
+        const scrollContainer = row.closest<HTMLElement>(
+          "[data-app-scroll-container]",
+        );
+
+        if (!scrollContainer) return;
+
+        const containerBounds = scrollContainer.getBoundingClientRect();
+        const rowBounds = row.getBoundingClientRect();
+        scrollContainer.scrollTo({
+          top:
+            scrollContainer.scrollTop +
+            rowBounds.top -
+            containerBounds.top -
+            (scrollContainer.clientHeight - rowBounds.height) / 2,
+          behavior: "auto",
+        });
+      });
+    },
+    [initialSelectedTrackId],
+  );
+
+  useEffect(() => {
+    if (!initialSelectedTrackId) return;
+    if (appliedInitialSelectionRef.current === initialSelectedTrackId) return;
+
+    const selectedTrackIndex = tracks.findIndex(
+      (track) => track.id === initialSelectedTrackId,
+    );
+    if (selectedTrackIndex < 0) return;
+
+    selectTrack(initialSelectedTrackId);
+    appliedInitialSelectionRef.current = initialSelectedTrackId;
+
+    if (!shouldVirtualize) return;
+
+    const frame = requestAnimationFrame(() => {
+      setRange((current) => {
+        if (
+          selectedTrackIndex >= current.start &&
+          selectedTrackIndex < current.end
+        ) {
+          return current;
+        }
+
+        const start = Math.max(0, selectedTrackIndex - OVERSCAN);
+        const end = Math.min(
+          tracks.length,
+          start + Math.ceil(window.innerHeight / rowHeight) + OVERSCAN * 2,
+        );
+        return { start, end };
+      });
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [
+    initialSelectedTrackId,
+    rowHeight,
+    selectTrack,
+    shouldVirtualize,
+    tracks,
+  ]);
 
   useEffect(() => {
     if (!shouldVirtualize) {
@@ -404,16 +551,27 @@ export function CatalogDetailPage({
       {showInitialLoading && <CatalogPageLoading />}
 
       {!showInitialLoading && error && (
-        <div className="mx-(--bodyGutter) pt-8 text-red-500">
-          <p>{error}</p>
-          <button type="button" onClick={() => void reload()}>
-            Thử lại
-          </button>
+        <div
+          role="alert"
+          className="[--buttonTextColor:var(--systemSecondary)] [--buttonBorderColor:var(--systemSecondary)] items-center text-(--systemSecondary) flex flex-col gap-3 left-1/2 m-auto max-w-110 px-6.25 absolute text-center top-1/2 -translate-x-1/2 -translate-y-1/2 z-(--z-default)"
+        >
+          <h2 className="[font:var(--title-2)] mb-1.25">An error occurred.</h2>
+          <div className="w-auto">
+            <button
+              type="button"
+              onClick={() => void reload()}
+              className="items-center bg-(--buttonBackgroundColor,var(--keyColorBG,var(--systemBlue))) rounded-(--buttonRadius,3px) [display:var(--buttonDisplay,flex)] [justify-content:var(--buttonJustifyContent,center)] [--buttonBackgroundColor:transparent] border border-solid border-(--buttonBorderColor,var(--keyColor,var(--systemBlue))) text-(--buttonTextColor,var(--keyColor)) [font:var(--body-tall)] min-w-(--buttonMinWidth,108px) pe-4 ps-4 min-[1260px]:h-(--buttonHeight,28px) min-[1260px]:w-(--buttonWidth,auto)"
+            >
+              Try Again
+            </button>
+          </div>
         </div>
       )}
 
       {!showInitialLoading && resource && (
-        <>
+        <div
+          className={`${isLibraryView ? "pb-10.75 min-[1000px]:pb-13.25" : ""}`}
+        >
           <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) in-[.has-theme-override]:[--header-title-chevron-color:var(--systemSecondary)]">
             <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
               <div className="[view-timeline-name:--header-view] [view-timeline-axis:block] after:content-[''] after:bg-(--joe-color) after:block after:inset-0 after:absolute after:z-[calc(var(--z-default)-2)] min-[484px]:after:-inset-s-(--web-navigation-width)">
@@ -471,15 +629,29 @@ export function CatalogDetailPage({
                     <div className="empty:hidden text-(--systemSecondary) [font:var(--subhead-emphasized)] mt-2.25"></div>
                     <h1 className="text-(--systemPrimary) cursor-text [font:var(--large-title-emphasized-short)] mb-[0.5px] wrap-break-word [text-align:var(--containerDetailHeaderAlign,center)] text-balance select-text line-clamp-2 min-[1000px]:[text-align:unset] max-[999px]:[font:var(--title-1-emphasized)] max-[999px]:mb-1">
                       <span dir="auto">{title}</span>
-                      {headerIsExplicit && (
-                        <span className="inline-flex items-center gap-1 ms-1 [--explicitBadgeSize:19px] [--favoriteBadgeSize:14px] [--favoriteBadgeMarginInlineStart:1px] has-[.explicit-wrapper]:ms-[6.5px] max-[999px]:[--explicitBadgeSize:16px]">
-                          <span className="explicit-wrapper">
+                      <span className="inline-flex items-center gap-1 ms-1 [--explicitBadgeSize:19px] [--favoriteBadgeSize:14px] [--favoriteBadgeMarginInlineStart:1px] has-[.explicit-wrapper]:ms-[6.5px] max-[999px]:[--explicitBadgeSize:16px]">
+                        {headerIsExplicit && (
+                          <span className="explicit-wrapper relative top-[0.6px]">
                             <span>
                               <ExplicitBadgeIcon />
                             </span>
                           </span>
-                        </span>
-                      )}
+                        )}
+
+                        {isAlbumFavoriteVisible && (
+                          <span className="ms-(--favoriteBadgeMarginInlineStart,2px)">
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              viewBox="0 0 64 64"
+                              width="64"
+                              height="64"
+                              className="inline-block fill-(--favoriteBadgeColor,var(--keyColor)) size-(--favoriteBadgeSize,9px) align-[2px]"
+                            >
+                              <path d="M13.559 60.051c1.102.86 2.5.565 4.166-.645l14.218-10.455L46.19 59.406c1.666 1.21 3.037 1.505 4.166.645 1.102-.833 1.344-2.204.672-4.166l-5.618-16.718 14.353-10.32c1.666-1.183 2.338-2.42 1.908-3.764-.43-1.29-1.693-1.935-3.763-1.908l-17.605.108-5.348-16.8C34.308 4.496 33.34 3.5 31.944 3.5c-1.372 0-2.34.995-2.984 2.984L23.61 23.283l-17.605-.108c-2.07-.027-3.333.618-3.763 1.908-.457 1.344.242 2.58 1.909 3.763l14.352 10.321-5.617 16.718c-.672 1.962-.43 3.333.672 4.166Z"></path>
+                            </svg>
+                          </span>
+                        )}
+                      </span>
                     </h1>
 
                     {albumArtists.length > 0 ||
@@ -574,7 +746,9 @@ export function CatalogDetailPage({
                           }
                           artworkUrl={catalogArtworkUrl(artworkData, 300) || ""}
                           sourceOrigin="catalog"
-                          songIds={tracks.map((track) => track.id)}
+                          songIds={catalogTracks.map((track) => track.id)}
+                          trackSources={toTrackSources(catalogTracks)}
+                          isLibraryAlbumView={isLibraryView}
                         />
                       </div>
                     </div>
@@ -623,8 +797,10 @@ export function CatalogDetailPage({
                               playlistSubtitle ??
                               "",
                             artworkUrl,
-                            songIds: tracks.map((track) => track.id),
+                            songIds: catalogTracks.map((track) => track.id),
+                            trackSources: toTrackSources(catalogTracks),
                             userId,
+                            isLibraryView,
                             inLibrary: false,
                           }}
                         />
@@ -675,7 +851,18 @@ export function CatalogDetailPage({
                   return (
                     <div
                       key={track.id}
-                      ref={localIndex === 0 ? firstRowRef : undefined}
+                      ref={
+                        localIndex === 0 || track.id === initialSelectedTrackId
+                          ? (row) => {
+                              if (localIndex === 0) {
+                                firstRowRef.current = row;
+                              }
+                              if (track.id === initialSelectedTrackId) {
+                                scrollInitialSelectedTrackIntoView(row);
+                              }
+                            }
+                          : undefined
+                      }
                       onClick={() => selectTrack(track.id)}
                       className={`group ${selectedTrackId === track.id ? "selected" : ""} text-(--systemSecondary) table-row relative z-(--z-default) [--platterBorderColor:var(--pageBG)] bg-(--rowBackgroundColor,transparent) last:[&>.table-cell]:after:[border-bottom:.5px_solid_var(--labelDivider)] last:[&>.table-cell]:after:h-full last:[&>.table-cell]:after:pointer-events-none ${
                         selectedTrackId === track.id
@@ -695,6 +882,7 @@ export function CatalogDetailPage({
                               }`}
                               onClick={(event) => event.stopPropagation()}
                               songId={track.id}
+                              sourceAlbumId={track.albumId}
                               title="Tells us more about the kind of music you like."
                             />
                           </div>
@@ -707,7 +895,7 @@ export function CatalogDetailPage({
                             className={`grid relative mt-px ${isCurrentTrack ? "[--playButtonOpacity:1]" : ""} ${selectedTrackId === track.id ? "[--linkColor:#fff] text-white" : "text-(--systemSecondary)"}`}
                           >
                             <div className="[font:var(--body-tall)] [grid-area:song-index] opacity-[calc(1-var(--playButtonOpacity))] text-center w-10">
-                              {index + 1}
+                              {catalogTrackPositions.get(track.id) ?? index + 1}
                             </div>
                             <div className="[grid-area:song-index] opacity-(--playButtonOpacity,0) z-[calc(var(--z-default)+2)] [--playButtonIconHoverColor:var(--keyColor)] [--playButtonIconColor:var(--keyColor)] [--nonPlatterIconFill:var(--keyColor)] in-[.selected]:[--playButtonIconHoverColor:#fff] in-[.selected]:[--playButtonIconColor:#fff] in-[.selected]:[--nonPlatterIconFill:#fff]">
                               <div className="[--nonPlatterIconFill:var(--nonPlatterOverrideIconColor,var(--keyColor))] size-full align-top">
@@ -824,6 +1012,7 @@ export function CatalogDetailPage({
                               title={track.title}
                               artist={track.artist}
                               artworkUrl={track.artworkUrl}
+                              sourceAlbumId={track.albumId}
                             />
                           </div>
                           <time
@@ -841,6 +1030,8 @@ export function CatalogDetailPage({
                               context={{
                                 kind: "song",
                                 songId: track.id,
+                                releaseTrackId: track.releaseTrackId,
+                                sourceAlbumId: track.albumId,
                                 title: track.title,
                                 userId,
                                 isFavorite: favoriteSongIds.has(track.id),
@@ -867,7 +1058,9 @@ export function CatalogDetailPage({
 
           <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) pt-3 [--songs-list-row-border-radius:12px] relative z-(--z-default)">
             <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
-              <div className="m-[0_var(--bodyGutter)] pb-10.75 ps-3 -mt-3 min-[1000px]:flex min-[1000px]:flex-row min-[1000px]:justify-between min-[1000px]:pb-13.25">
+              <div
+                className={`m-[0_var(--bodyGutter)] ps-3 -mt-3 min-[1000px]:flex min-[1000px]:flex-row min-[1000px]:justify-between ${isLibraryView ? "pb-0" : "pb-10.75 min-[1000px]:pb-13.25"}`}
+              >
                 <div className="text-(--systemSecondary) max-w-110 relative [font:var(--body-tall)] mt-11 min-[1260px]:max-w-135 min-[1000px]:mt-8.5">
                   <p className="whitespace-pre-wrap">{albumSummary}</p>
                 </div>
@@ -876,7 +1069,24 @@ export function CatalogDetailPage({
             </div>
           </div>
 
-          {hasRelatedShelves && (
+          {hasHiddenLibraryTracks && (
+            <button
+              type="button"
+              onClick={() => {
+                clearTrackSelection();
+                setExpandedLibraryAlbumId(
+                  showFullLibraryAlbum ? null : resourceId,
+                );
+              }}
+              className="mt-3 ms-[calc(var(--bodyGutter)+12px)] text-(--keyColor)"
+            >
+              {showFullLibraryAlbum
+                ? "Hide Songs Not in Library"
+                : "Show Complete Album"}
+            </button>
+          )}
+
+          {showRelatedShelfSpacer && (
             <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) pt-3 [--songs-list-row-border-radius:12px] relative z-(--z-default) bg-(--opaqueShelfBG)">
               <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
                 <div className="pt-4 w-full"></div>
@@ -884,12 +1094,22 @@ export function CatalogDetailPage({
             </div>
           )}
 
-          {resourceType === "albums" && (
+          {resourceType === "albums" && !isLibraryView && (
+            <CatalogMusicVideosShelf
+              resourceType="albums"
+              resourceId={resourceId}
+            />
+          )}
+
+          {resourceType === "albums" && !isLibraryView && (
             <AlbumRelatedShelves
               key={resourceId}
               albumId={resourceId}
+              initialData={relatedShelvesInitialData}
               availableSections={albumResource?.attributes.relatedShelfHints}
               onAvailabilityChange={handleRelatedShelvesAvailability}
+              onLoadingChange={handleRelatedShelvesLoading}
+              onDataLoaded={handleRelatedShelvesData}
               onOpenDetail={(shelf) =>
                 setSelectedRelatedShelf({
                   ...shelf,
@@ -912,7 +1132,7 @@ export function CatalogDetailPage({
               }
             />
           )}
-        </>
+        </div>
       )}
     </>
   );

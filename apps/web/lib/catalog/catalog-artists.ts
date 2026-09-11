@@ -1,4 +1,8 @@
-import type { CatalogReference, CatalogResponse } from "./catalog.types";
+import type {
+  CatalogArtistResource,
+  CatalogReference,
+  CatalogResponse,
+} from "./catalog.types";
 import type { MediaCardArtist } from "@/lib/media/media-card.types";
 import { projectLinkedArtists } from "@/lib/media/project-linked-artists";
 
@@ -11,9 +15,16 @@ export function catalogArtists(
   response: CatalogResponse,
   references: CatalogReference[] | undefined,
 ): MediaCardArtist[] {
+  return catalogArtistsFromResources(response.resources.artists, references);
+}
+
+export function catalogArtistsFromResources(
+  artists: Record<string, CatalogArtistResource>,
+  references: CatalogReference[] | undefined,
+): MediaCardArtist[] {
   return projectLinkedArtists(
     (references ?? []).flatMap((reference) => {
-      const artist = response.resources.artists[reference.id];
+      const artist = artists[reference.id];
       return artist
         ? [
             {

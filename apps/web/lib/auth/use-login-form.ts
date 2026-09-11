@@ -8,6 +8,10 @@ import { useAuthStore } from "@/lib/auth/auth-store";
 import { getOrCreateDeviceId } from "@/lib/auth/device-id";
 import { saveTwoFactorChallengeId } from "@/lib/auth/two-factor-challenge-store";
 import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
+import {
+  navigateAfterLogin,
+  resolveLoginReturnTo,
+} from "@/lib/auth/login-return-to";
 
 type LoginForm = {
   identifier: string;
@@ -53,7 +57,9 @@ export function useLoginForm() {
           saveTwoFactorChallengeId(result.data.twoFactorChallengeId);
         }
 
-        router.push("/login/2fa");
+        router.push(
+          `/login/2fa?returnTo=${encodeURIComponent(resolveLoginReturnTo().toString())}`,
+        );
         return;
       }
 
@@ -62,7 +68,7 @@ export function useLoginForm() {
         result.data.user,
         result.data.expiresIn,
       );
-      router.push("/home");
+      navigateAfterLogin(router);
     } catch (error) {
       setError(
         getApiErrorMessage(error, "Đăng nhập thất bại, vui lòng thử lại"),

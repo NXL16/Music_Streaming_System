@@ -26,10 +26,12 @@ type CardArtworkProps = SharedCardArtworkProps &
     | {
         variant: "hero";
         videoSrc?: string;
+        keepVideoMountedHorizontally?: boolean;
       }
     | {
         variant: "cover";
         videoSrc?: never;
+        keepVideoMountedHorizontally?: never;
       }
   );
 
@@ -42,6 +44,7 @@ export default function CardArtwork({
   imageSrcSet,
   artworkColors,
   videoSrc,
+  keepVideoMountedHorizontally,
   containerClassName,
   aspectRatio,
   containerStyle,
@@ -82,7 +85,11 @@ export default function CardArtwork({
 
         {videoSrc && (
           <div className="absolute top-0 size-full pointer-events-none">
-            <AmbientVideo src={videoSrc} />
+            <AmbientVideo
+              src={videoSrc}
+              variant="hero"
+              keepMountedHorizontally={keepVideoMountedHorizontally}
+            />
           </div>
         )}
       </>
@@ -97,6 +104,7 @@ export default function CardArtwork({
           "--artwork-bg-color": artworkColors.bg,
           "--aspect-ratio": aspectRatio ?? "1",
           "--placeholder-bg-color": "transparent",
+          aspectRatio: aspectRatio ?? "1",
           ...containerStyle,
         } as CSSProperties
       }

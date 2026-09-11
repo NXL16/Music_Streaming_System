@@ -16,7 +16,7 @@ describe("projectSongSummary", () => {
       albumUrl: "album",
     });
 
-    expect(track.url).toBe("/song/song-1");
+    expect(track.url).toBe("/song/track/song-1");
     expect(track.artists).toEqual([
       {
         id: "artist-1",
@@ -54,7 +54,7 @@ describe("projectSongSummary", () => {
     });
 
     expect(track).toMatchObject({
-      url: "/song/song-1",
+      url: "/song/track/song-1",
       artist: "Artist One",
       albumUrl: "/album/album/album-1",
       playbackUrl: "mse:song-1",

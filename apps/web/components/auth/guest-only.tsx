@@ -3,6 +3,7 @@
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { navigateAfterLogin } from "@/lib/auth/login-return-to";
 
 export function GuestOnly({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -10,7 +11,7 @@ export function GuestOnly({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (status === "authenticated") {
-      router.replace("/");
+      navigateAfterLogin(router);
     }
   }, [router, status]);
 

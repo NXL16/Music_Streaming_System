@@ -36,6 +36,7 @@ const PERSONAL_PLAYLIST_ARTWORK_COLOR = "4a4566";
 /** Adapter for the authenticated Library API; pages never build routes/cards. */
 export function projectLibraryMediaCard(
   resource: LibraryMediaResource,
+  viewerDisplayName?: string,
 ): MediaCardProps {
   const isAlbum = resource.resourceType === "albums";
   const isFavoritePlaylist =
@@ -47,7 +48,9 @@ export function projectLibraryMediaCard(
       name: resource.title,
       url: isFavoritePlaylist
         ? "/library/playlist/favorite"
-        : resource.catalogUrl,
+        : isAlbum
+          ? resource.catalogUrl
+          : `/library/playlist/${encodeURIComponent(resource.resourceId)}`,
       artistName: resource.subtitle,
       isUserPlaylist: isFavoritePlaylist,
       playlistKind: isFavoritePlaylist ? "favorite" : undefined,
@@ -61,9 +64,17 @@ export function projectLibraryMediaCard(
     },
     {
       cardType: "collection",
-      subtitle: resource.subtitle || (isAlbum ? "Album" : "Playlist"),
+      subtitle:
+        isFavoritePlaylist && viewerDisplayName
+          ? viewerDisplayName
+          : resource.subtitle || (isAlbum ? "Album" : "Playlist"),
       typeTag: isAlbum ? "Album" : "Playlist",
       artists: projectLinkedArtists(resource.artists),
+      slug: isAlbum
+        ? `/library/albums/${encodeURIComponent(resource.resourceId)}`
+        : isFavoritePlaylist
+          ? "/library/playlist/favorite"
+          : `/library/playlist/${encodeURIComponent(resource.resourceId)}`,
     },
   );
 }

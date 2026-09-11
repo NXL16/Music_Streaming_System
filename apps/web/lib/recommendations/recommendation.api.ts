@@ -18,6 +18,7 @@ const cachedRecommendationSections = new Map<
   string,
   { value: RecommendationResponse; expiresAt: number }
 >();
+const recommendationSectionGenerations = new Map<string, number>();
 let cachedResponse: RecommendationResponse | null = null;
 let cacheExpiresAt = 0;
 let cacheGeneration = 0;
@@ -84,6 +85,20 @@ function setCachedRecommendationSection(
     if (oldestSectionId === undefined) break;
     cachedRecommendationSections.delete(oldestSectionId);
   }
+}
+
+function getRecommendationSectionGeneration(sectionId: string) {
+  return recommendationSectionGenerations.get(sectionId) ?? 0;
+}
+
+/** Invalidates one runtime shelf without discarding unrelated Home content. */
+export function invalidateRecommendationSectionCache(sectionId: string) {
+  cachedRecommendationSections.delete(sectionId);
+  pendingRecommendationSections.delete(sectionId);
+  recommendationSectionGenerations.set(
+    sectionId,
+    getRecommendationSectionGeneration(sectionId) + 1,
+  );
 }
 
 function flushRecommendationImpressions() {
@@ -163,6 +178,7 @@ export function invalidateHomeRecommendationsCache() {
   pendingHomeRecommendations = null;
   pendingRecommendationSections.clear();
   cachedRecommendationSections.clear();
+  recommendationSectionGenerations.clear();
 }
 
 export async function getHomeRecommendations() {
@@ -194,7 +210,10 @@ export async function getHomeRecommendations() {
         : {}),
     })
     .then((response) => {
-      if (!HOME_CACHE_DISABLED && requestGeneration === cacheGeneration) {
+      if (
+        !HOME_CACHE_DISABLED &&
+        requestGeneration === cacheGeneration
+      ) {
         cachedResponse = response.data;
         cacheExpiresAt = Date.now() + CACHE_TTL_MS;
       }
@@ -222,6 +241,7 @@ export function getRecommendationSection(sectionId: string) {
   if (pending) return pending;
 
   const requestGeneration = cacheGeneration;
+  const sectionGeneration = getRecommendationSectionGeneration(sectionId);
   const request = http
     .get<RecommendationResponse>(
       `/me/recommendations/${encodeURIComponent(sectionId)}`,
@@ -243,7 +263,11 @@ export function getRecommendationSection(sectionId: string) {
       },
     )
     .then((response) => {
-      if (!HOME_CACHE_DISABLED && requestGeneration === cacheGeneration) {
+      if (
+        !HOME_CACHE_DISABLED &&
+        requestGeneration === cacheGeneration &&
+        sectionGeneration === getRecommendationSectionGeneration(sectionId)
+      ) {
         setCachedRecommendationSection(sectionId, response.data);
       }
       return response.data;

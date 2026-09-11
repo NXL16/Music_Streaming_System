@@ -166,10 +166,6 @@ function getDisplayKind(sourceKind: string): MediaShelfDisplayKind | undefined {
     return "MusicCircleCoverShelf";
   }
 
-  if (sourceKind === "MusicSocialCardShelf") {
-    return "MusicSocialCardShelf";
-  }
-
   return undefined;
 }
 
@@ -249,18 +245,15 @@ function selectArtwork(
   const artworkCandidates = {
     ...editorialArtwork,
     standardArtwork: attributes.artwork,
-    videoPreview: videoAsset?.previewFrame,
   };
 
   let artwork: Artwork | undefined;
 
   if (isHero) {
     artwork =
-      videoAsset?.previewFrame ??
-      editorialArtwork?.superHeroTall ??
-      editorialArtwork?.staticDetailTall ??
       closestArtwork(artworkCandidates, 3 / 4, 0.08) ??
-      closestArtwork(artworkCandidates, 3 / 4);
+      closestArtwork(artworkCandidates, 3 / 4) ??
+      videoAsset?.previewFrame;
   } else {
     artwork =
       editorialArtwork?.staticDetailSquare ??
@@ -300,20 +293,22 @@ function getArtists(
   const artistResources = response.resources?.artists;
   if (!artistResources) return [];
 
-  return projectLinkedArtists(artistRefs.flatMap((artistRef) => {
-    const artist = artistResources[artistRef.id];
-    const name = artist?.attributes?.name;
-    const artistUrl = artist?.attributes?.url;
-    if (!artist || !name || !artistUrl) return [];
+  return projectLinkedArtists(
+    artistRefs.flatMap((artistRef) => {
+      const artist = artistResources[artistRef.id];
+      const name = artist?.attributes?.name;
+      const artistUrl = artist?.attributes?.url;
+      if (!artist || !name || !artistUrl) return [];
 
-    return [
-      {
-        id: artist.id,
-        name,
-        url: artistUrl,
-      },
-    ];
-  }));
+      return [
+        {
+          id: artist.id,
+          name,
+          url: artistUrl,
+        },
+      ];
+    }),
+  );
 }
 
 function getCardType(
@@ -323,7 +318,6 @@ function getCardType(
 ): MediaCardProps["cardType"] {
   if (isHero) return "hero";
   if (displayKind === "MusicCircleCoverShelf") return "circle";
-  if (displayKind === "MusicSocialCardShelf") return "social";
   if (resourceType === "stations") return "station";
   return "collection";
 }
@@ -377,10 +371,23 @@ export function mapHomeRecommendations(
       section.relationships?.contents?.data,
       section.relationships?.primaryContent?.data,
     );
+    const hasPendingArtistStation = refs.some((ref) => {
+      const resource = resolveResource(response, ref);
+      return (
+        resource?.type === "stations" &&
+        resource.attributes?.kind === "artist-context" &&
+        resource.attributes.stationArtworkReady !== true
+      );
+    });
 
     const items = refs.flatMap((ref) => {
       const resource = resolveResource(response, ref);
       if (!resource?.attributes) return [];
+      const isArtistStationArtworkPending =
+        resource.type === "stations" &&
+        resource.attributes.kind === "artist-context" &&
+        resource.attributes.stationArtworkReady !== true;
+      if (isArtistStationArtworkPending) return [];
 
       const videoAsset = isHero ? selectHeroVideo(resource) : undefined;
       const artwork = selectArtwork(resource.attributes, videoAsset, isHero);
@@ -399,6 +406,10 @@ export function mapHomeRecommendations(
       const scrimColor = formatColor(heroPalette?.scrimColor);
       const subtitle = getSubtitle(resource.attributes);
       const notes = resource.attributes.plainEditorialNotes;
+      const isContextStation =
+        resource.type === "stations" &&
+        (resource.attributes.kind === "song-context" ||
+          resource.attributes.kind === "artist-context");
 
       return [
         createMediaResourceCard(
@@ -438,19 +449,23 @@ export function mapHomeRecommendations(
             },
             ...(videoAsset?.video ? { videoSrc: videoAsset.video } : {}),
             typeTag: notes?.tag ?? (isHero ? sectionTitle : notes?.name),
-            description:
-              notes?.short ??
-              notes?.standard ??
-              resource.attributes.description?.short ??
-              resource.attributes.description?.standard ??
-              subtitle,
+            description: isContextStation
+              ? undefined
+              : notes?.short ??
+                notes?.standard ??
+                resource.attributes.description?.short ??
+                resource.attributes.description?.standard ??
+                subtitle,
             altText: artwork.alt ?? resource.attributes.name,
           },
         ),
       ];
     });
 
-    if (!items.length) return [];
+    // Keep a Station shelf mounted while its composite covers are rendering.
+    // Pending cards remain hidden; this prevents the seed artist artwork from
+    // flashing while preserving the shelf position on Home.
+    if (!items.length && !hasPendingArtistStation) return [];
 
     return [
       {

@@ -25,6 +25,7 @@ export type UserProfile = {
 
 export type UserRole =
   | "USER"
+  | "ARTIST_PENDING"
   | "ARTIST"
   | "SUPER_ADMIN"
   | "ADMIN_USER_OPS"

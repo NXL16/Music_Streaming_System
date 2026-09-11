@@ -6,15 +6,15 @@ import { usePathname } from "next/navigation";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { http } from "@/lib/api/http";
 import { useWalletBalance } from "@/lib/wallet/use-wallet-balance";
-import { Coins, Plus, Settings } from "lucide-react";
+import { Coins } from "lucide-react";
 import Image from "next/image";
 import { useIsMobile } from "./sidebar/use-is-mobile";
 import { useUserPlaylists } from "./sidebar/use-user-playlists";
 import { usePinnedLibraryResources } from "./sidebar/use-pinned-library-resources";
+import { useLibraryMediaCards } from "@/lib/library/use-library-media-cards";
 import { ensureFavoriteLibraryResource } from "@/lib/favorites/ensure-favorite-library-resource";
 import { PlaylistIcon } from "./sidebar/playlist-icon";
 import { albumRoute } from "@/lib/catalog/album-route";
-import { songRoute } from "@/lib/catalog/song-route";
 import {
   identityAdminItems,
   libraryItems,
@@ -45,6 +45,10 @@ export default function AppSidebar() {
   const user = useAuthStore((state) => state.user);
   const userPlaylists = useUserPlaylists(user?.userId);
   const pinnedResources = usePinnedLibraryResources(user?.userId);
+  const { resources: libraryMediaCards } = useLibraryMediaCards({
+    userId: user?.userId,
+    errorMessage: "Couldn't load Library playlists",
+  });
 
   useEffect(() => {
     if (user?.userId) {
@@ -68,6 +72,25 @@ export default function AppSidebar() {
       href: `/library/playlist/${playlist.id}`,
       icon: <PlaylistIcon />,
     })),
+    ...libraryMediaCards
+      .filter(
+        (resource) =>
+          resource.resourceType === "playlists" &&
+          Boolean(resource.catalogUrl) &&
+          !resource.catalogUrl.startsWith("/library/playlist/"),
+      )
+      .filter(
+        (resource) =>
+          !userPlaylists.some(
+            (playlist) => playlist.id === resource.resourceId,
+          ),
+      )
+      .map((playlist) => ({
+        key: `library-playlist-${playlist.resourceId}`,
+        label: playlist.title || playlist.resourceId,
+        href: `/library/playlist/${encodeURIComponent(playlist.resourceId)}`,
+        icon: <PlaylistIcon />,
+      })),
   ];
 
   const visibleLibraryItems: SidebarItem[] = libraryItems
@@ -83,7 +106,7 @@ export default function AppSidebar() {
           subtitle: resource.subtitle,
           href:
             resource.resourceType === "songs"
-              ? songRoute(resource.resourceId)
+              ? "/library/songs"
               : resource.resourceType === "albums"
                 ? resource.catalogUrl
                   ? albumRoute(resource.catalogUrl, resource.resourceId)
@@ -296,52 +319,33 @@ export default function AppSidebar() {
                 <div className="mx-3 mb-5">
                   <div className="self-center">
                     <div className="top-1.25 w-full">
-                      <div className="p-1.5 rounded-full bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 flex items-center justify-between gap-2 shadow-sm">
-                        <Link
-                          href="/profile"
-                          className="flex items-center gap-2.5 min-w-0 flex-1 hover:opacity-80 transition"
-                          aria-label="My Profile"
-                        >
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-sm font-black text-white shadow-sm border border-neutral-800">
-                            <Image
-                              src={user?.avatarUrl || "/assets/avatar.webp"}
-                              alt="avatar"
-                              height={36}
-                              width={36}
-                              className="size-full rounded-full object-cover"
-                            />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-xs font-bold text-(--systemPrimary)">
-                              {user?.displayName || user?.username || "Account"}
-                            </p>
-                            <p className="truncate text-[10px] font-semibold text-amber-500 flex items-center gap-1 mt-0.5">
-                              <Coins className="h-3.5 w-3.5 shrink-0" />
-                              <span>
-                                {(balance?.coinBalance ?? 0).toLocaleString()}{" "}
-                                Coin
-                              </span>
-                            </p>
-                          </div>
-                        </Link>
+                      <Link
+                        href="/profile"
+                        className="items-center text-(--systemPrimary) grid [font:var(--title-navigation)] font-semibold gap-2 grid-cols-[auto_1fr] justify-items-start ps-2 no-underline"
+                        aria-label="My Profile"
+                      >
+                        <Image
+                          src={user?.avatarUrl || "/assets/avatar.webp"}
+                          alt="avatar"
+                          height={36}
+                          width={36}
+                          className="size-8.5 rounded-full object-cover"
+                        />
 
-                        <Link
-                          href="/settings/account"
-                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-(--labelDivider) bg-(--systemQuinary) text-(--systemPrimary) transition hover:bg-(--systemQuaternary)"
-                          title="Settings"
-                          aria-label="Settings"
-                        >
-                          <Settings className="h-3.5 w-3.5" />
-                        </Link>
+                        <div className="min-w-0 flex-1">
+                          <span className="truncate font-semibold">
+                            {user?.displayName || user?.username || "Account"}
+                          </span>
 
-                        <Link
-                          href="/deposit"
-                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-(--keyColor) hover:bg-(--keyColor)/90 text-white shadow transition-all cursor-pointer"
-                          title="Nạp Coin"
-                        >
-                          <Plus className="h-4 w-4" />
-                        </Link>
-                      </div>
+                          <p className="truncate text-[10px] font-semibold text-amber-500 flex items-center gap-1 mt-0.5">
+                            <Coins className="h-3.5 w-3.5 shrink-0" />
+                            <span>
+                              {(balance?.coinBalance ?? 0).toLocaleString()}
+                              Coin
+                            </span>
+                          </p>
+                        </div>
+                      </Link>
                     </div>
                   </div>
                 </div>

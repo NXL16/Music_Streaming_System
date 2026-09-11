@@ -9,6 +9,7 @@ import { playCatalogResource } from "@/lib/catalog/play-catalog-resource";
 type HeroCardProps = MediaCardProps & {
   cardType: "hero";
   priority?: boolean;
+  keepVideoMountedHorizontally?: boolean;
 };
 
 export default function HeroCard(props: HeroCardProps) {
@@ -22,6 +23,8 @@ export default function HeroCard(props: HeroCardProps) {
       metadataTextPrimary={props.artworkColors.textPrimary}
       metadataTextSecondary={props.artworkColors.textSecondary}
       metadataTextTertiary={props.artworkColors.textTertiary}
+      href={props.slug}
+      onOpen={props.onOpen}
     >
       <div className="h-full rounded-(--global-border-radius-xlarge,14px) overflow-hidden relative z-(--z-default)">
         <div className="h-full relative z-[calc(var(--z-default)-1)]">
@@ -30,6 +33,7 @@ export default function HeroCard(props: HeroCardProps) {
               variant="hero"
               {...props}
               priority={props.priority}
+              keepVideoMountedHorizontally={props.keepVideoMountedHorizontally}
               containerClassName="[--override-placeholder-bg-color:var(--artwork-bg-color,var(--genericJoeColor))] [--afterShadowBorderRadius:var(--global-border-radius-xlarge,14px)_var(--global-border-radius-xlarge,14px)_0_0] h-full"
             />
           </div>

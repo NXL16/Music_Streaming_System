@@ -27,9 +27,12 @@ import {
   listCatalogDrafts,
   publishAdminHomeRecommendations,
   publishCatalogDraft,
+  requestCatalogDraftChanges,
   replaceAdminHomeRecommendations,
   requestAssetUpload,
+  assignArtistWorkspaceMember,
   saveCatalogDraft,
+  submitCatalogDraft,
 } from "@/lib/admin/admin.api";
 import {
   getAdminUser,
@@ -46,6 +49,7 @@ import { formatDateTime } from "@/lib/format/date";
 const PAGE_SIZE = 20;
 const ROLES: UserRole[] = [
   "USER",
+  "ARTIST_PENDING",
   "ARTIST",
   "ADMIN_USER_OPS",
   "ADMIN_SECURITY_OPS",
@@ -621,14 +625,20 @@ function CatalogAdminActions({
           onRun(() => {
             const draftId = requiredString(payload, "draftId");
             const action = String(payload.action ?? "get");
-            return action === "publish"
-              ? publishCatalogDraft(draftId)
-              : action === "delete"
-                ? deleteCatalogDraft(draftId)
-                : getCatalogDraft(draftId);
+            if (action === "publish") return publishCatalogDraft(draftId);
+            if (action === "submit") return submitCatalogDraft(draftId);
+            if (action === "request-changes") {
+              return requestCatalogDraftChanges(
+                draftId,
+                String(payload.reviewNote ?? ""),
+              );
+            }
+            return action === "delete"
+              ? deleteCatalogDraft(draftId)
+              : getCatalogDraft(draftId);
           })
         }
-        help="Add action: get, publish or delete."
+        help="Add action: get, submit, request-changes, publish, or delete. request-changes accepts reviewNote."
       />
       <div className="border-t border-(--labelDivider) pt-5 lg:col-span-2">
         <SelectBox
@@ -648,10 +658,26 @@ function CatalogAdminActions({
             onRun={(payload) =>
               onRun(() => saveCatalogDraft(resourceType, payload))
             }
-            help="Supply the complete DTO for the selected resource type."
+            help='For Song drafts, use credits: [{"artistId":"...","role":"producer","position":0}]. Roles: artist, composer, lyricist, producer, mixer, mastering_engineer, engineer, arranger, remixer. Save → submit → publish is the approval flow.'
           />
         </div>
       </div>
+      <AdminApiAction
+        label="Assign approved Artist account to workspace"
+        defaultValue='{"artistId":"","userId":"","role":"OWNER"}'
+        onRun={(payload) =>
+          onRun(() =>
+            assignArtistWorkspaceMember(
+              requiredString(payload, "artistId"),
+              {
+                userId: requiredString(payload, "userId"),
+                role: requiredArtistMemberRole(payload.role),
+              },
+            ),
+          )
+        }
+        help="The account must have the ARTIST role. Use OWNER for the seed artist account; use MANAGER, EDITOR, PRODUCTION, or ANALYST for team seats."
+      />
     </div>
   );
 }
@@ -799,6 +825,22 @@ function requiredString(payload: Record<string, unknown>, key: string) {
   return value;
 }
 
+function requiredArtistMemberRole(value: unknown) {
+  const role = String(value ?? "").trim().toUpperCase();
+  if (
+    role !== "OWNER" &&
+    role !== "MANAGER" &&
+    role !== "EDITOR" &&
+    role !== "PRODUCTION" &&
+    role !== "ANALYST"
+  ) {
+    throw new Error(
+      "role must be OWNER, MANAGER, EDITOR, PRODUCTION, or ANALYST.",
+    );
+  }
+  return role;
+}
+
 function SelectBox({
   value,
   options,
@@ -923,6 +965,31 @@ function UserManagementDialog({
                 onChange={requestRoleChange}
               />
             </div>
+            {user.role === "ARTIST_PENDING" && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  onRequestConfirmation({
+                    userId: user.userId,
+                    title: "Approve Artist application",
+                    description: `Approve ${user.username} as an Artist. They will gain access to the Artist Portal and studio APIs.`,
+                    confirmLabel: "Approve Artist",
+                    successMessage: `${user.username}'s Artist application has been approved.`,
+                    action: () => setAdminUserRole(user.userId, "ARTIST"),
+                  })
+                }
+                className="mt-3 h-10 rounded-full bg-(--statusPositive) px-4 text-(--background) [font:var(--callout-emphasized)] disabled:opacity-50"
+              >
+                Approve Artist application
+              </button>
+            )}
+            {user.role === "ARTIST_PENDING" && (
+              <p className="mt-3 text-(--systemSecondary) [font:var(--callout)]">
+                This account can sign in to the Artist Portal only to view its
+                pending status. It cannot use studio APIs until approved.
+              </p>
+            )}
             <button
               type="button"
               disabled={busy || isCurrentUser}

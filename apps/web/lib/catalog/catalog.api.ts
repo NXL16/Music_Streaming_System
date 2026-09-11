@@ -215,9 +215,25 @@ export async function getCatalogAlbum(albumId: string, signal?: AbortSignal) {
   );
 }
 
+export async function getCatalogReleaseTrack(
+  releaseTrackId: string,
+  signal?: AbortSignal,
+) {
+  return getCatalogDetail(
+    `release-tracks:${releaseTrackId}`,
+    `/catalog/${STOREFRONT}/release-tracks/${encodeURIComponent(releaseTrackId)}`,
+    signal,
+  );
+}
+
 export async function getCatalogAlbumRelated(
   albumId: string,
-  options: { section?: string; cursor?: string; limit?: number } = {},
+  options: {
+    section?: string;
+    cursor?: string;
+    limit?: number;
+    sourceSongId?: string;
+  } = {},
   signal?: AbortSignal,
 ) {
   const response = await http.get<CatalogAlbumRelatedResponse>(
@@ -277,6 +293,16 @@ export async function searchCatalog(query: string, signal?: AbortSignal) {
   return hydrateCatalogMediaEntities(response.data);
 }
 
+export async function recordCatalogSearchClick(
+  resourceType: string,
+  resourceId: string,
+) {
+  await http.post(`/catalog/${STOREFRONT}/search/click`, {
+    resourceType,
+    resourceId,
+  });
+}
+
 export async function getCatalogArtist(artistId: string, signal?: AbortSignal) {
   return getCatalogDetail(
     `artists:${artistId}`,
@@ -287,10 +313,22 @@ export async function getCatalogArtist(artistId: string, signal?: AbortSignal) {
 
 export async function getCatalogArtistAlbums(
   artistId: string,
+  options: {
+    limit?: number;
+    releaseTypes?: Array<"album" | "ep" | "single">;
+    section?: "appears-on";
+  } = {},
   signal?: AbortSignal,
 ) {
+  const params = new URLSearchParams();
+  if (options.limit) params.set("limit", String(options.limit));
+  if (options.releaseTypes?.length) {
+    params.set("releaseType", options.releaseTypes.join(","));
+  }
+  if (options.section) params.set("section", options.section);
+  const query = params.size > 0 ? `?${params.toString()}` : "";
   const response = await http.get<CatalogResponse>(
-    `/catalog/${STOREFRONT}/artists/${encodeURIComponent(artistId)}/albums`,
+    `/catalog/${STOREFRONT}/artists/${encodeURIComponent(artistId)}/albums${query}`,
     { signal },
   );
   return hydrateCatalogMediaEntities(response.data);
@@ -320,4 +358,15 @@ export async function getCatalogArtistSongs(
   );
   hydrateCatalogMediaEntities(response.data);
   return response.data;
+}
+
+export async function getCatalogSimilarArtists(
+  artistId: string,
+  { limit = 10, signal }: { limit?: number; signal?: AbortSignal } = {},
+) {
+  const response = await http.get<CatalogResponse>(
+    `/catalog/${STOREFRONT}/artists/${encodeURIComponent(artistId)}/similar`,
+    { params: { limit }, signal },
+  );
+  return hydrateCatalogMediaEntities(response.data);
 }

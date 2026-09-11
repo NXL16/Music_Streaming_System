@@ -1,17 +1,32 @@
 ﻿import { create } from "zustand";
 
+
 export type PlayerArtist = {
   id?: string;
   name: string;
   url?: string;
 };
 
+export type PlayerSongCredit = PlayerArtist & {
+  role: string;
+  position: number;
+  /** Only main billed artists may render in the song header. */
+  isPrimary?: boolean;
+  /** Optional catalog artist artwork used by the song-credit avatar. */
+  artworkUrl?: string;
+};
+
 export type PlayerSong = {
   id: string;
+  /** Public identity of this song inside the release currently being viewed. */
+  releaseTrackId?: string;
   title: string;
   url?: string;
   artist: string;
+  /** Raw `songs.artistName`; unlike `artist`, this is never replaced by album context. */
+  songArtistName?: string;
   artists?: PlayerArtist[];
+  credits?: PlayerSongCredit[];
   album: string;
   albumId?: string;
   albumUrl?: string;
@@ -24,6 +39,14 @@ export type PlayerSong = {
   artworkBgColor?: string;
   releaseDate?: string;
   playbackUrl: string;
+  /** The same Song can be played from its audio or Music Video entry point. */
+  playbackKind?: "audio" | "video";
+  /** Present only while this Song is being played through its Music Video. */
+  video?: {
+    id: string;
+    poster?: string;
+    posterSrcSet?: string;
+  };
   audioMode?: "STANDARD" | "SING";
   contentRating?: string;
   sourcePlaylist?: {
@@ -44,6 +67,7 @@ export type PlayerSong = {
     artworkUrl: string;
     artworkSrcSet?: string;
     artworkBgColor?: string;
+    artworkReady?: boolean;
   };
 };
 
@@ -62,10 +86,13 @@ type PlayerState = {
   drawerOpen: boolean;
   playbackTimeMs: number;
   playbackRate: number;
+  videoPlayerOpen: boolean;
   setDrawerOpen: (open: boolean) => void;
   setPlaybackTimeMs: (timeMs: number) => void;
   setPlaybackRate: (rate: number) => void;
+  setVideoPlayerOpen: (open: boolean) => void;
   setSong: (song: PlayerSong) => void;
+  replaceCurrentSong: (song: PlayerSong) => void;
   setQueue: (songs: PlayerSong[], startIndex?: number) => void;
   enqueue: (songs: PlayerSong[], position: QueueInsertionPosition) => void;
   reorderUpcomingQueue: (activeSongId: string, overSongId: string) => void;
@@ -73,7 +100,16 @@ type PlayerState = {
   removePlaylistSong: (playlistId: string, songId: string) => void;
   clearUpcomingQueue: () => void;
   playShuffledQueue: (songs: PlayerSong[]) => void;
-  startStation: (songs: PlayerSong[]) => void;
+  startStation: (
+    songs: PlayerSong[],
+    seedSongId?: string,
+    preserveSeedPlayback?: boolean,
+  ) => void;
+  appendStationTracks: (stationId: string, songs: PlayerSong[]) => void;
+  updateStationArtwork: (
+    stationId: string,
+    artwork: { url: string; bgColor: string },
+  ) => void;
   togglePlayback: () => void;
   toggleShuffle: () => void;
   cycleRepeatMode: () => void;
@@ -136,6 +172,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
   drawerOpen: false,
   playbackTimeMs: 0,
   playbackRate: 1,
+  videoPlayerOpen: false,
   setDrawerOpen: (open) => set({ drawerOpen: open }),
   setPlaybackTimeMs: (timeMs) => set({ playbackTimeMs: Math.max(0, timeMs) }),
   setPlaybackRate: (rate) =>
@@ -144,6 +181,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
         ? Math.min(2, Math.max(0.5, rate))
         : 1,
     }),
+  setVideoPlayerOpen: (open) => set({ videoPlayerOpen: open }),
   setSong: (song) =>
     set({
       currentSong: song,
@@ -155,6 +193,33 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       shuffleEnabled: false,
       stationMode: false,
       repeatMode: 0,
+      videoPlayerOpen: false,
+    }),
+  replaceCurrentSong: (song) =>
+    set((state) => {
+      const currentSong = state.currentSong;
+      if (
+        !currentSong ||
+        currentSong.id !== song.id ||
+        currentSong.playbackKind !== song.playbackKind ||
+        currentSong.video?.id !== song.video?.id
+      ) {
+        return state;
+      }
+
+      const isCurrentPlayback = (item: PlayerSong) =>
+        item.id === currentSong.id &&
+        item.playbackKind === currentSong.playbackKind &&
+        item.video?.id === currentSong.video?.id;
+      // `originalQueue` can be in a different order when shuffle is enabled;
+      // replacing by index would update an unrelated track in that case.
+      const replaceCurrentPlayback = (items: PlayerSong[]) =>
+        items.map((item) => (isCurrentPlayback(item) ? song : item));
+      return {
+        currentSong: song,
+        queue: replaceCurrentPlayback(state.queue),
+        originalQueue: replaceCurrentPlayback(state.originalQueue),
+      };
     }),
   setQueue: (songs, startIndex = 0) =>
     set(() => {
@@ -182,6 +247,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
         shuffleEnabled: false,
         stationMode: false,
         repeatMode: 0,
+        videoPlayerOpen: false,
       };
     }),
   enqueue: (songs, position) =>
@@ -418,19 +484,27 @@ export const usePlayerStore = create<PlayerState>((set) => ({
         shuffleEnabled: true,
         stationMode: false,
         repeatMode: 0,
+        videoPlayerOpen: false,
       };
     }),
-  startStation: (songs) =>
-    set(() => {
+  startStation: (songs, seedSongId, preserveSeedPlayback = false) =>
+    set((state) => {
       // A Station is shuffled once, then consumed in order. This guarantees a
       // track cannot repeat until the listener explicitly starts the station again.
-      const queue = shuffleAllSongs(songs);
+      const seed = seedSongId ? songs.find((song) => song.id === seedSongId) : undefined;
+      const queue = seed
+        ? [seed, ...shuffleAllSongs(songs.filter((song) => song.id !== seedSongId))]
+        : shuffleAllSongs(songs);
       const currentIndex = findPlayableIndex(queue, 0, 1);
       const currentSong = currentIndex >= 0 ? queue[currentIndex] : null;
+      const continuesCurrentSeed =
+        preserveSeedPlayback &&
+        currentSong?.id === state.currentSong?.id &&
+        currentSong?.releaseTrackId === state.currentSong?.releaseTrackId;
 
       return {
         currentSong,
-        playbackTimeMs: 0,
+        playbackTimeMs: continuesCurrentSeed ? state.playbackTimeMs : 0,
         queue,
         originalQueue: queue,
         currentIndex,
@@ -438,6 +512,50 @@ export const usePlayerStore = create<PlayerState>((set) => ({
         shuffleEnabled: true,
         stationMode: true,
         repeatMode: 0,
+      };
+    }),
+  appendStationTracks: (stationId, songs) =>
+    set((state) => {
+      if (
+        !state.stationMode ||
+        state.currentSong?.sourceStation?.id !== stationId
+      ) {
+        return state;
+      }
+      const existingSongIds = new Set(state.queue.map((song) => song.id));
+      const additions = shuffleAllSongs(
+        songs.filter(
+          (song) =>
+            Boolean(song.playbackUrl) &&
+            song.sourceStation?.id === stationId &&
+            !existingSongIds.has(song.id),
+        ),
+      );
+      if (!additions.length) return state;
+
+      return {
+        queue: [...state.queue, ...additions],
+        originalQueue: [...state.originalQueue, ...additions],
+      };
+    }),
+  updateStationArtwork: (stationId, artwork) =>
+    set((state) => {
+      const updateSong = (song: PlayerSong) =>
+        song.sourceStation?.id === stationId
+          ? {
+              ...song,
+              sourceStation: {
+                ...song.sourceStation,
+                artworkUrl: artwork.url,
+                artworkBgColor: artwork.bgColor,
+                artworkReady: true,
+              },
+            }
+          : song;
+      return {
+        currentSong: state.currentSong ? updateSong(state.currentSong) : null,
+        queue: state.queue.map(updateSong),
+        originalQueue: state.originalQueue.map(updateSong),
       };
     }),
   togglePlayback: () =>
@@ -503,7 +621,12 @@ export const usePlayerStore = create<PlayerState>((set) => ({
         return {
           currentIndex: stationIndex,
           currentSong: state.queue[stationIndex],
+          playbackTimeMs: 0,
           playing: true,
+          videoPlayerOpen:
+            state.videoPlayerOpen &&
+            state.currentSong?.playbackKind === "video" &&
+            state.queue[stationIndex]?.playbackKind === "video",
         };
       }
 
@@ -523,7 +646,12 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       return {
         currentIndex: nextIndex,
         currentSong: state.queue[nextIndex],
+        playbackTimeMs: 0,
         playing: true,
+        videoPlayerOpen:
+          state.videoPlayerOpen &&
+          state.currentSong?.playbackKind === "video" &&
+          state.queue[nextIndex]?.playbackKind === "video",
       };
     });
 
@@ -548,7 +676,12 @@ export const usePlayerStore = create<PlayerState>((set) => ({
         return {
           currentIndex: stationIndex,
           currentSong: state.queue[stationIndex],
+          playbackTimeMs: 0,
           playing: true,
+          videoPlayerOpen:
+            state.videoPlayerOpen &&
+            state.currentSong?.playbackKind === "video" &&
+            state.queue[stationIndex]?.playbackKind === "video",
         };
       }
 
@@ -573,7 +706,12 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       return {
         currentIndex: previousIndex,
         currentSong: state.queue[previousIndex],
+        playbackTimeMs: 0,
         playing: true,
+        videoPlayerOpen:
+          state.videoPlayerOpen &&
+          state.currentSong?.playbackKind === "video" &&
+          state.queue[previousIndex]?.playbackKind === "video",
       };
     });
 

@@ -65,7 +65,7 @@ export default function AllPlaylistsPage() {
         createdAt: playlist.createdAt,
       })),
       ...savedPlaylists.map((resource) => ({
-          card: projectLibraryMediaCard(resource),
+          card: projectLibraryMediaCard(resource, user?.displayName),
         createdAt: resource.createdAt,
       })),
     ].sort(
@@ -75,7 +75,7 @@ export default function AllPlaylistsPage() {
     );
 
     return dynamicCards;
-  }, [playlists, resources]);
+  }, [playlists, resources, user?.displayName]);
 
   return (
     <>

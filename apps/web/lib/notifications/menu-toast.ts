@@ -70,4 +70,5 @@ export async function confirmLibraryRemoval(
   });
 
   cancelExpiry = scheduleRealtimeExpiry(expiresAt, commit);
+  return { removedEmptyAlbumId: removal.removedEmptyAlbumId };
 }

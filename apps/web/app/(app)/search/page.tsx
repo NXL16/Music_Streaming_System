@@ -12,9 +12,11 @@ const GRID_CLASSNAME =
 function ResultSection({
   title,
   items,
+  onOpenResult = () => undefined,
 }: {
   title: string;
   items: MediaCardProps[];
+  onOpenResult?: (card: MediaCardProps) => void;
 }) {
   if (!items.length) return null;
 
@@ -25,7 +27,14 @@ function ResultSection({
       </h2>
       <ul className={GRID_CLASSNAME}>
         {items.map((card) => (
-          <MediaCardRenderer key={card.id} {...card} />
+          <MediaCardRenderer
+            key={card.id}
+            {...card}
+            onOpen={() => {
+              card.onOpen?.();
+              onOpenResult(card);
+            }}
+          />
         ))}
       </ul>
     </section>

@@ -2,8 +2,7 @@ export type MediaCardType =
   | "hero"
   | "collection"
   | "station"
-  | "circle"
-  | "social";
+  | "circle";
 
 /** The content advisory values supported by the media-card UI contract. */
 export type ContentRating = "explicit" | "clean";
@@ -47,6 +46,8 @@ export interface MediaCardProps {
   subtitle: string;
   imageUrl: string;
   imageSrcSet: string;
+  /** Optional non-square artwork ratio, for example a 16:9 video poster. */
+  artworkAspectRatio?: string;
   artwork?: MediaArtwork;
   artworkColors: {
     bg: string;
@@ -60,10 +61,16 @@ export interface MediaCardProps {
   typeTag?: string;
   description?: string;
   contentRating?: ContentRating;
+  isFavorite?: boolean;
   slug?: string;
   videoSrc?: string;
   altText?: string;
   artists?: MediaCardArtist[];
+  /** Optional card-specific actions when the resource has no catalog menu. */
+  menuItems?: MenuItemData[];
+  /** Reuses a catalog context menu when a card represents another media view. */
+  menuContext?: import("@/lib/context-menu/types").ContextMenuContext;
   onOpen?: () => void;
   onPlay?: () => void;
 }
+import type { MenuItemData } from "@/lib/menu/use-menu-store";

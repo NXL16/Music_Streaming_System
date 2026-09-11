@@ -16,6 +16,7 @@ import { useLibraryMediaCards } from "@/lib/library/use-library-media-cards";
 import {
   projectLibraryMediaCard,
 } from "@/lib/library/library-media-card.mapper";
+import { setLibraryAlbumOrigin } from "@/lib/library/library-album-origin";
 
 export default function AlbumsPage() {
   const user = useAuthStore((state) => state.user);
@@ -82,7 +83,11 @@ export default function AlbumsPage() {
       <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-5.5">
         <ul className="mb-8 mx-(--bodyGutter) ps-0 pe-0 grid gap-(--roomGridGap) grid-cols-[repeat(var(--roomGridColumns),minmax(0,1fr))] [--roomGridColumns:2] [--roomGridGap:10px] min-[415px]:[--roomGridColumns:3] min-[1000px]:[--roomGridGap:20px] min-[1000px]:[--roomGridColumns:4] min-[1260px]:[--roomGridColumns:5] min-[1580px]:[--roomGridColumns:6]">
           {albumCards.map(({ card }) => (
-            <MediaCardRenderer key={card.id} {...card} />
+            <MediaCardRenderer
+              key={card.id}
+              {...card}
+              onOpen={() => setLibraryAlbumOrigin(card.resourceId, "/library/albums")}
+            />
           ))}
         </ul>
       </div>

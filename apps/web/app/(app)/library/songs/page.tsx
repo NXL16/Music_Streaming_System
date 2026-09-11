@@ -7,6 +7,7 @@ import HeaderWithSort from "@/components/layout/header-with-sort";
 import CatalogPageLoading from "@/components/loading/catalog-page-loading";
 import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 import { ArtistLinks } from "@/components/media/artist-links";
+import { projectLinkedArtists } from "@/lib/media/project-linked-artists";
 import ResponsiveArtwork from "@/components/media/common/responsive-artwork";
 import { FavoriteSongButton } from "@/components/songs/favorite-song-button";
 import { PlaybackWaveform } from "@/components/songs/playback-waveform";
@@ -30,8 +31,6 @@ import {
   subscribeLibraryResourcesChanged,
 } from "@/lib/library/library-resources.api";
 import { useAuthStore } from "@/lib/auth/auth-store";
-import { songRoute } from "@/lib/catalog/song-route";
-import { artistRoute } from "@/lib/catalog/artist-route";
 import { albumRoute } from "@/lib/catalog/album-route";
 import { formatDuration } from "@/lib/format/duration";
 import { useTrackRowSelection } from "@/lib/player/use-track-row-selection";
@@ -169,7 +168,10 @@ export default function SongsPage() {
       // table here replaces virtual rows and makes the scroll position jump.
       if (change.operation === "pin" || change.operation === "unpin") return;
 
-      if (change.operation === "remove") {
+      if (
+        change.operation === "pending-remove" ||
+        change.operation === "remove"
+      ) {
         setSongs((current) =>
           current.filter((song) => song.id !== change.resourceId),
         );
@@ -290,6 +292,7 @@ export default function SongsPage() {
                           }`}
                           onClick={(event) => event.stopPropagation()}
                           songId={track.id}
+                          sourceAlbumId={track.albumId}
                           title="Tells us more about the kind of music you like."
                         />
                       </div>
@@ -410,9 +413,9 @@ export default function SongsPage() {
 
                       <div className="items-center inline-flex [grid-area:song-name] leading-4 overflow-hidden w-full -my-1 -mx-1 py-1 px-1">
                         <div className="block cursor-default flex-1 overflow-hidden ps-1 pe-1 -me-1 pb-1 pt-1 -ms-1 -mb-1 -mt-1 text-left">
-                          {track.id ? (
+                          {projectSongSummary(track).url ? (
                             <Link
-                              href={songRoute(track.id)}
+                              href={projectSongSummary(track).url!}
                               onClick={(e) => e.stopPropagation()}
                               className="overflow-hidden [--linkColor:var(--systemPrimary)] hover:underline"
                             >
@@ -442,13 +445,7 @@ export default function SongsPage() {
                   <div className="hidden [font:var(--body)] pb-0 pt-0 align-middle pe-2.5 relative overflow-hidden text-ellipsis whitespace-nowrap min-[1000px]:table-cell after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
                     <div className="overflow-hidden text-ellipsis whitespace-nowrap -mb-1 -mt-1 -ms-1 -me-1 pb-1 pt-1 pe-1 ps-1 text-left">
                       <ArtistLinks
-                        artists={track.artists?.map((artist) => ({
-                          ...artist,
-                          url:
-                            artist.id && artist.url
-                              ? artistRoute(artist.url, artist.id)
-                              : undefined,
-                        }))}
+                        artists={projectLinkedArtists(track.artists ?? [])}
                         fallbackText={track.artist}
                         linkClassName="hover:underline"
                       />
@@ -489,6 +486,8 @@ export default function SongsPage() {
                           context={{
                             kind: "song",
                             songId: track.id,
+                            releaseTrackId: track.releaseTrackId,
+                            sourceAlbumId: track.albumId,
                             title: track.title,
                             subtitle: track.artist,
                             artworkUrl: track.coverUrl,

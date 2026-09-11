@@ -9,7 +9,13 @@ import {
 
 type Playlist = { id: string; name: string };
 
-export function AddSongToPlaylistButton({ songId }: { songId: string }) {
+export function AddSongToPlaylistButton({
+  songId,
+  sourceAlbumId,
+}: {
+  songId: string;
+  sourceAlbumId?: string;
+}) {
   const user = useAuthStore((state) => state.user);
   const [open, setOpen] = useState(false);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -27,8 +33,17 @@ export function AddSongToPlaylistButton({ songId }: { songId: string }) {
   }
 
   async function addToPlaylist(playlistId: string) {
+    if (!sourceAlbumId) {
+      setMessage("This song has no album context yet.");
+      return;
+    }
     try {
-      await addSongToUserPlaylist(playlistId, songId, user?.userId);
+      await addSongToUserPlaylist(
+        playlistId,
+        songId,
+        sourceAlbumId,
+        user?.userId,
+      );
       setMessage("Added to playlist.");
     } catch {
       setMessage("Could not add this song to the playlist.");

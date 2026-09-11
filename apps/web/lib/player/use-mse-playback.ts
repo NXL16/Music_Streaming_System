@@ -214,8 +214,6 @@ export function useMsePlayback(
       }
     };
 
-    // A seek must never keep the previous 50ms tolerance: both timelines need
-    // the exact target before and after the browser resolves their buffers.
     instrumental.addEventListener("seeking", alignVocalToInstrumental);
     instrumental.addEventListener("seeked", alignVocalToInstrumental);
     instrumental.addEventListener("timeupdate", correctPlaybackDrift);

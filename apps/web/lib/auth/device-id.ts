@@ -1,4 +1,4 @@
-const DEVICE_ID_KEY = "musical_device_id";
+const DEVICE_ID_KEY = "device_id";
 
 export function getOrCreateDeviceId() {
   if (typeof window === "undefined") return undefined;

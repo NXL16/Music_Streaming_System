@@ -7,13 +7,13 @@ import { useFavoriteStore } from "./use-favorite-store";
 const pendingToggles = new Map<string, Promise<boolean | null>>();
 
 /** Toggles a song once across all UI surfaces and reports the shared outcome. */
-export function toggleSongFavorite(songId: string) {
+export function toggleSongFavorite(songId: string, sourceAlbumId?: string) {
   const pending = pendingToggles.get(songId);
   if (pending) return pending;
 
   const request = useFavoriteStore
     .getState()
-    .toggle(songId)
+    .toggle(songId, sourceAlbumId)
     .then((isFavorite) => {
       notifyMenuSuccess(
         isFavorite

@@ -114,9 +114,10 @@ export async function listFavoriteSongs(
   );
 }
 
-export async function addFavoriteSong(songId: string) {
+export async function addFavoriteSong(songId: string, sourceAlbumId: string) {
   const response = await http.post<{ success: boolean }>(
     `/songs/${encodeURIComponent(songId)}/favorite`,
+    { sourceAlbumId },
   );
   invalidateFavoriteSongsCache();
   return response.data;

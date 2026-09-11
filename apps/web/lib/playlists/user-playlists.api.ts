@@ -149,10 +149,12 @@ export async function updateUserPlaylist(
 export async function addSongToUserPlaylist(
   playlistId: string,
   songId: string,
+  sourceAlbumId: string,
   userId?: string,
 ) {
   await http.post(`/playlists/${encodeURIComponent(playlistId)}/tracks`, {
     songId,
+    sourceAlbumId,
   });
   syncUserPlaylistMutation(playlistId, userId);
 }

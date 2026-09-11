@@ -16,6 +16,9 @@ import {
   getUserPlaylist,
 } from "@/lib/playlists/user-playlists.api";
 import { getMySong } from "@/lib/songs/song.api";
+import { getCatalogMusicVideo } from "@/lib/catalog/music-videos.api";
+import { toVideoPlayerSong } from "@/lib/catalog/play-catalog-music-video";
+import { getLibraryResources } from "@/lib/library/library-resources.api";
 import { projectSongSummary } from "@/lib/songs/project-song-summary";
 import { withPlaylistPlaybackSource } from "./playlist-playback-source";
 import {
@@ -123,10 +126,22 @@ async function resolveSongTracks(songId: string): Promise<PlayerSong[]> {
   ];
 }
 
+async function resolveVideoTracks(
+  context: Extract<ContextMenuContext, { kind: "video" }>,
+): Promise<PlayerSong[]> {
+  const [video, songs] = await Promise.all([
+    getCatalogMusicVideo(context.videoId),
+    resolveSongTracks(context.songId),
+  ]);
+  const song = songs.find((item) => item.id === context.songId) ?? songs[0];
+  return song && video.videoAssetId ? [toVideoPlayerSong(video, song)] : [];
+}
+
 async function resolveContextTracks(
   context: ContextMenuContext,
 ): Promise<PlayerSong[]> {
   if (context.kind === "song") return resolveSongTracks(context.songId);
+  if (context.kind === "video") return resolveVideoTracks(context);
   if (context.kind !== "collection") return [];
 
   if (context.sourceOrigin === "favorite")
@@ -134,10 +149,26 @@ async function resolveContextTracks(
   if (context.sourceOrigin === "user-playlist") {
     return resolveUserPlaylistTracks(context.resourceId);
   }
-  return resolveCatalogCollectionTracks(
+  const tracks = await resolveCatalogCollectionTracks(
     context.resourceType,
     context.resourceId,
   );
+  if (context.resourceType !== "albums" || !context.isLibraryView) {
+    return tracks;
+  }
+
+  // A Library Album can be created by saving only some of a release's songs.
+  // Queue only those persisted Library Songs, never the hidden catalog tracks.
+  const savedSongIds = new Set(
+    (await getLibraryResources())
+      .filter(
+        (resource) =>
+          resource.resourceType === "songs" &&
+          resource.sourceAlbumId === context.resourceId,
+      )
+      .map((resource) => resource.resourceId),
+  );
+  return tracks.filter((track) => savedSongIds.has(track.id));
 }
 
 /** Resolves menu context into canonical PlayerSong data and inserts it in queue. */

@@ -9,8 +9,8 @@ import Link from "next/link";
 export type MediaShelfDisplayKind =
   | "MusicNotesHeroShelf"
   | "MusicCoverShelf"
-  | "MusicCircleCoverShelf"
-  | "MusicSocialCardShelf";
+  | "MusicVideoShelf"
+  | "MusicCircleCoverShelf";
 
 export type MediaShelfProps = {
   title: string;
@@ -19,10 +19,14 @@ export type MediaShelfProps = {
   /** Applies a shelf-specific presentation rule without coupling this generic shelf to a data source. */
   normalizeItem?: (item: MediaCardProps) => MediaCardProps;
   containerClassName?: string;
+  /** Overrides selected CSS custom properties from the display-kind preset. */
+  gridStyle?: CSSProperties;
   shelfId?: string;
   prioritizeFirstCard?: boolean;
   /** Reset the horizontal viewport when a newly-prepended item becomes first. */
   scrollToStartKey?: string;
+  /** Keeps hero video mounted while this shelf scrolls horizontally. */
+  keepHeroVideoMountedHorizontally?: boolean;
   onSelect?: (shelfId: string) => void;
   /** @deprecated Use shelfId + onSelect instead */
   onTitleClick?: () => void;
@@ -85,29 +89,8 @@ const mediaShelfPresets = {
     "--standard-lockup-shadow-offset": "15px",
   },
 
-  MusicCircleCoverShelf: {
-    "--grid-max-content-xsmall": "120px",
-    "--grid-column-gap-xsmall": "10px",
-    "--grid-row-gap-xsmall": "24px",
-    "--grid-small": "5",
-    "--grid-column-gap-small": "20px",
-    "--grid-row-gap-small": "24px",
-    "--grid-medium": "6",
-    "--grid-column-gap-medium": "20px",
-    "--grid-row-gap-medium": "24px",
-    "--grid-large": "7",
-    "--grid-column-gap-large": "20px",
-    "--grid-row-gap-large": "24px",
-    "--grid-xlarge": "8",
-    "--grid-column-gap-xlarge": "20px",
-    "--grid-row-gap-xlarge": "24px",
-    "--grid-type": "G",
-    "--grid-rows": "1",
-    "--standard-lockup-shadow-offset": "15px",
-  },
-
-  MusicSocialCardShelf: {
-    "--grid-max-content-xsmall": "280px",
+  MusicVideoShelf: {
+    "--grid-max-content-xsmall": "298px",
     "--grid-column-gap-xsmall": "10px",
     "--grid-row-gap-xsmall": "24px",
     "--grid-small": "2",
@@ -116,13 +99,34 @@ const mediaShelfPresets = {
     "--grid-medium": "3",
     "--grid-column-gap-medium": "20px",
     "--grid-row-gap-medium": "24px",
-    "--grid-large": "3",
+    "--grid-large": "4",
     "--grid-column-gap-large": "20px",
     "--grid-row-gap-large": "24px",
     "--grid-xlarge": "4",
     "--grid-column-gap-xlarge": "20px",
     "--grid-row-gap-xlarge": "24px",
-    "--grid-type": "G",
+    "--grid-type": "B",
+    "--grid-rows": "1",
+    "--standard-lockup-shadow-offset": "15px",
+  },
+
+  MusicCircleCoverShelf: {
+    "--grid-max-content-xsmall": "94px",
+    "--grid-column-gap-xsmall": "10px",
+    "--grid-row-gap-xsmall": "24px",
+    "--grid-small": "6",
+    "--grid-column-gap-small": "20px",
+    "--grid-row-gap-small": "24px",
+    "--grid-medium": "8",
+    "--grid-column-gap-medium": "20px",
+    "--grid-row-gap-medium": "24px",
+    "--grid-large": "10",
+    "--grid-column-gap-large": "20px",
+    "--grid-row-gap-large": "24px",
+    "--grid-xlarge": "10",
+    "--grid-column-gap-xlarge": "20px",
+    "--grid-row-gap-xlarge": "24px",
+    "--grid-type": "H",
     "--grid-rows": "1",
     "--standard-lockup-shadow-offset": "15px",
   },
@@ -190,8 +194,8 @@ function ShelfTitleButton({
 const ESTIMATED_SHELF_HEIGHT: Record<MediaShelfDisplayKind, number> = {
   MusicNotesHeroShelf: 320,
   MusicCoverShelf: 250,
+  MusicVideoShelf: 225,
   MusicCircleCoverShelf: 225,
-  MusicSocialCardShelf: 340,
 };
 let shelfResizeFrame: number | undefined;
 const pendingShelfDraggabilityUpdates = new Set<HTMLUListElement>();
@@ -227,8 +231,10 @@ function MediaShelf({
   items,
   normalizeItem,
   containerClassName,
+  gridStyle,
   shelfId,
   prioritizeFirstCard = false,
+  keepHeroVideoMountedHorizontally = false,
   scrollToStartKey,
   onSelect,
   onTitleClick,
@@ -723,7 +729,12 @@ function MediaShelf({
         <div className="pb-8">
           <section
             className="box-border px-(--shelfGridPaddingInline,var(--bodyGutter)) relative w-full z-(--z-default) max-[999px]:ps-(--shelfGridPaddingInline,var(--bodyGutter)) max-[999px]:pe-0"
-            style={mediaShelfPresets[displayKind] as CSSProperties}
+            style={
+              {
+                ...mediaShelfPresets[displayKind],
+                ...gridStyle,
+              } as CSSProperties
+            }
           >
             <div className="box-content -mx-0.5 overflow-visible px-0.5 w-full">
               <ul
@@ -742,8 +753,17 @@ function MediaShelf({
                         priority={
                           (prioritizeFirstCard || isHeroShelf) && index === 0
                         }
-                        onOpen={() => onCardInteraction?.("open", card, index)}
-                        onPlay={() => onCardInteraction?.("play", card, index)}
+                        keepVideoMountedHorizontally={
+                          keepHeroVideoMountedHorizontally
+                        }
+                        onOpen={() => {
+                          card.onOpen?.();
+                          onCardInteraction?.("open", card, index);
+                        }}
+                        onPlay={() => {
+                          card.onPlay?.();
+                          onCardInteraction?.("play", card, index);
+                        }}
                       />
                     );
                   })}

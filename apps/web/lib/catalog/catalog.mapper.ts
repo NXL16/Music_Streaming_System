@@ -25,7 +25,10 @@ function mapTrackArtists(
   return catalogArtists(response, song.relationships.artists?.data);
 }
 
-export function mapCatalogTracks(response: CatalogResponse): PlayerSong[] {
+export function mapCatalogTracks(
+  response: CatalogResponse,
+  options?: { albumId?: string },
+): PlayerSong[] {
   const directTracks = response.data.filter(
     (reference) => reference.type === "songs",
   );
@@ -50,24 +53,59 @@ export function mapCatalogTracks(response: CatalogResponse): PlayerSong[] {
     if (!song) return [];
 
     const artists = mapTrackArtists(response, song);
-    const albumReference = song.relationships.albums?.data[0];
+    const albumReferences = song.relationships.albums?.data ?? [];
+    const albumReference = albumReferences[0];
     const album = albumReference
       ? response.resources.albums[albumReference.id]
       : undefined;
-    const playbackAlbum = contextAlbum ?? album;
+    const requestedAlbum = options?.albumId
+      ? response.resources.albums[options.albumId]
+      : undefined;
+    // A supplied albumId is a navigation contract, not a hint. Reject it if
+    // this song is not a track on that release instead of silently rendering
+    // an unrelated first relationship.
+    if (
+      options?.albumId &&
+      (!requestedAlbum ||
+        !albumReferences.some((reference) => reference.id === options.albumId))
+    ) {
+      return [];
+    }
+    const playbackAlbum = contextAlbum ?? requestedAlbum ?? album;
     const playbackAlbumId = playbackAlbum?.id ?? albumReference?.id;
+    const releaseTrackId =
+      reference.meta?.releaseTrackId ??
+      albumReferences.find((item) => item.id === playbackAlbumId)?.meta
+        ?.releaseTrackId;
     const playbackAlbumUrl = playbackAlbum?.attributes.url;
     const playbackArtwork =
       contextAlbum?.attributes.artwork ??
-      album?.attributes.artwork ??
+      playbackAlbum?.attributes.artwork ??
       song.attributes.artwork;
 
     return [
       projectPlayerSong({
         id: song.id,
+        releaseTrackId,
         title: song.attributes.name,
-        artist: song.attributes.artistName,
+        artist: playbackAlbum?.attributes.artistName ?? song.attributes.artistName,
+        songArtistName: song.attributes.artistName,
         artists,
+        credits: [
+          ...(song.attributes.credits ?? []).map((credit) => {
+            const artist = response.resources.artists[credit.artistId];
+            return {
+              id: credit.artistId,
+              name: credit.name,
+              url: credit.url,
+              role: credit.role,
+              position: credit.position,
+              isPrimary: credit.isPrimary,
+              artworkUrl: catalogArtworkUrl(artist?.attributes.artwork, 80),
+            };
+          }),
+          ...(song.attributes.contributorCredits ?? []),
+        ],
         album: playbackAlbum?.attributes.name ?? song.attributes.albumName,
         albumId: playbackAlbumId,
         albumUrl: playbackAlbumUrl,

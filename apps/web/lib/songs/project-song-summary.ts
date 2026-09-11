@@ -26,6 +26,7 @@ export type SongSummaryProjectionSource = {
   coverUrl?: string;
   thumbnailCoverSrcSet?: string;
   audioMode?: "STANDARD" | "SING";
+  releaseTrackId?: string;
 };
 
 /**
@@ -35,9 +36,12 @@ export type SongSummaryProjectionSource = {
  */
 export type PlayerSongProjectionSource = {
   id: string;
+  releaseTrackId?: string;
   title: string;
   artist?: string;
+  songArtistName?: string;
   artists?: PlayerArtist[];
+  credits?: PlayerSong["credits"];
   album?: string;
   albumId?: string;
   albumUrl?: string;
@@ -64,10 +68,13 @@ export function projectPlayerSong(
 
   return {
     id: song.id,
+    releaseTrackId: song.releaseTrackId,
     title: song.title,
-    url: songRoute(song.id),
+    url: song.releaseTrackId ? songRoute(song.title, song.releaseTrackId) : undefined,
     artist,
+    songArtistName: song.songArtistName,
     artists: song.artists,
+    credits: song.credits,
     album: song.album || "",
     albumId: song.albumId,
     albumUrl:
@@ -109,6 +116,7 @@ export function projectSongSummary(
 
   return projectPlayerSong({
     id: song.id,
+    releaseTrackId: song.releaseTrackId,
     title: song.title,
     artist: song.artist,
     artists,

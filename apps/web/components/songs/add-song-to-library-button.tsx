@@ -1,12 +1,8 @@
 "use client";
 
-import { type MouseEvent, useEffect, useId, useState } from "react";
-import {
-  addLibraryResource,
-  getLibraryResources,
-  isLibraryResource,
-  subscribeLibraryResourcesChanged,
-} from "@/lib/library/library-resources.api";
+import { type MouseEvent, useId, useState } from "react";
+import { addLibraryResource } from "@/lib/library/library-resources.api";
+import { useLibraryResourceMembership } from "@/lib/library/use-library-resource-membership";
 import {
   notifyMenuError,
   notifyMenuSuccess,
@@ -17,6 +13,7 @@ type AddSongToLibraryButtonProps = {
   title: string;
   artist?: string;
   artworkUrl?: string;
+  sourceAlbumId?: string;
   /** Collapses the action until its parent row (`group`) is hovered. */
   showOnParentHover?: boolean;
 };
@@ -27,61 +24,27 @@ export function AddSongToLibraryButton({
   title,
   artist = "",
   artworkUrl = "",
+  sourceAlbumId,
   showOnParentHover = false,
 }: AddSongToLibraryButtonProps) {
   const sourceId = useId();
-  const [status, setStatus] = useState<
-    "checking" | "idle" | "adding" | "saved"
-  >("checking");
+  const [isAdding, setIsAdding] = useState(false);
+  const inLibrary = useLibraryResourceMembership({
+    resourceType: "songs",
+    resourceId: songId,
+  });
   const loadingDelay = () =>
     new Promise<void>((resolve) => window.setTimeout(resolve, 300));
 
-  useEffect(() => {
-    let active = true;
-
-    void getLibraryResources()
-      .then(() => {
-        if (active)
-          setStatus(isLibraryResource("songs", songId) ? "saved" : "idle");
-      })
-      .catch(() => {
-        if (active) setStatus("idle");
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [songId]);
-
-  useEffect(
-    () =>
-      subscribeLibraryResourcesChanged((change) => {
-        if (
-          change &&
-          (change.resourceType !== "songs" ||
-            (change.resourceId !== songId && change.operation !== "sync"))
-        ) {
-          return;
-        }
-
-        void getLibraryResources().then(() => {
-          setStatus((currentStatus) =>
-            currentStatus === "adding"
-              ? currentStatus
-              : isLibraryResource("songs", songId)
-                ? "saved"
-                : "idle",
-          );
-        });
-      }),
-    [songId],
-  );
-
   async function addSong(event: MouseEvent<HTMLButtonElement>) {
     event.stopPropagation();
-    if (status !== "idle") return;
+    if (inLibrary || isAdding) return;
+    if (!sourceAlbumId) {
+      notifyMenuError("This song has no album context yet.");
+      return;
+    }
 
-    setStatus("adding");
+    setIsAdding(true);
     try {
       await Promise.all([
         addLibraryResource(
@@ -91,26 +54,27 @@ export function AddSongToLibraryButton({
             title,
             subtitle: artist,
             artworkUrl,
+            sourceAlbumId,
           },
           sourceId,
         ),
         loadingDelay(),
       ]);
-      setStatus("saved");
       notifyMenuSuccess("Added to Library");
     } catch {
-      setStatus("idle");
       notifyMenuError("Couldn't add to Library");
+    } finally {
+      setIsAdding(false);
     }
   }
 
-  if (status === "checking" || status === "saved") return null;
+  if (inLibrary === undefined || inLibrary) return null;
 
   return (
     <button
       type="button"
       onClick={addSong}
-      disabled={status === "adding"}
+      disabled={isAdding}
       aria-label={`Add ${title} to Library`}
       title="Add to Library"
       className={`items-center text-(--keyColor) cursor-pointer inline-flex justify-center [transition:var(--global-transition)] h-(--add-to-library-button-width,25px) leading-0 me-(--addToLibraryMarginEnd,4px) disabled:cursor-default ${
@@ -119,7 +83,7 @@ export function AddSongToLibraryButton({
           : "w-(--add-to-library-button-width,25px)"
       }`}
     >
-      {status === "adding" ? (
+      {isAdding ? (
         <svg
           width="16"
           height="16"

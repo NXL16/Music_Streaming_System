@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertCircle, ExternalLink, RefreshCw } from "lucide-react";
+import { AlertCircle, RefreshCw } from "lucide-react";
 import {
   MusicPageHeading,
   MusicPageLayout,
@@ -13,8 +13,6 @@ import {
   getAdminRecommendationQuality,
 } from "@/lib/admin/admin.api";
 import { useAuthStore } from "@/lib/auth/auth-store";
-import { useSongLibrary } from "@/lib/songs/use-song-library";
-import { songRoute } from "@/lib/catalog/song-route";
 
 const ADMIN_ROLES = new Set([
   "SUPER_ADMIN",
@@ -34,20 +32,6 @@ function percentage(numerator: number, denominator: number) {
 function formatRate(numerator: number, denominator: number) {
   const rate = denominator > 0 ? (numerator / denominator) * 100 : 0;
   return rate < 1 ? `${rate.toFixed(2)}%` : `${rate.toFixed(1)}%`;
-}
-
-function statusLabel(status: number) {
-  switch (status) {
-    case 3:
-      return "Live";
-    case 1:
-    case 2:
-      return "Processing";
-    case 4:
-      return "Needs attention";
-    default:
-      return "Draft";
-  }
 }
 
 type TrendPoint = {
@@ -289,245 +273,6 @@ function TrendChart({
         <span>{timeline.at(-1)?.date}</span>
       </div>
     </div>
-  );
-}
-
-function StatusChart({
-  values,
-}: {
-  values: Array<{ label: string; value: number; color: string }>;
-}) {
-  const total = Math.max(
-    1,
-    values.reduce((sum, value) => sum + value.value, 0),
-  );
-  return (
-    <div className="mt-6 border-t border-(--labelDivider) pt-5">
-      <p className="text-(--systemPrimary) [font:var(--body-tall-emphasized)]">
-        Release distribution
-      </p>
-      <div className="mt-4 flex h-3 overflow-hidden rounded-full bg-(--systemQuinary)">
-        {values.map((item) => (
-          <div
-            key={item.label}
-            style={{
-              width: `${(item.value / total) * 100}%`,
-              background: item.color,
-            }}
-            title={`${item.label}: ${item.value}`}
-          />
-        ))}
-      </div>
-      <div className="mt-4 grid gap-2 sm:grid-cols-3">
-        {values.map((item) => (
-          <div
-            key={item.label}
-            className="flex items-center justify-between text-(--systemSecondary) [font:var(--callout)]"
-          >
-            <span className="flex items-center gap-2">
-              <i
-                className="h-2.5 w-2.5 rounded-full"
-                style={{ background: item.color }}
-              />
-              {item.label}
-            </span>
-            <strong className="text-(--systemPrimary)">{item.value}</strong>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ArtistAnalytics() {
-  const { songs, loading, error, refresh, hasMore } = useSongLibrary();
-  const [statusFilter, setStatusFilter] = useState<
-    "all" | "live" | "processing" | "attention"
-  >("all");
-  const metrics = useMemo(() => {
-    const safeSongs = songs ?? [];
-    return {
-      total: safeSongs.length,
-      ready: safeSongs.filter((song) => song.status === 3).length,
-      processing: safeSongs.filter(
-        (song) => song.status === 1 || song.status === 2,
-      ).length,
-      failed: safeSongs.filter((song) => song.status === 4).length,
-      public: safeSongs.filter((song) => song.isPublic).length,
-    };
-  }, [songs]);
-  const visibleSongs = useMemo(() => {
-    const safeSongs = songs ?? [];
-    if (statusFilter === "live")
-      return safeSongs.filter((song) => song.status === 3);
-    if (statusFilter === "processing")
-      return safeSongs.filter((song) => song.status === 1 || song.status === 2);
-    if (statusFilter === "attention")
-      return safeSongs.filter((song) => song.status === 4);
-    return safeSongs;
-  }, [songs, statusFilter]);
-
-  return (
-    <section className="box-border p-[0_var(--shelfGridPaddingInline,var(--bodyGutter))] relative w-full z-(--z-default)">
-      <div className="items-center flex justify-end gap-3 m-[0_0_13px]">
-        <div className="flex-1">
-          <h2 className="text-(--header-title-color,var(--systemPrimary,#000)) inline-block [font:var(--header-title-font,var(--title-2-emphasized))]">
-            Release health
-          </h2>
-        </div>
-        <button
-          type="button"
-          onClick={() => void refresh()}
-          disabled={loading}
-          className="inline-flex items-center gap-2 rounded-full bg-(--systemQuinary) px-3 py-2 text-(--systemPrimary) [font:var(--footnote-emphasized)] transition hover:opacity-75 disabled:opacity-50"
-        >
-          <RefreshCw
-            className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
-          />
-          Refresh
-        </button>
-      </div>
-      {error ? (
-        <p className="text-(--keyColor) [font:var(--callout)]">
-          Could not load your catalog analytics.
-        </p>
-      ) : (
-        <div className="grid gap-x-6 sm:grid-cols-2 xl:grid-cols-4">
-          <Metric
-            label={hasMore ? "Recent tracks" : "Tracks"}
-            value={loading ? "—" : metrics.total}
-            note={
-              hasMore
-                ? "Latest loaded releases; open Library for all"
-                : "Your uploaded releases"
-            }
-          />
-          <Metric
-            label="Live"
-            value={loading ? "—" : metrics.ready}
-            note={
-              hasMore ? "Among latest loaded releases" : "Ready for playback"
-            }
-          />
-          <Metric
-            label="Processing"
-            value={loading ? "—" : metrics.processing}
-            note={
-              hasMore
-                ? "Among latest loaded releases"
-                : "Waiting for media processing"
-            }
-          />
-          <Metric
-            label="Needs attention"
-            value={loading ? "—" : metrics.failed}
-            note={
-              hasMore ? "Among latest loaded releases" : "Processing failed"
-            }
-          />
-          <Metric
-            label="Public"
-            value={loading ? "—" : metrics.public}
-            note={
-              hasMore ? "Among latest loaded releases" : "Visible to listeners"
-            }
-          />
-        </div>
-      )}
-      {!loading && (
-        <StatusChart
-          values={[
-            {
-              label: "Live",
-              value: metrics.ready,
-              color: "var(--statusPositive)",
-            },
-            {
-              label: "Processing",
-              value: metrics.processing,
-              color: "var(--keyColor)",
-            },
-            {
-              label: "Needs attention",
-              value: metrics.failed,
-              color: "var(--systemRed)",
-            },
-          ]}
-        />
-      )}
-      <div className="mt-6 border-t border-(--labelDivider) pt-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-(--systemPrimary) [font:var(--body-tall-emphasized)]">
-              Release queue
-            </p>
-            <p className="mt-1 text-(--systemSecondary) [font:var(--footnote)]">
-              Your most recently loaded releases and their processing state.
-            </p>
-          </div>
-          <Link
-            className="inline-flex items-center gap-1 text-(--keyColor) [font:var(--callout-emphasized)]"
-            href="/library"
-          >
-            Manage releases <ExternalLink className="h-4 w-4" />
-          </Link>
-        </div>
-        <div
-          className="mt-4 flex gap-2 overflow-x-auto pb-1"
-          role="tablist"
-          aria-label="Release status"
-        >
-          {(
-            [
-              ["all", "All"],
-              ["live", "Live"],
-              ["processing", "Processing"],
-              ["attention", "Needs attention"],
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              role="tab"
-              aria-selected={statusFilter === value}
-              onClick={() => setStatusFilter(value)}
-              className={`shrink-0 rounded-full px-3 py-1.5 [font:var(--footnote-emphasized)] transition ${statusFilter === value ? "bg-(--systemPrimary) text-(--background)" : "bg-(--systemQuinary) text-(--systemSecondary) hover:text-(--systemPrimary)"}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <div className="mt-3 divide-y divide-(--labelDivider) border-y border-(--labelDivider)">
-          {visibleSongs.slice(0, 8).map((song) => (
-            <Link
-              key={song.id}
-              href={songRoute(song.id)}
-              className="flex items-center justify-between gap-4 py-3 transition hover:opacity-70"
-            >
-              <span className="min-w-0">
-                <span className="block truncate text-(--systemPrimary) [font:var(--callout-emphasized)]">
-                  {song.title || "Untitled track"}
-                </span>
-                <span className="block truncate text-(--systemSecondary) [font:var(--footnote)]">
-                  {song.album || "Single"} ·{" "}
-                  {song.isPublic ? "Public" : "Private"}
-                </span>
-              </span>
-              <span
-                className={`shrink-0 rounded-full px-2.5 py-1 [font:var(--footnote-emphasized)] ${song.status === 3 ? "bg-(--statusPositiveBackground) text-(--statusPositive)" : song.status === 4 ? "bg-(--statusNegativeBackground) text-(--keyColor)" : "bg-(--systemQuinary) text-(--systemSecondary)"}`}
-              >
-                {statusLabel(song.status)}
-              </span>
-            </Link>
-          ))}
-          {!loading && visibleSongs.length === 0 && (
-            <p className="py-8 text-center text-(--systemSecondary) [font:var(--callout)]">
-              No releases in this status.
-            </p>
-          )}
-        </div>
-      </div>
-    </section>
   );
 }
 
@@ -1194,13 +939,12 @@ function FunnelStage({
 export default function DashboardPage() {
   const user = useAuthStore((state) => state.user);
   const isAdmin = ADMIN_ROLES.has(user?.role ?? "");
-  const isArtist = user?.role === "ARTIST";
 
-  if (!isAdmin && !isArtist) {
+  if (!isAdmin) {
     return (
       <div className="mx-auto max-w-2xl px-(--bodyGutter) py-16 text-(--systemPrimary)">
         <h1 className="[font:var(--title-1-emphasized)]">
-          Analytics is for artists and administrators
+          Analytics is for administrators
         </h1>
         <p className="mt-3 text-(--systemSecondary) [font:var(--body)]">
           Your account does not have access to the analytics workspace.
@@ -1210,19 +954,19 @@ export default function DashboardPage() {
   }
 
   return (
-    <MusicPageLayout>
+      <MusicPageLayout>
       <MusicPageHeading
-        title={isAdmin ? "System analytics" : "Artist analytics"}
+        title="System analytics"
         trailing={
           <Link
-            href={isAdmin ? "/admin" : "/library"}
+            href="/admin"
             className="rounded-full bg-(--keyColor) px-4 py-2 text-(--keyColorText) [font:var(--callout-emphasized)]"
           >
-            {isAdmin ? "Open Admin" : "Manage releases"}
+            Open Admin
           </Link>
         }
       />
-      {isAdmin ? <AdminAnalytics /> : <ArtistAnalytics />}
+      <AdminAnalytics />
     </MusicPageLayout>
   );
 }

@@ -55,7 +55,11 @@ export function ShelfDetailView({
         </div>
         <ul className="mb-8 mx-(--bodyGutter) ps-0 pe-0 grid gap-(--roomGridGap) grid-cols-[repeat(var(--roomGridColumns),minmax(0,1fr))] [--roomGridColumns:2] [--roomGridGap:10px] min-[415px]:[--roomGridColumns:3] min-[1000px]:[--roomGridGap:20px] min-[1000px]:[--roomGridColumns:4] min-[1260px]:[--roomGridColumns:5] min-[1580px]:[--roomGridColumns:6]">
           {shelf.items.map((card) => (
-            <MediaCardRenderer key={card.id} {...card} />
+            <MediaCardRenderer
+              key={card.id}
+              {...card}
+              isShelfDetail
+            />
           ))}
         </ul>
         {showLoadingMore && <Loading fullScreen={false} size={29} />}

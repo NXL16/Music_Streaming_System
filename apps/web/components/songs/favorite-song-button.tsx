@@ -6,6 +6,7 @@ import { toggleSongFavorite } from "@/lib/favorites/toggle-song-favorite";
 
 type FavoriteSongButtonProps = {
   songId: string;
+  sourceAlbumId?: string;
   className?: string;
   compact?: boolean;
   onClick?: (event: MouseEvent<HTMLButtonElement>) => void;
@@ -15,6 +16,7 @@ type FavoriteSongButtonProps = {
 
 export function FavoriteSongButton({
   songId,
+  sourceAlbumId,
   className,
   onClick,
   ariaLabel,
@@ -33,7 +35,7 @@ export function FavoriteSongButton({
     if (saving) return;
     setSaving(true);
     try {
-      await toggleSongFavorite(songId);
+      await toggleSongFavorite(songId, sourceAlbumId);
     } finally {
       setSaving(false);
     }

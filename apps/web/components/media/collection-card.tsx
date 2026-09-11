@@ -9,6 +9,15 @@ import { playCatalogResource } from "@/lib/catalog/play-catalog-resource";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { playUserPlaylist } from "@/lib/playlists/play-user-playlist";
 import { playFavoritePlaylist } from "@/lib/favorites/play-favorite-playlist";
+import { useAlbumFavoriteStore } from "@/lib/favorites/use-album-favorite-store";
+import { usePlaylistFavoriteStore } from "@/lib/favorites/use-playlist-favorite-store";
+import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
+import { useEffect, useState } from "react";
+import {
+  hydrateSuggestLess,
+  isSuggestLessActive,
+  subscribeSuggestLessChanges,
+} from "@/lib/recommendations/suggest-less.api";
 
 type CollectionCardProps = MediaCardProps & {
   cardType: "collection";
@@ -17,6 +26,38 @@ type CollectionCardProps = MediaCardProps & {
 export default function CollectionCard(props: CollectionCardProps) {
   const cardId = props.resourceId || props.id;
   const userId = useAuthStore((state) => state.user?.userId);
+  const favoriteAlbumIds = useAlbumFavoriteStore((state) => state.albumIds);
+  const hydrateFavoriteAlbums = useAlbumFavoriteStore((state) => state.hydrate);
+  const favoritePlaylistIds = usePlaylistFavoriteStore(
+    (state) => state.playlistIds,
+  );
+  const hydrateFavoritePlaylists = usePlaylistFavoriteStore(
+    (state) => state.hydrate,
+  );
+  const musicVideoSongId =
+    props.menuContext?.kind === "video" ? props.menuContext.songId : undefined;
+  const isMusicVideoFavorite = useFavoriteStore((state) =>
+    musicVideoSongId ? state.songIds.has(musicVideoSongId) : false,
+  );
+  const [isSuggestLess, setIsSuggestLess] = useState(false);
+  useEffect(() => {
+    if (userId && props.resourceType === "albums") {
+      void hydrateFavoriteAlbums();
+    }
+  }, [hydrateFavoriteAlbums, props.resourceType, userId]);
+  useEffect(() => {
+    if (userId && props.resourceType === "playlists") {
+      void hydrateFavoritePlaylists();
+    }
+  }, [hydrateFavoritePlaylists, props.resourceType, userId]);
+  useEffect(() => {
+    if (props.resourceType !== "albums") return;
+    const sync = () => setIsSuggestLess(isSuggestLessActive("albums", cardId));
+    void hydrateSuggestLess().then(sync).catch(() => undefined);
+    return subscribeSuggestLessChanges((detail) => {
+      if (detail.resourceType === "albums" && detail.resourceId === cardId) sync();
+    });
+  }, [cardId, props.resourceType]);
   const libraryResourceType =
     props.resourceType === "albums" || props.resourceType === "playlists"
       ? props.resourceType
@@ -64,6 +105,7 @@ export default function CollectionCard(props: CollectionCardProps) {
               href: props.slug,
               songIds: props.songIds,
               userId,
+              isLibraryView: props.slug?.startsWith("/library/albums/") ?? false,
               inLibrary: false,
             }
           : props.resourceType === "playlists"
@@ -84,7 +126,12 @@ export default function CollectionCard(props: CollectionCardProps) {
             : undefined;
 
   return (
-    <MediaCardShell id={cardId} artworkColor={props.artworkColors.main}>
+    <MediaCardShell
+      id={cardId}
+      artworkColor={props.artworkColors.main}
+      href={props.slug}
+      onOpen={props.onOpen}
+    >
       <>
         <div className="media-card-artwork rounded-(--global-border-radius-medium,7px) shadow-[0_1px_1px_rgba(0,0,0,0.01),0_2px_2px_rgba(0,0,0,0.01),0_4px_4px_rgba(0,0,0,0.02),0_8px_8px_rgba(0,0,0,0.03),0_14px_14px_rgba(0,0,0,0.03)] relative z-(--z-default) after:content-[''] after:absolute after:inset-0 after:rounded-[inherit] after:bg-[#333333]/30 after:opacity-(--scrimOpacity,0) after:transition-opacity after:duration-100 after:ease-in after:z-1">
           <CardArtwork
@@ -92,6 +139,7 @@ export default function CollectionCard(props: CollectionCardProps) {
             title={props.title}
             altText={props.altText}
             imageSrcSet={props.imageSrcSet}
+            aspectRatio={props.artworkAspectRatio}
             artworkColors={props.artworkColors}
             containerClassName="w-full [--override-placeholder-bg-color:var(--artwork-bg-color)] [anchor-name:--shelf-first-artwork]"
           />
@@ -110,6 +158,15 @@ export default function CollectionCard(props: CollectionCardProps) {
               >
                 {props.title}
               </Link>
+            )}
+
+            {!props.slug && props.onOpen && (
+              <button
+                type="button"
+                aria-label={props.title}
+                className="absolute inset-0 size-full rounded-[inherit]"
+                onClick={props.onOpen}
+              />
             )}
 
             {props.resourceType !== "user-playlist" && (
@@ -151,13 +208,28 @@ export default function CollectionCard(props: CollectionCardProps) {
               />
             )}
 
-            {collectionMenuContext && (
-              <CardContextMenu id={cardId} context={collectionMenuContext} />
+            {(props.menuContext || collectionMenuContext || props.menuItems) && (
+              <CardContextMenu
+                id={cardId}
+                context={props.menuContext ?? collectionMenuContext}
+                items={props.menuItems}
+              />
             )}
           </div>
         </div>
 
-        <CollectionCardMetadata {...props} />
+        <CollectionCardMetadata
+          {...props}
+          isFavorite={
+            (props.resourceType === "albums" &&
+              favoriteAlbumIds.has(props.resourceId) &&
+              !isSuggestLess) ||
+            (props.resourceType === "playlists" &&
+              favoritePlaylistIds.has(props.resourceId)) ||
+            (props.resourceType === "music-videos" &&
+              isMusicVideoFavorite)
+          }
+        />
       </>
     </MediaCardShell>
   );

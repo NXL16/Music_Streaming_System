@@ -2,15 +2,21 @@
 
 import { useCallback } from "react";
 import { useAsyncResource } from "@/lib/api/use-async-resource";
-import { loadCatalogTracks } from "./load-catalog-tracks";
+import { getCatalogReleaseTrack } from "./catalog.api";
+import { mapCatalogTracks } from "./catalog.mapper";
 
-export function useCatalogSong(songId: string) {
+export function useCatalogSong(releaseTrackId: string) {
   const fetchSong = useCallback(
     async (signal?: AbortSignal) => {
-      const [catalogSong] = await loadCatalogTracks([songId], signal);
-      return catalogSong ?? null;
+      if (!releaseTrackId) return null;
+      const catalog = await getCatalogReleaseTrack(releaseTrackId, signal);
+      return (
+        mapCatalogTracks(catalog).find(
+          (song) => song.releaseTrackId === releaseTrackId,
+        ) ?? null
+      );
     },
-    [songId],
+    [releaseTrackId],
   );
 
   const { data: song, loading, error, reload } = useAsyncResource(

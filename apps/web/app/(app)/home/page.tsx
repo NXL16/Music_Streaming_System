@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import MediaShelf from "@/components/media/media-shelf";
 import {
   ShelfDetailLoading,
@@ -15,6 +15,7 @@ import {
   getRecommendationSection,
   recordRecommendationInteraction,
 } from "@/lib/recommendations/recommendation.api";
+import { ensureArtistStationArtworkBatch } from "@/lib/recommendations/artist-station";
 import MediaShelfSkeleton from "@/components/loading/media-shelf-skeleton";
 import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
 import { useRecentlyPlayedSection } from "@/lib/recommendations/use-recently-played-section";
@@ -22,7 +23,10 @@ import {
   normalizeRecentlyPlayedCard,
   RECENTLY_PLAYED_SHELF_ID,
 } from "@/lib/recommendations/recently-played-presentation";
-import { HOME_SHELF_PREVIEW_LIMIT } from "@musical/shared-constants";
+import {
+  HERO_SHELF_PREVIEW_LIMIT,
+  HOME_SHELF_PREVIEW_LIMIT,
+} from "@musical/shared-constants";
 import { useAppScrollToTop } from "@/lib/layout/use-app-scroll-to-top";
 
 const DAILY_MIX_SHELF_ID = "user-daily-mix";
@@ -45,7 +49,7 @@ const PERSONALIZED_HOME_ORDER = [
 ] as const;
 
 export default function HomePage() {
-  const { data, loading, error, retry } = useHomeRecommendations();
+  const { data, loading, error, refresh, retry } = useHomeRecommendations();
   const { shelf: recentlyPlayedShelf, loading: recentlyPlayedLoading } =
     useRecentlyPlayedSection();
   const showHomeLoading = useMinimumLoadingDuration(
@@ -70,6 +74,41 @@ export default function HomePage() {
         : [],
     [data],
   );
+
+  const artistStationIds = useMemo(() => {
+    const references =
+      data?.resources?.personalRecommendation[STATIONS_FOR_YOU_SHELF_ID]
+        ?.relationships?.contents?.data ?? [];
+    const stations = data?.resources?.stations;
+    return [
+      ...new Set(
+        references
+          .filter(
+            (reference) =>
+              reference.type === "stations" &&
+              /^artist-station-[a-f0-9]{32}$/.test(reference.id) &&
+              stations?.[reference.id]?.attributes?.stationArtworkReady !== true,
+          )
+          .map((reference) => reference.id),
+      ),
+    ];
+  }, [data]);
+
+  useEffect(() => {
+    if (!artistStationIds.length) return;
+    let active = true;
+
+    void ensureArtistStationArtworkBatch(artistStationIds).then((updated) => {
+      if (!active || !updated) return;
+      // The renderer persisted the composite cover. Refresh once for the
+      // complete batch so every card changes together without a page reload.
+      void refresh(false, undefined, true);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [artistStationIds, refresh]);
 
   const shelvesWithRecentlyPlayed = useMemo(
     () =>
@@ -116,15 +155,17 @@ export default function HomePage() {
     () =>
       shelvesWithRecentlyPlayed.map((shelf) => {
         const previewItems = previewShelfItems(shelf);
+        const isHeroShelf = shelf.displayKind === "MusicNotesHeroShelf";
 
         return {
           ...shelf,
           items: previewItems,
-          hasMore:
-            (shelf.hasMore &&
-              previewItems.length >= HOME_SHELF_PREVIEW_LIMIT) ||
-            (shelf.id === RECENTLY_PLAYED_SHELF_ID &&
-              shelf.items.length > HOME_SHELF_PREVIEW_LIMIT),
+          hasMore: isHeroShelf
+            ? false
+            : (shelf.hasMore &&
+                previewItems.length >= HOME_SHELF_PREVIEW_LIMIT) ||
+              (shelf.id === RECENTLY_PLAYED_SHELF_ID &&
+                shelf.items.length > HOME_SHELF_PREVIEW_LIMIT),
         };
       }),
     [shelvesWithRecentlyPlayed],
@@ -221,6 +262,9 @@ export default function HomePage() {
                       : undefined
                   }
                   prioritizeFirstCard={index === 0}
+                  keepHeroVideoMountedHorizontally={
+                    shelf.displayKind === "MusicNotesHeroShelf"
+                  }
                   shelfId={shelf.id}
                   scrollToStartKey={
                     shelf.id === RECENTLY_PLAYED_SHELF_ID
@@ -332,5 +376,10 @@ function orderPersonalizedHomeShelves(
 function previewShelfItems(
   shelf: ReturnType<typeof mapHomeRecommendations>[number],
 ) {
-  return shelf.items.slice(0, HOME_SHELF_PREVIEW_LIMIT);
+  return shelf.items.slice(
+    0,
+    shelf.displayKind === "MusicNotesHeroShelf"
+      ? HERO_SHELF_PREVIEW_LIMIT
+      : HOME_SHELF_PREVIEW_LIMIT,
+  );
 }

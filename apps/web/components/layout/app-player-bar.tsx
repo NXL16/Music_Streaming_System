@@ -8,14 +8,23 @@ import {
   useLayoutEffect,
   useMemo,
 } from "react";
-import { usePlayerStore, type PlayerSong } from "@/lib/player/use-player-store";
+import {
+  usePlayerStore,
+  type PlayerSong,
+} from "@/lib/player/use-player-store";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { useShallow } from "zustand/react/shallow";
 import { useMsePlayback } from "@/lib/player/use-mse-playback";
 import { usePersistentVolume } from "@/lib/player/use-persistent-volume";
 import { resumeAudioContext } from "@/lib/player/audio-context";
 import { syncPlaybackClock } from "@/lib/player/playback-clock";
-import { sendListeningEvent } from "@/lib/recommendations/listening-events";
+import {
+  flushQueuedListeningEvents,
+  queueListeningEvent,
+  sendListeningEvent,
+} from "@/lib/recommendations/listening-events";
+import { refillSongStation } from "@/lib/recommendations/song-station";
+import { refillArtistStation } from "@/lib/recommendations/artist-station";
 import type {
   MediaArtwork,
   MediaCardProps,
@@ -28,6 +37,7 @@ import {
   createMediaResourceCard,
 } from "@/lib/media/normalize-media-resource";
 import { getMediaEntity } from "@/lib/media/media-entity-store";
+import { videoPlaybackController } from "@/lib/player/video-playback-controller";
 import dynamic from "next/dynamic";
 
 // Desktop-only queue drag/drop and the expanded player are substantial. Keep
@@ -42,6 +52,9 @@ const DesktopPlayerBar = dynamic(
 
 const LISTENING_QUALIFY_SECONDS = 3;
 const LOCK_SCREEN_SEEK_SECONDS = 10;
+const END_SEEK_TOLERANCE_SECONDS = 3;
+const SONG_STATION_REFILL_THRESHOLD = 8;
+const SONG_STATION_REFILL_RETRY_DELAY_MS = 15_000;
 
 function resetAudioToStart(audio: HTMLAudioElement | null): void {
   if (audio) {
@@ -69,8 +82,6 @@ function recentlyPlayedCard(song: PlayerSong): MediaCardProps {
       },
       {
         cardType: "station",
-        subtitle: station.description || "Musical Station",
-        description: station.description || "Musical Station",
         imageUrl: station.artworkUrl,
         imageSrcSet: station.artworkSrcSet || station.artworkUrl,
       },
@@ -186,6 +197,22 @@ function recentlyPlayedCard(song: PlayerSong): MediaCardProps {
   );
 }
 
+function telemetryDurationSeconds(seconds: number | undefined): number {
+  return Math.max(0, Math.floor(seconds ?? 0));
+}
+
+function playbackSessionKey(song: PlayerSong): string {
+  // Queue/Station membership changes must not restart the same media file.
+  // A Music Video of the same Song is nevertheless a new playback session:
+  // it has a separate stream, clock and listening event.
+  return [
+    song.id,
+    song.releaseTrackId ?? "",
+    song.playbackKind ?? "audio",
+    song.video?.id ?? "",
+  ].join(":");
+}
+
 export function AppPlayerBar() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const vocalAudioRef = useRef<HTMLAudioElement>(null);
@@ -193,7 +220,7 @@ export function AppPlayerBar() {
   const masterGainRef = useRef<GainNode | null>(null);
   const vocalGainRef = useRef<GainNode | null>(null);
   const audioContextCloseTimerRef = useRef<number | null>(null);
-  const playbackTimeSongIdRef = useRef<string | undefined>(undefined);
+  const playbackTimeSessionRef = useRef<string | undefined>(undefined);
   const {
     currentSong,
     queue,
@@ -210,6 +237,7 @@ export function AppPlayerBar() {
     previous,
     setPlaybackTimeMs,
     playbackRate,
+    setVideoPlayerOpen,
   } = usePlayerStore(
     useShallow((state) => ({
       currentSong: state.currentSong,
@@ -227,12 +255,22 @@ export function AppPlayerBar() {
       previous: state.previous,
       setPlaybackTimeMs: state.setPlaybackTimeMs,
       playbackRate: state.playbackRate,
+      setVideoPlayerOpen: state.setVideoPlayerOpen,
     })),
   );
   const { isMseActive, isStemActive } = useMsePlayback(audioRef, vocalAudioRef);
+  const currentPlaybackSessionKey = currentSong
+    ? playbackSessionKey(currentSong)
+    : undefined;
   const isPlaying = Boolean(currentSong && playing);
+  const isVideoPlayback = currentSong?.playbackKind === "video";
   const currentArtworkSrcSet =
-    currentSong?.thumbnailArtworkSrcSet ?? currentSong?.artworkSrcSet;
+    isVideoPlayback
+      ? (currentSong?.video?.posterSrcSet ??
+        currentSong?.video?.poster ??
+        currentSong?.thumbnailArtworkSrcSet ??
+        currentSong?.artworkSrcSet)
+      : (currentSong?.thumbnailArtworkSrcSet ?? currentSong?.artworkSrcSet);
   const playableSongCount = useMemo(
     () => queue.filter((song) => song.playbackUrl).length,
     [queue],
@@ -249,6 +287,20 @@ export function AppPlayerBar() {
   const useCompactPlayer = useMediaQuery("(max-width: 739px)");
   const { volume, lastAudibleVolume, setVolume } = usePersistentVolume();
   const trackedSongRef = useRef<string | null>(null);
+  const pendingStationQualifiedPlayRef = useRef<{
+    stationId: string;
+    song: PlayerSong;
+    elapsed: number;
+  } | null>(null);
+  const lastObservedPlaybackTimeRef = useRef(0);
+  const listenedSecondsRef = useRef(0);
+  const skippedToEndingRef = useRef(false);
+  const songStationRefillRef = useRef<{
+    stationId: string;
+    inFlight: boolean;
+    exhausted: boolean;
+    retryAfter: number;
+  } | null>(null);
 
   const previewVocalVolume = useCallback((nextVolume: number) => {
     const vocalGain = vocalGainRef.current;
@@ -262,6 +314,11 @@ export function AppPlayerBar() {
   }, []);
 
   const handleTogglePlayback = useCallback(() => {
+    if (isVideoPlayback) {
+      if (!playing) setVideoPlayerOpen(true);
+      togglePlayback();
+      return;
+    }
     resumeAudioContext(audioContextRef.current);
 
     const audio = audioRef.current;
@@ -285,18 +342,32 @@ export function AppPlayerBar() {
     }
 
     togglePlayback();
-  }, [isStemActive, playing, setPlaybackTimeMs, togglePlayback]);
+  }, [
+    isStemActive,
+    isVideoPlayback,
+    playing,
+    setVideoPlayerOpen,
+    setPlaybackTimeMs,
+    togglePlayback,
+  ]);
 
   const emitEvent = useCallback(
     (
       song: PlayerSong,
-      eventType: "PLAY_START" | "PLAY_COMPLETE" | "SKIP",
+      eventType: "PLAY_START" | "PLAY_COMPLETE" | "PLAY_STOPPED" | "SKIP",
       elapsed?: number,
+      deferDelivery = false,
     ) => {
-      void sendListeningEvent({
+      // A Song Station is only a valid Recently Played resource after its
+      // dedicated artwork has been generated. This guards every PLAY_START
+      // path, including a deferred event that outlives the player callback.
+      if (eventType === "PLAY_START" && song.sourceStation?.artworkReady === false) {
+        return;
+      }
+      const payload = {
         songId: song.id,
         eventType,
-        durationSec: elapsed ?? 0,
+        durationSec: telemetryDurationSeconds(elapsed),
         totalSec: song.durationSec ?? 0,
         songTitle: song.title,
         artistName: song.artist,
@@ -313,56 +384,229 @@ export function AppPlayerBar() {
         stationArtworkBgColor: song.sourceStation?.artworkBgColor,
         recentlyPlayedItem:
           eventType === "PLAY_START" ? recentlyPlayedCard(song) : undefined,
-      });
+      };
+      if (deferDelivery) {
+        queueListeningEvent(payload);
+        return;
+      }
+      void sendListeningEvent(payload);
     },
     [],
   );
 
   useEffect(() => {
+    void flushQueuedListeningEvents();
+  }, []);
+
+  useEffect(() => {
+    const handlePageHide = (event: PageTransitionEvent) => {
+      if (event.persisted || !currentSong) return;
+      if (trackedSongRef.current !== playbackSessionKey(currentSong)) return;
+
+      const elapsed = listenedSecondsRef.current;
+      if (elapsed <= 0) return;
+
+      // Fetches with an Authorization header are not reliable while the page
+      // closes. Persist a neutral terminal event and deliver it after the next
+      // authenticated app load instead of misclassifying it as a skip.
+      emitEvent(currentSong, "PLAY_STOPPED", elapsed, true);
+      trackedSongRef.current = null;
+      listenedSecondsRef.current = 0;
+    };
+
+    window.addEventListener("pagehide", handlePageHide);
+    return () => window.removeEventListener("pagehide", handlePageHide);
+  }, [currentSong, emitEvent]);
+
+  useEffect(() => {
     trackedSongRef.current = null;
-  }, [currentSong?.id]);
+    lastObservedPlaybackTimeRef.current = 0;
+    listenedSecondsRef.current = 0;
+    skippedToEndingRef.current = false;
+  }, [
+    currentSong?.id,
+    currentSong?.playbackKind,
+    currentSong?.video?.id,
+    currentSong?.sourcePlaylist?.id,
+    currentSong?.sourceStation?.id,
+  ]);
 
   const markQualifiedPlay = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio || !currentSong || !playing) return;
-    if (trackedSongRef.current === currentSong.id) return;
-    if (audio.currentTime < LISTENING_QUALIFY_SECONDS) return;
+    if (!currentSong || !playing) return;
+    if (skippedToEndingRef.current) return;
+    if (trackedSongRef.current === playbackSessionKey(currentSong)) return;
+    if (listenedSecondsRef.current < LISTENING_QUALIFY_SECONDS) return;
+    if (currentSong.sourceStation?.artworkReady === false) {
+      // The user has genuinely listened, but a Song Station must never enter
+      // Recently Played with its seed-song cover. Keep this one qualified
+      // play and publish it as soon as the generated Station artwork arrives.
+      pendingStationQualifiedPlayRef.current = {
+        stationId: currentSong.sourceStation.id,
+        song: currentSong,
+        elapsed: listenedSecondsRef.current,
+      };
+      return;
+    }
 
-    trackedSongRef.current = currentSong.id;
-    emitEvent(currentSong, "PLAY_START", audio.currentTime);
+    trackedSongRef.current = playbackSessionKey(currentSong);
+    emitEvent(currentSong, "PLAY_START", listenedSecondsRef.current);
   }, [currentSong, emitEvent, playing]);
 
+  useEffect(() => {
+    return videoPlaybackController.subscribe((event) => {
+      if (!isVideoPlayback || !currentSong || event.src !== currentSong.playbackUrl)
+        return;
+      if (event.type === "timeupdate") {
+        const currentTime = Math.max(0, event.currentTime);
+        const elapsedSinceLastObservation =
+          currentTime - lastObservedPlaybackTimeRef.current;
+        if (playing && elapsedSinceLastObservation >= 0) {
+          listenedSecondsRef.current += elapsedSinceLastObservation;
+        }
+        lastObservedPlaybackTimeRef.current = currentTime;
+        markQualifiedPlay();
+        return;
+      }
+
+      markQualifiedPlay();
+      if (
+        !skippedToEndingRef.current &&
+        trackedSongRef.current === playbackSessionKey(currentSong)
+      ) {
+        emitEvent(currentSong, "PLAY_COMPLETE", listenedSecondsRef.current);
+      }
+      trackedSongRef.current = null;
+      listenedSecondsRef.current = 0;
+      skippedToEndingRef.current = false;
+    });
+  }, [currentSong, emitEvent, isVideoPlayback, markQualifiedPlay, playing]);
+
+  useEffect(() => {
+    const pending = pendingStationQualifiedPlayRef.current;
+    if (!pending) return;
+
+    const stationSong = [currentSong, ...queue].find(
+      (song): song is PlayerSong =>
+        song?.sourceStation?.id === pending.stationId &&
+        song.sourceStation.artworkReady === true,
+    );
+    if (!stationSong?.sourceStation) return;
+
+    pendingStationQualifiedPlayRef.current = null;
+    const qualifiedSong = {
+      ...pending.song,
+      sourceStation: stationSong.sourceStation,
+    };
+    trackedSongRef.current = playbackSessionKey(qualifiedSong);
+    emitEvent(qualifiedSong, "PLAY_START", pending.elapsed);
+  }, [currentSong, emitEvent, queue]);
+
+  useEffect(() => {
+    const station = currentSong?.sourceStation;
+    const remainingTracks = queue.length - currentIndex - 1;
+    if (
+      !stationMode ||
+      !station ||
+      (!station.id.startsWith("song-station-") &&
+        !station.id.startsWith("artist-station-") &&
+        !station.id.startsWith("artist-play-station-")) ||
+      remainingTracks > SONG_STATION_REFILL_THRESHOLD
+    ) {
+      return;
+    }
+
+    const previous = songStationRefillRef.current;
+    const refill =
+      previous?.stationId === station.id
+        ? previous
+        : {
+            stationId: station.id,
+            inFlight: false,
+            exhausted: false,
+            retryAfter: 0,
+          };
+    songStationRefillRef.current = refill;
+    if (refill.inFlight || refill.exhausted || refill.retryAfter > Date.now()) {
+      return;
+    }
+
+    refill.inFlight = true;
+    const excludedSongIds = queue
+      .filter((song) => song.sourceStation?.id === station.id)
+      .map((song) => song.id);
+    const isArtistStation =
+      station.id.startsWith("artist-station-") ||
+      station.id.startsWith("artist-play-station-");
+    void (isArtistStation
+      ? refillArtistStation(station, excludedSongIds)
+      : refillSongStation(station, excludedSongIds))
+      .then((addedTracks) => {
+        refill.exhausted = addedTracks === 0;
+      })
+      .catch(() => {
+        refill.retryAfter = Date.now() + SONG_STATION_REFILL_RETRY_DELAY_MS;
+      })
+      .finally(() => {
+        refill.inFlight = false;
+      });
+  }, [currentIndex, currentSong?.sourceStation, queue, stationMode]);
+
   useLayoutEffect(() => {
-    playbackTimeSongIdRef.current = undefined;
+    playbackTimeSessionRef.current = currentPlaybackSessionKey;
     setPlaybackTimeMs(0);
-  }, [currentSong?.id, setPlaybackTimeMs]);
+    resetAudioToStart(audioRef.current);
+    resetAudioToStart(vocalAudioRef.current);
+  }, [currentPlaybackSessionKey, setPlaybackTimeMs]);
 
   const handleLoadedMetadata = useCallback(() => {
     const audio = audioRef.current;
-    const songId = currentSong?.id;
-    if (!audio || !songId) return;
+    if (!audio || !currentPlaybackSessionKey) return;
 
-    playbackTimeSongIdRef.current = songId;
+    playbackTimeSessionRef.current = currentPlaybackSessionKey;
+    lastObservedPlaybackTimeRef.current = audio.currentTime;
     syncPlaybackClock(audio, setPlaybackTimeMs);
-  }, [currentSong?.id, setPlaybackTimeMs]);
+  }, [currentPlaybackSessionKey, setPlaybackTimeMs]);
 
   const handleTimeUpdate = useCallback(() => {
     const audio = audioRef.current;
-    if (!audio || playbackTimeSongIdRef.current !== currentSong?.id) return;
+    if (!audio || playbackTimeSessionRef.current !== currentPlaybackSessionKey)
+      return;
 
+    const elapsedSinceLastObservation =
+      audio.currentTime - lastObservedPlaybackTimeRef.current;
+    if (playing && elapsedSinceLastObservation >= 0) {
+      listenedSecondsRef.current += elapsedSinceLastObservation;
+    }
+    lastObservedPlaybackTimeRef.current = audio.currentTime;
     syncPlaybackClock(audio, setPlaybackTimeMs);
     markQualifiedPlay();
-  }, [currentSong?.id, markQualifiedPlay, setPlaybackTimeMs]);
+  }, [currentPlaybackSessionKey, markQualifiedPlay, playing, setPlaybackTimeMs]);
 
   const handleSeeking = useCallback(() => {
     const audio = audioRef.current;
-    if (!audio || playbackTimeSongIdRef.current !== currentSong?.id) return;
+    if (!audio || playbackTimeSessionRef.current !== currentPlaybackSessionKey)
+      return;
+
+    const jumpedForwardSeconds =
+      audio.currentTime - lastObservedPlaybackTimeRef.current;
+    const remainingSeconds = audio.duration - audio.currentTime;
+    if (
+      Number.isFinite(audio.duration) &&
+      jumpedForwardSeconds >= LOCK_SCREEN_SEEK_SECONDS &&
+      remainingSeconds <= END_SEEK_TOLERANCE_SECONDS
+    ) {
+      // Do not turn a scrub straight to the final seconds into a qualified
+      // listen or a completion. There is no reliable evidence that the user
+      // consumed the track, and it must not train their taste profile.
+      skippedToEndingRef.current = true;
+    }
+    lastObservedPlaybackTimeRef.current = audio.currentTime;
 
     // `seeked` can arrive before the next `timeupdate`. Update the shared
     // clock here so progress, lyrics, and the audio element stay aligned
     // throughout a seek instead of briefly showing the old lyric line.
     syncPlaybackClock(audio, setPlaybackTimeMs);
-  }, [currentSong?.id, setPlaybackTimeMs]);
+  }, [currentPlaybackSessionKey, setPlaybackTimeMs]);
 
   useEffect(() => {
     if (audioContextCloseTimerRef.current !== null) {
@@ -413,6 +657,7 @@ export function AppPlayerBar() {
         0.02,
       );
     else if (audioRef.current) audioRef.current.volume = volume;
+    videoPlaybackController.setVolume(volume);
   }, [volume]);
 
   useEffect(() => {
@@ -436,6 +681,7 @@ export function AppPlayerBar() {
       audio.playbackRate = playbackRate;
       audio.defaultPlaybackRate = playbackRate;
     }
+    videoPlaybackController.setPlaybackRate(playbackRate);
   }, [playbackRate]);
 
   useEffect(() => {
@@ -458,6 +704,11 @@ export function AppPlayerBar() {
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || isMseActive) return;
+    if (isVideoPlayback) {
+      audio.pause();
+      vocalAudioRef.current?.pause();
+      return;
+    }
 
     if (!currentSong?.playbackUrl || !playing) {
       audio.pause();
@@ -467,16 +718,28 @@ export function AppPlayerBar() {
     void audio.play().catch(() => {
       pause();
     });
-  }, [currentSong?.id, currentSong?.playbackUrl, pause, playing, isMseActive]);
+  }, [
+    currentPlaybackSessionKey,
+    currentSong?.playbackUrl,
+    pause,
+    playing,
+    isMseActive,
+    isVideoPlayback,
+  ]);
 
   const handleEnded = () => {
     const audio = audioRef.current;
     if (currentSong) {
       markQualifiedPlay();
-      if (trackedSongRef.current === currentSong.id) {
-        emitEvent(currentSong, "PLAY_COMPLETE", audio?.currentTime);
+      if (
+        !skippedToEndingRef.current &&
+        trackedSongRef.current === playbackSessionKey(currentSong)
+      ) {
+        emitEvent(currentSong, "PLAY_COMPLETE", listenedSecondsRef.current);
       }
       trackedSongRef.current = null;
+      listenedSecondsRef.current = 0;
+      skippedToEndingRef.current = false;
     }
     if (
       audio &&
@@ -495,25 +758,29 @@ export function AppPlayerBar() {
   };
 
   const handleNext = useCallback(() => {
+    const elapsed = listenedSecondsRef.current;
     const didChangeTrack = next();
     if (!didChangeTrack) return;
 
-    if (currentSong && trackedSongRef.current === currentSong.id) {
-      emitEvent(currentSong, "SKIP", audioRef.current?.currentTime);
+    if (currentSong && elapsed > 0) {
+      emitEvent(currentSong, "SKIP", elapsed);
     }
 
     trackedSongRef.current = null;
+    listenedSecondsRef.current = 0;
   }, [currentSong, emitEvent, next]);
 
   const handlePrevious = useCallback(() => {
+    const elapsed = listenedSecondsRef.current;
     const didChangeTrack = previous();
     if (!didChangeTrack) return;
 
-    if (currentSong && trackedSongRef.current === currentSong.id) {
-      emitEvent(currentSong, "SKIP", audioRef.current?.currentTime);
+    if (currentSong && elapsed > 0) {
+      emitEvent(currentSong, "SKIP", elapsed);
     }
 
     trackedSongRef.current = null;
+    listenedSecondsRef.current = 0;
   }, [currentSong, emitEvent, previous]);
 
   useEffect(() => {
@@ -531,17 +798,24 @@ export function AppPlayerBar() {
             title: currentSong.title,
             artist: currentSong.artist,
             album: currentSong.album,
-            artwork: currentSong.artworkUrl
+            artwork: (isVideoPlayback
+              ? currentSong.video?.poster ?? currentSong.artworkUrl
+              : currentSong.artworkUrl)
               ? [
                   {
-                    src: getAbsoluteArtworkUrl(currentSong.artworkUrl),
+                    src: getAbsoluteArtworkUrl(
+                      isVideoPlayback
+                        ? currentSong.video?.poster ?? currentSong.artworkUrl
+                        : currentSong.artworkUrl,
+                    ),
                   },
                 ]
               : [],
           })
         : null;
-      mediaSession.playbackState =
-        audioRef.current?.paused || audioRef.current?.ended
+      mediaSession.playbackState = isVideoPlayback
+        ? (playing ? "playing" : "paused")
+        : audioRef.current?.paused || audioRef.current?.ended
           ? "paused"
           : "playing";
     };
@@ -560,6 +834,14 @@ export function AppPlayerBar() {
     };
 
     setAction("play", () => {
+      if (isVideoPlayback) {
+        const playerState = usePlayerStore.getState();
+        if (!playerState.playing) playerState.togglePlayback();
+        // Invoke play in the hardware/media-session gesture too. The normal
+        // React effect remains the fallback while HLS is attaching.
+        void videoPlaybackController.play();
+        return;
+      }
       const audio = audioRef.current;
       const vocal = isStemActive ? vocalAudioRef.current : null;
       const playerState = usePlayerStore.getState();
@@ -590,10 +872,21 @@ export function AppPlayerBar() {
         void Promise.all(plays).catch(() => usePlayerStore.getState().pause());
       }
     });
-    setAction("pause", () => usePlayerStore.getState().pause());
+    setAction("pause", () => {
+      if (isVideoPlayback) videoPlaybackController.pause();
+      usePlayerStore.getState().pause();
+    });
     setAction("nexttrack", handleNext);
     setAction("previoustrack", handlePrevious);
     setAction("seekbackward", () => {
+      if (isVideoPlayback) {
+        // The controller clamps to the active video's duration.
+        const currentTimeMs = usePlayerStore.getState().playbackTimeMs;
+        videoPlaybackController.seek(
+          Math.max(0, currentTimeMs / 1000 - LOCK_SCREEN_SEEK_SECONDS),
+        );
+        return;
+      }
       const audio = audioRef.current;
       if (audio) {
         const nextTime = Math.max(
@@ -605,6 +898,13 @@ export function AppPlayerBar() {
       }
     });
     setAction("seekforward", () => {
+      if (isVideoPlayback) {
+        const currentTimeMs = usePlayerStore.getState().playbackTimeMs;
+        videoPlaybackController.seek(
+          currentTimeMs / 1000 + LOCK_SCREEN_SEEK_SECONDS,
+        );
+        return;
+      }
       const audio = audioRef.current;
       if (audio) {
         const nextTime = Math.min(
@@ -616,6 +916,10 @@ export function AppPlayerBar() {
       }
     });
     setAction("seekto", (details) => {
+      if (isVideoPlayback && typeof details.seekTime === "number") {
+        videoPlaybackController.seek(details.seekTime);
+        return;
+      }
       const audio = audioRef.current;
       if (audio && typeof details.seekTime === "number") {
         audio.currentTime = details.seekTime;
@@ -648,7 +952,14 @@ export function AppPlayerBar() {
         setAction(action, null);
       }
     };
-  }, [currentSong, handleNext, handlePrevious, isStemActive, playing]);
+  }, [
+    currentSong,
+    handleNext,
+    handlePrevious,
+    isStemActive,
+    isVideoPlayback,
+    playing,
+  ]);
 
   const toggleMute = () => {
     if (!isExpanded) {
@@ -669,10 +980,16 @@ export function AppPlayerBar() {
     >
       <audio
         ref={audioRef}
-        src={isMseActive ? undefined : currentSong?.playbackUrl || undefined}
+        src={
+          isMseActive || isVideoPlayback
+            ? undefined
+            : currentSong?.playbackUrl || undefined
+        }
         preload="metadata"
         onEnded={handleEnded}
-        onError={pause}
+        onError={() => {
+          if (!isVideoPlayback) pause();
+        }}
         onLoadedMetadata={handleLoadedMetadata}
         onSeeking={handleSeeking}
         onTimeUpdate={handleTimeUpdate}
@@ -683,6 +1000,8 @@ export function AppPlayerBar() {
           currentSong={currentSong}
           currentArtworkSrcSet={currentArtworkSrcSet}
           isPlaying={isPlaying}
+          isVideoPlayback={isVideoPlayback}
+          onOpenVideoPlayer={() => setVideoPlayerOpen(true)}
           onTogglePlayback={handleTogglePlayback}
           onNext={handleNext}
         />
@@ -715,6 +1034,8 @@ export function AppPlayerBar() {
           vocalVolume={vocalVolume}
           onSetVocalVolume={setVocalVolume}
           onPreviewVocalVolume={previewVocalVolume}
+          isVideoPlayback={isVideoPlayback}
+          onOpenVideoPlayer={() => setVideoPlayerOpen(true)}
         />
       )}
     </div>

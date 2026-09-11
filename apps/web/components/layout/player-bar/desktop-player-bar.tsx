@@ -53,6 +53,7 @@ import { ExplicitBadgeIcon } from "@/components/icons/explicit-badge-icon";
 import VolumeControl from "@/components/custom-elements/VolumeControl";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
+import { musicVideoRoute } from "@/lib/catalog/music-video-route";
 
 // The detail modal owns the Pixi lyrics scene. It is only needed after the
 // listener opens the expanded player, so keep it out of the desktop controls
@@ -85,10 +86,23 @@ function PlayerSongArtwork({ song }: { song: PlayerSong }) {
         role="presentation"
         sizes="40px"
         src="/assets/artwork/1x1.gif"
-        srcSet={song.thumbnailArtworkSrcSet ?? song.artworkSrcSet}
+        srcSet={
+          song.playbackKind === "video"
+            ? (song.video?.posterSrcSet ??
+              song.video?.poster ??
+              song.thumbnailArtworkSrcSet ??
+              song.artworkSrcSet)
+            : (song.thumbnailArtworkSrcSet ?? song.artworkSrcSet)
+        }
         style={{ opacity: 1 }}
         width={40}
       />
+      {song.playbackKind === "video" && (
+        <div
+          data-video-playbar-media="true"
+          className="absolute inset-0 z-[calc(var(--z-default)+1)]"
+        />
+      )}
     </div>
   );
 }
@@ -206,6 +220,8 @@ function SortableQueueSong({
             context={{
               kind: "song",
               songId: song.id,
+              releaseTrackId: song.releaseTrackId,
+              sourceAlbumId: song.albumId,
               title: song.title,
               userId,
               isFavorite,
@@ -246,6 +262,8 @@ type DesktopPlayerBarProps = {
   vocalVolume: number;
   onSetVocalVolume: (volume: number) => void;
   onPreviewVocalVolume: (volume: number) => void;
+  isVideoPlayback: boolean;
+  onOpenVideoPlayer: () => void;
 };
 
 export function DesktopPlayerBar({
@@ -276,6 +294,8 @@ export function DesktopPlayerBar({
   vocalVolume,
   onSetVocalVolume,
   onPreviewVocalVolume,
+  isVideoPlayback,
+  onOpenVideoPlayer,
 }: DesktopPlayerBarProps) {
   const userId = useAuthStore((state) => state.user?.userId);
   const favoriteSongIds = useFavoriteStore((state) => state.songIds);
@@ -361,8 +381,15 @@ export function DesktopPlayerBar({
       const nextSong = remainingSongs.find((song) => song.playbackUrl);
       const remainingSongIds = new Set(remainingSongs.map((song) => song.id));
 
+      // Starting a Station again creates a new shuffled queue. A previous
+      // "Up Next" song can still exist in that new queue, but it is no longer
+      // necessarily the next song, so never retain its visual row here.
+      if (queueChanged) {
+        setStationVisibleQueueIds(nextSong ? [nextSong.id] : []);
+        return;
+      }
+
       if (
-        !queueChanged &&
         previousIndex !== null &&
         currentIndex < previousIndex
       ) {
@@ -558,19 +585,25 @@ export function DesktopPlayerBar({
               {currentSong ? (
                 <>
                   <div
-                    className={`aspect-square rounded-md [grid-area:artwork] scale-100 transition-transform duration-150 ease-out hover:scale-110 ${isProgressExpanded ? "opacity-50" : ""}`}
+                    data-video-playbar-host={
+                      isVideoPlayback ? "true" : undefined
+                    }
+                    className={`${isVideoPlayback ? "aspect-video h-full" : "aspect-square"} rounded-md [grid-area:artwork] scale-100 transition-transform duration-150 ease-out hover:scale-110 ${isProgressExpanded ? "opacity-50" : ""}`}
                   >
                     <PlayerSongArtwork song={currentSong} />
 
                     <button
                       type="button"
-                      onClick={() => void openMusicPlayer()}
+                      onClick={() => {
+                        if (isVideoPlayback) onOpenVideoPlayer();
+                        else void openMusicPlayer();
+                      }}
                       className="bg-[rgba(51,51,51,0.3)] rounded-[inherit] text-white grid inset-0 opacity-0 place-items-center absolute transition-opacity duration-150 ease-out z-(--z-default) hover:opacity-100"
                     >
                       <ExpansionButton />
                     </button>
 
-                    {isOpenMusicPlayer && (
+                    {!isVideoPlayback && isOpenMusicPlayer && (
                       <MusicPlayDetail
                         audioRef={audioRef}
                         currentSong={currentSong}
@@ -638,6 +671,7 @@ export function DesktopPlayerBar({
                                       <FavoriteSongButton
                                         compact
                                         songId={currentSong.id}
+                                        sourceAlbumId={currentSong.albumId}
                                       />
                                     </div>
                                   </div>
@@ -704,13 +738,32 @@ export function DesktopPlayerBar({
                     <div className="[--contextMenuEllipsisFillOverride:var(--systemPrimary)] [--contextMenuButtonSize:32px] flex items-center gap-1 pe-1">
                       <AmpContextMenuButton
                         id={`song-${currentSong.id}`}
-                        context={{
-                          kind: "song",
-                          songId: currentSong.id,
-                          title: currentSong.title,
-                          userId,
-                          isFavorite: isCurrentSongFavorite,
-                        }}
+                        context={
+                          isVideoPlayback
+                            ? {
+                                kind: "video",
+                                videoId: currentSong.video?.id ?? currentSong.id,
+                                href: musicVideoRoute(
+                                  currentSong.title,
+                                  currentSong.video?.id ?? currentSong.id,
+                                ),
+                                songId: currentSong.id,
+                                releaseTrackId: currentSong.releaseTrackId,
+                                sourceAlbumId: currentSong.albumId,
+                                title: currentSong.title,
+                                userId,
+                                isFavorite: isCurrentSongFavorite,
+                              }
+                            : {
+                                kind: "song",
+                                songId: currentSong.id,
+                                releaseTrackId: currentSong.releaseTrackId,
+                                sourceAlbumId: currentSong.albumId,
+                                title: currentSong.title,
+                                userId,
+                                isFavorite: isCurrentSongFavorite,
+                              }
+                        }
                       />
                     </div>
                   </div>
@@ -726,6 +779,9 @@ export function DesktopPlayerBar({
                       <AmpPlaybackControlsProgress
                         audioRef={audioRef}
                         isProgressExpanded={isProgressExpanded}
+                        videoSource={
+                          isVideoPlayback ? currentSong.playbackUrl : undefined
+                        }
                       />
                     </div>
                   </div>
@@ -789,7 +845,12 @@ export function DesktopPlayerBar({
                         </div>
 
                         <AmpLyrics
-                          songId={currentSong?.id}
+                          // The drawer remains structurally unchanged, but a
+                          // Music Video must never use its linked Song id to
+                          // request lyrics.
+                          songId={
+                            isVideoPlayback ? undefined : currentSong?.id
+                          }
                           audioRef={audioRef}
                         />
                       </div>

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { LibraryResourceType } from "@/lib/library/library-resources.api";
 import type { SongSummary } from "@/lib/songs/song.types";
 
 export type SidebarNavigationItem = {
@@ -13,7 +14,7 @@ export type SidebarNavigationItem = {
   artworkSrcSet?: string;
   isExplicit?: boolean;
   playbackSong?: SongSummary;
-  resourceType?: "songs" | "albums" | "playlists";
+  resourceType?: LibraryResourceType;
   resourceId?: string;
   isUserPlaylist?: boolean;
 };

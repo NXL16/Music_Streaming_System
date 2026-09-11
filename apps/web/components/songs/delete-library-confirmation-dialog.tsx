@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { LibraryResourceInput } from "@/lib/library/library-resources.api";
 import { DELETE_LIBRARY_CONFIRMATION_EVENT } from "@/lib/library/delete-library-confirmation-dialog";
+import { consumeLibraryAlbumOrigin } from "@/lib/library/library-album-origin";
 import { LibraryDeleteConfirmationDialog } from "./library-delete-confirmation-dialog";
 import {
   confirmLibraryRemoval,
@@ -36,12 +37,23 @@ export function DeleteLibraryConfirmationDialog() {
 
     setSubmitting(true);
     try {
-      await confirmLibraryRemoval(resource);
+      const { removedEmptyAlbumId } = await confirmLibraryRemoval(resource);
       if (
         resource.sourceOrigin === "user-playlist" &&
         pathname === `/library/playlist/${encodeURIComponent(resource.resourceId)}`
       ) {
         router.replace("/home");
+      } else if (
+        (resource.resourceType === "albums" || removedEmptyAlbumId) &&
+        pathname ===
+          `/library/albums/${encodeURIComponent(
+            removedEmptyAlbumId ?? resource.resourceId,
+          )}`
+      ) {
+        router.replace(
+          consumeLibraryAlbumOrigin(removedEmptyAlbumId ?? resource.resourceId) ??
+            "/home",
+        );
       }
       setResource(null);
     } catch (error) {

@@ -4,6 +4,7 @@ export type CatalogReference = {
   href: string;
   meta?: {
     popularity?: number;
+    releaseTrackId?: string;
   };
 };
 
@@ -55,6 +56,19 @@ export type CatalogSongResource = {
     audioLocale: string;
     audioTraits: string[];
     composerName: string;
+    credits?: Array<{
+      artistId: string;
+      name: string;
+      url: string;
+      role: string;
+      position: number;
+      isPrimary: boolean;
+    }>;
+    contributorCredits?: Array<{
+      name: string;
+      role: string;
+      position: number;
+    }>;
     contentRating: string;
     discNumber: number;
     durationInMillis: number;
@@ -89,7 +103,7 @@ export type CatalogAlbumResource = {
     isCompilation: boolean;
     isComplete: boolean;
     isPrerelease: boolean;
-    isSingle: boolean;
+    releaseType: "album" | "ep" | "single";
     name: string;
     recordLabel: string;
     releaseDate: string;
@@ -144,6 +158,10 @@ export type CatalogArtistResource = {
     url: string;
     artwork?: CatalogArtwork;
     genreNames: string[];
+    origin?: string;
+    birthDate?: string;
+    biography?: string;
+    biographySourceUrl?: string;
     artworkAssetId?: string;
     editorialVideoAssetId?: string;
     editorialVideo?: {

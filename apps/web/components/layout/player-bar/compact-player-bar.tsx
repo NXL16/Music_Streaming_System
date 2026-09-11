@@ -9,16 +9,20 @@ type CompactPlayerBarProps = {
   currentSong: PlayerSong | null;
   currentArtworkSrcSet?: string;
   isPlaying: boolean;
+  isVideoPlayback: boolean;
   onTogglePlayback: () => void;
   onNext: () => void;
+  onOpenVideoPlayer: () => void;
 };
 
 export function CompactPlayerBar({
   currentSong,
   currentArtworkSrcSet,
   isPlaying,
+  isVideoPlayback,
   onTogglePlayback,
   onNext,
+  onOpenVideoPlayer,
 }: CompactPlayerBarProps) {
   const [isModalMounted, setIsModalMounted] = useState(false);
   const [isModalVisible, setIsModalVisible] = useState(false);
@@ -51,6 +55,10 @@ export function CompactPlayerBar({
   }, [isModalMounted]);
 
   const openModal = () => {
+    if (isVideoPlayback) {
+      onOpenVideoPlayer();
+      return;
+    }
     setIsModalVisible(false);
     setIsModalMounted(true);
   };
@@ -68,7 +76,12 @@ export function CompactPlayerBar({
               onClick={openModal}
               className="items-center bg-transparent flex gap-2 h-8 min-w-0 w-full cursor-pointer"
             >
-              <div className="[--override-placeholder-bg-color:var(--genericJoeColor)] [--artwork-override-height:32px] rounded-md shrink-0 aspect-[1_auto] h-[inherit]">
+              <div
+                data-video-playbar-host={
+                  isVideoPlayback ? "true" : undefined
+                }
+                className={`[--override-placeholder-bg-color:var(--genericJoeColor)] [--artwork-override-height:32px] rounded-md shrink-0 h-[inherit] ${isVideoPlayback ? "w-[57px]" : "aspect-[1_auto]"}`}
+              >
                 <div
                   className="bg-(--override-placeholder-bg-color,var(--placeholder-bg-color,var(--genericJoeColor))) rounded-[inherit] box-border contain-content h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0px) min-w-(--artwork-override-min-width,0px) overflow-hidden relative w-(--artwork-override-width,100%) z-(--z-default) before:box-border before:content-[''] before:block before:pb-[calc(100%/var(--shelf-aspect-ratio,var(--aspect-ratio)))] after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:h-0 after:max-h-full after:max-w-full after:min-w-full after:opacity-(--containerInnerStrokeAlpha,0.1) after:pointer-events-none after:top-0 after:w-full after:z-[calc(var(--z-default)+1)] after:box-border after:content-[''] after:block after:pb-[calc(100%/var(--shelf-aspect-ratio,var(--aspect-ratio)))] after:min-h-0 after:absolute after:dark:opacity-(--containerInnerStrokeAlpha,.25)"
                   style={
@@ -80,16 +93,24 @@ export function CompactPlayerBar({
                 >
                   <div className="rounded-[inherit] [transition:var(--global-transition,opacity_.1s_ease-in)] h-(--artwork-override-height,100%) left-1/2 max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0px) min-w-(--artwork-override-min-width,0px) absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-(--artwork-override-width,100%) z-(--z-default)">
                     {currentSong ? (
-                      <ResponsiveArtwork
-                        alt={currentSong.title}
-                        className="block size-full rounded-[inherit] object-cover"
-                        height={32}
-                        pictureClassName="block size-full"
-                        sizes="32px"
-                        src="/assets/artwork/1x1.gif"
-                        srcSet={currentArtworkSrcSet}
-                        width={32}
-                      />
+                      <>
+                        <ResponsiveArtwork
+                          alt={currentSong.title}
+                          className="block size-full rounded-[inherit] object-cover"
+                          height={32}
+                          pictureClassName="block size-full"
+                          sizes="32px"
+                          src="/assets/artwork/1x1.gif"
+                          srcSet={currentArtworkSrcSet}
+                          width={32}
+                        />
+                        {isVideoPlayback && (
+                          <div
+                            data-video-playbar-media="true"
+                            className="absolute inset-0 z-[calc(var(--z-default)+1)]"
+                          />
+                        )}
+                      </>
                     ) : (
                       <div className="bg-(--genericJoeColor) max-h-full max-w-full h-[inherit] w-[inherit]">
                         <svg

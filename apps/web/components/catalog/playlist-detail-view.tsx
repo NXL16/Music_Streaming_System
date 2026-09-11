@@ -1,12 +1,21 @@
 "use client";
 
-import { CSSProperties, type ReactNode, useState } from "react";
+import {
+  CSSProperties,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import { usePlayerStore, type PlayerSong } from "@/lib/player/use-player-store";
 import CardArtwork from "../media/common/card-artwork";
 import ResponsiveArtwork from "../media/common/responsive-artwork";
 import AmpContextMenuButton from "../custom-elements/AmpContextMenuButton";
 import { ArtistLinks } from "../media/artist-links";
+import { toTrackSources } from "@/lib/songs/track-sources";
 import { getArtworkRenditionUrl, getArtworkSrcSet } from "@/lib/media/artwork";
 import { PLAYLIST_ARTWORK_WIDTHS } from "@/lib/media/artwork-slots";
 import { formatDuration, formatSummaryDuration } from "@/lib/format/duration";
@@ -19,9 +28,18 @@ import { useAppScrollToTop } from "@/lib/layout/use-app-scroll-to-top";
 import { useTrackRowSelection } from "@/lib/player/use-track-row-selection";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
+import { usePlaylistFavoriteStore } from "@/lib/favorites/use-playlist-favorite-store";
 import { withPlaylistPlaybackSource } from "@/lib/player/playlist-playback-source";
 import { playbackIntentProps } from "@/lib/player/playback-intent";
 import { ExplicitBadgeIcon } from "../icons/explicit-badge-icon";
+import MediaShelf from "../media/media-shelf";
+import {
+  ShelfDetailLoading,
+  ShelfDetailView,
+} from "../media/shelf-detail-view";
+import { useAsyncResource } from "@/lib/api/use-async-resource";
+import { getCatalogResources } from "@/lib/catalog/catalog.api";
+import { mapCatalogArtists } from "@/lib/catalog/search.mapper";
 import {
   SONG_ROW_HEIGHT,
   SongTableSpacer,
@@ -55,10 +73,14 @@ export type GenericPlaylist = {
   sourcePlaylistHref?: string;
   /** Separates visual/playback identity from mutation permissions. */
   playlistKind?: "catalog" | "favorite" | "user";
+  /** Uses the Library presentation rules instead of the public playlist view. */
+  isLibraryView?: boolean;
   /** @deprecated Use playlistKind. Retained for existing callers. */
   isUserPlaylist?: boolean;
   tracks: GenericTrack[];
 };
+
+const FEATURED_ARTIST_SHELF_PREVIEW_LIMIT = 10;
 
 export default function PlaylistDetailView({
   playlist,
@@ -79,6 +101,12 @@ export default function PlaylistDetailView({
   const isUserPlaylist = playlistKind === "user";
   const userId = useAuthStore((state) => state.user?.userId);
   const favoriteSongIds = useFavoriteStore((state) => state.songIds);
+  const favoritePlaylistIds = usePlaylistFavoriteStore(
+    (state) => state.playlistIds,
+  );
+  const hydrateFavoritePlaylists = usePlaylistFavoriteStore(
+    (state) => state.hydrate,
+  );
   const setQueue = usePlayerStore((state) => state.setQueue);
   const playShuffledQueue = usePlayerStore((state) => state.playShuffledQueue);
   const currentSong = usePlayerStore((state) => state.currentSong);
@@ -87,7 +115,71 @@ export default function PlaylistDetailView({
   const maxWidth739 = useMediaQuery("(max-width: 739px)");
   const [songTableElement, setSongTableElement] =
     useState<HTMLDivElement | null>(null);
-  const [isPreparingPlayback, setIsPreparingPlayback] = useState(false);
+  const isPreparingPlaybackRef = useRef(false);
+  const [
+    selectedFeaturedArtistsPlaylistId,
+    setSelectedFeaturedArtistsPlaylistId,
+  ] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (userId) {
+      void hydrateFavoritePlaylists();
+    }
+  }, [hydrateFavoritePlaylists, userId]);
+
+  const isPlaylistFavoriteVisible =
+    Boolean(userId) && favoritePlaylistIds.has(playlist.id);
+  const isPublicPlaylist =
+    playlistKind === "catalog" && !playlist.isLibraryView;
+  const featuredArtistIds = useMemo(
+    () => [
+      ...new Set(
+        playlist.tracks.flatMap((track) =>
+          (track.artists ?? []).flatMap((artist) =>
+            artist.id ? [artist.id] : [],
+          ),
+        ),
+      ),
+    ],
+    [playlist.tracks],
+  );
+  const isShowingAllFeaturedArtists =
+    selectedFeaturedArtistsPlaylistId === playlist.id;
+  const featuredArtistResources = useMemo(
+    () =>
+      (isShowingAllFeaturedArtists
+        ? featuredArtistIds
+        : featuredArtistIds.slice(0, FEATURED_ARTIST_SHELF_PREVIEW_LIMIT + 1)
+      ).map((id) => ({ id, type: "artists" })),
+    [featuredArtistIds, isShowingAllFeaturedArtists],
+  );
+  const featuredArtistRequestKey = useMemo(
+    () =>
+      `${playlist.id}:${isShowingAllFeaturedArtists ? "all" : "preview"}:${featuredArtistResources
+        .map((artist) => artist.id)
+        .join(",")}`,
+    [featuredArtistResources, isShowingAllFeaturedArtists, playlist.id],
+  );
+  const loadFeaturedArtists = useCallback(
+    async () => ({
+      key: featuredArtistRequestKey,
+      catalog: await getCatalogResources(featuredArtistResources),
+    }),
+    [featuredArtistRequestKey, featuredArtistResources],
+  );
+  const { data: featuredArtistResponse, loading: featuredArtistsLoading } =
+    useAsyncResource(loadFeaturedArtists, "Couldn't load featured artists.", {
+      enabled: isPublicPlaylist && featuredArtistResources.length > 0,
+    });
+  const featuredArtistsCatalog =
+    featuredArtistResponse?.key === featuredArtistRequestKey
+      ? featuredArtistResponse.catalog
+      : null;
+  const featuredArtistCards = useMemo(
+    () =>
+      featuredArtistsCatalog ? mapCatalogArtists(featuredArtistsCatalog) : [],
+    [featuredArtistsCatalog],
+  );
   const {
     activateTrack,
     activeTrackId,
@@ -134,9 +226,9 @@ export default function PlaylistDetailView({
     0,
   );
   const startPlaylistPlayback = async (trackId?: string, shuffle = false) => {
-    if (isPreparingPlayback) return;
+    if (isPreparingPlaybackRef.current) return;
 
-    setIsPreparingPlayback(true);
+    isPreparingPlaybackRef.current = true;
     try {
       const tracks = resolvePlaybackTracks
         ? await resolvePlaybackTracks()
@@ -170,9 +262,22 @@ export default function PlaylistDetailView({
     } catch {
       // Keep the current queue intact when a background playback-page load fails.
     } finally {
-      setIsPreparingPlayback(false);
+      isPreparingPlaybackRef.current = false;
     }
   };
+
+  if (isShowingAllFeaturedArtists) {
+    if (featuredArtistsLoading || !featuredArtistsCatalog) {
+      return <ShelfDetailLoading />;
+    }
+
+    return (
+      <ShelfDetailView
+        shelf={{ title: "Featured Artists", items: featuredArtistCards }}
+        onBack={() => setSelectedFeaturedArtistsPlaylistId(null)}
+      />
+    );
+  }
 
   return (
     <>
@@ -238,13 +343,32 @@ export default function PlaylistDetailView({
                 <div className="empty:hidden text-(--systemSecondary) [font:var(--subhead-emphasized)] mt-2.25"></div>
                 <h1 className="text-(--systemPrimary) cursor-text [font:var(--large-title-emphasized-short)] mb-[0.5px] wrap-break-word [text-align:var(--containerDetailHeaderAlign,center)] text-balance select-text line-clamp-2 min-[1000px]:[text-align:unset] max-[999px]:[font:var(--title-1-emphasized)] max-[999px]:mb-1">
                   <span dir="auto">{playlist.title}</span>
+                  <span className="inline-flex items-center gap-1 ms-1 [--explicitBadgeSize:19px] [--favoriteBadgeSize:14px] [--favoriteBadgeMarginInlineStart:1px] has-[.explicit-wrapper]:ms-[6.5px] max-[999px]:[--explicitBadgeSize:16px]">
+                    {isPlaylistFavoriteVisible && (
+                      <span className="ms-(--favoriteBadgeMarginInlineStart,2px)">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 64 64"
+                          width="64"
+                          height="64"
+                          className="inline-block fill-(--favoriteBadgeColor,var(--keyColor)) size-(--favoriteBadgeSize,9px) align-[2px]"
+                        >
+                          <path d="M13.559 60.051c1.102.86 2.5.565 4.166-.645l14.218-10.455L46.19 59.406c1.666 1.21 3.037 1.505 4.166.645 1.102-.833 1.344-2.204.672-4.166l-5.618-16.718 14.353-10.32c1.666-1.183 2.338-2.42 1.908-3.764-.43-1.29-1.693-1.935-3.763-1.908l-17.605.108-5.348-16.8C34.308 4.496 33.34 3.5 31.944 3.5c-1.372 0-2.34.995-2.984 2.984L23.61 23.283l-17.605-.108c-2.07-.027-3.333.618-3.763 1.908-.457 1.344.242 2.58 1.909 3.763l14.352 10.321-5.617 16.718c-.672 1.962-.43 3.333.672 4.166Z"></path>
+                        </svg>
+                      </span>
+                    )}
+                  </span>
                 </h1>
+
                 <div className="[--linkColor:var(--keyColor)] text-(--keyColor) [font:var(--large-title-short)] -m-1.25 overflow-hidden p-1.25 [text-align:var(--containerDetailHeaderAlign,center)] text-ellipsis whitespace-nowrap w-full min-[1000px]:[text-align:unset] max-[999px]:[font:var(--title-1)] max-[999px]:text-[20px]!">
                   {playlist.curatorName}
                 </div>
-                <div className="text-(--systemSecondary) [font:var(--callout-emphasized)] mt-1 text-center">
-                  Updated Today
-                </div>
+
+                {!playlist.isLibraryView && (
+                  <div className="text-(--systemSecondary) [font:var(--callout-emphasized)] mt-1 text-center">
+                    Updated Today
+                  </div>
+                )}
               </div>
 
               {playlist.description && (
@@ -260,7 +384,7 @@ export default function PlaylistDetailView({
                   <div className="w-full">
                     <button
                       type="button"
-                      disabled={!hasPlayableTrack || isPreparingPlayback}
+                      disabled={!hasPlayableTrack}
                       onClick={() => void startPlaylistPlayback()}
                       className="[--button-action-min-width:130px] [--button-action-height:36px] bg-(--button-pill-background-color,#000) rounded-(--button-action-border-radius,24px) text-(--button-pill-color,#fff) [font:var(--title-3-semibold)] px-3 items-center flex h-(--button-action-height,36px) justify-center min-w-(--button-action-min-width-override,var(--button-action-min-width,none)) w-(--button-action-width,100%) disabled:opacity-50 pointer-coarse:[--button-action-height:48px] pointer-coarse:[--button-action-min-width:160px] pointer-coarse:[font:var(--title-2-semibold)]"
                     >
@@ -282,7 +406,7 @@ export default function PlaylistDetailView({
                 <div className="order-1">
                   <div className="w-full">
                     <button
-                      disabled={playableTrackCount < 2 || isPreparingPlayback}
+                      disabled={playableTrackCount < 2}
                       onClick={() =>
                         void startPlaylistPlayback(undefined, true)
                       }
@@ -320,6 +444,7 @@ export default function PlaylistDetailView({
                         playlistKind === "user" ? "user-playlist" : "catalog"
                       }
                       songIds={playlist.tracks.map((track) => track.id)}
+                      trackSources={toTrackSources(playlist.tracks)}
                     />
                   </div>
                 </div>
@@ -365,6 +490,7 @@ export default function PlaylistDetailView({
                               artworkUrl: artworkImageUrl,
                               href: playlist.sourcePlaylistHref,
                               songIds: playlist.tracks.map((track) => track.id),
+                              trackSources: toTrackSources(playlist.tracks),
                               userId,
                               inLibrary: false,
                             }
@@ -382,6 +508,7 @@ export default function PlaylistDetailView({
                                 songIds: playlist.tracks.map(
                                   (track) => track.id,
                                 ),
+                                trackSources: toTrackSources(playlist.tracks),
                                 userId,
                                 inLibrary: true,
                               }
@@ -398,6 +525,7 @@ export default function PlaylistDetailView({
                                 songIds: playlist.tracks.map(
                                   (track) => track.id,
                                 ),
+                                trackSources: toTrackSources(playlist.tracks),
                                 userId,
                                 inLibrary: false,
                               }
@@ -411,316 +539,365 @@ export default function PlaylistDetailView({
         </div>
       </div>
 
-      <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) [--songs-list-row-border-radius:12px] relative z-(--z-default) pt-0">
-        <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
-          <div
-            ref={(node) => {
-              listRef.current = node;
-              setSongTableElement(node);
-            }}
-            className="[--linkColor:var(--systemSecondary)] border-collapse border-spacing-0 table [font:var(--callout)] table-fixed w-[calc(100%-var(--bodyGutter)*2)] ms-(--bodyGutter) me-(--bodyGutter)"
-          >
-            <div className="text-(--systemSecondary) table-row [font:var(--callout-emphasized)] relative max-[999px]:[clip:rect(1px,1px,1px,1px)] max-[999px]:border-0 max-[999px]:[clip-path:inset(0_0_99.9%_99.9%)] max-[999px]:h-px max-[999px]:overflow-hidden max-[999px]:p-0 max-[999px]:static max-[999px]:w-px">
-              <div className="table-cell pt-0 align-middle inset-s-1.75 overflow-visible w-0 relative z-(--z-default) rounded-none [font:var(--callout-emphasized)] h-8 pb-1.5 max-[999px]:h-0 max-[999px]:leading-0 max-[999px]:p-0">
-                <div className="overflow-hidden text-ellipsis whitespace-nowrap max-[999px]:h-0 max-[999px]:leading-0 max-[999px]:p-0"></div>
-              </div>
+      {playlist.tracks.length > 0 ? (
+        <>
+          <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) [--songs-list-row-border-radius:12px] relative z-(--z-default) pt-0">
+            <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
+              <div
+                ref={(node) => {
+                  listRef.current = node;
+                  setSongTableElement(node);
+                }}
+                className="[--linkColor:var(--systemSecondary)] border-collapse border-spacing-0 table [font:var(--callout)] table-fixed w-[calc(100%-var(--bodyGutter)*2)] ms-(--bodyGutter) me-(--bodyGutter)"
+              >
+                <div className="text-(--systemSecondary) table-row [font:var(--callout-emphasized)] relative max-[999px]:[clip:rect(1px,1px,1px,1px)] max-[999px]:border-0 max-[999px]:[clip-path:inset(0_0_99.9%_99.9%)] max-[999px]:h-px max-[999px]:overflow-hidden max-[999px]:p-0 max-[999px]:static max-[999px]:w-px">
+                  <div className="table-cell pt-0 align-middle inset-s-1.75 overflow-visible w-0 relative z-(--z-default) rounded-none [font:var(--callout-emphasized)] h-8 pb-1.5 max-[999px]:h-0 max-[999px]:leading-0 max-[999px]:p-0">
+                    <div className="overflow-hidden text-ellipsis whitespace-nowrap max-[999px]:h-0 max-[999px]:leading-0 max-[999px]:p-0"></div>
+                  </div>
 
-              <div className="table-cell pt-0 [overflow:unset] align-middle pe-0 relative z-(--z-default) rounded-none [font:var(--callout-emphasized)] h-8 pb-1.5 rounded-ee-none rounded-es-(--songs-list-row-border-radius,6px) rounded-se-none rounded-ss-(--songs-list-row-border-radius,6px) ps-1.75 min-[1000px]:w-[50%] min-[1260px]:w-[42%] max-[999px]:h-0 max-[999px]:leading-0 max-[999px]:p-0">
-                <div className="overflow-hidden text-ellipsis whitespace-nowrap max-[999px]:h-0 max-[999px]:leading-0 max-[999px]:p-0">
-                  Song
+                  <div className="table-cell pt-0 [overflow:unset] align-middle pe-0 relative z-(--z-default) rounded-none [font:var(--callout-emphasized)] h-8 pb-1.5 rounded-ee-none rounded-es-(--songs-list-row-border-radius,6px) rounded-se-none rounded-ss-(--songs-list-row-border-radius,6px) ps-1.75 min-[1000px]:w-[50%] min-[1260px]:w-[42%] max-[999px]:h-0 max-[999px]:leading-0 max-[999px]:p-0">
+                    <div className="overflow-hidden text-ellipsis whitespace-nowrap max-[999px]:h-0 max-[999px]:leading-0 max-[999px]:p-0">
+                      Song
+                    </div>
+                  </div>
+
+                  <div className="hidden pt-0 align-middle pe-2.5 relative z-(--z-default) rounded-none [font:var(--callout-emphasized)] h-8 pb-1.5 min-[1000px]:table-cell min-[1260px]:w-[29%] before:bg-(--systemQuaternary) before:rounded-[.5px] before:content-[''] before:inline-block before:h-4 before:-inset-s-3.75 before:absolute before:top-[calc(50%-3px)] before:translate-y-[-50%] before:w-px max-[999px]:h-0 max-[999px]:leading-0 max-[999px]:p-0">
+                    <div className="overflow-hidden text-ellipsis whitespace-nowrap max-[999px]:h-0 max-[999px]:leading-0 max-[999px]:p-0">
+                      Artist
+                    </div>
+                  </div>
+
+                  <div className="pt-0 align-middle pe-4 hidden relative z-(--z-default) rounded-none [font:var(--callout-emphasized)] h-8 pb-1.5 min-[1260px]:table-cell min-[1260px]:w-[29%] before:bg-(--systemQuaternary) before:rounded-[.5px] before:content-[''] before:inline-block before:h-4 before:-inset-s-3.75 before:absolute before:top-[calc(50%-3px)] before:translate-y-[-50%] before:w-px max-[999px]:h-0 max-[999px]:leading-0 max-[999px]:p-0">
+                    <div className="overflow-hidden text-ellipsis whitespace-nowrap max-[999px]:h-0 max-[999px]:leading-0 max-[999px]:p-0">
+                      Album
+                    </div>
+                  </div>
+
+                  <div className="w-35.25 table-cell pt-0 align-middle overflow-visible text-end relative z-(--z-default) rounded-none [font:var(--callout-emphasized)] h-8 pb-1.5 rounded-ee-(--songs-list-row-border-radius,6px) rounded-es-none rounded-se-(--songs-list-row-border-radius,6px) rounded-ss-none pe-4.5 max-[999px]:h-0 max-[999px]:leading-0 max-[999px]:p-0 max-[578px]:w-12!">
+                    <div className="relative z-(--z-default) overflow-hidden text-ellipsis whitespace-nowrap inline-block pb-0.75 pt-0.75 ps-3.75 pe-8.75 before:bg-(--systemQuaternary) before:rounded-[.5px] before:content-[''] before:inline-block before:h-4 before:absolute before:translate-y-[-50%] before:w-px before:inset-s-0 before:top-3 max-[999px]:h-0 max-[999px]:leading-0 max-[999px]:p-0">
+                      Time
+                    </div>
+                  </div>
                 </div>
-              </div>
 
-              <div className="hidden pt-0 align-middle pe-2.5 relative z-(--z-default) rounded-none [font:var(--callout-emphasized)] h-8 pb-1.5 min-[1000px]:table-cell min-[1260px]:w-[29%] before:bg-(--systemQuaternary) before:rounded-[.5px] before:content-[''] before:inline-block before:h-4 before:-inset-s-3.75 before:absolute before:top-[calc(50%-3px)] before:translate-y-[-50%] before:w-px max-[999px]:h-0 max-[999px]:leading-0 max-[999px]:p-0">
-                <div className="overflow-hidden text-ellipsis whitespace-nowrap max-[999px]:h-0 max-[999px]:leading-0 max-[999px]:p-0">
-                  Artist
-                </div>
-              </div>
+                <SongTableSpacer
+                  height={visibleSongRange.start * SONG_ROW_HEIGHT}
+                />
 
-              <div className="pt-0 align-middle pe-4 hidden relative z-(--z-default) rounded-none [font:var(--callout-emphasized)] h-8 pb-1.5 min-[1260px]:table-cell min-[1260px]:w-[29%] before:bg-(--systemQuaternary) before:rounded-[.5px] before:content-[''] before:inline-block before:h-4 before:-inset-s-3.75 before:absolute before:top-[calc(50%-3px)] before:translate-y-[-50%] before:w-px max-[999px]:h-0 max-[999px]:leading-0 max-[999px]:p-0">
-                <div className="overflow-hidden text-ellipsis whitespace-nowrap max-[999px]:h-0 max-[999px]:leading-0 max-[999px]:p-0">
-                  Album
-                </div>
-              </div>
+                {visibleTracks.map((track) => {
+                  const isCurrentTrack = currentSong?.id === track.id;
+                  const isTrackPlaying = isCurrentTrack && playing;
 
-              <div className="w-35.25 table-cell pt-0 align-middle overflow-visible text-end relative z-(--z-default) rounded-none [font:var(--callout-emphasized)] h-8 pb-1.5 rounded-ee-(--songs-list-row-border-radius,6px) rounded-es-none rounded-se-(--songs-list-row-border-radius,6px) rounded-ss-none pe-4.5 max-[999px]:h-0 max-[999px]:leading-0 max-[999px]:p-0 max-[578px]:w-12!">
-                <div className="relative z-(--z-default) overflow-hidden text-ellipsis whitespace-nowrap inline-block pb-0.75 pt-0.75 ps-3.75 pe-8.75 before:bg-(--systemQuaternary) before:rounded-[.5px] before:content-[''] before:inline-block before:h-4 before:absolute before:translate-y-[-50%] before:w-px before:inset-s-0 before:top-3 max-[999px]:h-0 max-[999px]:leading-0 max-[999px]:p-0">
-                  Time
+                  return (
+                    <div
+                      key={track.id}
+                      onClick={() => selectTrack(track.id)}
+                      className={`group ${selectedTrackId === track.id ? "selected" : ""} text-(--systemSecondary) table-row relative z-(--z-default) [--platterBorderColor:var(--pageBG)] bg-(--rowBackgroundColor,transparent) h-13.5 hover:[--playButtonOpacity:1] hover:[--addToLibraryOpacity:1] last:[&>div]:after:[border-bottom:.5px_solid_var(--labelDivider)] last:[&>div]:after:h-full last:[&>div]:after:pointer-events-none ${
+                        selectedTrackId === track.id
+                          ? "[--rowBackgroundColor:var(--selectionColor)] [--platterBorderColor:var(--selectionColor)] [outline:0] [--linkColor:#fff] [--explicitFillOverride:#fff] [--contextMenuEllipsisFillOverride:#fff] [--addToLibraryFillOverride:#fff] text-white [&>div]:after:opacity-0 [&+_.group>div]:after:border-t-transparent"
+                          : "hover:[--rowBackgroundColor:var(--tracklistHoverColor)] hover:[--platterBorderColor:#f0f0f0] hover:[&+_.group>div]:after:border-t-transparent"
+                      }`}
+                    >
+                      <div className="table-cell [font:var(--body)] pb-0 pt-0 align-middle h-[inherit] inset-s-1.75 overflow-visible relative z-(--z-default) after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
+                        <div className="grid [grid-template-areas:'favorite-or-popular'] h-full -inset-s-8.25 p-0 place-items-center absolute top-1/2 transform-[translateY(-50%)] w-6.5 z-(--z-default)">
+                          <div className="[grid-area:favorite-or-popular] leading-0 place-self-stretch">
+                            <FavoriteSongButton
+                              ariaLabel="Favourite"
+                              className={`group-hover:[--favoriteIconStarOutline:var(--favoriteButtonStarOutline-hover,var(--keyColor))] ${
+                                activeTrackId === track.id
+                                  ? "[--favoriteIconStarOutlineOverride:var(--favoriteButtonStarOutline-hover,var(--keyColor))]"
+                                  : ""
+                              }`}
+                              onClick={(event) => event.stopPropagation()}
+                              songId={track.id}
+                              sourceAlbumId={track.albumId}
+                              title="Tells us more about the kind of music you like."
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="table-cell [font:var(--body)] pb-0 pt-0 align-middle ps-0 pe-0 text-(--systemPrimary) relative rounded-ee-none rounded-es-(--songs-list-row-border-radius,6px) rounded-se-none rounded-ss-(--songs-list-row-border-radius,6px) overflow-hidden text-ellipsis whitespace-nowrap after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
+                        <div className="items-center grid [grid-template-areas:'song-artwork_song-rank_song-icon_song-name'] grid-cols-[auto_auto_auto_1fr] min-h-11.5 ps-1.75">
+                          <div
+                            className={`text-(--systemSecondary) grid relative me-3 ${
+                              isCurrentTrack ? "[--playButtonOpacity:1]" : ""
+                            }`}
+                          >
+                            <div className="grid [grid-area:song-artwork] [grid-template-areas:'song-index']">
+                              <div className="rounded-[5px] [grid-area:song-index] [--songsListArtworkHeight:40px] h-10">
+                                <div
+                                  className="bg-(--override-placeholder-bg-color,var(--placeholder-bg-color,var(--genericJoeColor))) rounded-[inherit] box-border contain-content h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0) min-w-(--artwork-override-min-width,0) overflow-hidden relative w-(--artwork-override-width,100%) z-(--z-default) [--artwork-override-width:calc(var(--songsListArtworkHeight)*var(--aspect-ratio))] [--artwork-override-height:var(--songsListArtworkHeight)] after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:content-[''] after:block after:h-0 after:max-h-full after:max-w-full after:min-h-full after:min-w-full after:opacity-(--containerInnerStrokeAlpha,.25) after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)]"
+                                  style={
+                                    {
+                                      "--artwork-bg-color": "#0b0809",
+                                      "--aspect-ratio": "1",
+                                      "--placeholder-bg-color": "transparent",
+                                    } as CSSProperties
+                                  }
+                                >
+                                  <ResponsiveArtwork
+                                    alt=""
+                                    className="rounded-[inherit] [transition:var(--global-transition,opacity_.1s_ease-in)] block h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0) min-w-(--artwork-override-min-width,0) [object-fit:var(--artwork-override-object-fit,fill)] object-(--artwork-override-object-position,center) w-(--artwork-override-width,100%)"
+                                    height={40}
+                                    sizes="40px"
+                                    src="/assets/artwork/1x1.gif"
+                                    srcSet={
+                                      track.thumbnailArtworkSrcSet ??
+                                      track.artworkSrcSet
+                                    }
+                                    style={{ opacity: 1 }}
+                                    width={40}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="[grid-area:song-index] opacity-(--playButtonOpacity,0) [--playButtonIconHoverColor:#fff] items-center bg-[rgba(0,0,0,.45)] rounded-[5px] flex size-full inset-s-0 justify-center absolute top-0 z-(--transgray-scrim-z,var(--z-default))">
+                              <div className="[--nonPlatterIconFill:var(--nonPlatterOverrideIconColor,var(--keyColor))] h-full align-top w-full">
+                                <button
+                                  disabled={!track.playbackUrl}
+                                  {...playbackIntentProps(track)}
+                                  onClick={(event) => {
+                                    if (selectedTrackId !== null) {
+                                      activateTrack(track.id);
+                                      event.stopPropagation();
+                                    }
+
+                                    if (isCurrentTrack) {
+                                      togglePlayback();
+                                    } else {
+                                      void startPlaylistPlayback(track.id);
+                                    }
+                                  }}
+                                  className="[--nonPlatterIconFill:var(--playButtonIconColor,#fff)] [--playingBarColor:var(--nonPlatterIconFill,#fff)] leading-0 pointer-events-auto relative z-(--z-default) h-full align-top w-full"
+                                >
+                                  {isCurrentTrack ? (
+                                    <div className="bottom-0 inset-x-0 m-auto absolute top-0 z-1 h-3.75 pointer-events-none w-full">
+                                      <PlaybackWaveform
+                                        isPlaying={isTrackPlaying}
+                                        seed={track.id}
+                                      />
+
+                                      <div className="bottom-0 inset-x-0 m-auto opacity-0 absolute top-0 z-1 group-hover:opacity-100">
+                                        {isTrackPlaying ? (
+                                          <svg
+                                            width="16"
+                                            height="16"
+                                            viewBox="0 0 16 16"
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            className="inline-block align-bottom"
+                                            aria-hidden="true"
+                                          >
+                                            <path
+                                              fill="var(--nonPlatterIconFill, var(--keyColor, black))"
+                                              d="M9.918.464h2.672a.89.89 0 0 1 .89.89v13.291a.89.89 0 0 1-.89.891H9.918a.89.89 0 0 1-.89-.89V1.354a.89.89 0 0 1 .89-.891zm-6.371 0h2.398c.567 0 1.027.46 1.027 1.028v13.016c0 .568-.46 1.028-1.027 1.028H3.547c-.567 0-1.028-.46-1.028-1.028V1.492c0-.568.46-1.028 1.028-1.028z"
+                                            ></path>
+                                          </svg>
+                                        ) : (
+                                          <svg
+                                            width="16"
+                                            height="16"
+                                            viewBox="0 0 16 16"
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            className="inline-block align-bottom"
+                                            aria-hidden="true"
+                                          >
+                                            <path
+                                              fill="var(--nonPlatterIconFill, var(--keyColor, black))"
+                                              d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"
+                                            ></path>
+                                          </svg>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <svg
+                                      width="16"
+                                      height="16"
+                                      viewBox="0 0 16 16"
+                                      xmlns="http://www.w3.org/2000/svg"
+                                      className="pointer-events-none inline-block h-(--playButtonSize,16px) w-(--playButtonSize,16px) align-bottom"
+                                      aria-hidden="true"
+                                    >
+                                      <path
+                                        fill="var(--nonPlatterIconFill, var(--keyColor, black))"
+                                        d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"
+                                      ></path>
+                                    </svg>
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="items-center inline-flex [grid-area:song-name] leading-4 overflow-hidden w-full -my-1 -mx-1 py-1 px-1">
+                            <div className="block cursor-default flex-1 overflow-hidden ps-1 pe-1 -me-1 pb-1 pt-1 -ms-1 -mb-1 -mt-1 text-left">
+                              {track.url ? (
+                                <Link
+                                  href={track.url}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                  }}
+                                  className="overflow-hidden [--linkColor:var(--systemPrimary)] hover:underline"
+                                >
+                                  <div className="overflow-hidden text-ellipsis inline text-pretty whitespace-normal text-left">
+                                    {track.title}
+                                  </div>
+                                </Link>
+                              ) : (
+                                <div className="overflow-hidden text-ellipsis inline text-pretty whitespace-normal text-left">
+                                  {track.title}
+                                </div>
+                              )}
+
+                              {track.contentRating === "explicit" && (
+                                <span
+                                  className="ms-1 [--explicitBadgeSize:10px] relative top-[0.7px]"
+                                  aria-label="Explicit"
+                                >
+                                  <ExplicitBadgeIcon />
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="hidden [font:var(--body)] pb-0 pt-0 align-middle pe-2.5 relative overflow-hidden text-ellipsis whitespace-nowrap min-[1000px]:table-cell after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
+                        <div className="overflow-hidden text-ellipsis whitespace-nowrap -mb-1 -mt-1 -ms-1 -me-1 pb-1 pt-1 pe-1 ps-1 text-left">
+                          <ArtistLinks
+                            artists={track.artists}
+                            fallbackText={track.artist}
+                            linkClassName="overflow-hidden text-ellipsis whitespace-nowrap text-left"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="hidden [font:var(--body)] pb-0 pt-0 align-middle pe-4 relative overflow-hidden text-ellipsis whitespace-nowrap min-[1260px]:table-cell after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
+                        <div className="overflow-hidden text-ellipsis whitespace-nowrap -mb-1 -mt-1 -ms-1 -me-1 pb-1 pt-1 pe-1 ps-1 text-left">
+                          <span className="overflow-hidden text-ellipsis whitespace-nowrap text-left">
+                            {track.albumUrl ? (
+                              <Link
+                                href={track.albumUrl}
+                                onClick={(e) => e.stopPropagation()}
+                                className="hover:underline"
+                              >
+                                {track.album}
+                              </Link>
+                            ) : (
+                              track.album
+                            )}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="table-cell [font:var(--body)] pb-0 pt-0 align-middle overflow-visible relative text-end z-(--z-default) rounded-ee-(--songs-list-row-border-radius,6px) rounded-es-none rounded-se-(--songs-list-row-border-radius,6px) rounded-ss-none pe-4.5 after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
+                        <div className="items-center inline-grid [grid-template-areas:'song-controls-add_song-controls-length_song-controls-context'] relative">
+                          {!playlist.isLibraryView && (
+                            <div className="pointer-coarse:hidden max-[578px]:hidden [grid-area:song-controls-add] opacity-(--addToLibraryOpacity,0) me-1.75">
+                              <AddSongToLibraryButton
+                                songId={track.id}
+                                title={track.title}
+                                artist={track.artist}
+                                artworkUrl={track.artworkUrl}
+                                sourceAlbumId={track.albumId}
+                              />
+                            </div>
+                          )}
+
+                          <time
+                            className="max-[578px]:hidden [grid-area:song-controls-length] cursor-default inline-block leading-9.5 font-features-['tnum'] tabular-nums"
+                            dateTime="PT1M27S"
+                          >
+                            {formatDuration(track.durationSec)}
+                          </time>
+
+                          <div
+                            className={`[grid-area:song-controls-context] ms-1.75 [--contextMenuButtonSize:28px] ${selectedTrackId === track.id ? "[--contextMenuEllipsisFillOverride:#fff]" : "[--contextMenuEllipsisFillOverride:var(--systemSecondary)] hover:[--contextMenuEllipsisFillOverride:var(--keyColor)]"}`}
+                          >
+                            <AmpContextMenuButton
+                              id={`song-${track.id}`}
+                              context={{
+                                kind: "song",
+                                songId: track.id,
+                                releaseTrackId: track.releaseTrackId,
+                                sourceAlbumId: track.albumId,
+                                title: track.title,
+                                userId,
+                                isFavorite: favoriteSongIds.has(track.id),
+                                playlistId: isUserPlaylist
+                                  ? playlist.id
+                                  : undefined,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                <SongTableSpacer
+                  height={
+                    (playlist.tracks.length - visibleSongRange.end) *
+                    SONG_ROW_HEIGHT
+                  }
+                />
+              </div>
+            </div>
+          </div>
+
+          {afterTracks}
+
+          {showMetadata && (
+            <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) pt-3 [--songs-list-row-border-radius:12px] relative z-(--z-default)">
+              <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
+                <div className="m-[0_var(--bodyGutter)] pb-10.75 ps-3 -mt-3 min-[1000px]:flex min-[1000px]:flex-row min-[1000px]:justify-between min-[1000px]:pb-13.25">
+                  <div className="text-(--systemSecondary) max-w-110 relative [font:var(--body-tall)] mt-11 min-[1260px]:max-w-135 min-[1000px]:mt-8.5">
+                    <p className="whitespace-pre-wrap">{`${playlist.curatorName}\n${playlist.tracks.length} songs, ${formatSummaryDuration(totalDurationSec)}`}</p>
+                  </div>
                 </div>
               </div>
             </div>
+          )}
 
-            <SongTableSpacer
-              height={visibleSongRange.start * SONG_ROW_HEIGHT}
-            />
-
-            {visibleTracks.map((track) => {
-              const isCurrentTrack = currentSong?.id === track.id;
-              const isTrackPlaying = isCurrentTrack && playing;
-
-              return (
-                <div
-                  key={track.id}
-                  onClick={() => selectTrack(track.id)}
-                  className={`group ${selectedTrackId === track.id ? "selected" : ""} text-(--systemSecondary) table-row relative z-(--z-default) [--platterBorderColor:var(--pageBG)] bg-(--rowBackgroundColor,transparent) h-13.5 hover:[--playButtonOpacity:1] hover:[--addToLibraryOpacity:1] last:[&>div]:after:[border-bottom:.5px_solid_var(--labelDivider)] last:[&>div]:after:h-full last:[&>div]:after:pointer-events-none ${
-                    selectedTrackId === track.id
-                      ? "[--rowBackgroundColor:var(--selectionColor)] [--platterBorderColor:var(--selectionColor)] [outline:0] [--linkColor:#fff] [--explicitFillOverride:#fff] [--contextMenuEllipsisFillOverride:#fff] [--addToLibraryFillOverride:#fff] text-white [&>div]:after:opacity-0 [&+_.group>div]:after:border-t-transparent"
-                      : "hover:[--rowBackgroundColor:var(--tracklistHoverColor)] hover:[--platterBorderColor:#f0f0f0] hover:[&+_.group>div]:after:border-t-transparent"
-                  }`}
-                >
-                  <div className="table-cell [font:var(--body)] pb-0 pt-0 align-middle h-[inherit] inset-s-1.75 overflow-visible relative z-(--z-default) after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
-                    <div className="grid [grid-template-areas:'favorite-or-popular'] h-full -inset-s-8.25 p-0 place-items-center absolute top-1/2 transform-[translateY(-50%)] w-6.5 z-(--z-default)">
-                      <div className="[grid-area:favorite-or-popular] leading-0 place-self-stretch">
-                        <FavoriteSongButton
-                          ariaLabel="Favourite"
-                          className={`group-hover:[--favoriteIconStarOutline:var(--favoriteButtonStarOutline-hover,var(--keyColor))] ${
-                            activeTrackId === track.id
-                              ? "[--favoriteIconStarOutlineOverride:var(--favoriteButtonStarOutline-hover,var(--keyColor))]"
-                              : ""
-                          }`}
-                          onClick={(event) => event.stopPropagation()}
-                          songId={track.id}
-                          title="Tells us more about the kind of music you like."
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="table-cell [font:var(--body)] pb-0 pt-0 align-middle ps-0 pe-0 text-(--systemPrimary) relative rounded-ee-none rounded-es-(--songs-list-row-border-radius,6px) rounded-se-none rounded-ss-(--songs-list-row-border-radius,6px) overflow-hidden text-ellipsis whitespace-nowrap after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
-                    <div className="items-center grid [grid-template-areas:'song-artwork_song-rank_song-icon_song-name'] grid-cols-[auto_auto_auto_1fr] min-h-11.5 ps-1.75">
-                      <div
-                        className={`text-(--systemSecondary) grid relative me-3 ${
-                          isCurrentTrack ? "[--playButtonOpacity:1]" : ""
-                        }`}
-                      >
-                        <div className="grid [grid-area:song-artwork] [grid-template-areas:'song-index']">
-                          <div className="rounded-[5px] [grid-area:song-index] [--songsListArtworkHeight:40px] h-10">
-                            <div
-                              className="bg-(--override-placeholder-bg-color,var(--placeholder-bg-color,var(--genericJoeColor))) rounded-[inherit] box-border contain-content h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0) min-w-(--artwork-override-min-width,0) overflow-hidden relative w-(--artwork-override-width,100%) z-(--z-default) [--artwork-override-width:calc(var(--songsListArtworkHeight)*var(--aspect-ratio))] [--artwork-override-height:var(--songsListArtworkHeight)] after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:content-[''] after:block after:h-0 after:max-h-full after:max-w-full after:min-h-full after:min-w-full after:opacity-(--containerInnerStrokeAlpha,.25) after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)]"
-                              style={
-                                {
-                                  "--artwork-bg-color": "#0b0809",
-                                  "--aspect-ratio": "1",
-                                  "--placeholder-bg-color": "transparent",
-                                } as CSSProperties
-                              }
-                            >
-                              <ResponsiveArtwork
-                                alt=""
-                                className="rounded-[inherit] [transition:var(--global-transition,opacity_.1s_ease-in)] block h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0) min-w-(--artwork-override-min-width,0) [object-fit:var(--artwork-override-object-fit,fill)] object-(--artwork-override-object-position,center) w-(--artwork-override-width,100%)"
-                                height={40}
-                                sizes="40px"
-                                src="/assets/artwork/1x1.gif"
-                                srcSet={
-                                  track.thumbnailArtworkSrcSet ??
-                                  track.artworkSrcSet
-                                }
-                                style={{ opacity: 1 }}
-                                width={40}
-                              />
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="[grid-area:song-index] opacity-(--playButtonOpacity,0) [--playButtonIconHoverColor:#fff] items-center bg-[rgba(0,0,0,.45)] rounded-[5px] flex size-full inset-s-0 justify-center absolute top-0 z-(--transgray-scrim-z,var(--z-default))">
-                          <div className="[--nonPlatterIconFill:var(--nonPlatterOverrideIconColor,var(--keyColor))] h-full align-top w-full">
-                            <button
-                              disabled={
-                                !track.playbackUrl || isPreparingPlayback
-                              }
-                              {...playbackIntentProps(track)}
-                              onClick={(event) => {
-                                if (selectedTrackId !== null) {
-                                  activateTrack(track.id);
-                                  event.stopPropagation();
-                                }
-
-                                if (isCurrentTrack) {
-                                  togglePlayback();
-                                } else {
-                                  void startPlaylistPlayback(track.id);
-                                }
-                              }}
-                              className="[--nonPlatterIconFill:var(--playButtonIconColor,#fff)] [--playingBarColor:var(--nonPlatterIconFill,#fff)] leading-0 pointer-events-auto relative z-(--z-default) h-full align-top w-full"
-                            >
-                              {isCurrentTrack ? (
-                                <div className="bottom-0 inset-x-0 m-auto absolute top-0 z-1 h-3.75 pointer-events-none w-full">
-                                  <PlaybackWaveform
-                                    isPlaying={isTrackPlaying}
-                                    seed={track.id}
-                                  />
-
-                                  <div className="bottom-0 inset-x-0 m-auto opacity-0 absolute top-0 z-1 group-hover:opacity-100">
-                                    {isTrackPlaying ? (
-                                      <svg
-                                        width="16"
-                                        height="16"
-                                        viewBox="0 0 16 16"
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        className="inline-block align-bottom"
-                                        aria-hidden="true"
-                                      >
-                                        <path
-                                          fill="var(--nonPlatterIconFill, var(--keyColor, black))"
-                                          d="M9.918.464h2.672a.89.89 0 0 1 .89.89v13.291a.89.89 0 0 1-.89.891H9.918a.89.89 0 0 1-.89-.89V1.354a.89.89 0 0 1 .89-.891zm-6.371 0h2.398c.567 0 1.027.46 1.027 1.028v13.016c0 .568-.46 1.028-1.027 1.028H3.547c-.567 0-1.028-.46-1.028-1.028V1.492c0-.568.46-1.028 1.028-1.028z"
-                                        ></path>
-                                      </svg>
-                                    ) : (
-                                      <svg
-                                        width="16"
-                                        height="16"
-                                        viewBox="0 0 16 16"
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        className="inline-block align-bottom"
-                                        aria-hidden="true"
-                                      >
-                                        <path
-                                          fill="var(--nonPlatterIconFill, var(--keyColor, black))"
-                                          d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"
-                                        ></path>
-                                      </svg>
-                                    )}
-                                  </div>
-                                </div>
-                              ) : (
-                                <svg
-                                  width="16"
-                                  height="16"
-                                  viewBox="0 0 16 16"
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  className="pointer-events-none inline-block h-(--playButtonSize,16px) w-(--playButtonSize,16px) align-bottom"
-                                  aria-hidden="true"
-                                >
-                                  <path
-                                    fill="var(--nonPlatterIconFill, var(--keyColor, black))"
-                                    d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"
-                                  ></path>
-                                </svg>
-                              )}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="items-center inline-flex [grid-area:song-name] leading-4 overflow-hidden w-full -my-1 -mx-1 py-1 px-1">
-                        <div className="block cursor-default flex-1 overflow-hidden ps-1 pe-1 -me-1 pb-1 pt-1 -ms-1 -mb-1 -mt-1 text-left">
-                          {track.url ? (
-                            <Link
-                              href={track.url}
-                              onClick={(e) => e.stopPropagation()}
-                              className="overflow-hidden [--linkColor:var(--systemPrimary)] hover:underline"
-                            >
-                              <div className="overflow-hidden text-ellipsis inline text-pretty whitespace-normal text-left">
-                                {track.title}
-                              </div>
-                            </Link>
-                          ) : (
-                            <div className="overflow-hidden text-ellipsis inline text-pretty whitespace-normal text-left">
-                              {track.title}
-                            </div>
-                          )}
-
-                          {track.contentRating === "explicit" && (
-                            <span
-                              className="ms-1 [--explicitBadgeSize:10px] relative top-[0.7px]"
-                              aria-label="Explicit"
-                            >
-                              <ExplicitBadgeIcon />
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="hidden [font:var(--body)] pb-0 pt-0 align-middle pe-2.5 relative overflow-hidden text-ellipsis whitespace-nowrap min-[1000px]:table-cell after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
-                    <div className="overflow-hidden text-ellipsis whitespace-nowrap -mb-1 -mt-1 -ms-1 -me-1 pb-1 pt-1 pe-1 ps-1 text-left">
-                      <ArtistLinks
-                        artists={track.artists}
-                        fallbackText={track.artist}
-                        linkClassName="overflow-hidden text-ellipsis whitespace-nowrap text-left"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="hidden [font:var(--body)] pb-0 pt-0 align-middle pe-4 relative overflow-hidden text-ellipsis whitespace-nowrap min-[1260px]:table-cell after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
-                    <div className="overflow-hidden text-ellipsis whitespace-nowrap -mb-1 -mt-1 -ms-1 -me-1 pb-1 pt-1 pe-1 ps-1 text-left">
-                      <span className="overflow-hidden text-ellipsis whitespace-nowrap text-left">
-                        {track.albumUrl ? (
-                          <Link
-                            href={track.albumUrl}
-                            onClick={(e) => e.stopPropagation()}
-                            className="hover:underline"
-                          >
-                            {track.album}
-                          </Link>
-                        ) : (
-                          track.album
-                        )}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="table-cell [font:var(--body)] pb-0 pt-0 align-middle overflow-visible relative text-end z-(--z-default) rounded-ee-(--songs-list-row-border-radius,6px) rounded-es-none rounded-se-(--songs-list-row-border-radius,6px) rounded-ss-none pe-4.5 after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
-                    <div className="items-center inline-grid [grid-template-areas:'song-controls-add_song-controls-length_song-controls-context'] relative">
-                      <div className="pointer-coarse:hidden max-[578px]:hidden [grid-area:song-controls-add] opacity-(--addToLibraryOpacity,0) me-1.75">
-                        <AddSongToLibraryButton
-                          songId={track.id}
-                          title={track.title}
-                          artist={track.artist}
-                          artworkUrl={track.artworkUrl}
-                        />
-                      </div>
-
-                      <time
-                        className="max-[578px]:hidden [grid-area:song-controls-length] cursor-default inline-block leading-9.5 font-features-['tnum'] tabular-nums"
-                        dateTime="PT1M27S"
-                      >
-                        {formatDuration(track.durationSec)}
-                      </time>
-
-                      <div
-                        className={`[grid-area:song-controls-context] ms-1.75 [--contextMenuButtonSize:28px] ${selectedTrackId === track.id ? "[--contextMenuEllipsisFillOverride:#fff]" : "[--contextMenuEllipsisFillOverride:var(--systemSecondary)] hover:[--contextMenuEllipsisFillOverride:var(--keyColor)]"}`}
-                      >
-                        <AmpContextMenuButton
-                          id={`song-${track.id}`}
-                          context={{
-                            kind: "song",
-                            songId: track.id,
-                            title: track.title,
-                            userId,
-                            isFavorite: favoriteSongIds.has(track.id),
-                            playlistId: isUserPlaylist
-                              ? playlist.id
-                              : undefined,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </div>
+          {isPublicPlaylist && featuredArtistCards.length > 0 && (
+            <>
+              <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) pt-3 [--songs-list-row-border-radius:12px] relative z-(--z-default) bg-(--opaqueShelfBG)">
+                <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
+                  <div className="pt-4 w-full"></div>
                 </div>
-              );
-            })}
+              </div>
 
-            <SongTableSpacer
-              height={
-                (playlist.tracks.length - visibleSongRange.end) *
-                SONG_ROW_HEIGHT
-              }
-            />
-          </div>
-        </div>
-      </div>
-
-      {afterTracks}
-
-      {showMetadata && (
+              <MediaShelf
+                shelfId="playlist-featured-artists"
+                title="Featured Artists"
+                displayKind="MusicCircleCoverShelf"
+                containerClassName="bg-(--opaqueShelfBG)"
+                items={featuredArtistCards.slice(
+                  0,
+                  FEATURED_ARTIST_SHELF_PREVIEW_LIMIT,
+                )}
+                onSelect={
+                  featuredArtistIds.length > FEATURED_ARTIST_SHELF_PREVIEW_LIMIT
+                    ? () => setSelectedFeaturedArtistsPlaylistId(playlist.id)
+                    : undefined
+                }
+              />
+            </>
+          )}
+        </>
+      ) : (
         <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) pt-3 [--songs-list-row-border-radius:12px] relative z-(--z-default)">
           <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
-            <div className="m-[0_var(--bodyGutter)] pb-10.75 ps-3 -mt-3 min-[1000px]:flex min-[1000px]:flex-row min-[1000px]:justify-between min-[1000px]:pb-13.25">
-              <div className="text-(--systemSecondary) max-w-110 relative [font:var(--body-tall)] mt-11 min-[1260px]:max-w-135 min-[1000px]:mt-8.5">
-                <p className="whitespace-pre-wrap">{`${playlist.curatorName}\n${playlist.tracks.length} songs, ${formatSummaryDuration(totalDurationSec)}`}</p>
-              </div>
+            <div className="text-(--systemSecondary) block max-w-full p-[20px_var(--bodyGutter)_13px] relative text-center w-full">
+              <h2 className="block [font:var(--headline-emphasized)] mb-1.5 relative">
+                Empty Playlist
+              </h2>
+              <p className="block [font:var(--body-tall)] mx-auto max-w-105 relative">
+                {`This playlist is empty. Add songs or albums using the three-dot menu and select "Add to Playlist".`}
+              </p>
             </div>
           </div>
         </div>

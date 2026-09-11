@@ -5,9 +5,15 @@ import type { ContextMenuContext } from "./types";
 export function contextMenuPath(context: ContextMenuContext): string | null {
   switch (context.kind) {
     case "song":
-      return songRoute(context.songId);
+      return context.releaseTrackId
+        ? songRoute(context.title, context.releaseTrackId)
+        : null;
+    case "video":
+      return context.href;
     case "station":
       return stationRoute(context.title, context.stationId);
+    case "artist":
+      return context.href;
     case "collection":
       if (context.sourceOrigin === "favorite") {
         return "/library/playlist/favorite";

@@ -18,6 +18,11 @@ export function useTrackRowSelection<T extends HTMLElement>() {
     setActiveTrackId(null);
   }, []);
 
+  const clearTrackSelection = useCallback(() => {
+    setSelectedTrackId(null);
+    setActiveTrackId(null);
+  }, []);
+
   useEffect(() => {
     const clearActiveTrackOnOutsidePointerDown = (event: PointerEvent) => {
       if (!listRef.current?.contains(event.target as Node)) {
@@ -37,6 +42,7 @@ export function useTrackRowSelection<T extends HTMLElement>() {
     activateTrack,
     activeTrackId,
     clearActiveTrack,
+    clearTrackSelection,
     listRef,
     selectTrack,
     selectedTrackId,

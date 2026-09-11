@@ -1,7 +1,7 @@
 import { albumRoute } from "@/lib/catalog/album-route";
 import { artistRoute } from "@/lib/catalog/artist-route";
 import { playlistRoute } from "@/lib/catalog/playlist-route";
-import { songRoute } from "@/lib/catalog/song-route";
+import { routeSlug } from "@/lib/catalog/route-slug";
 import { getArtworkRenditionUrl, getArtworkSrcSet } from "@/lib/media/artwork";
 import { createMediaCard } from "@/lib/media/media-card";
 import {
@@ -34,6 +34,8 @@ export type MediaResourceSource = {
   isUserPlaylist?: boolean;
   playlistKind?: MediaCardProps["playlistKind"];
   songIds?: string[];
+  /** Release shown alongside a song card, when the resource is a song. */
+  albumId?: string;
 };
 
 export type MediaResourceProjection = {
@@ -54,16 +56,6 @@ export type MediaResourceProjection = {
 const COVER_WIDTHS = [296, 316, 592, 632];
 const HERO_WIDTHS = [450, 600, 900, 1200];
 
-function slugifyStationName(name: string) {
-  const slug = name
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLocaleLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, "-")
-    .replace(/^-+|-+$/g, "");
-  return slug || "station";
-}
-
 /** The only place that turns canonical resource metadata into an app route. */
 export function mediaResourceRoute(resource: MediaResourceSource) {
   switch (resource.type) {
@@ -79,9 +71,12 @@ export function mediaResourceRoute(resource: MediaResourceSource) {
         ? resource.url || `/library/playlist/${encodeURIComponent(resource.id)}`
         : playlistRoute(resource.url ?? "", resource.id);
     case "songs":
-      return songRoute(resource.id);
+      // A catalog song UUID is reusable across releases and is not a public
+      // song-detail identity. Song cards need a releaseTrackId before they can
+      // expose a detail URL.
+      return undefined;
     case "stations":
-      return `/station/${encodeURIComponent(slugifyStationName(resource.name))}/${encodeURIComponent(resource.id)}`;
+      return `/station/${encodeURIComponent(routeSlug(resource.name, "station"))}/${encodeURIComponent(resource.id)}`;
     case "editorial-items":
       return resource.url;
   }

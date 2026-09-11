@@ -29,6 +29,11 @@ export async function getWalletBalance() {
   );
 }
 
+export async function refreshWalletBalance() {
+  invalidateCachedQuery(WALLET_BALANCE_KEY);
+  return getWalletBalance();
+}
+
 export async function createDepositOrder(payload: CreateDepositPayload) {
   const response = await http.post<CreateDepositResponse>(
     "/wallet/deposit",

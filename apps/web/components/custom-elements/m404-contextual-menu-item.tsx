@@ -45,7 +45,7 @@ export default function M404ContextualMenuItem({
     if (item.href) {
       router.push(item.href);
     } else {
-      item.onClick?.();
+      void item.onClick?.();
     }
     if (!item.keepOpen) closeMenu();
   };

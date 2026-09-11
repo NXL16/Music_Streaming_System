@@ -11,6 +11,7 @@ import {
   clearTwoFactorChallengeId,
   getTwoFactorChallengeId,
 } from "@/lib/auth/two-factor-challenge-store";
+import { navigateAfterLogin } from "@/lib/auth/login-return-to";
 
 export function useTwoFactorLoginForm() {
   const router = useRouter();
@@ -52,7 +53,7 @@ export function useTwoFactorLoginForm() {
         result.data.user,
         result.data.expiresIn,
       );
-      router.push("/");
+      navigateAfterLogin(router);
     } catch (error) {
       setError(getApiErrorMessage(error, "Ma 2FA khong hop le."));
     } finally {

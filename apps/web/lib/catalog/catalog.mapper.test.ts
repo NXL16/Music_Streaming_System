@@ -23,7 +23,17 @@ const response = {
             },
           },
         },
-        relationships: { tracks: { data: [{ id: "song-1", type: "songs" }] } },
+        relationships: {
+          tracks: {
+            data: [
+              {
+                id: "song-1",
+                type: "songs",
+                meta: { releaseTrackId: "release-track-1" },
+              },
+            ],
+          },
+        },
       },
     },
     playlists: {},
@@ -59,7 +69,7 @@ describe("mapCatalogTracks", () => {
 
     expect(track).toMatchObject({
       id: "song-1",
-      url: "/song/song-1",
+      url: "/song/track/release-track-1",
       album: "Context Album",
       albumUrl: "/album/context-album/album-context",
       durationSec: 180,
@@ -75,5 +85,73 @@ describe("mapCatalogTracks", () => {
     ]);
     expect(track.artworkSrcSet).toContain("296w");
     expect(track.thumbnailArtworkSrcSet).toContain("40w");
+  });
+
+  it("uses an explicit song-detail album context instead of the first relation", () => {
+    const directSongResponse = {
+      ...response,
+      data: [{ id: "song-1", type: "songs" }],
+      resources: {
+        ...response.resources,
+        albums: {
+          ...response.resources.albums,
+          "canonical-album": {
+            id: "canonical-album",
+            attributes: {
+              name: "Canonical Album",
+              url: "canonical-album",
+              artwork: {
+                url: "https://image.example/canonical.jpg",
+                bgColor: "111111",
+              },
+            },
+          },
+          "album-2": {
+            id: "album-2",
+            attributes: {
+              name: "Single",
+              url: "single",
+              artwork: {
+                url: "https://image.example/single.jpg",
+                bgColor: "222222",
+              },
+            },
+          },
+        },
+        songs: {
+          ...response.resources.songs,
+          "song-1": {
+            ...response.resources.songs["song-1"],
+            relationships: {
+              ...response.resources.songs["song-1"].relationships,
+              albums: {
+                data: [
+                  { id: "canonical-album", type: "albums" },
+                  {
+                    id: "album-2",
+                    type: "albums",
+                    meta: { releaseTrackId: "release-track-2" },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+    } as unknown as CatalogResponse;
+    const [track] = mapCatalogTracks(directSongResponse, {
+      albumId: "album-2",
+    });
+
+    expect(track).toMatchObject({
+      albumId: "album-2",
+      url: "/song/track/release-track-2",
+      artworkUrl: "https://image.example/single.jpg",
+      artworkBgColor: "#222222",
+    });
+  });
+
+  it("does not fall back when a requested album does not contain the song", () => {
+    expect(mapCatalogTracks(response, { albumId: "missing-album" })).toEqual([]);
   });
 });

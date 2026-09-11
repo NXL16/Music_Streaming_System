@@ -4,7 +4,6 @@ import React, { useSyncExternalStore } from "react";
 import CircleCard from "./circle-card";
 import CollectionCard from "./collection-card";
 import HeroCard from "./hero-card";
-import SocialCard from "./social-card";
 import StationCard from "./station-card";
 import type { MediaCardProps } from "./media-card.types";
 import {
@@ -15,6 +14,8 @@ import { projectMediaCardArtwork } from "@/lib/media/project-media-card-artwork"
 
 type MediaCardRendererProps = MediaCardProps & {
   priority?: boolean;
+  keepVideoMountedHorizontally?: boolean;
+  isShelfDetail?: boolean;
 };
 
 export default React.memo(function MediaCardRenderer(
@@ -33,13 +34,23 @@ export default React.memo(function MediaCardRenderer(
 
   switch (card.cardType) {
     case "hero":
-      return <HeroCard {...card} cardType="hero" />;
+      return (
+        <HeroCard
+          {...card}
+          cardType="hero"
+          keepVideoMountedHorizontally={props.keepVideoMountedHorizontally}
+        />
+      );
     case "station":
       return <StationCard {...card} cardType="station" />;
     case "circle":
-      return <CircleCard {...card} cardType="circle" />;
-    case "social":
-      return <SocialCard {...card} cardType="social" />;
+      return (
+        <CircleCard
+          {...card}
+          cardType="circle"
+          isShelfDetail={props.isShelfDetail}
+        />
+      );
     case "collection":
       return <CollectionCard {...card} cardType="collection" />;
   }

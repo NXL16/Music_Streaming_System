@@ -22,9 +22,8 @@ type UseFormattedArtistsOptions = {
 };
 
 /**
- * Uses artistName as the display source and structured artist records only to
- * decide which names can link to an artist page. Every caller can therefore
- * render contributors consistently with comma separators.
+ * Structured artist credits are the source of truth. The text field exists
+ * only for legacy records that do not have linked artist credits yet.
  */
 export function useFormattedArtists({
   artists,
@@ -41,17 +40,11 @@ export function useFormattedArtists({
         .filter((artist) => artist.name)
         .map((artist) => [normalizedArtistName(artist.name), artist]) ?? [],
     );
-    const fallbackNames = artistNamesFromText(fallbackText ?? "");
-    if (fallbackNames.length) {
-      return fallbackNames.map(
-        (name) =>
-          artistsByName.get(normalizedArtistName(name)) ?? {
-            id: name,
-            name,
-          },
-      );
-    }
+    if (artistsByName.size) return [...artistsByName.values()];
 
-    return [...artistsByName.values()];
+    return artistNamesFromText(fallbackText ?? "").map((name) => ({
+      id: name,
+      name,
+    }));
   }, [artists, fallbackText]);
 }
