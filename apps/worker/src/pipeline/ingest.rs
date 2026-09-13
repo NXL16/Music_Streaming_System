@@ -55,14 +55,16 @@ pub async fn run_pipeline(
             ));
         }
         let separation_started = Instant::now();
-        let separated = if download::has_complete_staging_stems(&ctx.r2_client, &song_id).await? {
+        let separated = if let Some((vocal_key, instrumental_key)) =
+            download::complete_staging_stem_keys(&ctx.r2_client, &song_id).await?
+        {
             eprintln!(
                 "pipeline song_id={} stage=modal_separation reused_staging=true",
                 song_id,
             );
             crate::modal::client::SeparationResponse {
-                vocal_key: format!("staging/{song_id}/vocal.m4a"),
-                instrumental_key: format!("staging/{song_id}/instrumental.m4a"),
+                vocal_key,
+                instrumental_key,
                 model_version: "reused-staging".to_string(),
             }
         } else {
@@ -129,12 +131,43 @@ pub async fn run_pipeline(
                 Vec::new(),
             )
             .await?;
-            Ok::<_, anyhow::Error>((instrumental, vocal))
+            let mut high_outputs = Vec::new();
+            if instrumental_path
+                .extension()
+                .and_then(|value| value.to_str())
+                == Some("flac")
+            {
+                high_outputs.push(
+                    transcode::transcode_stem_file(
+                        &song_id,
+                        "instrumental-high",
+                        ctx.job.metadata_version,
+                        &instrumental_path,
+                        ctx.master_secret_key.as_slice(),
+                        ctx.r2_client.clone(),
+                        Vec::new(),
+                    )
+                    .await?,
+                );
+                high_outputs.push(
+                    transcode::transcode_stem_file(
+                        &song_id,
+                        "vocal-high",
+                        ctx.job.metadata_version,
+                        &vocal_path,
+                        ctx.master_secret_key.as_slice(),
+                        ctx.r2_client.clone(),
+                        Vec::new(),
+                    )
+                    .await?,
+                );
+            }
+            Ok::<_, anyhow::Error>((instrumental, vocal, high_outputs))
         }
         .await;
         let _ = tokio::fs::remove_file(&instrumental_path).await;
         let _ = tokio::fs::remove_file(&vocal_path).await;
-        let (instrumental, vocal) = stems_result?;
+        let (instrumental, vocal, high_outputs) = stems_result?;
 
         let drift = (instrumental.duration - vocal.duration).abs();
         if drift > 0.050 {
@@ -144,12 +177,36 @@ pub async fn run_pipeline(
         ctx.encrypted_size_bytes = Some(
             instrumental
                 .encrypted_size_bytes
-                .saturating_add(vocal.encrypted_size_bytes),
+                .saturating_add(vocal.encrypted_size_bytes)
+                .saturating_add(
+                    high_outputs
+                        .iter()
+                        .map(|output| output.encrypted_size_bytes)
+                        .sum::<usize>(),
+                ),
         );
         // SING playback is defined by the two-stem manifest. Keep the
         // instrumental key as a compatibility metadata anchor; it is not a
         // substitute for clients that require the original mixed track.
         ctx.output_key = Some(instrumental.output_key);
+        ctx.highest_bitrate_kbps = if high_outputs.is_empty() { 128 } else { 320 };
+        let retained_variants = if high_outputs.is_empty() {
+            ["instrumental", "vocal"].as_slice()
+        } else {
+            ["instrumental", "vocal", "instrumental-high", "vocal-high"].as_slice()
+        };
+        if let Err(error) = download::delete_obsolete_processed_variants(
+            &ctx.r2_client,
+            &song_id,
+            retained_variants,
+        )
+        .await
+        {
+            eprintln!(
+                "pipeline song_id={} warn=obsolete_rendition_cleanup_failed error={}",
+                song_id, error
+            );
+        }
         if let Err(error) = download::delete_staging_objects(
             &ctx.r2_client,
             &[separated.instrumental_key, separated.vocal_key],

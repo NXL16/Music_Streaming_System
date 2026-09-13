@@ -31,7 +31,7 @@ pub async fn handle(
                 audio_analysis_only: false,
                 duration_sec,
                 encrypted_file_path: Some(encrypted_file_path),
-                bitrate_kbps: Some(128),
+                bitrate_kbps: Some(ctx.highest_bitrate_kbps),
                 codec: Some("aac".to_string()),
                 format: Some("fmp4".to_string()),
                 audio_bpm: None,

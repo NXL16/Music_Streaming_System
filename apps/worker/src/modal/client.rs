@@ -127,8 +127,9 @@ pub async fn separate(song_id: &str, source_key: &str) -> Result<SeparationRespo
 }
 
 fn validate_staging_key(song_id: &str, key: &str, variant: &str) -> Result<()> {
-    let expected = format!("staging/{song_id}/{variant}.m4a");
-    if key != expected {
+    let flac = format!("staging/{song_id}/{variant}.flac");
+    let m4a = format!("staging/{song_id}/{variant}.m4a");
+    if key != flac && key != m4a {
         return Err(anyhow::anyhow!(
             "Modal stem-separation returned unexpected {variant} key"
         ));
@@ -143,6 +144,7 @@ mod tests {
     #[test]
     fn accepts_expected_staging_key() {
         assert!(validate_staging_key("song-1", "staging/song-1/vocal.m4a", "vocal").is_ok());
+        assert!(validate_staging_key("song-1", "staging/song-1/vocal.flac", "vocal").is_ok());
     }
 
     #[test]

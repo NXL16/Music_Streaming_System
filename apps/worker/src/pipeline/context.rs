@@ -17,6 +17,7 @@ pub struct PipelineContext {
     pub encrypted_size_bytes: Option<usize>,
     pub duration: Option<f64>,
     pub output_key: Option<String>,
+    pub highest_bitrate_kbps: i32,
 }
 
 impl PipelineContext {
@@ -30,6 +31,7 @@ impl PipelineContext {
             encrypted_size_bytes: None,
             duration: None,
             output_key: None,
+            highest_bitrate_kbps: 128,
         }
     }
 }

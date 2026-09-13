@@ -10,6 +10,7 @@ use aes::Aes256;
 use anyhow::Context;
 use ctr::cipher::{KeyIvInit, StreamCipher};
 use futures_util::StreamExt;
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::env;
 use std::process::Stdio;
@@ -26,6 +27,28 @@ use self::uploader::HybridUploader;
 use self::waveform::{WAVEFORM_POINTS, build_waveform_temp_path, extract_waveform_from_audio_file};
 
 type Aes256Ctr = ctr::Ctr128BE<Aes256>;
+
+#[derive(Deserialize)]
+struct FfprobeQuality {
+    #[serde(default)]
+    streams: Vec<FfprobeStream>,
+    #[serde(default)]
+    format: FfprobeFormat,
+}
+
+#[derive(Deserialize)]
+struct FfprobeStream {
+    #[serde(default)]
+    codec_name: String,
+    #[serde(default)]
+    bit_rate: String,
+}
+
+#[derive(Default, Deserialize)]
+struct FfprobeFormat {
+    #[serde(default)]
+    bit_rate: String,
+}
 
 #[derive(Debug, Clone)]
 pub struct StemOutput {
@@ -77,6 +100,51 @@ async fn probe_audio_duration(path: &std::path::Path) -> anyhow::Result<f64> {
         ));
     }
     Ok(duration)
+}
+
+/// A High AAC-320 rendition is only meaningful when the original source is
+/// lossless or already near that quality. This probe runs on the immutable
+/// upload, never on a previously encoded playback rendition.
+async fn source_qualifies_for_high(path: &std::path::Path) -> anyhow::Result<bool> {
+    let output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=codec_name,bit_rate:format=bit_rate",
+            "-of",
+            "json",
+            &path.to_string_lossy(),
+        ])
+        .output()
+        .await
+        .context("failed to probe source audio quality")?;
+    if !output.status.success() {
+        return Err(anyhow::anyhow!("ffprobe source quality failed"));
+    }
+    let quality: FfprobeQuality = serde_json::from_slice(&output.stdout)
+        .context("ffprobe source quality returned invalid JSON")?;
+    let stream = quality.streams.first();
+    let codec = stream
+        .map(|stream| stream.codec_name.as_str())
+        .unwrap_or("");
+    // VBR files frequently expose their average bitrate only at container
+    // level. Prefer stream bitrate when present, then use format bitrate.
+    let bitrate = stream
+        .and_then(|stream| stream.bit_rate.parse::<u64>().ok())
+        .or_else(|| quality.format.bit_rate.parse::<u64>().ok())
+        .unwrap_or(0);
+    let minimum_high_bitrate = std::env::var("HIGH_QUALITY_MIN_BITRATE")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(300_000);
+    Ok(matches!(
+        codec,
+        "flac" | "alac" | "pcm_s16le" | "pcm_s24le" | "pcm_s32le"
+    ) || bitrate >= minimum_high_bitrate)
 }
 
 #[cfg(test)]
@@ -283,6 +351,12 @@ pub async fn transcode(ctx: &mut PipelineContext) -> anyhow::Result<()> {
                 }
             };
 
+        let high_quality_available = source_qualifies_for_high(&waveform_source_path).await?;
+        eprintln!(
+            "pipeline song_id={} quality_source_high_eligible={}",
+            ctx.job.song_id, high_quality_available
+        );
+
         let metadata_started_at = Instant::now();
         metadata_client::update_technical_meta(metadata_client::TechnicalMeta {
             song_id: ctx.job.song_id.clone(),
@@ -290,7 +364,7 @@ pub async fn transcode(ctx: &mut PipelineContext) -> anyhow::Result<()> {
             metadata_version: ctx.job.metadata_version,
             duration: final_duration,
             segments,
-            waveform,
+            waveform: waveform.clone(),
             encryption_start_offset: 0,
             seektable_version: SEEKTABLE_VERSION,
             timescale: effective_timescale,
@@ -301,11 +375,52 @@ pub async fn transcode(ctx: &mut PipelineContext) -> anyhow::Result<()> {
             },
         })
         .await?;
+        let high_output = if high_quality_available {
+            Some(
+                transcode_stem_file(
+                    &ctx.job.song_id,
+                    "high",
+                    ctx.job.metadata_version,
+                    &waveform_source_path,
+                    ctx.master_secret_key.as_slice(),
+                    ctx.r2_client.clone(),
+                    waveform.clone(),
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
         let metadata_elapsed = metadata_started_at.elapsed();
 
         ctx.duration = Some(final_duration);
-        ctx.encrypted_size_bytes = Some(total_bytes);
+        ctx.encrypted_size_bytes = Some(
+            total_bytes.saturating_add(
+                high_output
+                    .as_ref()
+                    .map(|output| output.encrypted_size_bytes)
+                    .unwrap_or(0),
+            ),
+        );
         ctx.output_key = Some(output_key);
+        ctx.highest_bitrate_kbps = if high_output.is_some() { 320 } else { 128 };
+        let retained_variants = if high_output.is_some() {
+            ["", "high"].as_slice()
+        } else {
+            [""].as_slice()
+        };
+        if let Err(error) = crate::pipeline::steps::download::delete_obsolete_processed_variants(
+            &ctx.r2_client,
+            &ctx.job.song_id,
+            retained_variants,
+        )
+        .await
+        {
+            eprintln!(
+                "pipeline song_id={} warn=obsolete_rendition_cleanup_failed error={}",
+                ctx.job.song_id, error
+            );
+        }
         let total_elapsed = pipeline_started_at.elapsed();
         let upload_mbps = if total_elapsed.as_secs_f64() > 0.0 {
             (total_bytes as f64 * 8.0) / total_elapsed.as_secs_f64() / 1_000_000.0
@@ -348,7 +463,10 @@ pub async fn transcode_stem_file(
     r2_client: aws_sdk_s3::Client,
     waveform: Vec<f32>,
 ) -> anyhow::Result<StemOutput> {
-    if variant != "instrumental" && variant != "vocal" {
+    if !matches!(
+        variant,
+        "instrumental" | "vocal" | "instrumental-high" | "vocal-high" | "high"
+    ) {
         return Err(anyhow::anyhow!("invalid stem variant: {variant}"));
     }
 
@@ -358,34 +476,50 @@ pub async fn transcode_stem_file(
         rand::random::<u64>()
     ));
     let output_key = format!("processed/{song_id}/{variant}.m4a");
-    // Modal's regular M4A has authoritative duration metadata. The fMP4
-    // remux uses an empty moov box, so probing it can report N/A on some
+    // Modal's source stem has authoritative duration metadata. The fMP4
+    // package uses an empty moov box, so probing it can report N/A on some
     // ffprobe versions.
     let exact_duration = probe_audio_duration(source_path).await?;
 
+    let is_high = variant.ends_with("-high") || variant == "high";
+    // Low-quality staging is already AAC 128 from Modal, so remux it directly.
+    // FLAC and high renditions need AAC encoding for browser-compatible fMP4.
+    let must_encode = is_high
+        || source_path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("flac"));
+    let mut args = vec![
+        "-y".to_owned(),
+        "-i".to_owned(),
+        source_path.to_string_lossy().into_owned(),
+        "-map".to_owned(),
+        "0:a:0".to_owned(),
+        "-dn".to_owned(),
+        "-sn".to_owned(),
+        "-map_metadata".to_owned(),
+        "-1".to_owned(),
+        "-map_chapters".to_owned(),
+        "-1".to_owned(),
+        "-c:a".to_owned(),
+        if must_encode { "aac" } else { "copy" }.to_owned(),
+    ];
+    if must_encode {
+        args.extend([
+            "-b:a".to_owned(),
+            if is_high { "320k" } else { "128k" }.to_owned(),
+        ]);
+    }
+    args.extend([
+        "-movflags".to_owned(),
+        "frag_keyframe+empty_moov+default_base_moof".to_owned(),
+        "-frag_duration".to_owned(),
+        "2000000".to_owned(),
+        "-f".to_owned(),
+        "mp4".to_owned(),
+        temp_output.to_string_lossy().into_owned(),
+    ]);
     let remux_result = Command::new("ffmpeg")
-        .args([
-            "-y",
-            "-i",
-            &source_path.to_string_lossy(),
-            "-map",
-            "0:a:0",
-            "-dn",
-            "-sn",
-            "-map_metadata",
-            "-1",
-            "-map_chapters",
-            "-1",
-            "-c:a",
-            "copy",
-            "-movflags",
-            "frag_keyframe+empty_moov+default_base_moof",
-            "-frag_duration",
-            "2000000",
-            "-f",
-            "mp4",
-            &temp_output.to_string_lossy(),
-        ])
+        .args(args)
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .output()
