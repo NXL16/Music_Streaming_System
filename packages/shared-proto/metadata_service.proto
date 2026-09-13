@@ -36,11 +36,8 @@ message UpdateMetaRequest {
   ByteRange        init_range              = 7;
   repeated Segment segments                = 8;
   repeated float   waveform                = 9;
-  // Empty is the legacy mixed stream. Separated stems use "instrumental" or "vocal".
-  string variant = 10;
-  // Monotonic version allocated by the Song transcode outbox. Meta must never
-  // derive this from request arrival time because retries can arrive out of order.
-  int64 metadata_version = 11;
+  string           variant                 = 10;
+  int64            metadata_version        = 11;
 }
 
 message GetStreamDataRequest {
@@ -59,7 +56,7 @@ message StreamDataResponse {
   repeated Segment segments                = 8;
   repeated float   waveform                = 9;
   string           variant                 = 10;
-  int64            metadata_version       = 11;
+  int64            metadata_version        = 11;
 }
 
 message EmptyResponse {}
