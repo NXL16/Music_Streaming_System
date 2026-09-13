@@ -20,6 +20,7 @@ type CompactSegment = {
 export type CompactMetadataResponse = {
   songId: string;
   variant: string;
+  metadataVersion: number;
   duration: number;
   seektableVersion: number;
   offset: number;
@@ -62,15 +63,21 @@ export class MetadataService implements OnModuleInit {
   async getCompactStreamData(
     songId: string,
     variant = '',
+    forceRefresh = false,
   ): Promise<CompactMetadataResponse> {
     const cacheKey = `${songId}:${variant}`;
     const now = Date.now();
     const cached = this.streamDataCache.get(cacheKey);
-    if (!developmentCacheDisabled() && cached && cached.expiresAt > now) {
+    if (
+      !forceRefresh &&
+      !developmentCacheDisabled() &&
+      cached &&
+      cached.expiresAt > now
+    ) {
       return cached.data;
     }
 
-    if (cached) {
+    if (cached && !forceRefresh) {
       this.streamDataCache.delete(cacheKey);
     }
 
@@ -78,6 +85,7 @@ export class MetadataService implements OnModuleInit {
     const compact: CompactMetadataResponse = {
       songId: data.songId,
       variant: data.variant,
+      metadataVersion: data.metadataVersion,
       duration: data.duration,
       seektableVersion: data.seektableVersion,
       offset: data.mediaOffset || data.encryptionStartOffset || 0,
@@ -97,7 +105,7 @@ export class MetadataService implements OnModuleInit {
       waveform: data.waveform || [],
     };
 
-    if (developmentCacheDisabled()) return compact;
+    if (developmentCacheDisabled() || forceRefresh) return compact;
 
     if (this.streamDataCache.size >= META_CACHE_MAX_ITEMS) {
       this.purgeExpiredEntries(now);

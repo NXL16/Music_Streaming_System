@@ -3,11 +3,20 @@ import { ConfigService } from '@nestjs/config';
 import { hkdf } from 'crypto';
 import { promisify } from 'util';
 import { MetadataService } from '../metadata/metadata.service';
+import { status } from '@grpc/grpc-js';
 
 const KEY_INFO = 'music-stream:v1:key';
 const IV_INFO = 'music-stream:v1:iv';
 const KEY_LEN = 32;
 const IV_LEN = 16;
+
+class HighRenditionUnavailableError extends Error {
+  readonly code = status.NOT_FOUND;
+
+  constructor() {
+    super('High-quality playback is not available');
+  }
+}
 
 // Async HKDF (callback-based) wrapped in a Promise so key derivation runs off
 // the event loop instead of blocking it like hkdfSync did.
@@ -81,7 +90,7 @@ export class StreamService {
     if (audioMode === 'STANDARD') {
       const [main, metadata] = await Promise.all([
         this.getStreamUrl(songId),
-        this.metadata.getCompactStreamData(songId),
+        this.metadata.getCompactStreamData(songId, '', true),
       ]);
       return {
         mode: 'STANDARD' as const,
@@ -93,8 +102,8 @@ export class StreamService {
       await Promise.all([
         this.getStreamUrl(songId, 'instrumental'),
         this.getStreamUrl(songId, 'vocal'),
-        this.metadata.getCompactStreamData(songId, 'instrumental'),
-        this.metadata.getCompactStreamData(songId, 'vocal'),
+        this.metadata.getCompactStreamData(songId, 'instrumental', true),
+        this.metadata.getCompactStreamData(songId, 'vocal', true),
       ]);
 
     return {
@@ -103,10 +112,81 @@ export class StreamService {
       vocal: { ...vocal, metadata: vocalMetadata },
     };
   }
+
+  async getHighPlaybackManifest(
+    songId: string,
+    audioMode: 'STANDARD' | 'SING' = 'STANDARD',
+  ) {
+    if (audioMode === 'STANDARD') {
+      const [stream, metadata, baselineMetadata] = await Promise.all([
+        this.getStreamUrl(songId, 'high'),
+        this.metadata.getCompactStreamData(songId, 'high', true),
+        this.metadata.getCompactStreamData(songId, '', true),
+      ]);
+      this.assertHighMetadataIsCurrent(
+        metadata.metadataVersion,
+        baselineMetadata.metadataVersion,
+      );
+      return { mode: 'STANDARD' as const, high: { ...stream, metadata } };
+    }
+
+    const [
+      instrumental,
+      vocal,
+      instrumentalMetadata,
+      vocalMetadata,
+      baselineInstrumentalMetadata,
+      baselineVocalMetadata,
+    ] = await Promise.all([
+      this.getStreamUrl(songId, 'instrumental-high'),
+      this.getStreamUrl(songId, 'vocal-high'),
+      this.metadata.getCompactStreamData(songId, 'instrumental-high', true),
+      this.metadata.getCompactStreamData(songId, 'vocal-high', true),
+      this.metadata.getCompactStreamData(songId, 'instrumental', true),
+      this.metadata.getCompactStreamData(songId, 'vocal', true),
+    ]);
+    this.assertHighMetadataIsCurrent(
+      instrumentalMetadata.metadataVersion,
+      baselineInstrumentalMetadata.metadataVersion,
+    );
+    this.assertHighMetadataIsCurrent(
+      vocalMetadata.metadataVersion,
+      baselineVocalMetadata.metadataVersion,
+    );
+    return {
+      mode: 'SING' as const,
+      high: {
+        instrumental: { ...instrumental, metadata: instrumentalMetadata },
+        vocal: { ...vocal, metadata: vocalMetadata },
+      },
+    };
+  }
+
+  private assertHighMetadataIsCurrent(
+    highVersion: number,
+    baselineVersion: number,
+  ): void {
+    // A lower-quality reprocess intentionally omits a high rendition. The
+    // old high metadata may still exist briefly while object cleanup is
+    // retried, so never expose it unless it belongs to this same transcode.
+    if (highVersion !== baselineVersion) {
+      throw new HighRenditionUnavailableError();
+    }
+  }
 }
 
-function normalizeVariant(value: string): '' | 'instrumental' | 'vocal' {
+function normalizeVariant(
+  value: string,
+): '' | 'high' | 'instrumental' | 'vocal' | 'instrumental-high' | 'vocal-high' {
   if (!value) return '';
-  if (value === 'instrumental' || value === 'vocal') return value;
+  if (
+    value === 'high' ||
+    value === 'instrumental' ||
+    value === 'vocal' ||
+    value === 'instrumental-high' ||
+    value === 'vocal-high'
+  ) {
+    return value;
+  }
   throw new Error('INVALID_STREAM_VARIANT');
 }

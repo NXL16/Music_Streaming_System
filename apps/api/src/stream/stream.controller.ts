@@ -43,6 +43,28 @@ export class StreamController {
     }
   }
 
+  @Get(':songId/playback/high')
+  async getHighPlaybackManifest(
+    @Param('songId', ParseUUIDPipe) songId: string,
+    @Req() request: { user: JwtUser },
+  ) {
+    try {
+      const audioMode = await this.playbackAccess.assertCanPlay(
+        songId,
+        request.user,
+      );
+      return await this.streamService.getHighPlaybackManifest(
+        songId,
+        audioMode,
+      );
+    } catch (error) {
+      if (isGrpcNotFound(error)) {
+        throw new NotFoundException('High-quality playback is not available');
+      }
+      throw error;
+    }
+  }
+
   @Get(':songId')
   async getStreamUrl(
     @Param('songId', ParseUUIDPipe) songId: string,
