@@ -18,6 +18,13 @@ func TestValidateUpdateRequest(t *testing.T) {
 			valid: true,
 		},
 		{
+			name: "accepts high-quality variants",
+			mutate: func(request *pb.UpdateMetaRequest) {
+				request.Variant = "instrumental-high"
+			},
+			valid: true,
+		},
+		{
 			name: "rejects an unknown variant",
 			mutate: func(request *pb.UpdateMetaRequest) {
 				request.Variant = "surround"

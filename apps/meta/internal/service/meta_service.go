@@ -135,7 +135,7 @@ func validateUpdateRequest(req *pb.UpdateMetaRequest) error {
 	if req.MediaOffset < 0 || req.EncryptionStartOffset < 0 {
 		return status.Error(codes.InvalidArgument, "offsets must be >= 0")
 	}
-	if req.Variant != "" && req.Variant != "instrumental" && req.Variant != "vocal" {
+	if !isKnownVariant(req.Variant) {
 		return status.Error(codes.InvalidArgument, "variant is invalid")
 	}
 	if req.InitRange == nil {
@@ -189,6 +189,15 @@ func validateUpdateRequest(req *pb.UpdateMetaRequest) error {
 	}
 
 	return nil
+}
+
+func isKnownVariant(variant string) bool {
+	switch variant {
+	case "", "high", "instrumental", "vocal", "instrumental-high", "vocal-high":
+		return true
+	default:
+		return false
+	}
 }
 
 func isFinite(value float64) bool {
