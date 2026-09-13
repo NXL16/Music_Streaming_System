@@ -6,6 +6,8 @@ Deploy with: modal deploy apps/stem-separation-modal/stem_separation_modal.py
 from __future__ import annotations
 
 import os
+import json
+import subprocess
 import tempfile
 from threading import Lock
 from pathlib import Path
@@ -28,7 +30,8 @@ image = (
     )
 )
 MODEL_NAME = "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
-_separator = None
+DEFAULT_HIGH_QUALITY_MIN_BITRATE = 300_000
+_separators: dict[str, object] = {}
 _separator_lock = Lock()
 
 
@@ -63,6 +66,44 @@ def configure_output_dir(separator, output_dir: Path) -> None:
     model_instance.output_dir = target_dir
 
 
+def select_output_format(source_path: Path) -> str:
+    """Keep lossless stems only when a 320k/lossless source can benefit."""
+    result = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries",
+         "stream=codec_name,bit_rate:format=bit_rate", "-of", "json", str(source_path)],
+        check=True, capture_output=True, text=True,
+    )
+    stream = (json.loads(result.stdout).get("streams") or [{}])[0]
+    codec = str(stream.get("codec_name") or "").lower()
+    # VBR MP3/AAC commonly omits stream.bit_rate even when the container has
+    # a reliable average bitrate. Falling back to format.bit_rate keeps a
+    # genuine 320 kbps upload eligible for the high rendition.
+    container = json.loads(result.stdout).get("format") or {}
+    bitrate = int(stream.get("bit_rate") or container.get("bit_rate") or 0)
+    try:
+        minimum_high_bitrate = int(os.environ.get("HIGH_QUALITY_MIN_BITRATE", ""))
+    except ValueError:
+        minimum_high_bitrate = DEFAULT_HIGH_QUALITY_MIN_BITRATE
+    if minimum_high_bitrate <= 0:
+        minimum_high_bitrate = DEFAULT_HIGH_QUALITY_MIN_BITRATE
+    return "flac" if codec in {"flac", "pcm_s16le", "pcm_s24le", "pcm_s32le", "alac"} or bitrate >= minimum_high_bitrate else "m4a"
+
+
+def encode_aac_128(source_path: Path, output_path: Path) -> Path:
+    """Create the sole lossy rendition for low-quality stem inputs."""
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-i", str(source_path), "-map", "0:a:0",
+            "-dn", "-sn", "-map_metadata", "-1", "-c:a", "aac",
+            "-b:a", "128k", str(output_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return output_path
+
+
 def require_service_token(authorization: str | None) -> None:
     expected = os.environ.get("STEM_SEPARATION_SHARED_SECRET", "")
     if not expected or authorization != f"Bearer {expected}":
@@ -83,29 +124,30 @@ def has_complete_staging_stems(s3, bucket: str, vocal_key: str, instrumental_key
     return bool(vocal.get("ContentLength")) and bool(instrumental.get("ContentLength"))
 
 
-def separate_to_output(source_path: Path, output_dir: Path) -> list[str]:
-    """Keep one loaded model per warm container and serialize its mutable output dir."""
-    global _separator
+def separate_to_output(source_path: Path, output_dir: Path, output_format: str) -> list[str]:
+    """Reuse one model per output format and serialize its mutable output dir."""
 
     with _separator_lock:
-        if _separator is None:
+        separator = _separators.get(output_format)
+        if separator is None:
             from audio_separator.separator import Separator
 
-            _separator = Separator(
+            separator = Separator(
                 model_file_dir="/models",
                 output_dir=str(output_dir),
-                output_format="m4a",
+                output_format=output_format,
             )
-            _separator.load_model(model_filename=MODEL_NAME)
+            separator.load_model(model_filename=MODEL_NAME)
+            _separators[output_format] = separator
             # Persist the first downloaded model for future cold containers.
             model_cache.commit()
 
         # Keep the wrapper and the loaded architecture's output directory in
         # sync. Requests are serialized by `_separator_lock`, so this mutable
         # setting cannot leak between concurrent calls.
-        configure_output_dir(_separator, output_dir)
+        configure_output_dir(separator, output_dir)
 
-        return _separator.separate(str(source_path))
+        return separator.separate(str(source_path))
 
 
 @app.function(
@@ -141,7 +183,7 @@ def separate(
     payload: dict,
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict:
-    """Read a source from R2 and write BS-RoFormer M4A stems to R2 staging."""
+    """Read a source from R2 and write BS-RoFormer FLAC or M4A stems to staging."""
     require_service_token(authorization)
 
     song_id = str(payload.get("songId", "")).strip()
@@ -150,19 +192,15 @@ def separate(
         raise ValueError("songId and sourceKey are required")
 
     bucket = os.environ["R2_BUCKET"]
-    vocal_key = f"staging/{song_id}/vocal.m4a"
-    instrumental_key = f"staging/{song_id}/instrumental.m4a"
     s3 = r2_client()
     # A worker retry after packaging/metadata failure must reuse the staging
     # pair. This avoids another GPU separation and makes the operation safe to
     # retry without multiplying cost.
-    if has_complete_staging_stems(s3, bucket, vocal_key, instrumental_key):
-        return {
-            "songId": song_id,
-            "vocalKey": vocal_key,
-            "instrumentalKey": instrumental_key,
-            "modelVersion": MODEL_NAME,
-        }
+    for extension in ("flac", "m4a"):
+        vocal_key = f"staging/{song_id}/vocal.{extension}"
+        instrumental_key = f"staging/{song_id}/instrumental.{extension}"
+        if has_complete_staging_stems(s3, bucket, vocal_key, instrumental_key):
+            return {"songId": song_id, "vocalKey": vocal_key, "instrumentalKey": instrumental_key, "modelVersion": MODEL_NAME}
 
     with tempfile.TemporaryDirectory(prefix="stem-separation-") as temp:
         workspace = Path(temp)
@@ -170,11 +208,17 @@ def separate(
         output_dir = workspace / "output"
         output_dir.mkdir()
         s3.download_file(bucket, source_key, str(source_path))
+        output_format = select_output_format(source_path)
+        extension = "flac" if output_format == "flac" else "m4a"
+        vocal_key = f"staging/{song_id}/vocal.{extension}"
+        instrumental_key = f"staging/{song_id}/instrumental.{extension}"
 
         os.environ.setdefault("HF_HOME", "/models/huggingface")
-        # Keep the proven M4A output format. The worker remuxes/encrypts these
-        # AAC packets and never applies a second lossy AAC encode.
-        generated = separate_to_output(source_path, output_dir)
+        # Preserve lossless stems for high-quality outputs. Lower-quality
+        # sources first produce local WAV, then exactly one AAC 128 encode for
+        # staging; the worker can remux it without another lossy pass.
+        separator_format = "flac" if output_format == "flac" else "wav"
+        generated = separate_to_output(source_path, output_dir, separator_format)
 
         # audio-separator has returned both absolute paths and bare filenames
         # across releases. Resolve its return value, then also inspect the
@@ -203,12 +247,17 @@ def separate(
                 f"(generated={generated_names}, output={output_names})"
             )
 
-        s3.upload_file(str(vocal), bucket, vocal_key, ExtraArgs={"ContentType": "audio/mp4"})
+        if output_format == "m4a":
+            vocal = encode_aac_128(vocal, workspace / "vocal.m4a")
+            instrumental = encode_aac_128(instrumental, workspace / "instrumental.m4a")
+
+        content_type = "audio/flac" if output_format == "flac" else "audio/mp4"
+        s3.upload_file(str(vocal), bucket, vocal_key, ExtraArgs={"ContentType": content_type})
         s3.upload_file(
             str(instrumental),
             bucket,
             instrumental_key,
-            ExtraArgs={"ContentType": "audio/mp4"},
+            ExtraArgs={"ContentType": content_type},
         )
         return {
             "songId": song_id,
