@@ -148,23 +148,12 @@ export class CatalogAssetsService implements OnModuleInit {
           ]
         : []),
     ];
-    let assets: Asset[];
-    try {
-      const response = await firstValueFrom(
-        this.client.registerAssetUsages(
-          {
-            ownerService: 'catalog',
-            ownerType: resourceType,
-            ownerId: resourceId,
-            usages,
-          },
-          this.metadata(),
-        ),
-      );
-      assets = response.assets;
-    } catch {
-      this.failedPrecondition('CATALOG_ASSET_REGISTRATION_FAILED');
-    }
+    // Songs intentionally inherit artwork from their AlbumTrack -> Album
+    // relation. Do not send an empty registration to Asset: empty usage sets
+    // are invalid there and there is no asset ownership to establish here.
+    const assets: Asset[] = usages.length
+      ? await this.registerUsages(resourceType, resourceId, usages)
+      : [];
     const byId = new Map(assets.map((asset) => [asset.id, asset]));
     const artworkAsset = this.asset(
       byId,
@@ -235,6 +224,29 @@ export class CatalogAssetsService implements OnModuleInit {
         this.metadata(),
       ),
     );
+  }
+
+  private async registerUsages(
+    resourceType: string,
+    resourceId: string,
+    usages: CatalogAssetUsage[],
+  ): Promise<Asset[]> {
+    try {
+      const response = await firstValueFrom(
+        this.client.registerAssetUsages(
+          {
+            ownerService: 'catalog',
+            ownerType: resourceType,
+            ownerId: resourceId,
+            usages,
+          },
+          this.metadata(),
+        ),
+      );
+      return response.assets;
+    } catch {
+      this.failedPrecondition('CATALOG_ASSET_REGISTRATION_FAILED');
+    }
   }
 
   async getMusicVideoAsset(assetId: string): Promise<CatalogMusicVideoAsset> {

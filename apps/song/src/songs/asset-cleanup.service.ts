@@ -272,11 +272,28 @@ export class AssetCleanupService
   }
 
   private async processJob(job: AssetCleanupJob): Promise<void> {
-    await this.deleteIfPresent(job.source_object_path);
-    await this.deleteIfPresent(job.encrypted_file_path);
+    const objectKeys = [
+      ...new Set([
+        job.source_object_path?.trim(),
+        job.encrypted_file_path?.trim(),
+        ...this.processedRenditionKeys(job.song_id),
+      ]),
+    ].filter((key): key is string => Boolean(key));
+    await Promise.all(objectKeys.map((key) => this.deleteIfPresent(key)));
     this.logger.log(
-      `Asset cleanup completed for song ${job.song_id} bucket=${this.bucket} source=${job.source_object_path || '<empty>'} encrypted=${job.encrypted_file_path || '<empty>'}`,
+      `Asset cleanup completed for song ${job.song_id} bucket=${this.bucket} objects=${objectKeys.length}`,
     );
+  }
+
+  private processedRenditionKeys(songId: string): string[] {
+    return [
+      `processed/${songId}.m4a`,
+      `processed/${songId}/high.m4a`,
+      `processed/${songId}/instrumental.m4a`,
+      `processed/${songId}/vocal.m4a`,
+      `processed/${songId}/instrumental-high.m4a`,
+      `processed/${songId}/vocal-high.m4a`,
+    ];
   }
 
   private async claimStaleEntry(): Promise<RedisStreamEntry | undefined> {
