@@ -20,7 +20,7 @@ const ORIGIN_HEADERS = [
   "If-Range",
 ];
 const SONG_ID_PATTERN =
-  /^\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(instrumental|vocal))?\/?$/i;
+  /^\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(high|instrumental|vocal|instrumental-high|vocal-high))?\/?$/i;
 const VIDEO_PATH_PATTERN =
   /^\/video\/processed\/(?<assetId>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/video\/(?<generation>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(?<file>default\.m3u8|[0-9a-f]{24}\.m3u8|[A-Za-z0-9_-]{24}_[0-9]{13,20}\.ts)$/i;
 // API signs a two-hour session. Permit a small clock-skew window so an edge
@@ -65,6 +65,9 @@ function objectKey(pathname: string): string | null {
   if (!match) return null;
 
   const [, songId, variant] = match;
+  // Empty remains the legacy/standard AAC-128 asset. Quality variants are
+  // immutable independent files, so they retain range-cache behaviour and do
+  // not add a manifest hop on play or seek.
   return variant
     ? `processed/${songId}/${variant}.m4a`
     : `processed/${songId}.m4a`;
@@ -174,10 +177,7 @@ function proxyResponse(
 
   if (upstream.ok) {
     headers.set("Content-Type", headers.get("Content-Type") ?? "audio/mp4");
-    headers.set(
-      "Cache-Control",
-      clientCacheControl,
-    );
+    headers.set("Cache-Control", clientCacheControl);
     headers.set("Accept-Ranges", "bytes");
   }
 
@@ -226,10 +226,7 @@ async function videoResponse(
     serverTiming(startedAt, headers.get("X-Stream-Cache") ?? "UNKNOWN"),
   );
   headers.set("Content-Type", "application/vnd.apple.mpegurl");
-  headers.set(
-    "Cache-Control",
-    VIDEO_PLAYLIST_CACHE_CONTROL,
-  );
+  headers.set("Cache-Control", VIDEO_PLAYLIST_CACHE_CONTROL);
   headers.set("Content-Length", String(new TextEncoder().encode(body).length));
   return new Response(request.method === "HEAD" ? null : body, {
     status: upstream.status,
