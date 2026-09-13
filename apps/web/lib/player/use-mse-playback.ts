@@ -4,9 +4,17 @@ import { useEffect, useRef, useState } from "react";
 import { usePlayerStore } from "./use-player-store";
 import { preloadCache } from "./mse/preload-cache";
 import { createMediaPlayer, type MediaPlayer } from "./media-player-factory";
-import { getPlaybackManifest } from "./stream.api";
+import {
+  getHighPlaybackManifestWithTimeout,
+  getPlaybackManifest,
+} from "./stream.api";
+import {
+  selectInitialRendition,
+  shouldPreferHighQuality,
+} from "./mse/quality-policy";
 
 const MSE_PREFIX = "mse:";
+const STEM_SYNC_DRIFT_SEC = 0.12;
 
 function isMseSong(playbackUrl: string | undefined): boolean {
   return !!playbackUrl?.startsWith(MSE_PREFIX);
@@ -104,20 +112,32 @@ export function useMsePlayback(
         return;
       }
 
+      // Renditions are independently encoded fMP4 assets. Select one before
+      // attaching MSE: live SourceBuffer replacement causes audible gaps (and
+      // doubles that problem for a SING pair). Both manifest calls are tiny
+      // and concurrent, so this does not serialize first-play latency.
+      const highPromise = shouldPreferHighQuality()
+        ? getHighPlaybackManifestWithTimeout(songId).catch(() => null)
+        : Promise.resolve(null);
       const manifest = await getPlaybackManifest(songId);
       ensureCurrentPlayer();
+      const selectedManifest = selectInitialRendition(
+        manifest,
+        await highPromise,
+      );
+      ensureCurrentPlayer();
 
-      if (manifest.mode === "SING") {
+      if (selectedManifest.mode === "SING") {
         if (!vocalAudio) throw new Error("Vocal audio element is unavailable");
         const vocalPlayer = createMediaPlayer();
         await Promise.all([
           player.attach(audio, undefined, {
-            streamInfo: manifest.instrumental,
-            metadata: manifest.instrumental.metadata,
+            streamInfo: selectedManifest.instrumental,
+            metadata: selectedManifest.instrumental.metadata,
           }),
           vocalPlayer.attach(vocalAudio, undefined, {
-            streamInfo: manifest.vocal,
-            metadata: manifest.vocal.metadata,
+            streamInfo: selectedManifest.vocal,
+            metadata: selectedManifest.vocal.metadata,
           }),
         ]);
         if (playerRef.current !== player) {
@@ -132,8 +152,8 @@ export function useMsePlayback(
 
       setIsStemActive(false);
       await player.attach(audio, undefined, {
-        streamInfo: manifest.main,
-        metadata: manifest.main.metadata,
+        streamInfo: selectedManifest.main,
+        metadata: selectedManifest.main.metadata,
       });
       ensureCurrentPlayer();
     };
@@ -144,7 +164,8 @@ export function useMsePlayback(
         playerReadyRef.current = true;
         if (usePlayerStore.getState().playing) {
           const plays = [audio.play()];
-          if (isStemPlaybackRef.current && vocalAudio) plays.push(vocalAudio.play());
+          if (isStemPlaybackRef.current && vocalAudio)
+            plays.push(vocalAudio.play());
           Promise.all(plays).catch(() => pause());
         }
       })
@@ -208,7 +229,12 @@ export function useMsePlayback(
       // micro-seeks.
       if (
         isStemPlaybackRef.current &&
-        Math.abs(vocal.currentTime - instrumental.currentTime) > 0.05
+        !instrumental.paused &&
+        !vocal.paused &&
+        instrumental.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA &&
+        vocal.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA &&
+        Math.abs(vocal.currentTime - instrumental.currentTime) >
+          STEM_SYNC_DRIFT_SEC
       ) {
         alignVocalToInstrumental();
       }

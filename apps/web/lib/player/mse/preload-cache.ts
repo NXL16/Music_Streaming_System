@@ -1,6 +1,13 @@
-import { getPlaybackManifest } from "../stream.api";
+import {
+  getHighPlaybackManifestWithTimeout,
+  getPlaybackManifest,
+} from "../stream.api";
 import { decryptChunk, hexToBytes, importAesKey } from "./crypto";
 import { fetchRange } from "./fetcher";
+import {
+  selectInitialRendition,
+  shouldPreferHighQuality,
+} from "./quality-policy";
 import type { PreloadedPlayback, PreloadedSong, StemPlayback } from "./types";
 
 const MAX_CACHE_SIZE = 3;
@@ -44,9 +51,7 @@ async function preloadStem(
     ivBytes,
     initSegment: plain.slice(0, metadata.initRange.end + 1),
     firstSegmentsBatch:
-      count > 0
-        ? plain.slice(metadata.initRange.end + 1)
-        : new ArrayBuffer(0),
+      count > 0 ? plain.slice(metadata.initRange.end + 1) : new ArrayBuffer(0),
     preloadedCount: count,
   };
 }
@@ -102,7 +107,8 @@ class PreloadCacheStore {
     const token = Symbol(songId);
     const promise = this.load(songId, controller.signal)
       .catch((error) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (error instanceof DOMException && error.name === "AbortError")
+          return;
         throw error;
       })
       .finally(() => {
@@ -115,7 +121,15 @@ class PreloadCacheStore {
   }
 
   private async load(songId: string, signal: AbortSignal): Promise<void> {
-    const manifest = await getPlaybackManifest(songId, signal);
+    // Queue preload must use the same rendition selection as foreground
+    // playback. Otherwise a cached 128 bootstrap wins even when 320 is ready.
+    const highPromise = shouldPreferHighQuality()
+      ? getHighPlaybackManifestWithTimeout(songId, signal).catch(() => null)
+      : Promise.resolve(null);
+    const manifest = selectInitialRendition(
+      await getPlaybackManifest(songId, signal),
+      await highPromise,
+    );
     if (signal.aborted) throw new DOMException("Preload aborted", "AbortError");
 
     let playback: PreloadedPlayback;
@@ -129,7 +143,11 @@ class PreloadCacheStore {
         preloadStem(songId, manifest.instrumental, signal),
         preloadStem(songId, manifest.vocal, signal),
       ]);
-      playback = { mode: "SING", instrumental, vocal };
+      playback = {
+        mode: "SING",
+        instrumental,
+        vocal,
+      };
     }
 
     if (signal.aborted) throw new DOMException("Preload aborted", "AbortError");

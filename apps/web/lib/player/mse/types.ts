@@ -13,7 +13,7 @@ export type SegmentInfo = {
 
 export type StreamMetadata = {
   songId: string;
-  variant?: "instrumental" | "vocal";
+  variant?: string;
   duration: number;
   offset: number;
   timescale: number;
@@ -38,9 +38,14 @@ export type SingPlaybackManifest = {
   vocal: StemPlayback;
 };
 
-export type PlaybackManifest =
-  | StandardPlaybackManifest
-  | SingPlaybackManifest;
+export type PlaybackManifest = StandardPlaybackManifest | SingPlaybackManifest;
+
+export type HighPlaybackManifest =
+  | { mode: "STANDARD"; high: StemPlayback }
+  | {
+      mode: "SING";
+      high: { instrumental: StemPlayback; vocal: StemPlayback };
+    };
 
 export type AttachedStream = {
   streamInfo: StreamInfo;

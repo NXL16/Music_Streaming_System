@@ -1,6 +1,11 @@
 import { decryptChunk, hexToBytes, importAesKey } from "./crypto";
 import { fetchRange } from "./fetcher";
-import type { AttachedStream, PreloadedSong, SegmentInfo, StreamMetadata } from "./types";
+import type {
+  AttachedStream,
+  PreloadedSong,
+  SegmentInfo,
+  StreamMetadata,
+} from "./types";
 
 const MIME = 'audio/mp4; codecs="mp4a.40.2"';
 const INITIAL_BATCH = 1;
@@ -188,7 +193,8 @@ export abstract class SegmentedMediaPlayer {
     if (this.mediaSource?.readyState === "open") {
       try {
         if (this.sourceBuffer?.updating) this.sourceBuffer.abort();
-        if (this.sourceBuffer) this.mediaSource.removeSourceBuffer(this.sourceBuffer);
+        if (this.sourceBuffer)
+          this.mediaSource.removeSourceBuffer(this.sourceBuffer);
         this.mediaSource.endOfStream();
       } catch {
         // The source can close while its buffer is being detached.
@@ -250,7 +256,9 @@ export abstract class SegmentedMediaPlayer {
   private async loadInitialData(
     preloaded?: PreloadedSong,
     attachedStream?: AttachedStream,
-  ): Promise<Pick<PreloadedSong, "initSegment" | "firstSegmentsBatch" | "preloadedCount">> {
+  ): Promise<
+    Pick<PreloadedSong, "initSegment" | "firstSegmentsBatch" | "preloadedCount">
+  > {
     if (preloaded) {
       this.streamUrl = preloaded.streamInfo.streamUrl;
       this.cryptoKey = preloaded.cryptoKey;
@@ -277,6 +285,7 @@ export abstract class SegmentedMediaPlayer {
     this.metadata = metadata;
 
     const preloadedCount = Math.min(INITIAL_BATCH, metadata.segments.length);
+
     const lastSegment = metadata.segments[preloadedCount - 1];
     const fetchEnd = lastSegment
       ? lastSegment.startByte + lastSegment.size - 1
@@ -307,7 +316,10 @@ export abstract class SegmentedMediaPlayer {
     const targetTime = this.audio.currentTime;
     const targetIndex = findSegmentIndex(this.metadata.segments, targetTime);
     if (this.isTimeBuffered(targetTime)) {
-      this.requiredTailStartIndex = Math.min(this.requiredTailStartIndex, targetIndex);
+      this.requiredTailStartIndex = Math.min(
+        this.requiredTailStartIndex,
+        targetIndex,
+      );
       if (!this.downloading && this.getBufferAhead() < BUFFER_LOW_SEC) {
         this.fillBuffer();
       }
@@ -322,10 +334,7 @@ export abstract class SegmentedMediaPlayer {
     // are not constrained to one fragment, and refetching only the target would
     // play one fragment then stall at the next stale cache entry.
     const refillEndIndex = Math.min(
-      findSegmentIndex(
-        this.metadata.segments,
-        targetTime + BUFFER_GOAL_SEC,
-      ),
+      findSegmentIndex(this.metadata.segments, targetTime + BUFFER_GOAL_SEC),
       this.metadata.segments.length - 1,
     );
     for (let index = targetIndex; index <= refillEndIndex; index += 1) {
@@ -383,7 +392,8 @@ export abstract class SegmentedMediaPlayer {
     signal: AbortSignal,
   ): Promise<void> {
     const segments = this.metadata?.segments;
-    if (!segments || !this.streamUrl || !this.cryptoKey || !this.ivBytes) return;
+    if (!segments || !this.streamUrl || !this.cryptoKey || !this.ivBytes)
+      return;
 
     const endIndex = Math.min(startIndex + count, segments.length);
     let from = startIndex;
@@ -451,11 +461,7 @@ export abstract class SegmentedMediaPlayer {
           ? SEEK_BATCH
           : getBatchSegmentCount(segments, cursor, BUFFER_BATCH_BYTES);
         this.needsUrgentFill = false;
-        await this.fetchAndAppendBatch(
-          cursor,
-          batchSize,
-          signal,
-        );
+        await this.fetchAndAppendBatch(cursor, batchSize, signal);
       }
     } catch {
       // `waiting` can fire while `downloading` is still true, before this
@@ -484,7 +490,11 @@ export abstract class SegmentedMediaPlayer {
   }
 
   private tryEndOfStream(): void {
-    if (this.disposed || !this.metadata || this.mediaSource?.readyState !== "open") {
+    if (
+      this.disposed ||
+      !this.metadata ||
+      this.mediaSource?.readyState !== "open"
+    ) {
       return;
     }
 
@@ -508,7 +518,8 @@ export abstract class SegmentedMediaPlayer {
 
     const buffered = this.audio.buffered;
     for (let index = 0; index < buffered.length; index += 1) {
-      if (time >= buffered.start(index) && time <= buffered.end(index)) return true;
+      if (time >= buffered.start(index) && time <= buffered.end(index))
+        return true;
     }
 
     return false;
@@ -518,9 +529,7 @@ export abstract class SegmentedMediaPlayer {
     return this.enqueueSourceBufferOperation(data);
   }
 
-  private enqueueSourceBufferOperation(
-    data: ArrayBuffer,
-  ): Promise<void> {
+  private enqueueSourceBufferOperation(data: ArrayBuffer): Promise<void> {
     if (!this.sourceBuffer || this.disposed) return Promise.resolve();
 
     return new Promise((resolve, reject) => {
