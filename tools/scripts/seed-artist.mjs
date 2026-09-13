@@ -123,7 +123,7 @@ function optionValue(name) {
   return index >= 0 ? String(args[index + 1] || '').trim() : '';
 }
 function firstPositionalArgument() {
-    const optionsWithValues = new Set(['--artist-id', '--album-ids', '--audio-mode']);
+  const optionsWithValues = new Set(['--artist-id', '--album-ids', '--audio-mode']);
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (optionsWithValues.has(argument)) {
@@ -801,8 +801,8 @@ function musicBrainzCandidateArtistNames(recording) {
 function findMusicBrainzRecording(search, expectedTitles, primaryArtist) {
   return (search.recordings || []).find((recording) =>
     Number(recording.score || 0) >= MUSIC_BRAINZ_MIN_MATCH_SCORE
-      && expectedTitles.has(normalizeMusicText(recording.title))
-      && artistMatches(primaryArtist, musicBrainzCandidateArtistNames(recording)),
+    && expectedTitles.has(normalizeMusicText(recording.title))
+    && artistMatches(primaryArtist, musicBrainzCandidateArtistNames(recording)),
   );
 }
 
@@ -2355,7 +2355,10 @@ async function createAndPublishSongDraft(
     albumName,
     artistName: displayTrackArtistName(track),
     audioLocale: 'vi',
-    audioTraits: ['lossless'],
+    // Playback quality is determined from the uploaded source by Worker.
+    // Never label every provider import as lossless: most catalog sources are
+    // AAC/MP3 and a false trait would leak into production metadata.
+    audioTraits: [],
     composerName: '',
     contentRating: track.trackExplicitness === 'explicit' ? 'explicit' : '',
     discNumber: track.discNumber || 1,
@@ -2437,7 +2440,10 @@ async function createAndPublishAlbum(album, artistIds, songMappings, artworkAsse
     ingestionKey: catalogIngestionKey(album.collectionId),
     name: albumName,
     artistName: album.artistName,
-    audioTraits: ['lossless'],
+    // An album can contain tracks with different source qualities. Its
+    // catalog trait must not claim lossless unless that is independently
+    // verified for every track.
+    audioTraits: [],
     contentRating: album.collectionExplicitness === 'explicit' ? 'explicit' : '',
     copyright: album.copyright || '',
     genreNames: [album.primaryGenreName || 'Hip-Hop/Rap'],
