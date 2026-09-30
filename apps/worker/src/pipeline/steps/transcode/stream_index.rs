@@ -279,6 +279,14 @@ pub fn build_segments(
         let duration_sec_seg = (end_time_sec - start_time_sec).max(0.0);
         let duration_ts = (duration_sec_seg * timescale as f64).round() as i64;
 
+        // Some encoders emit a terminal `moof` whose timestamp is exactly the
+        // media duration. It contains no media bytes (and therefore has a zero
+        // duration). It is a boundary marker, not a playable segment, so do
+        // not put it in the client stream index.
+        if size <= 0 || duration_ts <= 0 {
+            continue;
+        }
+
         segments.push(Segment {
             start_byte,
             size,
@@ -398,6 +406,31 @@ mod tests {
             build_segments(&seek_points, 90_000, 6.0, TIMESCALE_FALLBACK).expect("segments");
         assert_eq!(segments.len(), 3);
         assert!(segments.iter().all(|s| s.size > 0 && s.duration_ts > 0));
+        assert!(validate_segments(&segments).is_ok());
+    }
+
+    #[test]
+    fn build_segments_discards_terminal_empty_boundary() {
+        let seek_points = vec![
+            SeekPoint {
+                timestamp: 0.0,
+                byte_offset: 100,
+            },
+            SeekPoint {
+                timestamp: 2.0,
+                byte_offset: 5_000,
+            },
+            // A final boundary at the exact media duration has no payload.
+            SeekPoint {
+                timestamp: 4.0,
+                byte_offset: 10_000,
+            },
+        ];
+
+        let segments =
+            build_segments(&seek_points, 10_000, 4.0, TIMESCALE_FALLBACK).expect("segments");
+
+        assert_eq!(segments.len(), 2);
         assert!(validate_segments(&segments).is_ok());
     }
 }
