@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="vi">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hero Artwork Lab</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background:#111; color:#f5f5f7; }
+    body { max-width:1180px; margin:0 auto; padding:32px 20px 60px; }
+    h1 { margin:0 0 8px; font-size:25px } p { color:#aaa; margin:0 0 20px; line-height:1.5 }
+    .controls { display:flex; gap:10px; flex-wrap:wrap; padding:14px; border:1px solid #3a3a3c; border-radius:14px; background:#1c1c1e; }
+    input, button { font:inherit } input { flex:1; min-width:220px } button { border:0; border-radius:999px; padding:9px 16px; cursor:pointer; background:#fff; color:#111; font-weight:700 } button.secondary { background:#333; color:#fff }
+    .status { min-height:22px; color:#b5b5bd; margin:16px 0; }
+    .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+    figure { margin:0; border:1px solid #37373a; border-radius:14px; padding:12px; background:#1c1c1e; min-width:0; }
+    figcaption { font-weight:700; margin-bottom:10px } img { display:block; width:100%; aspect-ratio:3/4; object-fit:contain; background:#050505; border-radius:9px; }
+    .meta { color:#aaa; font-size:13px; min-height:38px; margin-top:10px; line-height:1.45; }
+    .hint { font-size:13px; color:#8e8e93; margin-top:20px; }
+    @media (max-width:800px) { .grid { grid-template-columns:1fr; } }
+  </style>
+  <body>
+    <h1>Hero Artwork Lab</h1>
+    <p>So sánh thuật toán hero đang chạy trong Asset Service với bản thử nghiệm chỉ xử lý trường hợp ảnh có dải footer đen lớn.</p>
+    <div class="controls">
+      <input id="file" type="file" accept="image/png,image/jpeg,image/webp" />
+      <button id="run">Phân tích ảnh</button>
+      <button id="download" class="secondary" disabled>Tải bản thử nghiệm</button>
+    </div>
+    <div id="status" class="status">Chọn một ảnh để bắt đầu.</div>
+    <main class="grid">
+      <figure><figcaption>Ảnh gốc</figcaption><img id="original" alt="Ảnh gốc" /><div id="original-meta" class="meta"></div></figure>
+      <figure><figcaption>Project hiện tại</figcaption><img id="project" alt="Hero hiện tại" /><div id="project-meta" class="meta"></div></figure>
+      <figure><figcaption>Thử nghiệm adaptive</figcaption><img id="adaptive" alt="Hero thử nghiệm" /><div id="adaptive-meta" class="meta"></div></figure>
+    </main>
+    <p class="hint">Bản adaptive chỉ trim footer nếu phát hiện một dải gần như đen, liên tục, chiếm ít nhất 8% đáy ảnh. Các ảnh bình thường giữ nguyên hành vi như project.</p>
+    <p class="hint">Bản adaptive cũng giữ màu ở mép rất tối nhưng còn sắc độ (xanh, đỏ, tím); chỉ mép đen trung tính mới dùng nhánh black-edge.</p>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      let adaptiveUrl = '';
+      async function render(mode, file) {
+        const response = await fetch('/api/render?mode=' + mode, { method:'POST', body:file });
+        if (!response.ok) throw Error((await response.json()).error || 'Render thất bại');
+        return { url: URL.createObjectURL(await response.blob()), meta: JSON.parse(atob(response.headers.get('X-Hero-Meta').replace(/-/g,'+').replace(/_/g,'/'))) };
+      }
+      function describe(meta) {
+        return `${meta.source} → ${meta.hero}<br>Nhánh: ${meta.branch}${meta.trimmedBlackFooter ? `<br>Đã trim footer đen: ${meta.trimmedBlackFooter}` : ''}${meta.edgeLuminance !== null ? `<br>Độ sáng mép: ${meta.edgeLuminance}` : ''}`;
+      }
+      $('run').onclick = async () => {
+        const file = $('file').files[0];
+        if (!file) return $('status').textContent = 'Hãy chọn ảnh trước.';
+        $('status').textContent = 'Đang tạo hai phiên bản hero…'; $('download').disabled = true;
+        $('original').src = URL.createObjectURL(file); $('original-meta').textContent = `${file.name} · ${(file.size/1024/1024).toFixed(2)} MB`;
+        try {
+          const [project, adaptive] = await Promise.all([render('project', file), render('adaptive', file)]);
+          $('project').src = project.url; $('adaptive').src = adaptive.url; adaptiveUrl = adaptive.url;
+          $('project-meta').innerHTML = describe(project.meta); $('adaptive-meta').innerHTML = describe(adaptive.meta);
+          $('status').textContent = 'Hoàn tất — so sánh hai cột bên phải.'; $('download').disabled = false;
+        } catch (error) { $('status').textContent = error.message; }
+      };
+      $('download').onclick = () => { const a=document.createElement('a'); a.href=adaptiveUrl; a.download='hero-adaptive.webp'; a.click(); };
+    </script>
+  </body>
+</html>

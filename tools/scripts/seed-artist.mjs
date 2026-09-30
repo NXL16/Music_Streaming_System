@@ -41,6 +41,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const require = createRequire(import.meta.url);
 const projectRoot = path.resolve(__dirname, '..', '..');
+const FALLBACK_ARTIST_ARTWORK_PATH = path.join(
+  projectRoot,
+  'tools',
+  'seed-studio',
+  'assets',
+  'fallback.jpg',
+);
 const { SONG_CREDIT_ROLE_IDS } = require(
   path.join(projectRoot, 'packages', 'shared-constants', 'dist', 'index.js'),
 );
@@ -50,10 +57,13 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:9999/v1';
 let ADMIN_TOKEN = '';
 let SEED_ARTIST_PASSWORD = '';
 let SEED_ARTIST_ACCESS_TOKEN = '';
+let SEED_ARTIST_OWNER_EMAIL = '';
+let SEED_ARTIST_OWNER_STATE = null;
+let seedArtistOwnerRefreshInFlight = null;
 // Bump whenever seed-derived Song metadata or credits change. A resumed seed
 // republishes the catalog record without uploading audio or creating a song.
-const CATALOG_SONG_PUBLISH_VERSION = 13;
-const CATALOG_ALBUM_CREDIT_VERSION = 2;
+const CATALOG_SONG_PUBLISH_VERSION = 14;
+const CATALOG_ALBUM_PUBLISH_VERSION = 3;
 
 function catalogIngestionKey(collectionId) {
   return crypto
@@ -73,6 +83,7 @@ if (args.includes('--skip-transcode')) {
 const DRY_RUN = args.includes('--dry-run');
 const NO_YOUTUBE = args.includes('--no-youtube');
 const NO_SOUNDCLOUD = args.includes('--no-soundcloud');
+const METADATA_ONLY = args.includes('--metadata-only');
 
 function parsePositiveIntegerEnv(name, fallback, min, max) {
   const raw = process.env[name]?.trim();
@@ -123,7 +134,12 @@ function optionValue(name) {
   return index >= 0 ? String(args[index + 1] || '').trim() : '';
 }
 function firstPositionalArgument() {
-  const optionsWithValues = new Set(['--artist-id', '--album-ids', '--audio-mode']);
+  const optionsWithValues = new Set([
+    '--artist-id',
+    '--album-ids',
+    '--audio-mode',
+    '--catalog-artist-id',
+  ]);
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (optionsWithValues.has(argument)) {
@@ -135,6 +151,7 @@ function firstPositionalArgument() {
   return '';
 }
 const SELECTED_ARTIST_ID = optionValue('--artist-id');
+const CATALOG_ARTIST_ID = optionValue('--catalog-artist-id');
 const SELECTED_ALBUM_IDS = new Set(
   optionValue('--album-ids').split(',').map(value => value.trim()).filter(Boolean),
 );
@@ -678,6 +695,39 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isExpiredArtistOwnerTokenError(error) {
+  const message = errorMessage(error);
+  return message.includes('API 401') || message.includes('AUTH_INVALID_TOKEN');
+}
+
+async function refreshSeedArtistOwnerSession() {
+  if (!SEED_ARTIST_OWNER_EMAIL || !SEED_ARTIST_OWNER_STATE) {
+    throw new Error('Seed Artist owner session cannot be refreshed because its login context is unavailable');
+  }
+
+  if (!seedArtistOwnerRefreshInFlight) {
+    seedArtistOwnerRefreshInFlight = (async () => {
+      logWarn('Artist owner access token expired; signing in again before retrying upload');
+      await loginSeedArtistOwner(SEED_ARTIST_OWNER_EMAIL, SEED_ARTIST_OWNER_STATE);
+    })().finally(() => {
+      seedArtistOwnerRefreshInFlight = null;
+    });
+  }
+
+  await seedArtistOwnerRefreshInFlight;
+}
+
+async function requestSongUpload(payload) {
+  try {
+    return await apiCall('POST', '/songs/request-upload', payload, artistAuthorization());
+  } catch (error) {
+    if (!isExpiredArtistOwnerTokenError(error)) throw error;
+
+    await refreshSeedArtistOwnerSession();
+    return apiCall('POST', '/songs/request-upload', payload, artistAuthorization());
+  }
+}
+
 async function getAdminToken() {
   const tokenUrl = process.env.SEED_STUDIO_TOKEN_URL?.trim();
   if (!tokenUrl) return ADMIN_TOKEN;
@@ -839,33 +889,108 @@ async function findMusicBrainzCreditSuggestions(track) {
   }
 }
 
-async function reviewSongCreditsInStudio(track, albumName) {
-  const studioUrl = process.env.SEED_STUDIO_TOKEN_URL?.trim();
-  if (!studioUrl) return [];
+const APPLE_MUSIC_CREDIT_ROLE_MAP = Object.freeze({
+  performer: 'performer',
+  vocals: 'vocals',
+  'lead vocals': 'lead_vocals',
+  'background vocals': 'background_vocals',
+  musician: 'musician',
+  instrumentalist: 'instrumentalist',
+  guitar: 'guitar',
+  'bass guitar': 'bass_guitar',
+  drums: 'drums',
+  percussion: 'percussion',
+  keyboards: 'keyboards',
+  piano: 'piano',
+  synthesizer: 'synthesizer',
+  strings: 'strings',
+  violin: 'violin',
+  programming: 'programming',
+  composer: 'composer',
+  lyrics: 'lyrics',
+  lyricist: 'lyrics',
+  songwriter: 'songwriter',
+  arranger: 'arranger',
+  'vocal arranger': 'vocal_arranger',
+  translator: 'translator',
+  producer: 'producer',
+  'co-producer': 'co_producer',
+  'executive producer': 'executive_producer',
+  'recording engineer': 'recording_engineer',
+  'mixing engineer': 'mixing_engineer',
+  'mastering engineer': 'mastering_engineer',
+  'immersive engineer': 'immersive_engineer',
+  'assistant engineer': 'assistant_engineer',
+  engineer: 'engineer',
+  remixer: 'remixer',
+});
 
-  const reviewUrl = new URL('/api/job/credit-review', studioUrl);
-  const musicBrainz = await findMusicBrainzCreditSuggestions(track);
-  const response = await fetch(reviewUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-seed-job-secret': process.env.SEED_STUDIO_JOB_SECRET?.trim() || '',
-    },
-    body: JSON.stringify({
-      track: {
-        id: String(track.trackId || track.trackName || track.title || ''),
-        name: track.trackName || track.title || '',
-        artistName: displayTrackArtistName(track),
-        albumName,
-        artworkUrl: track.artworkUrl100 || track.artworkUrl || '',
-      },
-      suggestions: musicBrainz.suggestions,
-      lookup: { source: 'MusicBrainz', status: musicBrainz.status },
-    }),
-  });
-  if (!response.ok) throw new Error(`Credit review unavailable: ${response.status}`);
-  const payload = await response.json();
-  return Array.isArray(payload.credits) ? payload.credits : [];
+function appleMusicSongUrl(track) {
+  const trackUrl = String(track.trackViewUrl || '').trim();
+  if (track.trackId) {
+    return `https://music.apple.com/${STOREFRONT}/song/_/${encodeURIComponent(track.trackId)}`;
+  }
+  return trackUrl.includes('music.apple.com/') && trackUrl.includes('/song/')
+    ? trackUrl
+    : '';
+}
+
+function collectAppleMusicSongCredits(value, credits, seenObjects = new Set()) {
+  if (!value || typeof value !== 'object' || seenObjects.has(value)) return;
+  seenObjects.add(value);
+
+  if (value.itemKind === 'songDetailItemLockup' && Array.isArray(value.items)) {
+    for (const item of value.items) {
+      const name = String(item?.name || '').trim();
+      const roleNames = Array.isArray(item?.roleNames) ? item.roleNames : [];
+      for (const roleName of roleNames) {
+        const role = APPLE_MUSIC_CREDIT_ROLE_MAP[normalizeMusicText(roleName)];
+        if (name && role) credits.push({ name, role });
+      }
+    }
+  }
+
+  for (const child of Object.values(value)) {
+    collectAppleMusicSongCredits(child, credits, seenObjects);
+  }
+}
+
+async function fetchAppleMusicSongCredits(track) {
+  const title = track.trackName || track.title || '';
+  const url = appleMusicSongUrl(track);
+  if (!url) {
+    logWarn(`Apple Music credit lookup skipped for "${title}": missing song URL`);
+    return [];
+  }
+
+  try {
+    const response = await fetch(url, { headers: APPLE_MUSIC_HEADERS });
+    if (!response.ok) {
+      logWarn(`Apple Music credit lookup failed for "${title}": HTTP ${response.status}`);
+      return [];
+    }
+
+    const data = parseAppleMusicServerData(await response.text());
+    const rawCredits = [];
+    collectAppleMusicSongCredits(data, rawCredits);
+    const seen = new Set();
+    const credits = rawCredits.filter((credit) => {
+      const key = `${normalizeMusicText(credit.name)}:${credit.role}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    if (credits.length) {
+      logOk(`Apple Music found ${credits.length} credit(s) for "${title}"`);
+    } else {
+      logInfo(`Apple Music has no detailed credits for "${title}"; continuing without credits`);
+    }
+    return credits;
+  } catch (error) {
+    logWarn(`Could not fetch Apple Music credits for "${title}": ${errorMessage(error)}`);
+    return [];
+  }
 }
 
 function normalizeReviewedCredits(rawCredits) {
@@ -978,53 +1103,113 @@ async function fetchAppleMusicArtworkHighRes(artistId) {
       headers: APPLE_MUSIC_HEADERS,
     });
     if (!res.ok) return null;
-    const html = await res.text();
-
-    const targetId = 'serialized-server-data';
-    const startTag = `id="${targetId}"`;
-    const startIdx = html.indexOf(startTag);
-    if (startIdx === -1) return null;
-
-    const tagEndIdx = html.indexOf('>', startIdx);
-    const endTagIdx = html.indexOf('</script>', tagEndIdx);
-    const content = html.substring(tagEndIdx + 1, endTagIdx).trim();
-
-    const rawData = JSON.parse(content);
-    const pageData = rawData.data?.[0]?.data;
-    if (!pageData) return null;
-
-    const sections = pageData.sections || [];
-    const headerSection = sections.find(s => s.id?.includes('artist-detail-header-section'));
-    const headerItem = headerSection?.items?.[0];
+    const rawData = parseAppleMusicServerData(await res.text());
+    const headerItem = findAppleMusicArtistHeader(rawData, artistId);
     const artworkDict = headerItem?.artwork?.dictionary;
+    const videoArtwork = videoArtworkFromArtistHeader(headerItem);
+    if (!artworkDict?.url && !videoArtwork) {
+      logWarn(`Apple Music returned no artist portrait or motion artwork for ID ${artistId}`);
+      return null;
+    }
+    if (!artworkDict?.url) logWarn(`Apple Music returned no artist portrait for ID ${artistId}`);
 
     const result = {
       url: artworkDict?.url || '',
-      bgColor: artworkDict.bgColor || '',
-      textColor1: artworkDict.textColor1 || '',
-      textColor2: artworkDict.textColor2 || '',
-      textColor3: artworkDict.textColor3 || '',
-      textColor4: artworkDict.textColor4 || '',
-      width: artworkDict.width || 0,
-      height: artworkDict.height || 0,
-      videoArtwork: null,
+      bgColor: artworkDict?.bgColor || '',
+      textColor1: artworkDict?.textColor1 || '',
+      textColor2: artworkDict?.textColor2 || '',
+      textColor3: artworkDict?.textColor3 || '',
+      textColor4: artworkDict?.textColor4 || '',
+      width: artworkDict?.width || 0,
+      height: artworkDict?.height || 0,
+      videoArtwork,
     };
 
-    const videoDict = headerItem?.videoArtwork?.dictionary;
-    const motionData = videoDict?.motionArtistWide16x9;
-    if (motionData?.video) {
-      result.videoArtwork = {
-        hlsUrl: motionData.video,
-        previewFrame: motionData.previewFrame,
-      };
-      logOk('Found video banner (motionArtistWide16x9)');
-    }
+    if (result.videoArtwork) logOk('Found artist motion artwork');
 
     return result;
   } catch (err) {
     logWarn(`Could not fetch Apple Music page: ${err.message}`);
     return null;
   }
+}
+
+function appleMusicDescriptorId(value) {
+  return String(value?.contentDescriptor?.identifiers?.storeAdamID || '');
+}
+
+function appleMusicDescriptorMatches(value, resourceId) {
+  const descriptorId = appleMusicDescriptorId(value);
+  const canonicalId = String(resourceId);
+  // Artist radio/header records can prefix the same Apple artist ID (for
+  // example `ra.a-1648018194`). Treat it as the same resource only when the
+  // object itself carries artwork or motion-artwork metadata.
+  return descriptorId === canonicalId || descriptorId.endsWith(`-${canonicalId}`);
+}
+
+/**
+ * Apple has changed the section identifier for artist pages more than once.
+ * The artist ID is stable, so select the resource header by that ID instead
+ * of relying on a presentational section name.
+ */
+function findAppleMusicArtistHeader(value, artistId, seen = new Set()) {
+  if (!value || typeof value !== 'object' || seen.has(value)) return null;
+  seen.add(value);
+
+  if (
+    appleMusicDescriptorMatches(value, artistId)
+    && (value.artwork || value.videoArtwork || value.wideVideoArtwork || value.tallVideoArtwork)
+  ) {
+    return value;
+  }
+
+  for (const child of Object.values(value)) {
+    const found = findAppleMusicArtistHeader(child, artistId, seen);
+    if (found) return found;
+  }
+
+  return null;
+}
+
+function videoArtworkFromDictionary(dictionary) {
+  if (!dictionary || typeof dictionary !== 'object') return null;
+
+  for (const motion of Object.values(dictionary)) {
+    if (!motion || typeof motion !== 'object' || typeof motion.video !== 'string') continue;
+    if (motion.video.startsWith('https://')) {
+      return {
+        hlsUrl: motion.video,
+        previewFrame: motion.previewFrame || null,
+      };
+    }
+  }
+
+  return null;
+}
+
+/** Artist detail pages use a wide hero. Keep square motion only as a last resort. */
+function videoArtworkFromArtistHeader(headerItem) {
+  const wide = videoArtworkFromDictionary(headerItem?.wideVideoArtwork?.dictionary);
+  if (wide) return { ...wide, presentation: '16:9' };
+
+  const square = videoArtworkFromDictionary(headerItem?.videoArtwork?.dictionary);
+  if (square) return { ...square, presentation: '1:1 fallback' };
+
+  const tall = videoArtworkFromDictionary(headerItem?.tallVideoArtwork?.dictionary);
+  return tall ? { ...tall, presentation: 'tall fallback' } : null;
+}
+
+async function discoverArtistMotionArtwork(artists) {
+  const profilesById = new Map();
+  logInfo(`Checking motion artwork for ${artists.length} artist result(s)...`);
+
+  for (const artist of artists) {
+    const profile = await fetchAppleMusicArtworkHighRes(artist.artistId);
+    profilesById.set(String(artist.artistId), profile);
+    await sleep(150);
+  }
+
+  return profilesById;
 }
 
 function parseAppleMusicServerData(html) {
@@ -1050,16 +1235,8 @@ function findAppleMusicVideoArtwork(value, seen = new Set()) {
   seen.add(value);
 
   if (value.videoArtwork?.dictionary) {
-    const dictionary = value.videoArtwork.dictionary;
-    for (const motion of Object.values(dictionary)) {
-      if (!motion || typeof motion !== 'object' || typeof motion.video !== 'string') continue;
-      if (motion.video.startsWith('https://')) {
-        return {
-          hlsUrl: motion.video,
-          previewFrame: typeof motion.previewFrame === 'string' ? motion.previewFrame : '',
-        };
-      }
-    }
+    const found = videoArtworkFromDictionary(value.videoArtwork.dictionary);
+    if (found) return found;
   }
 
   for (const child of Object.values(value)) {
@@ -1070,144 +1247,137 @@ function findAppleMusicVideoArtwork(value, seen = new Set()) {
   return null;
 }
 
-async function fetchAppleMusicAlbumVideo(album) {
-  const albumName = album.collectionName || album.name || album.collectionId;
-  const albumId = album.collectionId;
-  if (!albumId) return null;
+function findAppleMusicAlbumHeader(value, albumId, seen = new Set()) {
+  if (!value || typeof value !== 'object' || seen.has(value)) return null;
+  seen.add(value);
 
-  logInfo(`Fetching Apple Music motion artwork for album "${albumName}"...`);
-  try {
-    const url = `https://music.apple.com/${STOREFRONT}/album/_/${albumId}`;
-    const res = await fetch(url, { headers: APPLE_MUSIC_HEADERS });
-    if (!res.ok) return null;
+  if (
+    appleMusicDescriptorId(value) === String(albumId)
+    && value.contentDescriptor?.kind === 'album'
+    && Array.isArray(value.subtitleLinks)
+  ) {
+    return value;
+  }
 
-    const pageData = parseAppleMusicServerData(await res.text());
-    const videoArtwork = findAppleMusicVideoArtwork(pageData);
-    if (videoArtwork) logOk(`Found motion artwork for album "${albumName}"`);
-    return videoArtwork;
-  } catch (err) {
-    logWarn(`Could not fetch album video for "${albumName}": ${err.message}`);
-    return null;
+  for (const child of Object.values(value)) {
+    const found = findAppleMusicAlbumHeader(child, albumId, seen);
+    if (found) return found;
+  }
+
+  return null;
+}
+
+function decodeHtmlEntities(value) {
+  const namedEntities = {
+    amp: '&', apos: "'", gt: '>', lt: '<', nbsp: ' ', quot: '"',
+  };
+  return value.replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (entity, token) => {
+    const normalized = token.toLowerCase();
+    if (normalized.startsWith('#x')) {
+      return String.fromCodePoint(Number.parseInt(normalized.slice(2), 16)) || entity;
+    }
+    if (normalized.startsWith('#')) {
+      return String.fromCodePoint(Number.parseInt(normalized.slice(1), 10)) || entity;
+    }
+    return namedEntities[normalized] || entity;
+  });
+}
+
+function appleMusicAlbumEditorialDescription(html) {
+  const descriptionIndex = html.indexOf('data-testid="description"');
+  if (descriptionIndex === -1) return '';
+  const startMarker = '<!-- HTML_TAG_START -->';
+  const endMarker = '<!-- HTML_TAG_END -->';
+  const start = html.indexOf(startMarker, descriptionIndex);
+  const end = start === -1 ? -1 : html.indexOf(endMarker, start + startMarker.length);
+  if (start === -1 || end === -1) return '';
+
+  return decodeHtmlEntities(
+    html.slice(start + startMarker.length, end).replace(/<[^>]*>/g, ' '),
+  ).replace(/\s+/g, ' ').trim();
+}
+
+function collectAppleMusicArtistLinks(value, ids, seen = new Set()) {
+  if (!value || typeof value !== 'object' || seen.has(value)) return;
+  seen.add(value);
+
+  for (const links of [value.subtitleLinks, value.tertiaryTitleLinks, value.artistLinks]) {
+    if (!Array.isArray(links)) continue;
+    for (const link of links) {
+      const artistId = link?.segue?.destination?.contentDescriptor?.identifiers?.storeAdamID;
+      if (link?.title && artistId && !ids[normalizeMusicText(link.title)]) {
+        ids[normalizeMusicText(link.title)] = String(artistId);
+      }
+    }
+  }
+
+  for (const child of Object.values(value)) {
+    collectAppleMusicArtistLinks(child, ids, seen);
   }
 }
 
 /**
- * Fallback metadata source for artists whose Apple Music page has no artwork.
- * Only an exact normalized artist-name match is accepted: a plausible image is
- * worse than no image when seeding a catalog.
+ * Album headers expose the authoritative artist IDs for a release's credits.
+ * This avoids globally searching a non-unique display name such as "AMEE".
  */
-async function fetchDeezerArtistArtwork(artistName) {
-  const expectedName = normalizeMusicText(artistName);
-  if (!expectedName) return null;
+async function fetchAppleMusicAlbumArtistIds(album) {
+  const albumId = album.collectionId;
+  if (!albumId) return {};
 
-  logInfo(`Searching Deezer metadata for artwork of "${artistName}"...`);
   try {
-    const url = `https://api.deezer.com/search/artist?q=${encodeURIComponent(artistName)}&limit=10`;
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'MusicalCatalogSeed/1.0',
-      },
-    });
-    if (!res.ok) {
-      logWarn(`Deezer artist search failed: ${res.status} ${res.statusText}`);
-      return null;
-    }
+    const url = `https://music.apple.com/${STOREFRONT}/album/_/${albumId}`;
+    const res = await fetch(url, { headers: APPLE_MUSIC_HEADERS });
+    if (!res.ok) return {};
 
-    const data = await res.json();
-    const match = (data.data || []).find(
-      (candidate) => normalizeMusicText(candidate.name) === expectedName,
-    );
-    const artworkUrl = match?.picture_xl || match?.picture_big || match?.picture_medium || '';
-    if (!artworkUrl) {
-      logWarn(`Deezer has no verified artwork for "${artistName}"`);
-      return null;
-    }
-
-    logOk(`Using verified Deezer artwork metadata for "${artistName}"`);
-    return artworkUrl;
-  } catch (error) {
-    logWarn(`Deezer artist artwork lookup failed: ${error.message}`);
-    return null;
+    const rawData = parseAppleMusicServerData(await res.text());
+    const header = findAppleMusicAlbumHeader(rawData, albumId);
+    const ids = {};
+    // Process the album header first, then track credit links. This preserves
+    // the release's direct credit if another section repeats the same name.
+    collectAppleMusicArtistLinks(header, ids);
+    collectAppleMusicArtistLinks(rawData?.data?.[0]?.data?.sections, ids);
+    return ids;
+  } catch (err) {
+    logWarn(`Could not resolve artist credits for "${album.collectionName}": ${err.message}`);
+    return {};
   }
 }
 
-function asMetadataList(value) {
-  if (Array.isArray(value)) return value;
-  if (Array.isArray(value?.items)) return value.items;
-  if (Array.isArray(value?.data)) return value.data;
-  return [];
-}
+async function fetchAppleMusicAlbumEditorialMetadata(album) {
+  const albumName = album.collectionName || album.name || album.collectionId;
+  const albumId = album.collectionId;
+  if (!albumId) return { videoArtwork: null, description: '' };
 
-function verifiedArtistArtworkUrl(candidates, artistName) {
-  const expectedName = normalizeMusicText(artistName);
-  const artist = candidates.find((candidate) => {
-    const candidateName = candidate?.name || candidate?.artistName || candidate?.title || '';
-    return normalizeMusicText(candidateName) === expectedName;
-  });
-  if (!artist) return null;
-
-  const artworkUrl = [
-    artist.imageUrl,
-    artist.avatarUrl,
-    artist.avatar,
-    artist.thumbnailM,
-    artist.thumbnail,
-    artist.picture,
-    artist.cover,
-  ].find((value) => typeof value === 'string' && value.startsWith('http'));
-  return artworkUrl || null;
-}
-
-async function fetchNhacCuaTuiArtistArtwork(artistName) {
-  logInfo(`Searching NhacCuaTui metadata for artwork of "${artistName}"...`);
+  logInfo(`Fetching Apple Music editorial metadata for album "${albumName}"...`);
   try {
-    const data = await nctApiCall(
-      '/api/v3/search/all',
-      { keyword: artistName, correct: 'true' },
-      { keyword: artistName, correct: true, isShowLoading: false },
-    );
-    const artistCandidates = [
-      ...asMetadataList(data?.artists),
-      ...asMetadataList(data?.singers),
-      ...asMetadataList(data?.artist),
-    ];
-    const artworkUrl = verifiedArtistArtworkUrl(artistCandidates, artistName);
-    if (artworkUrl) {
-      logOk(`Using verified NhacCuaTui artwork metadata for "${artistName}"`);
-      return artworkUrl;
-    }
-    logWarn(`NhacCuaTui has no verified artwork for "${artistName}"`);
-    return null;
-  } catch (error) {
-    logWarn(`NhacCuaTui artist artwork lookup failed: ${error.message}`);
-    return null;
+    const url = `https://music.apple.com/${STOREFRONT}/album/_/${albumId}`;
+    const res = await fetch(url, { headers: APPLE_MUSIC_HEADERS });
+    if (!res.ok) return { videoArtwork: null, description: '' };
+
+    const pageHtml = await res.text();
+    const pageData = parseAppleMusicServerData(pageHtml);
+    const videoArtwork = findAppleMusicVideoArtwork(pageData);
+    const description = appleMusicAlbumEditorialDescription(pageHtml);
+    if (videoArtwork) logOk(`Found motion artwork for album "${albumName}"`);
+    if (description) logOk(`Found editorial description for album "${albumName}"`);
+    return { videoArtwork, description };
+  } catch (err) {
+    logWarn(`Could not fetch editorial metadata for "${albumName}": ${err.message}`);
+    return { videoArtwork: null, description: '' };
   }
 }
 
-async function fetchZingArtistArtwork(artistName) {
-  logInfo(`Searching Zing MP3 metadata for artwork of "${artistName}"...`);
-  try {
-    const ctime = String(Math.floor(Date.now() / 1000));
-    const data = await zingApiCall(
-      '/api/v2/search',
-      { ctime, version: ZING_VERSION },
-      { q: artistName },
-    );
-    const artistCandidates = [
-      ...asMetadataList(data?.artists),
-      ...asMetadataList(data?.artist),
-    ];
-    const artworkUrl = verifiedArtistArtworkUrl(artistCandidates, artistName);
-    if (artworkUrl) {
-      logOk(`Using verified Zing MP3 artwork metadata for "${artistName}"`);
-      return artworkUrl;
-    }
-    logWarn(`Zing MP3 has no verified artwork for "${artistName}"`);
-    return null;
-  } catch (error) {
-    logWarn(`Zing MP3 artist artwork lookup failed: ${error.message}`);
-    return null;
+async function discoverAlbumEditorialMetadata(albums) {
+  const metadataByAlbumId = new Map();
+  logInfo(`Checking editorial metadata for ${albums.length} album(s)/single(s)...`);
+
+  for (const album of albums) {
+    const metadata = await fetchAppleMusicAlbumEditorialMetadata(album);
+    metadataByAlbumId.set(String(album.collectionId), metadata);
+    await sleep(150);
   }
+
+  return metadataByAlbumId;
 }
 
 function getHighResArtworkUrl(artworkUrlTemplate, size = 1200) {
@@ -1980,6 +2150,117 @@ async function createAndPublishArtist({
   return artistId;
 }
 
+async function catalogArtistResource(artistId) {
+  const response = await apiCall('GET', `/catalog/${STOREFRONT}/artists/${artistId}`);
+  const artists = response?.resources?.artists || response?.data?.resources?.artists || {};
+  const artist = artists[artistId] || Object.values(artists).find((entry) => entry?.id === artistId);
+  if (!artist) throw new Error(`Catalog artist not found: ${artistId}`);
+  return artist;
+}
+
+async function assertArtistMetadataUpdateAllowed(artistId) {
+  const response = await apiCall(
+    'GET',
+    `/admin/catalog/drafts?storefront=${STOREFRONT}&resourceType=artists&resourceId=${encodeURIComponent(artistId)}&status=SUBMITTED&limit=1`,
+  );
+  const drafts = response?.drafts || response?.data?.drafts || [];
+  const submittedDraft = drafts.find((draft) =>
+    ['3', 'SUBMITTED', 'CATALOG_DRAFT_STATUS_SUBMITTED'].includes(String(draft?.status)),
+  );
+  if (submittedDraft?.id) {
+    throw new Error(
+      `Artist ${artistId} has draft ${submittedDraft.id} awaiting review. Publish, request changes, or delete that draft before refreshing metadata.`,
+    );
+  }
+}
+
+async function updateAndPublishArtistMetadata({
+  catalogArtistId,
+  selectedArtist,
+  artworkAssetId,
+  editorialVideoAssetId,
+}) {
+  const existingArtist = await catalogArtistResource(catalogArtistId);
+  const attributes = existingArtist.attributes || existingArtist;
+  const genreNames = selectedArtist.primaryGenreName
+    ? [selectedArtist.primaryGenreName]
+    : (attributes.genreNames || []);
+  const draft = await apiCall('POST', '/admin/catalog/artists/draft', {
+    resourceId: catalogArtistId,
+    storefront: STOREFRONT,
+    // Preserve the catalog-owned fields this import does not author.
+    name: attributes.name || selectedArtist.artistName,
+    url: attributes.url || slugify(selectedArtist.artistName),
+    genreNames,
+    artworkAssetId,
+    editorialVideoAssetId: editorialVideoAssetId || attributes.editorialVideoAssetId || '',
+    origin: attributes.origin || '',
+    birthDate: attributes.birthDate || '',
+    biography: attributes.biography || '',
+    biographySourceUrl: attributes.biographySourceUrl || '',
+  });
+  const draftId = draft.draftId || draft.id;
+  if (!draftId) throw new Error(`Artist metadata draft was not created for ${catalogArtistId}`);
+
+  await apiCall('POST', `/admin/catalog/drafts/${draftId}/submit`);
+  await apiCall('POST', `/admin/catalog/drafts/${draftId}/publish`);
+  logOk(`Artist metadata updated — artistId: ${catalogArtistId}`);
+}
+
+async function refreshExistingArtistMetadata({
+  catalogArtistId,
+  selectedArtist,
+  appleMusicProfile,
+  state,
+  tmpDir,
+}) {
+  if (!catalogArtistId) throw new Error('--catalog-artist-id is required with --metadata-only');
+  await assertArtistMetadataUpdateAllowed(catalogArtistId);
+
+  const artworkPath = path.join(tmpDir, 'artist-metadata-artwork.jpg');
+  const artworkUrl = await downloadArtistArtwork(
+    resolveArtistArtworkUrls(appleMusicProfile, selectedArtist.artworkUrl100),
+    artworkPath,
+    'Artist metadata',
+    true,
+  );
+  let artworkAssetId;
+  if (artworkUrl) {
+    artworkAssetId = await uploadArtworkAsset(artworkPath, 'Artist metadata');
+  } else {
+    if (!fs.existsSync(FALLBACK_ARTIST_ARTWORK_PATH)) {
+      throw new Error(`Default artist avatar is missing: ${FALLBACK_ARTIST_ARTWORK_PATH}`);
+    }
+    artworkAssetId = await uploadArtworkAsset(
+      FALLBACK_ARTIST_ARTWORK_PATH,
+      'Default artist avatar',
+    );
+    logWarn(`No Apple Music or iTunes portrait for "${selectedArtist.artistName}"; applied the default artist avatar`);
+  }
+
+  let editorialVideoAssetId = '';
+  if (appleMusicProfile?.videoArtwork?.hlsUrl) {
+    const videoPath = path.join(tmpDir, 'artist-metadata-video-banner.mp4');
+    try {
+      if (await downloadVideoBanner(appleMusicProfile.videoArtwork.hlsUrl, videoPath, 'Artist metadata')) {
+        editorialVideoAssetId = await uploadVideoAsset(videoPath, 'Artist metadata banner');
+      }
+    } catch (error) {
+      logWarn(`Could not refresh artist motion artwork: ${error.message}`);
+    }
+  }
+
+  await updateAndPublishArtistMetadata({
+    catalogArtistId,
+    selectedArtist,
+    artworkAssetId,
+    editorialVideoAssetId,
+  });
+  state.set('artistArtworkAssetId', artworkAssetId);
+  state.set('artistArtworkSource', artworkUrl ? 'apple-or-itunes' : 'fallback');
+  if (editorialVideoAssetId) state.set('artistVideoAssetId', editorialVideoAssetId);
+}
+
 async function findCatalogArtistByExactName(name) {
   const response = await apiCall(
     'GET',
@@ -2001,46 +2282,136 @@ async function findExactITunesArtist(name) {
   ) || null;
 }
 
-async function collaboratorProfileSeedData(name, fallbackArtworkAssetId, state, tmpDir) {
-  const artist = await findExactITunesArtist(name);
-  if (!artist) {
-    logWarn(`No exact iTunes artist profile for "${name}"; using release artwork temporarily`);
-    return {
-      genreNames: ['Music'],
-      artworkAssetId: fallbackArtworkAssetId,
-    };
+function resolveArtistArtworkUrls(appleMusicProfile, iTunesArtworkUrl) {
+  return [...new Set([
+    appleMusicProfile?.url ? getHighResArtworkUrl(appleMusicProfile.url) : null,
+    getITunesArtworkHighRes(iTunesArtworkUrl),
+  ].filter(Boolean))];
+}
+
+async function downloadArtistArtwork(artworkUrls, destination, label, force = false) {
+  for (const artworkUrl of artworkUrls) {
+    try {
+      if (force && fs.existsSync(destination)) fs.unlinkSync(destination);
+      await downloadArtwork(artworkUrl, destination, label);
+      return artworkUrl;
+    } catch (error) {
+      logWarn(`Could not import ${label} portrait: ${error.message}`);
+    }
+  }
+  return null;
+}
+
+async function buildAppleArtistIdsByName(albumsWithTracks, state) {
+  const idsByAlbum = state.get('appleArtistIdsByAlbum') || {};
+  const idsByName = {};
+
+  for (const { album } of albumsWithTracks) {
+    const albumId = String(album.collectionId);
+    if (!Object.hasOwn(idsByAlbum, albumId)) {
+      logInfo(`Resolving Apple Music artist credits for "${album.collectionName}"...`);
+      idsByAlbum[albumId] = await fetchAppleMusicAlbumArtistIds(album);
+      state.set('appleArtistIdsByAlbum', idsByAlbum);
+    }
+
+    for (const [name, artistId] of Object.entries(idsByAlbum[albumId] || {})) {
+      if (!idsByName[name]) idsByName[name] = artistId;
+    }
+  }
+
+  return idsByName;
+}
+
+async function collaboratorProfileSeedData(
+  name,
+  sourceArtistId,
+  fallbackArtistArtworkAssetId,
+  state,
+  tmpDir,
+) {
+  const iTunesArtist = await findExactITunesArtist(name);
+  const artistId = sourceArtistId || iTunesArtist?.artistId;
+  const genreName = iTunesArtist?.primaryGenreName || 'Music';
+  if (!artistId) {
+    logWarn(`No verified Apple Music artist ID for "${name}"; portrait can only come from an exact iTunes match`);
   }
 
   const artworkAssetIds = state.get('collaboratorArtworkAssetIds') || {};
+  const artworkSources = state.get('collaboratorArtworkSources') || {};
+  const videoAssetIds = state.get('collaboratorVideoAssetIds') || {};
   const key = normalizeMusicText(name);
   let artworkAssetId = artworkAssetIds[key];
-  let appleMusicProfile = null;
+  if (!artworkSources[key]) {
+    // Do not keep a legacy collaborator avatar whose source could have been a
+    // release cover or a third-party provider.
+    artworkAssetId = '';
+  }
+  let editorialVideoAssetId = videoAssetIds[key];
+  const appleMusicProfile = artistId
+    ? await fetchAppleMusicArtworkHighRes(artistId)
+    : null;
+
   if (!artworkAssetId) {
-    appleMusicProfile = await fetchAppleMusicArtworkHighRes(artist.artistId);
-    const artworkUrl = appleMusicProfile?.url
-      ? getHighResArtworkUrl(appleMusicProfile.url)
-      : getITunesArtworkHighRes(artist.artworkUrl100);
-    if (artworkUrl) {
+    const artworkUrls = resolveArtistArtworkUrls(
+      appleMusicProfile,
+      iTunesArtist?.artworkUrl100,
+    );
+    if (artworkUrls.length) {
       const artworkPath = path.join(
         tmpDir,
         'collaborator-artwork',
-        `${slugify(name) || artist.artistId}.jpg`,
+        `${slugify(name) || artistId || 'artist'}.jpg`,
       );
-      await downloadArtwork(artworkUrl, artworkPath, `Collaborator "${name}"`);
-      artworkAssetId = await uploadArtworkAsset(artworkPath, `Collaborator "${name}"`);
-      artworkAssetIds[key] = artworkAssetId;
-      state.set('collaboratorArtworkAssetIds', artworkAssetIds);
+      const artworkUrl = await downloadArtistArtwork(
+        artworkUrls,
+        artworkPath,
+        `Collaborator "${name}"`,
+      );
+      if (artworkUrl) {
+        artworkAssetId = await uploadArtworkAsset(artworkPath, `Collaborator "${name}"`);
+        artworkAssetIds[key] = artworkAssetId;
+        artworkSources[key] = 'apple-or-itunes';
+        state.set('collaboratorArtworkAssetIds', artworkAssetIds);
+        state.set('collaboratorArtworkSources', artworkSources);
+      }
     }
   }
 
   if (!artworkAssetId) {
-    logWarn(`No artwork for collaborator "${name}"; using release artwork temporarily`);
-    artworkAssetId = fallbackArtworkAssetId;
+    logWarn(`No Apple Music or iTunes portrait for collaborator "${name}"; using the default artist avatar`);
+    artworkAssetId = fallbackArtistArtworkAssetId;
+    artworkAssetIds[key] = artworkAssetId;
+    artworkSources[key] = 'fallback';
+    state.set('collaboratorArtworkAssetIds', artworkAssetIds);
+    state.set('collaboratorArtworkSources', artworkSources);
+  }
+
+  if (!editorialVideoAssetId && appleMusicProfile?.videoArtwork?.hlsUrl) {
+    const videoPath = path.join(
+      tmpDir,
+      'collaborator-video',
+      `${slugify(name) || artistId || 'artist'}.mp4`,
+    );
+    try {
+      const downloaded = await downloadVideoBanner(
+        appleMusicProfile.videoArtwork.hlsUrl,
+        videoPath,
+        `Collaborator "${name}"`,
+      );
+      if (downloaded) {
+        editorialVideoAssetId = await uploadVideoAsset(videoPath, `Collaborator "${name}" banner`);
+        videoAssetIds[key] = editorialVideoAssetId;
+        state.set('collaboratorVideoAssetIds', videoAssetIds);
+      }
+    } catch (err) {
+      logWarn(`Could not import video for collaborator "${name}": ${err.message}`);
+    }
   }
 
   return {
-    genreNames: [artist.primaryGenreName || 'Music'],
+    genreNames: [genreName],
     artworkAssetId,
+    editorialVideoAssetId,
   };
 }
 
@@ -2048,27 +2419,31 @@ async function ensureCollaboratorArtists(
   albumsWithTracks,
   selectedArtist,
   primaryArtistId,
-  artworkAssetId,
+  fallbackArtistArtworkAssetId,
   state,
   tmpDir,
 ) {
   const idsByName = state.get('collaboratorArtistIds') || {};
   const collaborators = new Map();
+  const appleArtistIdsByName = await buildAppleArtistIdsByName(albumsWithTracks, state);
 
   for (const { album, tracks } of albumsWithTracks) {
     for (const name of creditedArtistNames(album.artistName || album.collectionArtistName)) {
       if (artistMatches(selectedArtist.artistName, name)) continue;
-      collaborators.set(normalizeMusicText(name), name);
+      const key = normalizeMusicText(name);
+      if (!collaborators.has(key)) collaborators.set(key, { name });
     }
     for (const track of tracks) {
       for (const name of songArtistNames(track, album)) {
         if (artistMatches(selectedArtist.artistName, name)) continue;
-        collaborators.set(normalizeMusicText(name), name);
+        const key = normalizeMusicText(name);
+      if (!collaborators.has(key)) collaborators.set(key, { name });
       }
     }
   }
 
-  for (const [key, name] of collaborators) {
+  for (const [key, collaborator] of collaborators) {
+    const { name } = collaborator;
     if (idsByName[key]) continue;
 
     const existingId = await findCatalogArtistByExactName(name);
@@ -2078,7 +2453,8 @@ async function ensureCollaboratorArtists(
     } else {
       const profile = await collaboratorProfileSeedData(
         name,
-        artworkAssetId,
+        appleArtistIdsByName[key],
+        fallbackArtistArtworkAssetId,
         state,
         tmpDir,
       );
@@ -2089,6 +2465,50 @@ async function ensureCollaboratorArtists(
   }
 
   return { [normalizeMusicText(selectedArtist.artistName)]: primaryArtistId, ...idsByName };
+}
+
+async function ensureAppleMusicCreditArtist(
+  name,
+  fallbackArtistArtworkAssetId,
+  state,
+  tmpDir,
+  collaboratorArtistIds,
+) {
+  const key = normalizeMusicText(name);
+  if (!key) return null;
+  if (collaboratorArtistIds[key]) return collaboratorArtistIds[key];
+
+  const lookupState = state.get('creditArtistLookups') || {};
+  if (Object.hasOwn(lookupState, key) && !lookupState[key]) return null;
+
+  const iTunesArtist = await findExactITunesArtist(name);
+  lookupState[key] = iTunesArtist?.artistId ? String(iTunesArtist.artistId) : '';
+  state.set('creditArtistLookups', lookupState);
+  if (!iTunesArtist?.artistId) {
+    logInfo(`Credit "${name}" has no exact Apple Music artist; keeping text credit`);
+    return null;
+  }
+
+  const existingId = await findCatalogArtistByExactName(name);
+  if (existingId) {
+    collaboratorArtistIds[key] = existingId;
+    state.set('collaboratorArtistIds', collaboratorArtistIds);
+    logOk(`Reusing credit artist "${name}" — artistId: ${existingId}`);
+    return existingId;
+  }
+
+  const profile = await collaboratorProfileSeedData(
+    name,
+    String(iTunesArtist.artistId),
+    fallbackArtistArtworkAssetId,
+    state,
+    tmpDir,
+  );
+  const artistId = await createAndPublishArtist({ name, ...profile });
+  collaboratorArtistIds[key] = artistId;
+  state.set('collaboratorArtistIds', collaboratorArtistIds);
+  logOk(`Created credit artist "${name}" — artistId: ${artistId}`);
+  return artistId;
 }
 
 function sortSongOccurrencesByCreditCompleteness(occurrences) {
@@ -2154,7 +2574,7 @@ async function createSeedArtistOwner(name, slug, state) {
   // deterministic suffix so artists whose slugs normalize similarly never
   // collide, while making retries use the same account.
   const safeSlug = slug
-    .replace(/-/g, '_')
+    .replace(/-/g, '')
     .replace(/[^a-z0-9_]/g, '_')
     .replace(/_+/g, '_')
     .replace(/^_+|_+$/g, '');
@@ -2163,8 +2583,8 @@ async function createSeedArtistOwner(name, slug, state) {
     .update(slug)
     .digest('hex')
     .slice(0, 8);
-  const username = ('seed_' + (safeSlug || 'artist').slice(0, 36) + '_' + usernameSuffix).slice(0, 50);
-  const email = 'seed+' + slug + '@artists.404hz.local';
+  const username = ((safeSlug || 'artist').slice(0, 41) + '_' + usernameSuffix).slice(0, 50);
+  const email = slug.replace(/-/g, '') + '@artist.404hz.local';
   logInfo('Creating Artist Owner account ' + email + '...');
   const signup = responseData(
     await apiCall('POST', '/artist/auth/signup', {
@@ -2203,6 +2623,8 @@ async function loginSeedArtistOwner(email, state) {
     throw new Error('Seed Artist Owner login requires unsupported 2FA or returned no token');
   }
   SEED_ARTIST_ACCESS_TOKEN = login.accessToken;
+  SEED_ARTIST_OWNER_EMAIL = email;
+  SEED_ARTIST_OWNER_STATE = state;
 }
 
 async function findSongInLibrary(title) {
@@ -2278,13 +2700,13 @@ async function uploadSongThroughPipeline(audioFile, title, artistId) {
 
   let uploadRes;
   try {
-    uploadRes = await apiCall('POST', '/songs/request-upload', {
+    uploadRes = await requestSongUpload({
       title,
       artistId,
       checksum,
       size,
       audioMode: AUDIO_MODE,
-    }, artistAuthorization());
+    });
   } catch (err) {
     if (err.message.includes('SONG_ALREADY_IN_LIBRARY') || err.message.includes('409')) {
       logWarn(`Song "${title}" already in library, searching for existing songId...`);
@@ -2403,7 +2825,14 @@ async function createAndPublishSongDraft(
   return draftId;
 }
 
-async function createAndPublishAlbum(album, artistIds, songMappings, artworkAssetId, editorialVideoAssetId) {
+async function createAndPublishAlbum(
+  album,
+  artistIds,
+  songMappings,
+  artworkAssetId,
+  editorialVideoAssetId,
+  editorialDescription,
+) {
   const albumName = album.collectionName || album.name;
   const releaseDate = album.releaseDate ? album.releaseDate.split('T')[0] : '';
   const releaseType = releaseTypeForSeedAlbum(album);
@@ -2462,6 +2891,9 @@ async function createAndPublishAlbum(album, artistIds, songMappings, artworkAsse
 
   if (editorialVideoAssetId) {
     draftBody.editorialVideoAssetId = editorialVideoAssetId;
+  }
+  if (editorialDescription) {
+    draftBody.editorialNotes = { standard: editorialDescription };
   }
 
   // A seed is an administrative import. Keep create, submit, and publish on
@@ -2526,19 +2958,15 @@ async function main() {
     }
     logOk(managedBySeedStudio ? 'Seed Studio managed session connected' : 'ADMIN_TOKEN set');
 
-    FINALIZER_INTERNAL_TOKEN =
-      process.env.FINALIZER_INTERNAL_TOKEN || process.env.INTERNAL_TOKEN || '';
+    FINALIZER_INTERNAL_TOKEN = process.env.FINALIZER_INTERNAL_TOKEN || '';
     if (!FINALIZER_INTERNAL_TOKEN) {
       logErr('FINALIZER_INTERNAL_TOKEN is required');
       process.exit(1);
     }
-    if (!process.env.FINALIZER_INTERNAL_TOKEN && process.env.INTERNAL_TOKEN) {
-      logWarn('INTERNAL_TOKEN is deprecated; rename it to FINALIZER_INTERNAL_TOKEN');
-    }
     logOk('FINALIZER_INTERNAL_TOKEN set');
 
     SEED_ARTIST_PASSWORD = process.env.SEED_ARTIST_PASSWORD || '';
-    if (!SEED_ARTIST_PASSWORD) {
+    if (!METADATA_ONLY && !SEED_ARTIST_PASSWORD) {
       logErr('SEED_ARTIST_PASSWORD is required to create the Artist Owner account');
       process.exit(1);
     }
@@ -2575,7 +3003,11 @@ async function main() {
   }
 
   console.log(`\n  Found ${artists.length} artist(s):\n`);
+  const artistMotionProfiles = await discoverArtistMotionArtwork(artists);
   artists.forEach((a, i) => {
+    const video = artistMotionProfiles.get(String(a.artistId))?.videoArtwork;
+    const videoStatus = video ? `video ${video.presentation}` : 'no video';
+    console.log(`      motion artwork: ${videoStatus}`);
     console.log(`  ${c.bold}[${i + 1}]${c.reset} ${a.artistName} (${a.primaryGenreName || 'N/A'}) — ID: ${a.artistId}`);
   });
 
@@ -2604,7 +3036,31 @@ async function main() {
   const tmpDir = path.join(__dirname, '.tmp', slug);
   const audioDir = path.join(tmpDir, 'audio');
   const state = new State(path.join(tmpDir, 'state.json'));
-  const highResArtwork = await fetchAppleMusicArtworkHighRes(selectedArtist.artistId);
+  const selectedArtistProfileKey = String(selectedArtist.artistId);
+  const highResArtwork = artistMotionProfiles.has(selectedArtistProfileKey)
+    ? artistMotionProfiles.get(selectedArtistProfileKey)
+    : await fetchAppleMusicArtworkHighRes(selectedArtist.artistId);
+
+  if (METADATA_ONLY) {
+    if (!CATALOG_ARTIST_ID) {
+      logErr('--catalog-artist-id is required when updating metadata');
+      process.exit(1);
+    }
+    logStep('Metadata update', `Refreshing artist metadata for ${selectedArtist.artistName}...`);
+    if (DRY_RUN) {
+      logOk(`Would update catalog artist ${CATALOG_ARTIST_ID} without changing albums, songs, or audio`);
+      process.exit(0);
+    }
+    await refreshExistingArtistMetadata({
+      catalogArtistId: CATALOG_ARTIST_ID,
+      selectedArtist,
+      appleMusicProfile: highResArtwork,
+      state,
+      tmpDir,
+    });
+    console.log(`\n${c.bold}${c.green}Done!${c.reset} Metadata updated for artist ${CATALOG_ARTIST_ID}.\n`);
+    return;
+  }
 
   logInfo(`Looking up albums for ${selectedArtist.artistName}...`);
   const discoveredAlbums = await lookupAlbumsITunes(selectedArtist.artistId);
@@ -2625,7 +3081,14 @@ async function main() {
   }
 
   console.log(`\n  Found ${albums.length} album(s)/single(s):\n`);
+  const albumEditorialMetadataById = await discoverAlbumEditorialMetadata(albums);
   albums.forEach((a, i) => {
+    const metadata = albumEditorialMetadataById.get(String(a.collectionId));
+    const videoStatus = metadata?.videoArtwork?.hlsUrl
+      ? 'video artwork'
+      : 'no video';
+    const descriptionStatus = metadata?.description ? 'editorial description' : 'no description';
+    console.log(`      editorial: ${videoStatus}, ${descriptionStatus}`);
     const type = a.trackCount <= 3 ? 'Single' : 'Album';
     console.log(`  ${c.bold}[${i + 1}]${c.reset} ${a.collectionName} (${a.trackCount} tracks, ${type}, ${a.releaseDate?.split('T')[0] || '?'})`);
   });
@@ -2684,34 +3147,15 @@ async function main() {
 
   logStep('Phase 2/5', 'Downloading assets...');
 
-  let artistArtworkUrl = highResArtwork?.url
-    ? getHighResArtworkUrl(highResArtwork.url)
-    : getITunesArtworkHighRes(selectedArtist.artworkUrl100);
-  if (!artistArtworkUrl) {
-    artistArtworkUrl = await fetchDeezerArtistArtwork(selectedArtist.artistName);
-  }
-  if (!artistArtworkUrl) {
-    artistArtworkUrl = await fetchNhacCuaTuiArtistArtwork(selectedArtist.artistName);
-  }
-  if (!artistArtworkUrl) {
-    artistArtworkUrl = await fetchZingArtistArtwork(selectedArtist.artistName);
-  }
-  if (!artistArtworkUrl) {
-    const fallbackAlbum = selectedAlbums.find((album) => album.artworkUrl100);
-    if (fallbackAlbum) {
-      artistArtworkUrl = getITunesArtworkHighRes(fallbackAlbum.artworkUrl100);
-      logWarn(
-        `No artist portrait found — using artwork from the verified album "${fallbackAlbum.collectionName}"`,
-      );
-    }
-  }
-
   const artistArtworkPath = path.join(tmpDir, 'artist-artwork.jpg');
-  if (artistArtworkUrl) {
-    await downloadArtwork(artistArtworkUrl, artistArtworkPath, 'Artist');
-  } else {
-    throw new Error(
-      `No artist or album artwork found for "${selectedArtist.artistName}" from the available metadata sources`,
+  const artistArtworkUrl = await downloadArtistArtwork(
+    resolveArtistArtworkUrls(highResArtwork, selectedArtist.artworkUrl100),
+    artistArtworkPath,
+    'Artist',
+  );
+  if (!artistArtworkUrl) {
+    logWarn(
+      `No Apple Music or iTunes portrait for "${selectedArtist.artistName}"; using the default artist avatar`,
     );
   }
 
@@ -2733,7 +3177,10 @@ async function main() {
       albumArtworks[album.collectionId] = albumArtworkPath;
     }
 
-    const videoArtwork = await fetchAppleMusicAlbumVideo(album);
+    const metadata = albumEditorialMetadataById.has(String(album.collectionId))
+      ? albumEditorialMetadataById.get(String(album.collectionId))
+      : await fetchAppleMusicAlbumEditorialMetadata(album);
+    const videoArtwork = metadata?.videoArtwork;
     if (!videoArtwork?.hlsUrl) continue;
 
     const albumVideoPath = path.join(tmpDir, `album-${albumSlug}-video.mp4`);
@@ -2806,11 +3253,34 @@ async function main() {
 
   logStep('Phase 3/5', 'Uploading artworks to local API...');
 
-  let artistArtworkAssetId = state.get('artistArtworkAssetId');
-  if (!artistArtworkAssetId && fs.existsSync(artistArtworkPath)) {
-    artistArtworkAssetId = await uploadArtworkAsset(artistArtworkPath, 'Artist');
-    state.set('artistArtworkAssetId', artistArtworkAssetId);
+  if (!fs.existsSync(FALLBACK_ARTIST_ARTWORK_PATH)) {
+    throw new Error(`Default artist avatar is missing: ${FALLBACK_ARTIST_ARTWORK_PATH}`);
   }
+  let fallbackArtistArtworkAssetId = state.get('fallbackArtistArtworkAssetId');
+  if (!fallbackArtistArtworkAssetId) {
+    fallbackArtistArtworkAssetId = await uploadArtworkAsset(
+      FALLBACK_ARTIST_ARTWORK_PATH,
+      'Default artist avatar',
+    );
+    state.set('fallbackArtistArtworkAssetId', fallbackArtistArtworkAssetId);
+  }
+
+  const artistArtworkSource = artistArtworkUrl ? 'apple-or-itunes' : 'fallback';
+  let artistArtworkAssetId = state.get('artistArtworkAssetId');
+  if (state.get('artistArtworkSource') !== artistArtworkSource) {
+    // States written before the source policy existed may point at an album
+    // cover or a third-party portrait. Rebuild the artist asset once so every
+    // resumed seed follows the current Apple/iTunes-only policy.
+    artistArtworkAssetId = '';
+  }
+  if (artistArtworkUrl && !artistArtworkAssetId && fs.existsSync(artistArtworkPath)) {
+    artistArtworkAssetId = await uploadArtworkAsset(artistArtworkPath, 'Artist');
+  }
+  if (!artistArtworkUrl) {
+    artistArtworkAssetId = fallbackArtistArtworkAssetId;
+  }
+  state.set('artistArtworkAssetId', artistArtworkAssetId);
+  state.set('artistArtworkSource', artistArtworkSource);
 
   let artistVideoAssetId = state.get('artistVideoAssetId');
   if (!artistVideoAssetId && artistVideoBannerPath && fs.existsSync(artistVideoBannerPath)) {
@@ -2849,7 +3319,12 @@ async function main() {
 
   logStep('Phase 4/5', 'Creating artist & uploading songs...');
 
-  let artistId = state.get('artistId');
+  // Seed Studio passes the explicitly selected catalog Artist. Reuse it for
+  // normal song/album imports as well as metadata-only updates; otherwise a
+  // later import for an existing artist would create a second Artist record.
+  const existingPrimaryArtistId = CATALOG_ARTIST_ID
+    || await findCatalogArtistByExactName(selectedArtist.artistName);
+  let artistId = existingPrimaryArtistId || state.get('artistId');
   if (!artistId) {
     artistId = await createAndPublishArtist({
       name: selectedArtist.artistName,
@@ -2859,7 +3334,8 @@ async function main() {
     });
     state.set('artistId', artistId);
   } else {
-    logOk(`Artist already created — artistId: ${artistId}`);
+    state.set('artistId', artistId);
+    logOk(`Reusing existing artist — artistId: ${artistId}`);
   }
 
   const artistOwnerUserId = await createSeedArtistOwner(
@@ -2878,7 +3354,7 @@ async function main() {
     albumsWithTracks,
     selectedArtist,
     artistId,
-    artistArtworkAssetId,
+    fallbackArtistArtworkAssetId,
     state,
     tmpDir,
   );
@@ -3052,9 +3528,9 @@ async function main() {
             : '';
           let reviewedCredits = reviewedSongCredits[songId];
           if (!reviewedCredits) {
-            logInfo(`Waiting for credit review: "${creditTrack.trackName}"`);
+            logInfo(`Reading Apple Music credits: "${creditTrack.trackName}"`);
             reviewedCredits = normalizeReviewedCredits(
-              await reviewSongCreditsInStudio(creditTrack, creditAlbumName),
+              await fetchAppleMusicSongCredits(creditTrack),
             );
             reviewedSongCredits[songId] = reviewedCredits;
             state.set('reviewedSongCredits', reviewedSongCredits);
@@ -3079,7 +3555,13 @@ async function main() {
           const contributorCreditPositions = new Map();
           const contributorCredits = [];
           for (const reviewed of reviewedCredits) {
-            const artistId = collaboratorArtistIds[normalizeMusicText(reviewed.name)];
+            const artistId = await ensureAppleMusicCreditArtist(
+              reviewed.name,
+              fallbackArtistArtworkAssetId,
+              state,
+              tmpDir,
+              collaboratorArtistIds,
+            );
             if (artistId) {
               const position = credits.filter(
                 (credit) => credit.role === reviewed.role,
@@ -3142,12 +3624,30 @@ async function main() {
       continue;
     }
 
+    // An interrupted upload can leave an album published with only part of
+    // its tracklist. Keep a concrete signature of the complete source
+    // tracklist so a later resume republishes that album once the missing
+    // songs become READY instead of incorrectly treating it as finished.
+    const hasCompleteTrackMapping = tracks.every((track) =>
+      Boolean(songIdMap[`${album.collectionId}:${track.trackId}`]),
+    );
+    const trackMappingSignature = songMappings
+      .map(({ track, catalogSongId }) => `${track.trackId}:${catalogSongId}`)
+      .join('|');
     const albumPublished = state.get(`albumPublished:${album.collectionId}`);
-    const albumCreditsCurrent =
-      state.get(`albumCreditVersion:${album.collectionId}`) === CATALOG_ALBUM_CREDIT_VERSION;
+    const albumMetadataCurrent =
+      state.get(`albumPublishVersion:${album.collectionId}`) === CATALOG_ALBUM_PUBLISH_VERSION;
+    const albumTracklistCurrent =
+      hasCompleteTrackMapping &&
+      state.get(`albumTrackMappingSignature:${album.collectionId}`) === trackMappingSignature;
     const albumVideoAssetId = albumVideoAssetIds[album.collectionId];
     const albumVideoPublished = state.get(`albumVideoPublished:${album.collectionId}`);
-    if (albumPublished && albumCreditsCurrent && (!albumVideoAssetId || albumVideoPublished)) {
+    if (
+      albumPublished &&
+      albumMetadataCurrent &&
+      albumTracklistCurrent &&
+      (!albumVideoAssetId || albumVideoPublished)
+    ) {
       logOk(`Album "${albumName}" already published`);
       continue;
     }
@@ -3159,9 +3659,19 @@ async function main() {
         songMappings,
         albumArtworkAssetId,
         albumVideoAssetId,
+        albumEditorialMetadataById.get(String(album.collectionId))?.description || '',
       );
-      state.set(`albumPublished:${album.collectionId}`, true);
-      state.set(`albumCreditVersion:${album.collectionId}`, CATALOG_ALBUM_CREDIT_VERSION);
+      state.set(`albumPublishVersion:${album.collectionId}`, CATALOG_ALBUM_PUBLISH_VERSION);
+      if (hasCompleteTrackMapping) {
+        state.set(`albumPublished:${album.collectionId}`, true);
+        state.set(`albumTrackMappingSignature:${album.collectionId}`, trackMappingSignature);
+      } else {
+        // Do not cache an incomplete album as published. The next resume must
+        // retry it after the failed audio items have been uploaded.
+        state.delete(`albumPublished:${album.collectionId}`);
+        state.delete(`albumTrackMappingSignature:${album.collectionId}`);
+        logWarn(`Album "${albumName}" was published with missing tracks and will be completed on resume`);
+      }
       if (albumVideoAssetId) {
         state.set(`albumVideoPublished:${album.collectionId}`, true);
       }

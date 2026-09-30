@@ -8,7 +8,7 @@ const token = process.env.ADMIN_ACCESS_TOKEN?.trim();
 if (!token) throw new Error('ADMIN_ACCESS_TOKEN is required.');
 const source = process.env.FAVORITE_ARTWORK_FILE || 'apps/web/public/favourite/favorite.jpg';
 const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-const request = async (path, options = {}) => {F
+const request = async (path, options = {}) => {
   const response = await fetch(`${apiBase}${path}`, { headers, ...options });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`${path} failed (${response.status}): ${JSON.stringify(body)}`);
