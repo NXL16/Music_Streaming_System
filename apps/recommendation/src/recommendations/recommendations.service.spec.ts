@@ -4,6 +4,7 @@ import { RecommendationsService } from './recommendations.service';
 
 jest.mock('@musical/shared-constants', () => ({
   HOME_SHELF_PREVIEW_LIMIT: 6,
+  HOME_SHELF_PREVIEW_FETCH_LIMIT: 7,
   RECENTLY_PLAYED_CONTEXT_LIMIT: 20,
 }));
 
@@ -176,7 +177,7 @@ describe('RecommendationsService Home preview reads', () => {
     const query = queryInput as {
       include: { sections: { include: { items: { take: number } } } };
     };
-    expect(query.include.sections.include.items.take).toBe(6);
+    expect(query.include.sections.include.items.take).toBe(7);
   });
 
   it('hydrates referenced artists so Home cards can link their credits', async () => {

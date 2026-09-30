@@ -93,12 +93,12 @@ model RecommendationGenerationLease {
 // Cursor for the rebuildable Qdrant audio index. This is deliberately tiny:
 // vector data stays owned by Song; deleting this row simply causes a reindex.
 model AudioVectorIndexState {
-  id             String   @id @db.VarChar(128)
-  collectionName String   @db.VarChar(128)
-  cursor         String   @default("") @db.VarChar(512)
+  id             String    @id @db.VarChar(128)
+  collectionName String    @db.VarChar(128)
+  cursor         String    @default("") @db.VarChar(512)
   synchronizedAt DateTime? @db.Timestamptz
-  createdAt      DateTime @default(now()) @db.Timestamptz
-  updatedAt      DateTime @updatedAt @db.Timestamptz
+  createdAt      DateTime  @default(now()) @db.Timestamptz
+  updatedAt      DateTime  @updatedAt @db.Timestamptz
 
   @@map("audio_vector_index_states")
 }
@@ -318,13 +318,109 @@ model RecommendationResourceSnapshot {
 // The asset itself remains owned by Asset service. This registry only binds a
 // stable generated station key (for example `focus`) to a processed artwork.
 model SystemStationArtwork {
-  stationKey String   @id @db.VarChar(64)
-  assetId    String   @unique @db.VarChar(128)
-  artwork    Json
-  createdAt  DateTime @default(now()) @db.Timestamptz
-  updatedAt  DateTime @updatedAt @db.Timestamptz
+  stationKey       String   @id @db.VarChar(64)
+  coverAssetId     String   @unique @db.VarChar(128)
+  heroVideoAssetId String?  @unique @db.VarChar(128)
+  coverArtwork     Json
+  heroVideo        Json?
+  createdAt        DateTime @default(now()) @db.Timestamptz
+  updatedAt        DateTime @updatedAt @db.Timestamptz
 
   @@map("system_station_artworks")
+}
+
+model SystemPlaylistArtwork {
+  playlistKey     String   @id @db.VarChar(32)
+  coverAssetId    String   @unique @db.VarChar(128)
+  homeCardAssetId String   @unique @db.VarChar(128)
+  coverArtwork    Json
+  homeCardArtwork Json
+  // Video is the source of truth for system playlist media. The matching
+  // poster from each processed video supplies the image fallback.
+  detailSquareVideoAssetId String @default("") @db.VarChar(128)
+  detailMobileVideoAssetId String @default("") @db.VarChar(128)
+  homeHeroVideoAssetId     String @default("") @db.VarChar(128)
+  detailSquareVideo        Json?
+  detailMobileVideo        Json?
+  homeHeroVideo            Json?
+  createdAt       DateTime @default(now()) @db.Timestamptz
+  updatedAt       DateTime @updatedAt @db.Timestamptz
+
+  @@map("system_playlist_artworks")
+  @@index([detailSquareVideoAssetId])
+  @@index([detailMobileVideoAssetId])
+  @@index([homeHeroVideoAssetId])
+}
+
+// Maps each of the three global catalog playlists to its stable product intent.
+// It is deliberately global-only: user-specific membership belongs in
+// UserSystemPlaylistTrack, never in the Song catalog's Playlist table.
+model GeneratedSystemPlaylist {
+  id          String   @id @default(uuid())
+  scopeKey    String   @db.VarChar(128)
+  playlistKey String   @db.VarChar(32)
+  playlistId  String   @unique @db.VarChar(128)
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  @@unique([scopeKey, playlistKey])
+  @@map("generated_system_playlists")
+}
+
+// Cached personalised contents for the three fixed product playlists. These
+// rows are recommendations, not playlists, and cannot create new playlist
+// URLs or catalog records.
+model UserSystemPlaylistTrack {
+  userId      String   @db.VarChar(128)
+  playlistKey String   @db.VarChar(32)
+  songId      String   @db.VarChar(128)
+  sortOrder   Int
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  @@id([userId, playlistKey, songId])
+  @@unique([userId, playlistKey, sortOrder])
+  @@index([userId, playlistKey, sortOrder])
+  @@map("user_system_playlist_tracks")
+}
+
+// One persisted artist line for each listener's fixed playlist. Keeping this
+// separate from membership prevents duplicating the same text on all 25 track
+// rows and gives Home an immutable snapshot to render.
+model UserSystemPlaylistMetadata {
+  userId              String   @db.VarChar(128)
+  playlistKey         String   @db.VarChar(32)
+  shortDescription    String   @default("") @db.Text
+  standardDescription String   @default("") @db.Text
+  createdAt           DateTime @default(now()) @db.Timestamptz
+  updatedAt           DateTime @updatedAt @db.Timestamptz
+
+  @@id([userId, playlistKey])
+  @@index([userId, updatedAt])
+  @@map("user_system_playlist_metadata")
+}
+
+// Refresh state is deliberately separate from playlist membership. Each
+// editorial playlist has one global schedule; user track rows never own one.
+model SystemPlaylistRefreshState {
+  playlistKey      String   @id @db.VarChar(32)
+  refreshedAt      DateTime @db.Timestamptz
+  selectionVersion Int      @default(1)
+  updatedAt        DateTime @updatedAt @db.Timestamptz
+
+  @@map("system_playlist_refresh_states")
+}
+
+// Mood Stations rotate on one shared hourly editorial clock. The state is
+// global: it selects the current Top Pick, while each user keeps their own
+// personalized station track list.
+model SystemStationRefreshState {
+  stationKey  String   @id @db.VarChar(32)
+  refreshedAt DateTime @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  @@index([refreshedAt])
+  @@map("system_station_refresh_states")
 }
 
 model ListeningEvent {

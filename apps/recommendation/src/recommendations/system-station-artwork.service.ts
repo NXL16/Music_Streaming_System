@@ -17,7 +17,7 @@ import { PRODUCTION_RECOMMENDATION_POLICY } from '../generation/production-recom
 
 type JsonObject = Record<string, unknown>;
 
-export type SystemStationArtwork = {
+type StationCover = {
   assetId: string;
   url: string;
   width: number;
@@ -26,8 +26,22 @@ export type SystemStationArtwork = {
   variants: JsonObject;
 };
 
+export type SystemStationArtwork = {
+  cover: StationCover;
+  heroVideo?: JsonObject;
+  updatedAt?: Date;
+};
+
+const OWNER_SERVICE = 'recommendation';
+const OWNER_TYPE = 'system-station';
+const COVER_RATIO = 1;
+const HERO_RATIO = 3 / 4;
+const RATIO_TOLERANCE = 0.03;
 const STATION_KEYS: Set<string> = new Set(
-  PRODUCTION_RECOMMENDATION_POLICY.moodStations.map((station) => station.key),
+  [
+    ...PRODUCTION_RECOMMENDATION_POLICY.moodStations,
+    ...PRODUCTION_RECOMMENDATION_POLICY.personalizedStations,
+  ].map((station) => station.key),
 );
 
 @Injectable()
@@ -41,120 +55,261 @@ export class SystemStationArtworkService implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
-    this.client = this.grpcClient.getService<AssetServiceClient>('AssetService');
+    this.client =
+      this.grpcClient.getService<AssetServiceClient>('AssetService');
   }
 
-  async bind(stationKey: string, assetId: string): Promise<SystemStationArtwork> {
-    if (!STATION_KEYS.has(stationKey)) {
-      this.failedPrecondition(`SYSTEM_STATION_KEY_INVALID:${stationKey}`);
+  async bind(
+    stationKey: string,
+    coverAssetId: string,
+    heroVideoAssetId: string,
+  ): Promise<SystemStationArtwork> {
+    this.assertStationKey(stationKey);
+    if (!coverAssetId.trim() || !heroVideoAssetId.trim()) {
+      this.failedPrecondition('SYSTEM_STATION_MEDIA_REQUIRED');
     }
-    if (!assetId.trim()) this.failedPrecondition('SYSTEM_STATION_ARTWORK_REQUIRED');
-
-    let asset: Asset | undefined;
-    try {
-      const response = await firstValueFrom(
-        this.client.registerAssetUsages(
-          {
-            ownerService: 'recommendation',
-            ownerType: 'system-station',
-            ownerId: stationKey,
-            usages: [{
-              slot: 'artwork',
-              assetId,
-              expectedKind: AssetKind.ASSET_KIND_IMAGE,
-              expectedPurpose: AssetPurpose.ASSET_PURPOSE_ARTWORK,
-            }],
-          },
-          this.metadata(),
-        ),
-      );
-      asset = response.assets.find((item) => item.id === assetId);
-    } catch {
-      this.failedPrecondition('SYSTEM_STATION_ARTWORK_REGISTRATION_FAILED');
-    }
-
-    const artwork = this.artwork(asset, assetId);
-    await this.prisma.systemStationArtwork.upsert({
+    const previous = await this.prisma.systemStationArtwork.findUnique({
       where: { stationKey },
-      create: {
+      select: { coverAssetId: true, heroVideoAssetId: true },
+    });
+    const assets = await this.registerAssetUsages(
+      stationKey,
+      coverAssetId,
+      heroVideoAssetId,
+    );
+    try {
+      const artwork = {
+        cover: this.cover(
+          assets.find((asset) => asset.id === coverAssetId),
+          coverAssetId,
+        ),
+        heroVideo: this.heroVideo(
+          assets.find((asset) => asset.id === heroVideoAssetId),
+          heroVideoAssetId,
+        ),
+      };
+      await this.prisma.systemStationArtwork.upsert({
+        where: { stationKey },
+        create: {
+          stationKey,
+          coverAssetId,
+          heroVideoAssetId,
+          coverArtwork: artwork.cover as unknown as Prisma.InputJsonObject,
+          heroVideo: artwork.heroVideo as Prisma.InputJsonObject,
+        },
+        update: {
+          coverAssetId,
+          heroVideoAssetId,
+          coverArtwork: artwork.cover as unknown as Prisma.InputJsonObject,
+          heroVideo: artwork.heroVideo as Prisma.InputJsonObject,
+        },
+      });
+      await this.reconcileAssetUsages(
         stationKey,
-        assetId,
-        artwork: artwork as unknown as Prisma.InputJsonObject,
-      },
-      update: {
-        assetId,
-        artwork: artwork as unknown as Prisma.InputJsonObject,
-      },
-    });
-    // Generated station snapshots embed artwork metadata. Mark pages stale so
-    // the next lazy generation replaces the old song-derived artwork.
-    await this.prisma.recommendationPage.updateMany({
-      where: { name: 'listen-now', status: 'PUBLISHED' },
-      data: { staleAfter: new Date(0) },
-    });
-    return artwork;
+        coverAssetId,
+        heroVideoAssetId,
+      );
+      await this.markHomePagesStale();
+      return artwork;
+    } catch (error) {
+      await this.reconcileAssetUsages(
+        stationKey,
+        previous?.coverAssetId,
+        previous?.heroVideoAssetId ?? undefined,
+      ).catch(() => undefined);
+      throw error;
+    }
   }
 
-  async byStationKeys(keys: string[]): Promise<Map<string, SystemStationArtwork>> {
+  async byStationKeys(
+    keys: string[],
+  ): Promise<Map<string, SystemStationArtwork>> {
     if (!keys.length) return new Map();
     const rows = await this.prisma.systemStationArtwork.findMany({
       where: { stationKey: { in: keys } },
-      select: { stationKey: true, artwork: true },
+      select: {
+        stationKey: true,
+        coverArtwork: true,
+        heroVideo: true,
+        updatedAt: true,
+      },
     });
     return new Map(
       rows.flatMap((row) => {
-        const artwork = this.storedArtwork(row.artwork);
-        return artwork ? [[row.stationKey, artwork] as const] : [];
+        const cover = this.storedCover(row.coverArtwork);
+        const heroVideo = this.storedHeroVideo(row.heroVideo);
+        return cover
+          ? [
+              [
+                row.stationKey,
+                {
+                  cover,
+                  ...(heroVideo ? { heroVideo } : {}),
+                  updatedAt: row.updatedAt,
+                },
+              ] as const,
+            ]
+          : [];
       }),
     );
   }
 
-  private artwork(asset: Asset | undefined, assetId: string): SystemStationArtwork {
-    if (!asset) this.failedPrecondition(`SYSTEM_STATION_ARTWORK_NOT_FOUND:${assetId}`);
-    if (asset.status !== AssetStatus.ASSET_STATUS_READY) {
-      this.failedPrecondition(`SYSTEM_STATION_ARTWORK_NOT_READY:${assetId}`);
+  private async registerAssetUsages(
+    stationKey: string,
+    coverAssetId: string,
+    heroVideoAssetId: string,
+  ): Promise<Asset[]> {
+    try {
+      const response = await firstValueFrom(
+        this.client.registerAssetUsages(
+          this.assetUsageRequest(stationKey, coverAssetId, heroVideoAssetId),
+          this.metadata(),
+        ),
+      );
+      return response.assets;
+    } catch {
+      this.failedPrecondition('SYSTEM_STATION_MEDIA_REGISTRATION_FAILED');
     }
+  }
+
+  private async reconcileAssetUsages(
+    stationKey: string,
+    coverAssetId?: string,
+    heroVideoAssetId?: string,
+  ): Promise<void> {
+    await firstValueFrom(
+      this.client.reconcileAssetUsages(
+        this.assetUsageRequest(stationKey, coverAssetId, heroVideoAssetId),
+        this.metadata(),
+      ),
+    );
+  }
+
+  private assetUsageRequest(
+    stationKey: string,
+    coverAssetId?: string,
+    heroVideoAssetId?: string,
+  ) {
+    return {
+      ownerService: OWNER_SERVICE,
+      ownerType: OWNER_TYPE,
+      ownerId: stationKey,
+      usages:
+        coverAssetId?.trim() && heroVideoAssetId?.trim()
+          ? [
+              {
+                slot: 'cover',
+                assetId: coverAssetId,
+                expectedKind: AssetKind.ASSET_KIND_IMAGE,
+                expectedPurpose: AssetPurpose.ASSET_PURPOSE_ARTWORK,
+              },
+              {
+                slot: 'home-hero-video',
+                assetId: heroVideoAssetId,
+                expectedKind: AssetKind.ASSET_KIND_VIDEO,
+                expectedPurpose: AssetPurpose.ASSET_PURPOSE_EDITORIAL_VIDEO,
+              },
+            ]
+          : [],
+    };
+  }
+
+  private cover(asset: Asset | undefined, assetId: string): StationCover {
     if (
+      !asset ||
+      asset.status !== AssetStatus.ASSET_STATUS_READY ||
       asset.kind !== AssetKind.ASSET_KIND_IMAGE ||
       asset.purpose !== AssetPurpose.ASSET_PURPOSE_ARTWORK
     ) {
-      this.failedPrecondition(`SYSTEM_STATION_ARTWORK_TYPE_MISMATCH:${assetId}`);
+      this.failedPrecondition(`SYSTEM_STATION_COVER_INVALID:${assetId}`);
     }
     const variants = this.object(asset.variants);
     const rendition = this.primaryRendition(variants);
-    const palette = this.object(variants.palette);
+    const width = rendition.width || asset.width;
+    const height = rendition.height || asset.height;
     const url = rendition.url || asset.publicUrl;
-    if (!url) this.failedPrecondition(`SYSTEM_STATION_ARTWORK_URL_MISSING:${assetId}`);
+    if (
+      !url ||
+      !width ||
+      !height ||
+      Math.abs(width / height - COVER_RATIO) > RATIO_TOLERANCE
+    ) {
+      this.failedPrecondition(`SYSTEM_STATION_COVER_RATIO_INVALID:${assetId}`);
+    }
     return {
       assetId: asset.id,
       url,
-      width: rendition.width || asset.width,
-      height: rendition.height || asset.height,
-      bgColor: this.string(palette.bgColor),
+      width,
+      height,
+      bgColor: this.string(this.object(variants.palette).bgColor) || '2c2c2e',
       variants,
     };
   }
 
-  private storedArtwork(value: unknown): SystemStationArtwork | undefined {
-    const artwork = this.object(value);
-    const assetId = this.string(artwork.assetId);
-    const url = this.string(artwork.url);
+  private heroVideo(asset: Asset | undefined, assetId: string): JsonObject {
+    if (
+      !asset ||
+      asset.status !== AssetStatus.ASSET_STATUS_READY ||
+      asset.kind !== AssetKind.ASSET_KIND_VIDEO ||
+      asset.purpose !== AssetPurpose.ASSET_PURPOSE_EDITORIAL_VIDEO ||
+      !asset.width ||
+      !asset.height ||
+      Math.abs(asset.width / asset.height - HERO_RATIO) > RATIO_TOLERANCE
+    ) {
+      this.failedPrecondition(`SYSTEM_STATION_HERO_VIDEO_INVALID:${assetId}`);
+    }
+    const variants = this.object(asset.variants);
+    const poster = this.object(variants.poster);
+    if (!this.string(asset.publicUrl) || !this.string(poster.url)) {
+      this.failedPrecondition(
+        `SYSTEM_STATION_HERO_VIDEO_POSTER_MISSING:${assetId}`,
+      );
+    }
+    return {
+      assetId: asset.id,
+      video: asset.publicUrl,
+      width: asset.width,
+      height: asset.height,
+      durationMillis: asset.durationMillis,
+      previewFrame: {
+        assetId: asset.id,
+        url: this.string(poster.url),
+        width: this.number(poster.width),
+        height: this.number(poster.height),
+        variants: this.object(poster.variants),
+      },
+      variants,
+    };
+  }
+
+  private storedCover(value: unknown): StationCover | undefined {
+    const cover = this.object(value);
+    const assetId = this.string(cover.assetId);
+    const url = this.string(cover.url);
     if (!assetId || !url) return undefined;
     return {
       assetId,
       url,
-      width: this.number(artwork.width),
-      height: this.number(artwork.height),
-      bgColor: this.string(artwork.bgColor),
-      variants: this.object(artwork.variants),
+      width: this.number(cover.width),
+      height: this.number(cover.height),
+      bgColor: this.string(cover.bgColor) || '2c2c2e',
+      variants: this.object(cover.variants),
     };
   }
 
+  private storedHeroVideo(value: unknown): JsonObject | undefined {
+    const video = this.object(value);
+    return this.string(video.video) &&
+      this.string(this.object(video.previewFrame).url)
+      ? video
+      : undefined;
+  }
+
   private primaryRendition(variants: JsonObject) {
-    const renditions = Array.isArray(variants.renditions)
-      ? variants.renditions.map((item) => this.object(item))
-      : [];
-    const primary = renditions
+    const primary = (
+      Array.isArray(variants.renditions) ? variants.renditions : []
+    )
+      .map((item) => this.object(item))
       .filter((item) => this.string(item.url))
       .sort((left, right) => this.number(right.width) - this.number(left.width))
       .at(0);
@@ -165,9 +320,25 @@ export class SystemStationArtworkService implements OnModuleInit {
     };
   }
 
+  private async markHomePagesStale(): Promise<void> {
+    await this.prisma.recommendationPage.updateMany({
+      where: { name: 'listen-now', status: 'PUBLISHED' },
+      data: { staleAfter: new Date(0) },
+    });
+  }
+
+  private assertStationKey(stationKey: string): void {
+    if (!STATION_KEYS.has(stationKey)) {
+      this.failedPrecondition(`SYSTEM_STATION_KEY_INVALID:${stationKey}`);
+    }
+  }
+
   private metadata(): Metadata {
     const metadata = new Metadata();
-    metadata.set('x-internal-token', this.config.getOrThrow<string>('INTERNAL_GRPC_TOKEN'));
+    metadata.set(
+      'x-internal-token',
+      this.config.getOrThrow<string>('INTERNAL_GRPC_TOKEN'),
+    );
     return metadata;
   }
 

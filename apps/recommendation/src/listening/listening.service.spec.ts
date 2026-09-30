@@ -97,6 +97,7 @@ describe('ListeningService.recordEvent', () => {
   let createEvent: jest.Mock;
   let upsertStats: jest.Mock;
   let upsertContext: jest.Mock;
+  let staleRecommendationPages: jest.Mock;
   let findExcessContexts: jest.Mock;
   let service: ListeningService;
 
@@ -107,12 +108,14 @@ describe('ListeningService.recordEvent', () => {
     createEvent = jest.fn();
     upsertStats = jest.fn();
     upsertContext = jest.fn();
+    staleRecommendationPages = jest.fn();
     findExcessContexts = jest.fn().mockResolvedValue([]);
 
     const tx = {
       listeningEvent: { create: createEvent },
       userListeningStats: { upsert: upsertStats },
       userRecentlyPlayedContext: { upsert: upsertContext },
+      recommendationPage: { updateMany: staleRecommendationPages },
     };
     transaction.mockImplementation(
       (callback: (transactionClient: typeof tx) => Promise<unknown>) =>
@@ -206,6 +209,15 @@ describe('ListeningService.recordEvent', () => {
       }),
     );
     expect(findExcessContexts).toHaveBeenCalledTimes(1);
+    expect(staleRecommendationPages).toHaveBeenCalledWith({
+      where: {
+        userId: 'user-1',
+        status: 'PUBLISHED',
+        publishedAt: { lte: expect.any(Date) as unknown },
+        staleAfter: { gt: expect.any(Date) as unknown },
+      },
+      data: { staleAfter: expect.any(Date) as unknown },
+    });
   });
 
   it('counts an early skip as an attempted play and records only elapsed time', async () => {
@@ -498,8 +510,8 @@ describe('ListeningService.getUserTasteProfile', () => {
       userContentPreference: { findMany: jest.fn().mockResolvedValue([]) },
       recommendationResourceSnapshot: {
         findMany: jest.fn().mockResolvedValue([
-          { resourceId: 'recent-pop', genreNames: ['Pop'] },
-          { resourceId: 'old-rock', genreNames: ['Rock'] },
+          { resourceType: 'songs', resourceId: 'recent-pop', genreNames: ['Pop'] },
+          { resourceType: 'songs', resourceId: 'old-rock', genreNames: ['Rock'] },
         ]),
       },
     } as unknown as PrismaService);
@@ -552,8 +564,8 @@ describe('ListeningService.getUserTasteProfile', () => {
       userContentPreference: { findMany: jest.fn().mockResolvedValue([]) },
       recommendationResourceSnapshot: {
         findMany: jest.fn().mockResolvedValue([
-          { resourceId: 'skipped-song', genreNames: ['Noise'] },
-          { resourceId: 'completed-song', genreNames: ['Soul'] },
+          { resourceType: 'songs', resourceId: 'skipped-song', genreNames: ['Noise'] },
+          { resourceType: 'songs', resourceId: 'completed-song', genreNames: ['Soul'] },
         ]),
       },
     } as unknown as PrismaService);
@@ -617,9 +629,9 @@ describe('ListeningService.getUserTasteProfile', () => {
       userContentPreference: { findMany: jest.fn().mockResolvedValue([]) },
       recommendationResourceSnapshot: {
         findMany: jest.fn().mockResolvedValue([
-          { resourceId: 'short-listen', genreNames: ['Short'] },
-          { resourceId: 'engaged-listen', genreNames: ['Engaged'] },
-          { resourceId: 'replayed-completion', genreNames: ['Replay'] },
+          { resourceType: 'songs', resourceId: 'short-listen', genreNames: ['Short'] },
+          { resourceType: 'songs', resourceId: 'engaged-listen', genreNames: ['Engaged'] },
+          { resourceType: 'songs', resourceId: 'replayed-completion', genreNames: ['Replay'] },
         ]),
       },
     } as unknown as PrismaService);
@@ -672,6 +684,131 @@ describe('ListeningService.getUserTasteProfile', () => {
 
     expect(profile.artists).toEqual([]);
     expect(profile.genres).toEqual([]);
+  });
+
+  it('learns AI sound features from an explicit positive preference', async () => {
+    const now = new Date('2026-09-20T00:00:00Z');
+    const service = new ListeningService({
+      userListeningStats: { findMany: jest.fn().mockResolvedValue([]) },
+      userPreferenceEvent: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            resourceType: 'songs',
+            resourceId: 'song-liked',
+            weight: 5,
+            occurredAt: now,
+          },
+        ]),
+      },
+      userContentPreference: { findMany: jest.fn().mockResolvedValue([]) },
+      recommendationResourceSnapshot: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            resourceType: 'songs',
+            resourceId: 'song-liked',
+            artistName: 'Favourite artist',
+            genreNames: ['Pop'],
+            attributes: {
+              audioTags: ['Romantic Music', 'pop music'],
+              audioBpm: 120,
+              audioEnergy: 0.7,
+            },
+          },
+        ]),
+      },
+    } as unknown as PrismaService);
+
+    const profile = await service.getUserTasteProfile('user-1');
+
+    expect(profile.audioTags.map(({ name }) => name)).toEqual([
+      'romantic music',
+      'pop music',
+    ]);
+    expect(profile.preferredBpm).toBe(120);
+    expect(profile.preferredEnergy).toBe(0.7);
+    expect(profile.artists).toEqual([
+      expect.objectContaining({ name: 'Favourite artist', weight: 1 }),
+    ]);
+    expect([...profile.audioSeedSongIds]).toEqual(['song-liked']);
+  });
+
+  it('prioritizes explicit song and album preferences as audio-vector seeds', async () => {
+    const now = new Date('2026-09-20T00:00:00Z');
+    const service = new ListeningService({
+      userListeningStats: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            songId: 'listened-song',
+            playCount: 1,
+            completionCount: 1,
+            skipCount: 0,
+            earlySkipCount: 0,
+            totalListenSec: 180,
+            totalEligibleSec: 180,
+            lastPlayedAt: now,
+            artistName: 'Listener artist',
+            albumName: 'Listener album',
+            albumId: 'listener-album',
+          },
+        ]),
+      },
+      userPreferenceEvent: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            resourceType: 'songs',
+            resourceId: 'favourite-song',
+            weight: 5,
+            occurredAt: now,
+          },
+          {
+            resourceType: 'albums',
+            resourceId: 'library-album',
+            weight: 1,
+            occurredAt: now,
+          },
+        ]),
+      },
+      userContentPreference: { findMany: jest.fn().mockResolvedValue([]) },
+      recommendationResourceSnapshot: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            resourceType: 'songs',
+            resourceId: 'listened-song',
+            genreNames: [],
+            attributes: {},
+          },
+          {
+            resourceType: 'songs',
+            resourceId: 'favourite-song',
+            genreNames: [],
+            attributes: {},
+          },
+          {
+            resourceType: 'albums',
+            resourceId: 'library-album',
+            genreNames: [],
+            attributes: {},
+            relationships: {
+              tracks: {
+                data: [
+                  { type: 'songs', id: 'album-track-1' },
+                  { type: 'songs', id: 'album-track-2' },
+                ],
+              },
+            },
+          },
+        ]),
+      },
+    } as unknown as PrismaService);
+
+    const profile = await service.getUserTasteProfile('user-1');
+
+    expect([...profile.audioSeedSongIds]).toEqual([
+      'favourite-song',
+      'album-track-1',
+      'album-track-2',
+      'listened-song',
+    ]);
   });
 });
 

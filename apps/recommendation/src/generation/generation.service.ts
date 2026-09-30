@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { status } from '@grpc/grpc-js';
 import { RpcException } from '@nestjs/microservices';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   GenerateRecommendationsRequest,
   GetHomeRecommendationsResponse,
@@ -21,38 +21,67 @@ import {
   type SystemStationArtwork,
 } from '../recommendations/system-station-artwork.service';
 import {
+  SystemPlaylistArtworkService,
+  type SystemPlaylistArtworkPair,
+} from '../recommendations/system-playlist-artwork.service';
+import {
   GeneratedShelf,
   PERSONALIZATION_MODEL_VERSION,
   RecommendationEngineService,
 } from './recommendation-engine.service';
-import { PRODUCTION_RECOMMENDATION_POLICY } from './production-recommendation-policy';
+import {
+  PRODUCTION_RECOMMENDATION_POLICY,
+  scoreGlobalTopPick,
+} from './production-recommendation-policy';
 import { developmentCacheDisabled } from '../common/configs/development-cache';
 import { GenerationLeaseService } from './generation-lease.service';
+import { audioFeaturesFromAttributes } from '../common/audio-features';
 import { ArtistStationService } from '../stations/artist-station.service';
+import { STATION_TRACK_SELECTION_VERSION } from '../stations/station-track-selection.service';
 import {
   GENERATION_LEASE_LOST_MESSAGE,
   type GenerationLease,
 } from './generation-lease.types';
+import { systemPlaylistArtistPreview } from '../recommendations/system-playlist-artist-preview';
+import { systemPlaylistTrackIds } from '../recommendations/system-playlist-track-ids';
+import { chillIntentScore, hasAudioAnalysis } from '../common/chill-intent';
 
 const STALE_DURATION_MS = 6 * 60 * 60 * 1000;
 const MAX_PER_ARTIST = 3;
-const DAILY_MIX_MAX_PER_ARTIST = 2;
-const DAILY_MIX_TRACK_LIMIT = 25;
-const DAILY_MIX_MIN_TRACKS = 5;
-const DAILY_MIX_LIMIT = 4;
+const SYSTEM_PLAYLIST_MAX_PER_ARTIST = 2;
+const NEW_MUSIC_MAX_TRACKS_PER_RELEASE = 1;
+const SYSTEM_PLAYLIST_SELECTION_VERSION = 2;
+const SYSTEM_PLAYLIST_TRACK_LIMIT = 25;
+const SYSTEM_PLAYLIST_MIN_TRACKS = 5;
+// Used only until an admin configures the two real artwork assets for a fixed
+// system playlist. It keeps the three catalog playlists publishable on a new
+// environment without invoking the unrelated Hero-blur artwork flow.
+const SYSTEM_PLAYLIST_ARTWORK_URL = '/assets/artwork/1x1.gif';
 const STATION_TRACK_LIMIT = 80;
+const PERSONAL_STATION_MIN_TRACKS = 5;
 // Small local catalogs should still expose a truthful mood station once it has
 // enough variety to avoid immediately repeating a track.
 const MOOD_STATION_MIN_TRACKS = 5;
-const FAMILIAR_ARTIST_STATION_LIMIT = 9;
-const DISCOVERY_ARTIST_STATION_LIMIT = 3;
+const FAMILIAR_ARTIST_STATION_LIMIT = 5;
+const DISCOVERY_ARTIST_STATION_LIMIT = 5;
 const SYSTEM_VARIANT_MAX_OVERLAP_RATIO = 0.6;
 const SYSTEM_VARIANT_MIN_NOVEL_RATIO = 0.25;
 const MIN_LISTENED_SONGS = 3;
 const HOME_SHELF_ITEM_MIN = 10;
 const HOME_SHELF_ITEM_LIMIT = 40;
-const GLOBAL_PUBLISH_MIN_SHELVES = 12;
-const GLOBAL_SHELF_LIMIT = 22;
+const HOME_HERO_SHELF_ITEM_LIMIT = 10;
+const TOP_PICK_NEW_RELEASE_ALBUM_LIMIT = 3;
+const LISTEN_AGAIN_ALBUM_CANDIDATE_LIMIT = 20;
+const TOP_PICK_FRESHNESS_WINDOW_MS = 30 * 86_400_000;
+const TOP_PICK_REVISIT_WINDOW_MS = 30 * 86_400_000;
+const TOP_PICK_RELEVANCE_WEIGHT = 70;
+const TOP_PICK_FRESHNESS_WEIGHT = 20;
+const TOP_PICK_REVISIT_WEIGHT = 10;
+// Eight complete shelves are a rich Global page. Requiring twelve caused a
+// valid regenerated page to be rejected when sparse catalog facets were
+// correctly removed instead of rendering six-card genre rails.
+const GLOBAL_PUBLISH_MIN_SHELVES = 8;
+const GLOBAL_SHELF_LIMIT = 15;
 
 const TIMEZONE_REGEX = /^[+-](?:0\d|1[0-4]):[0-5]\d$/;
 const DEFAULT_TIMEZONE = '+07:00';
@@ -107,6 +136,7 @@ type ScoredItem = {
   type: string;
   score: number;
   artistName: string;
+  albumKey?: string;
 };
 
 type SnapshotRow = {
@@ -118,6 +148,8 @@ type SnapshotRow = {
   moodTags?: string[];
   releaseDate: string;
   releaseType: string;
+  attributes?: unknown;
+  relationships?: unknown;
 };
 
 type MoodStationProfile = {
@@ -129,6 +161,161 @@ type MoodStationProfile = {
   avoidTraits: readonly string[];
   allowGenreFallback: boolean;
 };
+
+const VIETNAM_WEEKDAY = {
+  SUNDAY: 0,
+  MONDAY: 1,
+  FRIDAY: 5,
+} as const;
+
+type FixedSystemPlaylist = {
+  key: 'get-up' | 'chill' | 'new-music';
+  title: string;
+  artworkBgColor: string;
+  refreshWeekday: (typeof VIETNAM_WEEKDAY)[keyof typeof VIETNAM_WEEKDAY];
+};
+
+const FIXED_SYSTEM_PLAYLISTS: readonly FixedSystemPlaylist[] = [
+  {
+    key: 'get-up',
+    title: 'Get Up',
+    artworkBgColor: 'd41414',
+    refreshWeekday: VIETNAM_WEEKDAY.MONDAY,
+  },
+  {
+    key: 'chill',
+    title: 'Chill',
+    artworkBgColor: '22788a',
+    refreshWeekday: VIETNAM_WEEKDAY.SUNDAY,
+  },
+  {
+    key: 'new-music',
+    title: 'New Music',
+    artworkBgColor: 'e87c91',
+    refreshWeekday: VIETNAM_WEEKDAY.FRIDAY,
+  },
+];
+
+type SystemPlaylistBuildResult = {
+  topPick: { id: string; type: 'playlists'; refreshedAt?: Date };
+  playlistShelf: PersonalRecommendationResource;
+};
+
+type ArtistStationBuildResult = {
+  items: Array<{ id: string; type: 'stations' }>;
+  topPickStations: Array<{ id: string; type: 'stations' }>;
+};
+
+type RankedTopPickItem = {
+  id: string;
+  type: 'albums' | 'playlists' | 'stations';
+  relevance: number;
+  freshnessAt?: Date;
+  revisitAt?: Date;
+  score?: number;
+};
+
+type GlobalTopPickItem = {
+  id: string;
+  type: 'albums' | 'playlists' | 'stations';
+  refreshedAt?: Date;
+  score?: number;
+};
+
+const SYSTEM_PLAYLIST_TIMEZONE = 'Asia/Ho_Chi_Minh';
+const SYSTEM_STATION_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+
+function systemPlaylistScheduledRefresh(
+  definition: FixedSystemPlaylist,
+  now = new Date(),
+): Date {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: SYSTEM_PLAYLIST_TIMEZONE,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    weekday: 'short',
+  }).formatToParts(now);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value);
+  const weekday = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(
+    parts.find((part) => part.type === 'weekday')?.value ?? '',
+  );
+  const daysSinceRefresh = (weekday - definition.refreshWeekday + 7) % 7;
+  // Vietnam has no daylight-saving adjustment. Local midnight is UTC-7.
+  return new Date(
+    Date.UTC(
+      value('year'),
+      value('month') - 1,
+      value('day') - daysSinceRefresh,
+    ) -
+      7 * 3_600_000,
+  );
+}
+
+function latestSystemPlaylistDefinition(now = new Date()): FixedSystemPlaylist {
+  return FIXED_SYSTEM_PLAYLISTS.reduce((latest, definition) =>
+    systemPlaylistScheduledRefresh(definition, now) >
+    systemPlaylistScheduledRefresh(latest, now)
+      ? definition
+      : latest,
+  );
+}
+
+function nextSystemPlaylistRefresh(now = new Date()): Date {
+  return FIXED_SYSTEM_PLAYLISTS.map((definition) => {
+    const scheduled = systemPlaylistScheduledRefresh(definition, now);
+    return scheduled.getTime() > now.getTime()
+      ? scheduled
+      : new Date(scheduled.getTime() + 7 * 86_400_000);
+  }).reduce((next, scheduled) => (scheduled < next ? scheduled : next));
+}
+
+function vietnamHourStart(now = new Date()): Date {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: SYSTEM_PLAYLIST_TIMEZONE,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value);
+
+  return new Date(
+    Date.UTC(value('year'), value('month') - 1, value('day'), value('hour')) -
+      7 * 3_600_000,
+  );
+}
+
+function systemStationScheduledRefresh(index: number, now = new Date()): Date {
+  const hourStart = vietnamHourStart(now);
+  const cycleSize = PRODUCTION_RECOMMENDATION_POLICY.moodStations.length;
+  const currentHour = Math.floor(
+    hourStart.getTime() / SYSTEM_STATION_REFRESH_INTERVAL_MS,
+  );
+  const hoursSinceStationRefresh =
+    (currentHour - index + cycleSize) % cycleSize;
+  return new Date(
+    hourStart.getTime() -
+      hoursSinceStationRefresh * SYSTEM_STATION_REFRESH_INTERVAL_MS,
+  );
+}
+
+function nextSystemStationRefresh(now = new Date()): Date {
+  const hourStart = vietnamHourStart(now);
+  return new Date(hourStart.getTime() + SYSTEM_STATION_REFRESH_INTERVAL_MS);
+}
+
+function homeStaleAfter(now = new Date()): Date {
+  const routineStaleAt = new Date(now.getTime() + STALE_DURATION_MS);
+  const playlistRefreshAt = nextSystemPlaylistRefresh(now);
+  const stationRefreshAt = nextSystemStationRefresh(now);
+  return [routineStaleAt, playlistRefreshAt, stationRefreshAt].reduce(
+    (earliest, candidate) => (candidate < earliest ? candidate : earliest),
+  );
+}
 
 type GenerationWriteGuard = () => Promise<void>;
 
@@ -152,6 +339,7 @@ export class GenerationService {
     private readonly systemStationArtworkService: SystemStationArtworkService,
     private readonly generationLeaseService: GenerationLeaseService,
     private readonly artistStationService: ArtistStationService,
+    private readonly systemPlaylistArtworkService?: SystemPlaylistArtworkService,
   ) {}
 
   async generate(
@@ -274,14 +462,7 @@ export class GenerationService {
         (section) => section.version >= PERSONALIZATION_MODEL_VERSION,
       );
 
-    if (!isStale) {
-      const needsArtworkFix =
-        (await this.hasZeroArtworkDimensions(userId)) ||
-        (await this.hasMissingSystemArtworkVariants(userId));
-      if (!needsArtworkFix) {
-        return null;
-      }
-    }
+    if (!isStale) return null;
 
     this.generatingUsers.add(userId);
     try {
@@ -437,21 +618,41 @@ export class GenerationService {
 
     const globalShelves =
       await this.recommendationEngine.generateGlobalShelves();
+    const globalTopPickShelf = globalShelves.find(
+      (shelf) => shelf.id === 'global-top-picks',
+    );
     const albumSections = globalShelves.map((shelf) =>
       this.buildEngineSection(shelf),
     );
 
-    const moodStations = await this.buildGlobalMoodStationsSection();
-    const playlists = await this.buildCatalogBrowseSection(
-      'global-playlists',
-      'Playlist Picks',
-      'playlists',
-      'MusicCoverShelf',
+    const [moodStations, systemPlaylists] = await Promise.all([
+      this.buildGlobalMoodStationsSection(),
+      this.buildFixedSystemPlaylists(''),
+    ]);
+    const stationTopPick = await this.latestSystemStationTopPick(
+      '',
+      moodStations,
+    );
+    const rankedTopPickItems = await this.rankGlobalTopPickItems({
+      albums: globalTopPickShelf?.items ?? [],
+      albumScores: globalTopPickShelf?.topPickScores ?? {},
+      playlist: systemPlaylists?.topPick,
+      station: stationTopPick,
+    });
+    const topPicks = this.composeGlobalTopPicks(
+      albumSections.find((section) => section.id === 'global-top-picks'),
+      rankedTopPickItems,
     );
     const sections = this.composeGlobalHomeSections(
-      albumSections,
-      playlists,
-      moodStations,
+      topPicks
+        ? albumSections.map((section) =>
+            section.id === topPicks.id ? topPicks : section,
+          )
+        : albumSections,
+      {
+        playlists: systemPlaylists?.playlistShelf ?? null,
+        moodStations,
+      },
     );
 
     if (sections.length === 0) {
@@ -464,9 +665,9 @@ export class GenerationService {
       });
     }
 
-    // Global and personalised Home use the same release-level rule: an album
-    // may occupy only one recommendation shelf. Recently Played is generated
-    // separately for a user and is deliberately outside this global page.
+    // Global Home keeps its visible preview release-unique. Detail overflow is
+    // allowed to overlap another shelf and is loaded only after the listener
+    // selects that shelf.
     const uniqueSections = this.removeDuplicateSections(sections).slice(
       0,
       GLOBAL_SHELF_LIMIT,
@@ -519,7 +720,7 @@ export class GenerationService {
         scope: RecommendationPageScope.RECOMMENDATION_PAGE_SCOPE_GLOBAL,
         actorUserId,
       },
-      { lease, staleAfter: new Date(Date.now() + STALE_DURATION_MS) },
+      { lease, staleAfter: homeStaleAfter() },
     );
 
     return result;
@@ -540,12 +741,20 @@ export class GenerationService {
     const actorUserId = request.actorUserId || 'system:recommendation-engine';
 
     const profile = await this.listeningService.getUserTasteProfile(userId);
-    // Cold-start users get the stable global editorial page. We do not invent
-    // a fake personal profile or label random catalog results as "For You".
-    if (
-      profile.listenedSongIds.size <
-      PRODUCTION_RECOMMENDATION_POLICY.minimumHistoryEvents
-    ) {
+    // A Favourite (or comparable explicit positive preference) is a valid
+    // cold-start signal even before the listener has three qualified plays.
+    // Keep this aligned with `hasListeningHistory`, otherwise lazy generation
+    // is permitted but this method silently returns the Global page.
+    const hasSufficientSignals =
+      profile.listenedSongIds.size >=
+        PRODUCTION_RECOMMENDATION_POLICY.minimumHistoryEvents ||
+      (await this.listeningService.hasListeningHistory(
+        userId,
+        PRODUCTION_RECOMMENDATION_POLICY.minimumHistoryEvents,
+      ));
+    if (!hasSufficientSignals) {
+      // Cold-start users get the stable global editorial page. We do not
+      // invent a fake personal profile or label random results as "For You".
       return this.recommendationsService.getHomeRecommendations({
         userId: '',
         name,
@@ -554,12 +763,25 @@ export class GenerationService {
         platform,
       });
     }
+    await this.ensureFixedSystemPlaylistsPublished();
     const recentlyPlayed = await this.buildRecentlyPlayedSection(userId);
-    const dailyMix = await this.buildDailyMixPlaylist(userId, profile);
-    const stations = await this.buildArtistStationsForYouSection(
+    const systemPlaylists = await this.buildFixedSystemPlaylists(
       userId,
       profile,
     );
+    const personalizedStationItems = await this.buildPersonalizedStationItems(
+      userId,
+      profile,
+    );
+    const artistStations = await this.buildArtistStationsForYouSection(
+      userId,
+      profile,
+    );
+    const artistStationItems = artistStations?.items ?? [];
+    const stations = this.buildStationsForYouSection([
+      ...personalizedStationItems,
+      ...artistStationItems,
+    ]);
     const moodStations = await this.buildMoodStationsSection(userId, profile);
     const shelves = await this.recommendationEngine.generateUserShelves(
       userId,
@@ -568,12 +790,41 @@ export class GenerationService {
     const shelfById = new Map(
       shelves.map((shelf) => [shelf.id, this.buildEngineSection(shelf)]),
     );
+    // Top Picks deliberately reuses the already-ranked New Releases shelf.
+    // This makes its album portion both fresh and deterministic, rather than
+    // creating a second, slightly different freshness ranking.
+    const topPickNewReleaseAlbums = (
+      shelfById.get('user-new-releases')?.relationships?.contents?.data ?? []
+    )
+      .filter((item) => item.type === 'albums')
+      .slice(0, TOP_PICK_NEW_RELEASE_ALBUM_LIMIT)
+      .map((item) => ({ id: item.id, type: 'albums' as const }));
+    const [stationTopPick, listenAgainAlbum] = await Promise.all([
+      this.latestSystemStationTopPick(userId, moodStations),
+      this.mostListenedAlbumTopPick(userId, profile),
+    ]);
+    const rankedTopPickItems = await this.rankUserTopPickItems({
+      systemPlaylist: systemPlaylists?.topPick,
+      moodStation: stationTopPick,
+      personalizedStations: personalizedStationItems,
+      artistStations: artistStations?.topPickStations ?? [],
+      listenAgainAlbum,
+      newReleaseAlbums: topPickNewReleaseAlbums.filter(
+        (album) => album.id !== listenAgainAlbum?.id,
+      ),
+    });
+    const userTopPicks = this.composeRankedTopPicks(
+      shelfById.get('user-top-picks'),
+      rankedTopPickItems,
+      listenAgainAlbum?.id,
+    );
+    if (userTopPicks) shelfById.set(userTopPicks.id, userTopPicks);
     const systemSections = new Map<
       string,
       PersonalRecommendationResource | null
     >([
       ['recently-played', recentlyPlayed],
-      ['made-for-you', dailyMix],
+      ['made-for-you', systemPlaylists?.playlistShelf ?? null],
       ['stations-for-you', stations],
       ['find-your-mood', moodStations],
     ]);
@@ -613,6 +864,28 @@ export class GenerationService {
       ),
     );
 
+    // Do not publish a sparse page under the user's name. The personal Home
+    // contract is 12–22 meaningful shelves; catalog constraints can make a
+    // listener eligible for personalisation while still leaving too few
+    // distinct, publishable collections. In that case Global Home is the
+    // honest product fallback.
+    if (
+      publishableSections.length <
+      PRODUCTION_RECOMMENDATION_POLICY.minUserHomeShelves
+    ) {
+      this.logger.warn(
+        `[user-home] skip: only ${publishableSections.length} publishable shelves ` +
+          `(need ${PRODUCTION_RECOMMENDATION_POLICY.minUserHomeShelves})`,
+      );
+      return this.recommendationsService.getHomeRecommendations({
+        userId: '',
+        name,
+        locale,
+        timezone,
+        platform,
+      });
+    }
+
     await assertLeaseHeldBeforeWrite();
     await this.recommendationsService.replaceHomeRecommendations(
       {
@@ -641,7 +914,7 @@ export class GenerationService {
         scope: RecommendationPageScope.RECOMMENDATION_PAGE_SCOPE_USER,
         actorUserId,
       },
-      { lease, staleAfter: new Date(Date.now() + STALE_DURATION_MS) },
+      { lease, staleAfter: homeStaleAfter() },
     );
 
     return result;
@@ -652,26 +925,56 @@ export class GenerationService {
   private scoreSong(song: SnapshotRow, profile: TasteProfile): number {
     let score = 0;
 
-    // Genre affinity (0–0.4): sum of matching genre weights, capped
+    // Genre affinity: sum of matching genre weights, capped.
     let genreScore = 0;
     for (const genre of song.genreNames) {
       const gw = profile.genres.find((g) => g.name === genre)?.weight ?? 0;
       genreScore += gw;
     }
-    score += Math.min(genreScore, 1) * 0.4;
+    score += Math.min(genreScore, 1) * 0.32;
 
-    // Artist affinity (0–0.3): known artist = proportional, unknown = discovery bonus
+    // Artist affinity: known artist = proportional, unknown = discovery bonus.
     const artistWeight =
       profile.artists.find((a) => a.name === song.artistName)?.weight ?? 0;
     if (artistWeight > 0) {
-      score += artistWeight * 0.2;
+      score += artistWeight * 0.16;
     } else {
-      score += 0.1;
+      score += 0.08;
     }
 
-    // Freshness bonus (0.3): unheard songs get full bonus
+    // AI-derived sound affinity. These fields were calculated at upload time
+    // and are optional, so imported or not-yet-analysed songs remain eligible.
+    const audio = audioFeaturesFromAttributes(song.attributes);
+    if (audio.tags.length && profile.audioTags.length) {
+      const preferredTags = new Map(
+        profile.audioTags.map((tag) => [tag.name, tag.weight]),
+      );
+      const tagScore = audio.tags.reduce(
+        (best, tag) => Math.max(best, preferredTags.get(tag) ?? 0),
+        0,
+      );
+      score += tagScore * 0.1;
+    }
+    if (audio.bpm !== undefined && profile.preferredBpm !== null) {
+      const tolerance = profile.bpmTolerance ?? 20;
+      score +=
+        Math.max(
+          0,
+          1 - Math.abs(audio.bpm - profile.preferredBpm) / tolerance,
+        ) * 0.06;
+    }
+    if (audio.energy !== undefined && profile.preferredEnergy !== null) {
+      const tolerance = profile.energyTolerance ?? 0.2;
+      score +=
+        Math.max(
+          0,
+          1 - Math.abs(audio.energy - profile.preferredEnergy) / tolerance,
+        ) * 0.06;
+    }
+
+    // Freshness bonus: unheard songs get full bonus.
     if (!profile.listenedSongIds.has(song.resourceId)) {
-      score += 0.3;
+      score += 0.24;
     }
 
     return Math.min(score, 1);
@@ -733,8 +1036,8 @@ export class GenerationService {
       (candidate) => candidate.resourceId,
     );
     const [popularity, collaborative] = await Promise.all([
-      this.dailyMixPopularityScores(candidateIds),
-      this.dailyMixCollaborativeScores(
+      this.personalizedPopularityScores(candidateIds),
+      this.personalizedCollaborativeScores(
         userId,
         [...profile.listenedSongIds],
         candidateIds,
@@ -747,11 +1050,13 @@ export class GenerationService {
         artistName: candidate.artistName,
         score:
           this.scoreSong(candidate, profile) *
-            PRODUCTION_RECOMMENDATION_POLICY.dailyMixWeights.taste +
+            PRODUCTION_RECOMMENDATION_POLICY.personalizedPlaylistWeights.taste +
           (popularity.get(candidate.resourceId) ?? 0) *
-            PRODUCTION_RECOMMENDATION_POLICY.dailyMixWeights.popularity +
+            PRODUCTION_RECOMMENDATION_POLICY.personalizedPlaylistWeights
+              .popularity +
           (collaborative.get(candidate.resourceId) ?? 0) *
-            PRODUCTION_RECOMMENDATION_POLICY.dailyMixWeights.collaborative,
+            PRODUCTION_RECOMMENDATION_POLICY.personalizedPlaylistWeights
+              .collaborative,
       }))
       .sort(
         (left, right) =>
@@ -836,7 +1141,7 @@ export class GenerationService {
       eligible.map(({ candidate }) => candidate),
       profile,
       eligible.length,
-      DAILY_MIX_MAX_PER_ARTIST,
+      SYSTEM_PLAYLIST_MAX_PER_ARTIST,
     );
     const personalizedScores = new Map(
       personalized.map((item) => [item.id, item.score]),
@@ -904,7 +1209,7 @@ export class GenerationService {
     attributes?: unknown,
   ) {
     const attributeTags = isRecord(attributes)
-      ? ['moods', 'moodTags', 'tags'].flatMap((key) => {
+      ? ['moods', 'moodTags', 'tags', 'audioTags'].flatMap((key) => {
           const value = attributes[key];
           return Array.isArray(value)
             ? value.filter((item): item is string => typeof item === 'string')
@@ -935,7 +1240,7 @@ export class GenerationService {
     );
   }
 
-  private async dailyMixPopularityScores(songIds: string[]) {
+  private async personalizedPopularityScores(songIds: string[]) {
     if (!songIds.length) return new Map<string, number>();
     const historyStart = new Date(
       Date.now() -
@@ -967,7 +1272,7 @@ export class GenerationService {
     return new Map([...raw].map(([id, score]) => [id, score / maximum]));
   }
 
-  private async dailyMixCollaborativeScores(
+  private async personalizedCollaborativeScores(
     userId: string,
     listenedSongIds: string[],
     candidateSongIds: string[],
@@ -1096,124 +1401,81 @@ export class GenerationService {
     attributes?: unknown;
   }) {
     if (isRecord(track.attributes)) {
-      for (const key of ['albumId', 'albumName']) {
-        const value = track.attributes[key];
-        if (typeof value === 'string' && value.trim()) {
-          return `${key}:${value.trim().toLowerCase()}`;
-        }
+      const albumId = track.attributes.albumId;
+      if (typeof albumId === 'string' && albumId.trim()) {
+        return `albumId:${albumId.trim().toLowerCase()}`;
       }
     }
     return `song:${track.resourceId}`;
   }
 
-  private async groupSongsByAlbum(
-    items: Array<{ id: string; type: string }>,
-  ): Promise<Array<{ id: string; type: string }>> {
-    const songItems = items.filter((i) => i.type === 'songs');
-    if (songItems.length === 0) return items;
-
-    const songIds = songItems.map((s) => s.id);
-    const catalogAlbums = await this.catalogService.resolveSongAlbums(songIds);
-    const albumIdsBySong = new Map<string, string>();
-    const fallbackAlbumNames = new Map<string, string>();
-
-    for (const [songId, album] of catalogAlbums) {
-      if (album.albumId) {
-        albumIdsBySong.set(songId, album.albumId);
-      } else if (album.albumName) {
-        fallbackAlbumNames.set(songId, album.albumName);
-      }
-    }
-
-    const unresolvedSongIds = songIds.filter(
-      (songId) =>
-        !albumIdsBySong.has(songId) && !fallbackAlbumNames.has(songId),
-    );
-    if (unresolvedSongIds.length > 0) {
-      const snapshots =
-        await this.prisma.recommendationResourceSnapshot.findMany({
-          where: {
-            resourceType: 'songs',
-            resourceId: { in: unresolvedSongIds },
-          },
-          select: { resourceId: true, attributes: true },
-        });
-
-      for (const snapshot of snapshots) {
-        const attributes = snapshot.attributes as Record<
-          string,
-          unknown
-        > | null;
-        const albumName = attributes?.albumName;
-        if (typeof albumName === 'string' && albumName) {
-          fallbackAlbumNames.set(snapshot.resourceId, albumName);
-        }
-      }
-    }
-
-    const albumNames = [...new Set(fallbackAlbumNames.values())];
-    const albumNameToId = albumNames.length
-      ? new Map(
-          (
-            await this.prisma.recommendationResourceSnapshot.findMany({
-              where: { resourceType: 'albums', name: { in: albumNames } },
-              select: { resourceId: true, name: true },
-            })
-          ).map((album) => [album.name, album.resourceId]),
-        )
-      : new Map<string, string>();
-
-    const seen = new Set<string>();
-    const result: Array<{ id: string; type: string }> = [];
-
-    for (const item of items) {
-      if (item.type === 'songs') {
-        const albumId =
-          albumIdsBySong.get(item.id) ??
-          albumNameToId.get(fallbackAlbumNames.get(item.id) ?? '');
-        if (albumId) {
-          const key = `albums:${albumId}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            result.push({ id: albumId, type: 'albums' });
-          }
-        } else {
-          const key = `songs:${item.id}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            result.push(item);
-          }
-        }
-      } else {
-        const key = `${item.type}:${item.id}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          result.push(item);
-        }
-      }
-    }
-
-    return result;
-  }
-
   // ─── User sections ───
 
-  private async buildDailyMixPlaylist(
+  private async buildFixedSystemPlaylists(
     userId: string,
-    profile: TasteProfile,
-  ): Promise<PersonalRecommendationResource | null> {
-    if (profile.listenedSongIds.size < MIN_LISTENED_SONGS) {
-      this.logger.warn(
-        `[daily-mix] skip: only ${profile.listenedSongIds.size} listened songs (need ${MIN_LISTENED_SONGS})`,
-      );
-      return null;
+    profile?: TasteProfile,
+    forceRefresh = false,
+  ): Promise<SystemPlaylistBuildResult | null> {
+    const now = new Date();
+    const refreshStates =
+      await this.prisma.systemPlaylistRefreshState.findMany();
+    const refreshStateByKey = new Map(
+      refreshStates.map((state) => [state.playlistKey, state]),
+    );
+    const userTrackCacheByKey = new Map<
+      string,
+      { trackCount: number; updatedAt: Date }
+    >();
+    if (userId) {
+      const cachedTracks = await this.prisma.userSystemPlaylistTrack.findMany({
+        where: { userId },
+        select: { playlistKey: true, updatedAt: true },
+      });
+      for (const track of cachedTracks) {
+        const current = userTrackCacheByKey.get(track.playlistKey) ?? {
+          trackCount: 0,
+          updatedAt: track.updatedAt,
+        };
+        current.trackCount += 1;
+        if (track.updatedAt > current.updatedAt)
+          current.updatedAt = track.updatedAt;
+        userTrackCacheByKey.set(track.playlistKey, current);
+      }
     }
-
-    const preferredGenres = profile.genres
-      .filter((genre) => genre.weight > 0.05)
-      .slice(0, 10)
-      .map((genre) => genre.name);
-    const excludedSongIds = [...profile.listenedSongIds];
+    const definitionsToRefresh = FIXED_SYSTEM_PLAYLISTS.filter((definition) => {
+      const state = refreshStateByKey.get(definition.key);
+      if (userId) {
+        const userCache = userTrackCacheByKey.get(definition.key);
+        return (
+          !state ||
+          !userCache ||
+          userCache.trackCount < SYSTEM_PLAYLIST_TRACK_LIMIT ||
+          userCache.updatedAt < state.refreshedAt
+        );
+      }
+      return (
+        forceRefresh ||
+        !state ||
+        state.selectionVersion < SYSTEM_PLAYLIST_SELECTION_VERSION ||
+        state.refreshedAt < systemPlaylistScheduledRefresh(definition, now)
+      );
+    });
+    const playlistIds = new Map(
+      await Promise.all(
+        FIXED_SYSTEM_PLAYLISTS.map(
+          async (definition) =>
+            [
+              definition.key,
+              await this.fixedSystemPlaylistId(definition.key),
+            ] as const,
+        ),
+      ),
+    );
+    const playlistArtwork = this.systemPlaylistArtworkService
+      ? await this.systemPlaylistArtworkService.byKeys(
+          FIXED_SYSTEM_PLAYLISTS.map(({ key }) => key),
+        )
+      : new Map<string, SystemPlaylistArtworkPair>();
     const songSelection = {
       resourceId: true,
       resourceType: true,
@@ -1221,371 +1483,593 @@ export class GenerationService {
       genreNames: true,
       audioTraits: true,
       moodTags: true,
+      attributes: true,
+      relationships: true,
       releaseDate: true,
       releaseType: true,
-      name: true,
-      artworkUrl: true,
-      artworkBgColor: true,
-      artworkWidth: true,
-      artworkHeight: true,
-      attributes: true,
     } as const;
-
-    const matchingCandidates = preferredGenres.length
-      ? await this.prisma.recommendationResourceSnapshot.findMany({
-          where: {
-            resourceType: 'songs',
-            resourceId: { notIn: excludedSongIds },
-            genreNames: { hasSome: preferredGenres },
-          },
-          take: 150,
-          orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
-          select: songSelection,
-        })
-      : [];
-
-    const fallbackCandidates =
-      matchingCandidates.length >= DAILY_MIX_TRACK_LIMIT
-        ? []
-        : await this.prisma.recommendationResourceSnapshot.findMany({
-            where: {
-              resourceType: 'songs',
-              resourceId: { notIn: excludedSongIds },
-            },
-            take: 200,
-            orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
-            select: songSelection,
-          });
-
-    let candidates = [
-      ...matchingCandidates,
-      ...fallbackCandidates.filter(
-        (candidate) =>
-          !matchingCandidates.some(
-            (existing) => existing.resourceId === candidate.resourceId,
-          ),
-      ),
-    ];
-
-    // Small catalog fallback: include listened songs when unheard pool is too
-    // shallow, so the mix can still be built.
-    if (candidates.length < DAILY_MIX_MIN_TRACKS) {
-      const listenedFallback =
-        await this.prisma.recommendationResourceSnapshot.findMany({
-          where: {
-            resourceType: 'songs',
-            resourceId: { in: excludedSongIds },
-          },
-          take: 200,
-          orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
-          select: songSelection,
-        });
-      const seenIds = new Set(candidates.map((c) => c.resourceId));
-      candidates = [
-        ...candidates,
-        ...listenedFallback.filter((c) => !seenIds.has(c.resourceId)),
-      ];
-    }
-
-    const ranked = await this.rankPersonalizedTracks(
-      userId,
-      candidates,
-      profile,
-      DAILY_MIX_TRACK_LIMIT * DAILY_MIX_LIMIT,
-      DAILY_MIX_MAX_PER_ARTIST,
-    );
-    if (ranked.length < DAILY_MIX_MIN_TRACKS) {
-      this.logger.warn(
-        `[daily-mix] skip: only ${ranked.length} ranked (need ${DAILY_MIX_MIN_TRACKS})`,
-      );
-      return null;
-    }
-
-    const selectedById = new Map(
-      candidates.map((candidate) => [candidate.resourceId, candidate]),
-    );
-    const selected = this.sequencePersonalizedTracks(
-      ranked.slice(0, DAILY_MIX_TRACK_LIMIT).flatMap((item) => {
-        const snapshot = selectedById.get(item.id);
-        return snapshot ? [snapshot] : [];
-      }),
-    );
-    if (selected.length < DAILY_MIX_MIN_TRACKS) return null;
-
-    const playlistId = this.dailyMixId(userId);
-    const artworkSource =
-      selected.find((song) => song.artworkUrl) ?? selected[0];
-    const artworkWidth = artworkSource.artworkWidth || 1000;
-    const artworkHeight = artworkSource.artworkHeight || 1000;
-    const artworkVariants = artworkVariantsFromAttributes(
-      artworkSource.attributes,
-    );
-    const description = 'A fresh mix built from the music you love.';
-    const playlistHref = `/playlist/daily-mix/${playlistId}`;
-    await this.catalogService.upsertSystemPlaylist({
-      playlistId,
-      storefront: 'vn',
-      name: 'Daily Mix',
-      description,
-      url: 'daily-mix',
-      artworkUrl: artworkSource.artworkUrl,
-      artworkBgColor: artworkSource.artworkBgColor,
-      artworkVariantsJson: JSON.stringify(artworkVariants ?? {}),
-      artworkWidth,
-      artworkHeight,
-      songIds: selected.map((song) => song.resourceId),
-    });
-    const relationships = {
-      tracks: {
-        href: `/me/system-playlists/${playlistId}/tracks`,
-        data: selected.map((song) => ({
-          id: song.resourceId,
-          type: 'songs',
-          href: `/catalog/vn/songs/${song.resourceId}`,
-        })),
-      },
-    };
-
-    await this.prisma.recommendationResourceSnapshot.upsert({
-      where: {
-        resourceType_resourceId: {
-          resourceType: 'playlists',
-          resourceId: playlistId,
-        },
-      },
-      create: {
-        resourceType: 'playlists',
-        resourceId: playlistId,
-        name: 'Daily Mix',
-        title: 'Daily Mix',
-        curatorName: 'Musical',
-        href: playlistHref,
-        externalUrl: playlistHref,
-        artworkUrl: artworkSource.artworkUrl,
-        artworkBgColor: artworkSource.artworkBgColor,
-        artworkWidth,
-        artworkHeight,
-        shortDescription: description,
-        standardDescription: description,
-        playlistType: 'system-personalized',
-        trackCount: selected.length,
-        attributes: {
-          name: 'Daily Mix',
-          curatorName: 'Musical',
-          description: { short: description, standard: description },
-          artwork: {
-            url: artworkSource.artworkUrl,
-            width: artworkWidth,
-            height: artworkHeight,
-            bgColor: artworkSource.artworkBgColor,
-            alt: 'Daily Mix',
-            ...(artworkVariants ? { variants: artworkVariants } : {}),
-          },
-          playlistType: 'system-personalized',
-          trackCount: selected.length,
-          url: 'daily-mix',
-        },
-        relationships,
-      },
-      update: {
-        name: 'Daily Mix',
-        title: 'Daily Mix',
-        curatorName: 'Musical',
-        href: playlistHref,
-        externalUrl: playlistHref,
-        artworkUrl: artworkSource.artworkUrl,
-        artworkBgColor: artworkSource.artworkBgColor,
-        artworkWidth,
-        artworkHeight,
-        shortDescription: description,
-        standardDescription: description,
-        playlistType: 'system-personalized',
-        trackCount: selected.length,
-        attributes: {
-          name: 'Daily Mix',
-          curatorName: 'Musical',
-          description: { short: description, standard: description },
-          artwork: {
-            url: artworkSource.artworkUrl,
-            width: artworkWidth,
-            height: artworkHeight,
-            bgColor: artworkSource.artworkBgColor,
-            alt: 'Daily Mix',
-            ...(artworkVariants ? { variants: artworkVariants } : {}),
-          },
-          playlistType: 'system-personalized',
-          trackCount: selected.length,
-          url: 'daily-mix',
-        },
-        relationships,
-      },
-    });
-
-    const playlistItems: Array<{ id: string; type: string }> = [
-      { id: playlistId, type: 'playlists' },
-    ];
-    const mixTracklists = [selected.map((song) => song.resourceId)];
-    for (let mixIndex = 1; mixIndex < DAILY_MIX_LIMIT; mixIndex += 1) {
-      const variantId = this.dailyMixId(userId, mixIndex);
-      const variantSelected = this.sequencePersonalizedTracks(
-        this.selectDiverseSystemVariant(
-          ranked,
-          selectedById,
-          mixTracklists,
-          mixIndex * DAILY_MIX_TRACK_LIMIT,
-          DAILY_MIX_TRACK_LIMIT,
-          DAILY_MIX_MIN_TRACKS,
-        ),
-      );
-      if (variantSelected.length < DAILY_MIX_MIN_TRACKS) {
-        this.logger.debug(
-          `[daily-mix] variant ${mixIndex + 1} skipped: insufficient novel tracks`,
+    const listenedSongIds = profile ? [...profile.listenedSongIds] : [];
+    let candidates: SnapshotRow[] = [];
+    if (definitionsToRefresh.length) {
+      candidates = await this.prisma.recommendationResourceSnapshot.findMany({
+        where: { resourceType: 'songs' },
+        orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
+        take: 500,
+        select: songSelection,
+      });
+      if (listenedSongIds.length) {
+        const unlistenedCandidates = candidates.filter(
+          (candidate) => !listenedSongIds.includes(candidate.resourceId),
         );
-        continue;
-      }
-
-      const variantTitle = `Daily Mix ${mixIndex + 1}`;
-      const variantSlug = `daily-mix-${mixIndex + 1}`;
-      const variantHref = `/playlist/${variantSlug}/${variantId}`;
-      const variantArtwork =
-        variantSelected.find((song) => song.artworkUrl) ?? variantSelected[0];
-      const variantWidth = variantArtwork.artworkWidth || 1000;
-      const variantHeight = variantArtwork.artworkHeight || 1000;
-      const variantArtworkVariants = artworkVariantsFromAttributes(
-        variantArtwork.attributes,
-      );
-      const variantRelationships = {
-        tracks: {
-          href: `/me/system-playlists/${variantId}/tracks`,
-          data: variantSelected.map((song) => ({
-            id: song.resourceId,
-            type: 'songs',
-            href: `/catalog/vn/songs/${song.resourceId}`,
-          })),
-        },
-      };
-      await this.catalogService.upsertSystemPlaylist({
-        playlistId: variantId,
-        storefront: 'vn',
-        name: variantTitle,
-        description,
-        url: `daily-mix-${mixIndex + 1}`,
-        artworkUrl: variantArtwork.artworkUrl,
-        artworkBgColor: variantArtwork.artworkBgColor,
-        artworkVariantsJson: JSON.stringify(variantArtworkVariants ?? {}),
-        artworkWidth: variantWidth,
-        artworkHeight: variantHeight,
-        songIds: variantSelected.map((song) => song.resourceId),
-      });
-      const variantData = {
-        name: variantTitle,
-        title: variantTitle,
-        curatorName: 'Musical',
-        href: variantHref,
-        externalUrl: variantHref,
-        artworkUrl: variantArtwork.artworkUrl,
-        artworkBgColor: variantArtwork.artworkBgColor,
-        artworkWidth: variantWidth,
-        artworkHeight: variantHeight,
-        shortDescription: description,
-        standardDescription: description,
-        playlistType: 'system-personalized',
-        trackCount: variantSelected.length,
-        attributes: {
-          name: variantTitle,
-          curatorName: 'Musical',
-          description: { short: description, standard: description },
-          artwork: {
-            url: variantArtwork.artworkUrl,
-            width: variantWidth,
-            height: variantHeight,
-            bgColor: variantArtwork.artworkBgColor,
-            alt: variantTitle,
-            ...(variantArtworkVariants
-              ? { variants: variantArtworkVariants }
-              : {}),
-          },
-          playlistType: 'system-personalized',
-          trackCount: variantSelected.length,
-          url: variantSlug,
-        },
-        relationships: variantRelationships,
-      };
-
-      await this.prisma.recommendationResourceSnapshot.upsert({
-        where: {
-          resourceType_resourceId: {
-            resourceType: 'playlists',
-            resourceId: variantId,
-          },
-        },
-        create: {
-          resourceType: 'playlists',
-          resourceId: variantId,
-          ...variantData,
-        },
-        update: variantData,
-      });
-      playlistItems.push({ id: variantId, type: 'playlists' });
-      mixTracklists.push(variantSelected.map((song) => song.resourceId));
-    }
-
-    // A refresh may not find enough *new* variants in a sparse catalog. Keep
-    // previously generated, valid mixes instead of shrinking the shelf merely
-    // because the current pass has less novelty to work with.
-    if (playlistItems.length < DAILY_MIX_LIMIT) {
-      const existingMixes =
-        await this.prisma.recommendationResourceSnapshot.findMany({
-          where: {
-            resourceType: 'playlists',
-            resourceId: {
-              in: Array.from({ length: DAILY_MIX_LIMIT - 1 }, (_, index) =>
-                this.dailyMixId(userId, index + 1),
-              ),
-            },
-            playlistType: 'system-personalized',
-            trackCount: { gte: DAILY_MIX_MIN_TRACKS },
-          },
-          select: { resourceId: true },
-        });
-      const existingMixIds = new Set(
-        playlistItems.map((playlist) => playlist.id),
-      );
-
-      for (let mixIndex = 1; mixIndex < DAILY_MIX_LIMIT; mixIndex += 1) {
-        const mixId = this.dailyMixId(userId, mixIndex);
-        if (
-          existingMixes.some((mix) => mix.resourceId === mixId) &&
-          !existingMixIds.has(mixId)
-        ) {
-          playlistItems.push({ id: mixId, type: 'playlists' });
-          existingMixIds.add(mixId);
+        if (unlistenedCandidates.length >= SYSTEM_PLAYLIST_TRACK_LIMIT) {
+          candidates = unlistenedCandidates;
         }
       }
     }
-
-    return this.buildSection(
-      'user-daily-mix',
-      'Playlist Made for You',
-      'MusicNotesHeroShelf',
-      ['playlists'],
-      playlistItems,
+    const candidatesById = new Map(
+      candidates.map((candidate) => [candidate.resourceId, candidate]),
     );
-  }
-
-  private dailyMixId(userId: string, mixIndex = 0): string {
-    return createHash('sha256')
-      .update(`${userId}:${mixIndex}`)
-      .digest('hex')
-      .slice(0, 32);
+    if (!userId && definitionsToRefresh.length === 0) {
+      await this.syncSystemPlaylistDescriptions(playlistIds);
+    }
+    const selectedAcrossPlaylists = new Set<string>();
+    for (const definition of FIXED_SYSTEM_PLAYLISTS) {
+      const playlistId = playlistIds.get(definition.key)!;
+      if (!definitionsToRefresh.includes(definition)) continue;
+      const ranked = await this.rankFixedSystemPlaylistTracks(
+        userId,
+        candidates,
+        profile,
+        definition,
+      );
+      const selected = this.sequencePersonalizedTracks(
+        // Distinct programming is the default: a track belongs to at most one
+        // of Get Up, Chill and New Music. This avoids three renamed queues.
+        ranked
+          .filter((item) => !selectedAcrossPlaylists.has(item.id))
+          .slice(0, SYSTEM_PLAYLIST_TRACK_LIMIT)
+          .flatMap((item) => {
+            const candidate = candidatesById.get(item.id);
+            return candidate ? [candidate] : [];
+          }),
+      );
+      if (selected.length < SYSTEM_PLAYLIST_MIN_TRACKS) {
+        this.logger.warn(
+          `[system-playlists] ${definition.key} skipped: only ${selected.length} qualified tracks (need ${SYSTEM_PLAYLIST_MIN_TRACKS})`,
+        );
+        return null;
+      }
+      selected.forEach((track) =>
+        selectedAcrossPlaylists.add(track.resourceId),
+      );
+      // Product playlists are a three-item global catalog. A listener gets a
+      // private track selection for one of those playlists, never a private
+      // Playlist record or URL.
+      const configuredArtwork = playlistArtwork.get(definition.key);
+      const cover = configuredArtwork?.cover;
+      const homeCard = configuredArtwork?.homeCard;
+      const artistPreview = systemPlaylistArtistPreview(
+        selected.map((track) => track.artistName),
+      );
+      if (userId) {
+        // This is a recommendation cache, not a playlist. It is intentionally
+        // keyed by user and product intent so no user-owned Playlist rows are
+        // created in the Song database.
+        await this.prisma.$transaction([
+          this.prisma.userSystemPlaylistTrack.deleteMany({
+            where: { userId, playlistKey: definition.key },
+          }),
+          this.prisma.userSystemPlaylistTrack.createMany({
+            data: selected.map((track, sortOrder) => ({
+              userId,
+              playlistKey: definition.key,
+              songId: track.resourceId,
+              sortOrder,
+            })),
+          }),
+          this.prisma.userSystemPlaylistMetadata.upsert({
+            where: {
+              userId_playlistKey: { userId, playlistKey: definition.key },
+            },
+            create: {
+              userId,
+              playlistKey: definition.key,
+              shortDescription: artistPreview,
+              standardDescription: artistPreview,
+            },
+            update: {
+              shortDescription: artistPreview,
+              standardDescription: artistPreview,
+            },
+          }),
+        ]);
+      } else {
+        // The catalog has exactly these three physical playlists. Only Global
+        // generation owns their default track list and shared metadata.
+        await this.catalogService.upsertSystemPlaylist({
+          playlistId,
+          storefront: 'vn',
+          name: definition.title,
+          description: artistPreview,
+          url: definition.key,
+          artworkUrl: cover?.url || SYSTEM_PLAYLIST_ARTWORK_URL,
+          artworkBgColor: cover?.bgColor || definition.artworkBgColor,
+          artworkVariantsJson: cover
+            ? JSON.stringify({
+                ...cover.variants,
+                homeCard,
+                systemPlaylistMedia: {
+                  detailSquareVideo: configuredArtwork?.detailSquareVideo,
+                  detailMobileVideo: configuredArtwork?.detailMobileVideo,
+                  homeHeroVideo: configuredArtwork?.homeHeroVideo,
+                },
+              })
+            : '',
+          artworkWidth: cover?.width || 1,
+          artworkHeight: cover?.height || 1,
+          songIds: selected.map((track) => track.resourceId),
+        });
+        await this.prisma.recommendationResourceSnapshot.upsert({
+          where: {
+            resourceType_resourceId: {
+              resourceType: 'playlists',
+              resourceId: playlistId,
+            },
+          },
+          create: {
+            resourceType: 'playlists',
+            resourceId: playlistId,
+            ...this.fixedSystemPlaylistSnapshot(
+              definition,
+              playlistId,
+              selected.map((track) => track.resourceId),
+              configuredArtwork,
+              artistPreview,
+            ),
+          },
+          update: this.fixedSystemPlaylistSnapshot(
+            definition,
+            playlistId,
+            selected.map((track) => track.resourceId),
+            configuredArtwork,
+            artistPreview,
+          ),
+        });
+      }
+      if (!userId) {
+        await this.prisma.systemPlaylistRefreshState.upsert({
+          where: { playlistKey: definition.key },
+          create: {
+            playlistKey: definition.key,
+            refreshedAt: now,
+            selectionVersion: SYSTEM_PLAYLIST_SELECTION_VERSION,
+          },
+          update: {
+            refreshedAt: now,
+            selectionVersion: SYSTEM_PLAYLIST_SELECTION_VERSION,
+          },
+        });
+      }
+    }
+    const topPickDefinition = latestSystemPlaylistDefinition(now);
+    const playlistItems = FIXED_SYSTEM_PLAYLISTS.map((definition) => ({
+      id: playlistIds.get(definition.key)!,
+      type: 'playlists' as const,
+    }));
+    if (!userId) await this.repairSystemPlaylistUserCaches();
+    return {
+      topPick: {
+        id: playlistIds.get(topPickDefinition.key)!,
+        type: 'playlists',
+        refreshedAt: refreshStateByKey.get(topPickDefinition.key)?.refreshedAt,
+      },
+      playlistShelf: this.buildSection(
+        userId
+          ? 'user-playlists-made-for-you'
+          : 'global-playlists-made-for-you',
+        'Playlists Made for You',
+        'MusicNotesHeroShelf',
+        ['playlists'],
+        playlistItems,
+      ),
+    };
   }
 
   /**
-   * Builds a system playlist/station variant that contributes a meaningful
-   * amount of unseen music relative to every previously accepted variant.
-   * A sparse catalog therefore yields fewer cards instead of renamed copies
-   * of the same queue.
+   * User pages reference the three global catalog playlists. Generation may
+   * run before a Global Home refresh after a deployment, so verify their
+   * catalog presence here instead of silently dropping the shelf later in
+   * `excludeUnpublishedCatalogContent`.
    */
+  private async ensureFixedSystemPlaylistsPublished(): Promise<void> {
+    const playlistIds = await Promise.all(
+      FIXED_SYSTEM_PLAYLISTS.map((definition) =>
+        this.fixedSystemPlaylistId(definition.key),
+      ),
+    );
+    const initiallyPublished = await this.catalogService.resolve(
+      playlistIds.map((id) => ({ id, type: 'playlists' })),
+    );
+    const globalPlaylists = await this.buildFixedSystemPlaylists(
+      '',
+      undefined,
+      initiallyPublished.length !== FIXED_SYSTEM_PLAYLISTS.length,
+    );
+    if (!globalPlaylists) {
+      throw new RpcException({
+        code: status.FAILED_PRECONDITION,
+        message: 'Fixed system playlists could not be published',
+      });
+    }
+    if (initiallyPublished.length === FIXED_SYSTEM_PLAYLISTS.length) return;
+    const published = await this.catalogService.resolve(
+      playlistIds.map((id) => ({ id, type: 'playlists' })),
+    );
+    if (published.length !== FIXED_SYSTEM_PLAYLISTS.length) {
+      throw new RpcException({
+        code: status.FAILED_PRECONDITION,
+        message: 'Fixed system playlists could not be published',
+      });
+    }
+  }
+
+  private async fixedSystemPlaylistId(
+    key: FixedSystemPlaylist['key'],
+  ): Promise<string> {
+    const scopeKey = 'GLOBAL';
+    const playlist = await this.prisma.generatedSystemPlaylist.upsert({
+      where: { scopeKey_playlistKey: { scopeKey, playlistKey: key } },
+      create: { scopeKey, playlistKey: key, playlistId: randomUUID() },
+      update: {},
+      select: { playlistId: true },
+    });
+    return playlist.playlistId;
+  }
+
+  private fixedSystemPlaylistSnapshot(
+    definition: FixedSystemPlaylist,
+    playlistId: string,
+    songIds: string[],
+    configuredArtwork: SystemPlaylistArtworkPair | undefined,
+    description: string,
+  ) {
+    const href = `/playlist/${definition.key}/${playlistId}`;
+    const attributes = {
+      name: definition.title,
+      curatorName: 'Musical',
+      description: {
+        short: description,
+        standard: description,
+      },
+      artwork: {
+        ...(configuredArtwork?.cover || {
+          url: SYSTEM_PLAYLIST_ARTWORK_URL,
+          width: 1,
+          height: 1,
+          bgColor: definition.artworkBgColor,
+        }),
+        ...(configuredArtwork?.homeCard
+          ? {
+              variants: {
+                ...configuredArtwork.cover.variants,
+                homeCard: configuredArtwork.homeCard,
+                systemPlaylistMedia: {
+                  detailSquareVideo: configuredArtwork.detailSquareVideo,
+                  detailMobileVideo: configuredArtwork.detailMobileVideo,
+                  homeHeroVideo: configuredArtwork.homeHeroVideo,
+                },
+              },
+            }
+          : {}),
+        alt: definition.title,
+      },
+      ...(configuredArtwork?.homeHeroVideo
+        ? {
+            editorialVideo: {
+              motionTallVideo3x4: configuredArtwork.homeHeroVideo,
+            },
+          }
+        : {}),
+      playlistType: 'system-personalized',
+      trackCount: songIds.length,
+      url: definition.key,
+    };
+    return {
+      name: definition.title,
+      title: definition.title,
+      curatorName: 'Musical',
+      href,
+      externalUrl: href,
+      artworkUrl: configuredArtwork?.cover?.url || SYSTEM_PLAYLIST_ARTWORK_URL,
+      artworkBgColor:
+        configuredArtwork?.cover?.bgColor || definition.artworkBgColor,
+      artworkWidth: configuredArtwork?.cover?.width || 1,
+      artworkHeight: configuredArtwork?.cover?.height || 1,
+      shortDescription: description,
+      standardDescription: description,
+      // System playlists have one description source: the artists selected
+      // for their current track list. Clear imported editorial copy so it
+      // cannot compete with that source on an older Home page.
+      editorialNotesName: '',
+      editorialNotesShort: '',
+      editorialNotes: '',
+      plainEditorialNotes: Prisma.DbNull,
+      playlistType: 'system-personalized',
+      trackCount: songIds.length,
+      attributes: attributes as Prisma.InputJsonObject,
+      relationships: {
+        tracks: {
+          href: `/me/recommendations/system-playlists/${playlistId}/tracks`,
+          data: songIds.map((songId) => ({
+            id: songId,
+            type: 'songs',
+            href: `/catalog/vn/songs/${songId}`,
+          })),
+        },
+      } as Prisma.InputJsonObject,
+    };
+  }
+
+  private async syncSystemPlaylistDescriptions(
+    playlistIds: Map<FixedSystemPlaylist['key'], string>,
+  ): Promise<void> {
+    const playlists = await this.prisma.recommendationResourceSnapshot.findMany(
+      {
+        where: {
+          resourceType: 'playlists',
+          resourceId: { in: [...playlistIds.values()] },
+        },
+        select: {
+          id: true,
+          resourceId: true,
+          shortDescription: true,
+          standardDescription: true,
+          editorialNotesName: true,
+          editorialNotesShort: true,
+          editorialNotes: true,
+          plainEditorialNotes: true,
+          attributes: true,
+          relationships: true,
+        },
+      },
+    );
+    const trackIdsByPlaylist = new Map(
+      playlists.map((playlist) => [
+        playlist.resourceId,
+        systemPlaylistTrackIds(playlist.relationships),
+      ]),
+    );
+    const trackIds = [...new Set([...trackIdsByPlaylist.values()].flat())];
+    if (!trackIds.length) return;
+
+    const tracks = await this.prisma.recommendationResourceSnapshot.findMany({
+      where: { resourceType: 'songs', resourceId: { in: trackIds } },
+      select: { resourceId: true, artistName: true },
+    });
+    const artistByTrackId = new Map(
+      tracks.map((track) => [track.resourceId, track.artistName]),
+    );
+    const definitionByPlaylistId = new Map(
+      FIXED_SYSTEM_PLAYLISTS.map((definition) => [
+        playlistIds.get(definition.key)!,
+        definition,
+      ]),
+    );
+    await Promise.all(
+      playlists.flatMap((playlist) => {
+        const definition = definitionByPlaylistId.get(playlist.resourceId);
+        if (!definition) return [];
+        const description = systemPlaylistArtistPreview(
+          (trackIdsByPlaylist.get(playlist.resourceId) ?? []).map(
+            (id) => artistByTrackId.get(id) ?? '',
+          ),
+        );
+        const hasLegacyEditorialCopy =
+          Boolean(
+            playlist.editorialNotesName ||
+            playlist.editorialNotesShort ||
+            playlist.editorialNotes,
+          ) || playlist.plainEditorialNotes !== null;
+        if (
+          playlist.shortDescription === description &&
+          playlist.standardDescription === description &&
+          !hasLegacyEditorialCopy
+        ) {
+          return [];
+        }
+        const attributes = isRecord(playlist.attributes)
+          ? {
+              ...playlist.attributes,
+              description: { short: description, standard: description },
+            }
+          : undefined;
+        return [
+          this.prisma.recommendationResourceSnapshot.update({
+            where: { id: playlist.id },
+            data: {
+              shortDescription: description,
+              standardDescription: description,
+              editorialNotesName: '',
+              editorialNotesShort: '',
+              editorialNotes: '',
+              plainEditorialNotes: Prisma.DbNull,
+              ...(attributes
+                ? { attributes: attributes }
+                : {}),
+            },
+          }),
+        ];
+      }),
+    );
+  }
+
+  /**
+   * A system playlist refresh is global, but its track order is personalised.
+   * Repair only caches that are missing, short, or older than the shared
+   * playlist revision so every existing listener sees a complete list.
+   */
+  private async repairSystemPlaylistUserCaches(): Promise<void> {
+    const [refreshStates, cachedTracks] = await Promise.all([
+      this.prisma.systemPlaylistRefreshState.findMany(),
+      this.prisma.userSystemPlaylistTrack.groupBy({
+        by: ['userId', 'playlistKey'],
+        _count: { songId: true },
+        _max: { updatedAt: true },
+      }),
+    ]);
+    const refreshStateByKey = new Map(
+      refreshStates.map((state) => [state.playlistKey, state.refreshedAt]),
+    );
+    const cacheByUser = new Map<
+      string,
+      Map<string, { trackCount: number; updatedAt: Date | null }>
+    >();
+    for (const cache of cachedTracks) {
+      const playlists =
+        cacheByUser.get(cache.userId) ??
+        new Map<string, { trackCount: number; updatedAt: Date | null }>();
+      playlists.set(cache.playlistKey, {
+        trackCount: cache._count.songId,
+        updatedAt: cache._max.updatedAt,
+      });
+      cacheByUser.set(cache.userId, playlists);
+    }
+    const userIdsToRepair = [...cacheByUser].flatMap(([userId, playlists]) =>
+      FIXED_SYSTEM_PLAYLISTS.some((definition) => {
+        const cache = playlists.get(definition.key);
+        const refreshedAt = refreshStateByKey.get(definition.key);
+        return (
+          !cache ||
+          cache.trackCount !== SYSTEM_PLAYLIST_TRACK_LIMIT ||
+          !cache.updatedAt ||
+          !refreshedAt ||
+          cache.updatedAt < refreshedAt
+        );
+      })
+        ? [userId]
+        : [],
+    );
+    for (const userId of userIdsToRepair) {
+      const profile = await this.listeningService.getUserTasteProfile(userId);
+      const repaired = await this.buildFixedSystemPlaylists(userId, profile);
+      if (!repaired) {
+        this.logger.warn(
+          `[system-playlists] could not repair incomplete cache for user ${userId}`,
+        );
+      }
+    }
+  }
+
+  private async rankFixedSystemPlaylistTracks(
+    userId: string,
+    candidates: SnapshotRow[],
+    profile: TasteProfile | undefined,
+    definition: FixedSystemPlaylist,
+  ): Promise<ScoredItem[]> {
+    const personalized = profile
+      ? await this.rankPersonalizedTracks(
+          userId,
+          candidates,
+          profile,
+          candidates.length,
+          SYSTEM_PLAYLIST_MAX_PER_ARTIST,
+        )
+      : [];
+    const personalScores = new Map(
+      personalized.map((item) => [item.id, item.score]),
+    );
+    const artistCounts = new Map<string, number>();
+    const releaseCounts = new Map<string, number>();
+    return candidates
+      .filter(
+        (candidate) =>
+          !profile ||
+          !this.isHidden(profile, candidate.resourceType, candidate.resourceId),
+      )
+      .map((candidate) => ({
+        id: candidate.resourceId,
+        type: candidate.resourceType,
+        artistName: candidate.artistName,
+        albumKey: this.systemPlaylistAlbumKey(candidate),
+        score:
+          this.fixedSystemPlaylistIntentScore(candidate, definition) * 0.58 +
+          (profile
+            ? (personalScores.get(candidate.resourceId) ?? 0) * 0.42
+            : this.globalSystemPlaylistScore(candidate, definition) * 0.42),
+      }))
+      .filter((item) => item.score > 0)
+      .sort(
+        (left, right) =>
+          right.score - left.score || left.id.localeCompare(right.id),
+      )
+      .filter((item) => {
+        const artistCount = artistCounts.get(item.artistName) ?? 0;
+        if (artistCount >= SYSTEM_PLAYLIST_MAX_PER_ARTIST) return false;
+        if (definition.key === 'new-music') {
+          const releaseCount = releaseCounts.get(item.albumKey) ?? 0;
+          if (releaseCount >= NEW_MUSIC_MAX_TRACKS_PER_RELEASE) return false;
+          releaseCounts.set(item.albumKey, releaseCount + 1);
+        }
+        artistCounts.set(item.artistName, artistCount + 1);
+        return true;
+      });
+  }
+
+  private systemPlaylistAlbumKey(track: SnapshotRow): string {
+    if (isRecord(track.attributes)) {
+      const albumId = track.attributes.albumId;
+      if (typeof albumId === 'string' && albumId.trim()) {
+        return `album:${albumId.trim().toLowerCase()}`;
+      }
+    }
+    if (isRecord(track.relationships) && isRecord(track.relationships.albums)) {
+      const albums = track.relationships.albums.data;
+      if (Array.isArray(albums) && isRecord(albums[0])) {
+        const albumId = albums[0].id;
+        if (typeof albumId === 'string' && albumId.trim()) {
+          return `album:${albumId.trim().toLowerCase()}`;
+        }
+      }
+    }
+    return `song:${track.resourceId}`;
+  }
+
+  private fixedSystemPlaylistIntentScore(
+    candidate: SnapshotRow,
+    definition: FixedSystemPlaylist,
+  ): number {
+    if (definition.key === 'new-music') return 1;
+    const audio = audioFeaturesFromAttributes(candidate.attributes);
+    const tags = [
+      ...audio.tags,
+      ...(candidate.audioTraits ?? []),
+      ...(candidate.moodTags ?? []),
+    ].map((tag) => tag.trim().toLowerCase());
+    const hasTag = (terms: string[]) =>
+      tags.some((tag) => terms.some((term) => tag.includes(term)));
+    if (definition.key === 'get-up') {
+      return Math.max(
+        hasTag(['energetic', 'upbeat', 'party', 'workout', 'dance']) ? 1 : 0,
+        audio.energy ?? 0,
+      );
+    }
+    return chillIntentScore({
+      tags,
+      energy: hasAudioAnalysis(candidate.attributes) ? audio.energy : undefined,
+    });
+  }
+
+  private globalSystemPlaylistScore(
+    candidate: SnapshotRow,
+    definition: FixedSystemPlaylist,
+  ): number {
+    if (definition.key !== 'new-music') return 1;
+    const releasedAt = Date.parse(candidate.releaseDate);
+    return Number.isFinite(releasedAt)
+      ? Math.max(0, 1 - (Date.now() - releasedAt) / (180 * 86_400_000))
+      : 0;
+  }
+
   private selectDiverseSystemVariant<T extends { resourceId: string }>(
     ranked: ScoredItem[],
     candidatesById: Map<string, T>,
@@ -1661,49 +2145,10 @@ export class GenerationService {
       : [];
   }
 
-  private async hasZeroArtworkDimensions(userId: string): Promise<boolean> {
-    const mixId = this.dailyMixId(userId);
-    const snapshot =
-      await this.prisma.recommendationResourceSnapshot.findUnique({
-        where: {
-          resourceType_resourceId: {
-            resourceType: 'playlists',
-            resourceId: mixId,
-          },
-        },
-        select: { artworkWidth: true, artworkHeight: true },
-      });
-    return !!snapshot && (!snapshot.artworkWidth || !snapshot.artworkHeight);
-  }
-
-  private async hasMissingSystemArtworkVariants(
-    userId: string,
-  ): Promise<boolean> {
-    const digest = createHash('sha256').update(userId).digest('hex');
-    const playlistPrefix = `daily-mix-${digest.slice(0, 32)}`;
-    const snapshots = await this.prisma.recommendationResourceSnapshot.findMany(
-      {
-        where: {
-          OR: [
-            {
-              resourceType: 'playlists',
-              resourceId: { startsWith: playlistPrefix },
-            },
-          ],
-        },
-        select: { attributes: true },
-      },
-    );
-
-    return snapshots.some(
-      (snapshot) => !artworkVariantsFromAttributes(snapshot.attributes),
-    );
-  }
-
   private async buildArtistStationsForYouSection(
     userId: string,
     profile: TasteProfile,
-  ): Promise<PersonalRecommendationResource | null> {
+  ): Promise<ArtistStationBuildResult | null> {
     if (profile.listenedSongIds.size < MIN_LISTENED_SONGS) return null;
 
     const listenedArtistNames = profile.artists
@@ -1737,9 +2182,7 @@ export class GenerationService {
     const familiarArtists = listenedArtistNames
       .map((name) => artistsByName.get(name))
       .filter(
-        (
-          artist,
-        ): artist is { resourceId: string; genreNames: string[] } =>
+        (artist): artist is { resourceId: string; genreNames: string[] } =>
           Boolean(artist),
       )
       .filter(
@@ -1775,20 +2218,40 @@ export class GenerationService {
                 (left, right) =>
                   this.sharedGenreCount(right.genreNames, familiarGenres) -
                     this.sharedGenreCount(left.genreNames, familiarGenres) ||
-                  this.artistDiscoveryRank(userId, left.resourceId).localeCompare(
+                  this.artistDiscoveryRank(
+                    userId,
+                    left.resourceId,
+                  ).localeCompare(
                     this.artistDiscoveryRank(userId, right.resourceId),
                   ),
               )
               .slice(0, DISCOVERY_ARTIST_STATION_LIMIT),
           )
       : [];
-    const artistIds = [
-      ...familiarArtists.map((artist) => artist.resourceId),
-      ...discoveryArtists.map((artist) => artist.resourceId),
-    ];
-    const items = await this.ensureArtistStationItems(artistIds);
+    const [familiarItems, discoveryItems] = await Promise.all([
+      this.ensureArtistStationItems(
+        familiarArtists.map((artist) => artist.resourceId),
+      ),
+      this.ensureArtistStationItems(
+        discoveryArtists.map((artist) => artist.resourceId),
+      ),
+    ]);
+    const items = [...familiarItems, ...discoveryItems];
     if (!items.length) return null;
 
+    return {
+      items,
+      topPickStations: [
+        ...familiarItems.slice(0, 1),
+        ...discoveryItems.slice(0, 1),
+      ].map((station) => ({ id: station.id, type: 'stations' })),
+    };
+  }
+
+  private buildStationsForYouSection(
+    items: Array<{ id: string; type: 'stations' }>,
+  ): PersonalRecommendationResource | null {
+    if (!items.length) return null;
     return this.buildSection(
       'user-stations-for-you',
       'Stations for You',
@@ -1798,7 +2261,177 @@ export class GenerationService {
     );
   }
 
-  private async ensureArtistStationItems(artistIds: string[]) {
+  /**
+   * Builds the two reusable Station products that lead the listener's station
+   * shelf. Their artwork is a shared editorial template, while IDs, tracks,
+   * and relationships are private to the current listener.
+   */
+  private async buildPersonalizedStationItems(
+    userId: string,
+    profile: TasteProfile,
+  ): Promise<Array<{ id: string; type: 'stations' }>> {
+    const definitions = PRODUCTION_RECOMMENDATION_POLICY.personalizedStations;
+    const artworkByKey = await this.systemStationArtworkService.byStationKeys(
+      definitions.map((station) => station.key),
+    );
+    const candidates =
+      await this.prisma.recommendationResourceSnapshot.findMany({
+        where: { resourceType: 'songs' },
+        orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
+        take: 500,
+        select: {
+          resourceId: true,
+          resourceType: true,
+          artistName: true,
+          genreNames: true,
+          audioTraits: true,
+          moodTags: true,
+          attributes: true,
+          releaseDate: true,
+          releaseType: true,
+          artworkUrl: true,
+          artworkBgColor: true,
+          artworkWidth: true,
+          artworkHeight: true,
+        },
+      });
+    if (candidates.length < PERSONAL_STATION_MIN_TRACKS) return [];
+
+    const ranked = await this.rankPersonalizedTracks(
+      userId,
+      candidates,
+      profile,
+      candidates.length,
+      SYSTEM_PLAYLIST_MAX_PER_ARTIST,
+    );
+    const candidatesById = new Map(
+      candidates.map((candidate) => [candidate.resourceId, candidate]),
+    );
+    const knownArtists = new Set(
+      profile.artists
+        .filter((artist) => artist.weight > 0)
+        .map((artist) => artist.name),
+    );
+    const familiar = ranked.flatMap((item) => {
+      const candidate = candidatesById.get(item.id);
+      return candidate ? [candidate] : [];
+    });
+    const discovery = familiar.filter(
+      (candidate) =>
+        !profile.listenedSongIds.has(candidate.resourceId) &&
+        !knownArtists.has(candidate.artistName),
+    );
+    const selections = new Map<string, typeof candidates>([
+      ['your-station', familiar],
+      ['discovery-station', discovery],
+    ]);
+    const items: Array<{ id: string; type: 'stations' }> = [];
+
+    for (const definition of definitions) {
+      const selected = this.sequencePersonalizedTracks(
+        (selections.get(definition.key) ?? []).slice(0, STATION_TRACK_LIMIT),
+      );
+      if (selected.length < PERSONAL_STATION_MIN_TRACKS) {
+        this.logger.warn(
+          `[personal-stations] ${definition.key} skipped: only ${selected.length} qualified tracks (need ${PERSONAL_STATION_MIN_TRACKS})`,
+        );
+        continue;
+      }
+
+      const stationId = this.personalStationId(userId, definition.key);
+      const configuredArtwork = artworkByKey.get(definition.key);
+      const artworkSource =
+        selected.find((song) => song.artworkUrl) ?? selected[0];
+      const artworkUrl =
+        configuredArtwork?.cover.url || artworkSource.artworkUrl;
+      const artworkWidth =
+        configuredArtwork?.cover.width || artworkSource.artworkWidth || 1000;
+      const artworkHeight =
+        configuredArtwork?.cover.height || artworkSource.artworkHeight || 1000;
+      const artworkBgColor =
+        configuredArtwork?.cover.bgColor || artworkSource.artworkBgColor;
+      const artworkVariants = configuredArtwork
+        ? {
+            ...configuredArtwork.cover.variants,
+            ...(configuredArtwork.heroVideo
+              ? {
+                  systemStationMedia: {
+                    heroVideo: configuredArtwork.heroVideo,
+                  },
+                }
+              : {}),
+          }
+        : artworkVariantsFromAttributes(artworkSource.attributes);
+      const stationData = {
+        name: definition.title,
+        title: definition.title,
+        curatorName: 'Musical',
+        href: '',
+        externalUrl: '',
+        artworkUrl,
+        artworkBgColor,
+        artworkWidth,
+        artworkHeight,
+        trackCount: selected.length,
+        shortDescription: '',
+        standardDescription: '',
+        stationKind:
+          definition.key === 'your-station'
+            ? 'personalized-user'
+            : 'personalized-discovery',
+        mediaKind: 'audio',
+        attributes: {
+          name: definition.title,
+          kind:
+            definition.key === 'your-station'
+              ? 'personalized-user'
+              : 'personalized-discovery',
+          mediaKind: 'audio',
+          trackCount: selected.length,
+          artwork: {
+            url: artworkUrl,
+            width: artworkWidth,
+            height: artworkHeight,
+            bgColor: artworkBgColor,
+            alt: definition.title,
+            ...(artworkVariants ? { variants: artworkVariants } : {}),
+          },
+          url: '',
+        },
+        relationships: {
+          tracks: {
+            href: `/me/system-stations/${stationId}/tracks`,
+            data: selected.map((song) => ({
+              id: song.resourceId,
+              type: 'songs',
+              href: `/catalog/vn/songs/${song.resourceId}`,
+            })),
+          },
+        },
+      };
+      await this.prisma.recommendationResourceSnapshot.upsert({
+        where: {
+          resourceType_resourceId: {
+            resourceType: 'stations',
+            resourceId: stationId,
+          },
+        },
+        create: {
+          resourceType: 'stations',
+          resourceId: stationId,
+          ...stationData,
+        } as Prisma.RecommendationResourceSnapshotUncheckedCreateInput,
+        update:
+          stationData as Prisma.RecommendationResourceSnapshotUncheckedUpdateInput,
+      });
+      items.push({ id: stationId, type: 'stations' });
+    }
+    return items;
+  }
+
+  private async ensureArtistStationItems(
+    artistIds: string[],
+  ): Promise<Array<{ id: string; type: 'stations' }>> {
     const existingStations =
       await this.prisma.recommendationResourceSnapshot.findMany({
         where: {
@@ -1810,17 +2443,17 @@ export class GenerationService {
           },
           stationKind: 'artist-context',
         },
-        select: { resourceId: true, attributes: true },
+        select: { resourceId: true, attributes: true, raw: true },
       });
     const existingStationsById = new Map(
       existingStations.map((station) => [station.resourceId, station]),
     );
 
-    const items: Array<{ id: string; type: string }> = [];
+    const items: Array<{ id: string; type: 'stations' }> = [];
     for (const artistId of artistIds) {
       const stationId = this.artistStationService.canonicalStationId(artistId);
       const existing = existingStationsById.get(stationId);
-      if (existing && this.stationArtworkStateIsKnown(existing.attributes)) {
+      if (existing && this.artistStationIsCurrent(existing)) {
         items.push({ id: stationId, type: 'stations' });
         continue;
       }
@@ -1838,7 +2471,29 @@ export class GenerationService {
   }
 
   private stationArtworkStateIsKnown(attributes: Prisma.JsonValue | null) {
-    return isRecord(attributes) && typeof attributes.stationArtworkReady === 'boolean';
+    return (
+      isRecord(attributes) &&
+      typeof attributes.stationArtworkReady === 'boolean'
+    );
+  }
+
+  private artistStationIsCurrent(station: {
+    attributes: Prisma.JsonValue | null;
+    raw: Prisma.JsonValue | null;
+  }) {
+    const artistStation = isRecord(station.raw)
+      ? station.raw.artistStation
+      : undefined;
+    return (
+      this.stationArtworkStateIsKnown(station.attributes) &&
+      isRecord(station.attributes) &&
+      typeof station.attributes.primaryArtistName === 'string' &&
+      station.attributes.primaryArtistName.length > 0 &&
+      typeof station.attributes.trackCount === 'number' &&
+      station.attributes.trackCount > 0 &&
+      isRecord(artistStation) &&
+      artistStation.trackSelectionVersion === STATION_TRACK_SELECTION_VERSION
+    );
   }
 
   private sharedGenreCount(genres: string[], expected: Set<string>) {
@@ -1849,9 +2504,7 @@ export class GenerationService {
   }
 
   private artistDiscoveryRank(userId: string, artistId: string) {
-    return createHash('sha256')
-      .update(`${userId}:${artistId}`)
-      .digest('hex');
+    return createHash('sha256').update(`${userId}:${artistId}`).digest('hex');
   }
 
   private async buildSystemStationsSection(
@@ -1860,10 +2513,31 @@ export class GenerationService {
   ): Promise<PersonalRecommendationResource | null> {
     const isGlobalMood = !userId;
     const stationSeeds = PRODUCTION_RECOMMENDATION_POLICY.moodStations;
+    const now = new Date();
+    const stationIds = stationSeeds.map((_, index) =>
+      this.stationId(userId, index),
+    );
     const stationArtworkByKey: Map<string, SystemStationArtwork> =
       await this.systemStationArtworkService.byStationKeys(
         stationSeeds.map((mood) => mood.key),
       );
+    const existingStations =
+      await this.prisma.recommendationResourceSnapshot.findMany({
+        where: {
+          resourceType: 'stations',
+          resourceId: { in: stationIds },
+        },
+        select: { resourceId: true, updatedAt: true },
+      });
+    const existingStationById = new Map(
+      existingStations.map((station) => [station.resourceId, station]),
+    );
+    const refreshStates = isGlobalMood
+      ? await this.prisma.systemStationRefreshState.findMany()
+      : [];
+    const refreshStateByKey = new Map(
+      refreshStates.map((state) => [state.stationKey, state]),
+    );
 
     const songSelection = {
       resourceId: true,
@@ -1872,18 +2546,44 @@ export class GenerationService {
       genreNames: true,
       audioTraits: true,
       moodTags: true,
+      attributes: true,
       releaseDate: true,
       releaseType: true,
       artworkUrl: true,
       artworkBgColor: true,
       artworkWidth: true,
       artworkHeight: true,
-      attributes: true,
     } as const;
     const stationItems: Array<{ id: string; type: string }> = [];
+    const stationRefreshAtById = new Map<string, Date>();
     const stationTracklists: string[][] = [];
 
     for (const [index, mood] of stationSeeds.entries()) {
+      const stationId = stationIds[index];
+      const scheduledRefresh = systemStationScheduledRefresh(index, now);
+      const existingStation = existingStationById.get(stationId);
+      const refreshState = refreshStateByKey.get(mood.key);
+      const configuredArtwork = stationArtworkByKey.get(mood.key);
+      const artworkChanged =
+        !!configuredArtwork?.updatedAt &&
+        !!existingStation &&
+        configuredArtwork.updatedAt > existingStation.updatedAt;
+      if (
+        existingStation &&
+        !artworkChanged &&
+        existingStation.updatedAt >= scheduledRefresh &&
+        (!isGlobalMood ||
+          (refreshState && refreshState.refreshedAt >= scheduledRefresh))
+      ) {
+        stationItems.push({ id: stationId, type: 'stations' });
+        stationRefreshAtById.set(
+          stationId,
+          isGlobalMood
+            ? (refreshState?.refreshedAt ?? scheduledRefresh)
+            : scheduledRefresh,
+        );
+        continue;
+      }
       const candidateWhere = {
         resourceType: 'songs',
         OR: [
@@ -1894,13 +2594,32 @@ export class GenerationService {
             : []),
         ],
       };
-      const genreCandidates =
-        await this.prisma.recommendationResourceSnapshot.findMany({
+      const [curatedCandidates, recentCandidates] = await Promise.all([
+        this.prisma.recommendationResourceSnapshot.findMany({
           where: candidateWhere,
           orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
           take: 250,
           select: songSelection,
-        });
+        }),
+        // AI tags are kept in the catalog attribute payload. Pull a bounded
+        // recent window as well, otherwise a song that has only AI tags (and
+        // no hand-authored audioTraits/moodTags) can never reach the semantic
+        // mood matcher below.
+        this.prisma.recommendationResourceSnapshot.findMany({
+          where: { resourceType: 'songs' },
+          orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
+          take: 250,
+          select: songSelection,
+        }),
+      ]);
+      const genreCandidates = [
+        ...new Map(
+          [...curatedCandidates, ...recentCandidates].map((candidate) => [
+            candidate.resourceId,
+            candidate,
+          ]),
+        ).values(),
+      ];
       const ranked = await this.rankMoodStationTracks(
         userId,
         genreCandidates,
@@ -1934,10 +2653,8 @@ export class GenerationService {
         continue;
       }
 
-      const stationId = this.stationId(userId, index);
       const artworkSource =
         selected.find((song) => song.artworkUrl) ?? selected[0];
-      const configuredArtwork = stationArtworkByKey.get(mood.key);
       const { title, subtitle: description } = mood;
       const relationships = {
         tracks: {
@@ -1950,16 +2667,25 @@ export class GenerationService {
         },
       };
       const stationArtworkUrl =
-        configuredArtwork?.url || artworkSource.artworkUrl;
+        configuredArtwork?.cover.url || artworkSource.artworkUrl;
       const stationArtworkWidth =
-        configuredArtwork?.width || artworkSource.artworkWidth || 1000;
+        configuredArtwork?.cover.width || artworkSource.artworkWidth || 1000;
       const stationArtworkHeight =
-        configuredArtwork?.height || artworkSource.artworkHeight || 1000;
+        configuredArtwork?.cover.height || artworkSource.artworkHeight || 1000;
       const stationArtworkBgColor =
-        configuredArtwork?.bgColor || artworkSource.artworkBgColor;
-      const stationArtworkVariants =
-        configuredArtwork?.variants ??
-        artworkVariantsFromAttributes(artworkSource.attributes);
+        configuredArtwork?.cover.bgColor || artworkSource.artworkBgColor;
+      const stationArtworkVariants = configuredArtwork
+        ? {
+            ...configuredArtwork.cover.variants,
+            ...(configuredArtwork.heroVideo
+              ? {
+                  systemStationMedia: {
+                    heroVideo: configuredArtwork.heroVideo,
+                  },
+                }
+              : {}),
+          }
+        : artworkVariantsFromAttributes(artworkSource.attributes);
       const stationData = {
         name: title,
         title,
@@ -2011,11 +2737,27 @@ export class GenerationService {
         update:
           stationData as Prisma.RecommendationResourceSnapshotUncheckedUpdateInput,
       });
+      if (isGlobalMood) {
+        await this.prisma.systemStationRefreshState.upsert({
+          where: { stationKey: mood.key },
+          create: { stationKey: mood.key, refreshedAt: scheduledRefresh },
+          update: { refreshedAt: scheduledRefresh },
+        });
+      }
       stationItems.push({ id: stationId, type: 'stations' });
+      stationRefreshAtById.set(stationId, scheduledRefresh);
       stationTracklists.push(selected.map((song) => song.resourceId));
     }
 
     if (stationItems.length === 0) return null;
+
+    // Stations refresh one at a time on an hourly cycle. Surface the station
+    // with the newest tracklist first instead of pinning the seed order.
+    stationItems.sort(
+      (left, right) =>
+        (stationRefreshAtById.get(right.id)?.getTime() ?? 0) -
+        (stationRefreshAtById.get(left.id)?.getTime() ?? 0),
+    );
 
     return this.buildSection(
       isGlobalMood ? 'global-find-your-mood' : 'user-find-your-mood',
@@ -2041,9 +2783,15 @@ export class GenerationService {
     return {
       genres: [],
       artists: [],
+      audioTags: [],
+      preferredBpm: null,
+      bpmTolerance: null,
+      preferredEnergy: null,
+      energyTolerance: null,
       avgCompletionRate: 0,
       totalListenTimeSec: 0,
       listenedSongIds: new Set(),
+      audioSeedSongIds: new Set(),
       listenedAlbumIds: new Set(),
       listenedAlbumNames: new Set(),
       hiddenResourceIds: new Map(),
@@ -2053,6 +2801,11 @@ export class GenerationService {
   private stationId(userId: string, index: number): string {
     const digest = createHash('sha256').update(userId).digest('hex');
     return `mood-station-${digest.slice(0, 32)}-${index}`;
+  }
+
+  private personalStationId(userId: string, key: string): string {
+    const digest = createHash('sha256').update(userId).digest('hex');
+    return `${key}-${digest.slice(0, 32)}`;
   }
 
   private async buildRecentlyPlayedSection(
@@ -2065,7 +2818,7 @@ export class GenerationService {
 
     const albumLastPlayed = new Map<
       string,
-      { albumId: string; albumName: string; lastPlayedAt: Date }
+      { albumId: string; lastPlayedAt: Date }
     >();
     const playlistLastPlayed = new Map<
       string,
@@ -2101,53 +2854,29 @@ export class GenerationService {
         continue;
       }
 
-      if (entry.albumId || entry.albumName) {
-        const key = entry.albumId
-          ? `id:${entry.albumId}`
-          : `name:${entry.albumName}`;
-        const existing = albumLastPlayed.get(key);
+      if (entry.albumId) {
+        const existing = albumLastPlayed.get(entry.albumId);
         if (!existing || entry.lastPlayedAt > existing.lastPlayedAt) {
-          albumLastPlayed.set(key, {
+          albumLastPlayed.set(entry.albumId, {
             albumId: entry.albumId,
-            albumName: entry.albumName,
             lastPlayedAt: entry.lastPlayedAt,
           });
         }
       }
     }
 
-    const albumIds = [
-      ...new Set(
-        [...albumLastPlayed.values()]
-          .map((entry) => entry.albumId)
-          .filter(Boolean),
-      ),
-    ];
-    const legacyAlbumNames = [
-      ...new Set(
-        [...albumLastPlayed.values()]
-          .filter((entry) => !entry.albumId)
-          .map((entry) => entry.albumName)
-          .filter(Boolean),
-      ),
-    ];
+    const albumIds = [...albumLastPlayed.keys()];
     const playlistIds = [...playlistLastPlayed.keys()];
     const stationIds = [...stationLastPlayed.keys()];
-    const albumSnapshots =
-      albumIds.length || legacyAlbumNames.length
-        ? await this.prisma.recommendationResourceSnapshot.findMany({
-            where: {
-              resourceType: 'albums',
-              OR: [
-                ...(albumIds.length ? [{ resourceId: { in: albumIds } }] : []),
-                ...(legacyAlbumNames.length
-                  ? [{ name: { in: legacyAlbumNames } }]
-                  : []),
-              ],
-            },
-            select: { resourceId: true, name: true },
-          })
-        : [];
+    const albumSnapshots = albumIds.length
+      ? await this.prisma.recommendationResourceSnapshot.findMany({
+          where: {
+            resourceType: 'albums',
+            resourceId: { in: albumIds },
+          },
+          select: { resourceId: true },
+        })
+      : [];
     const playlistSnapshots = playlistIds.length
       ? await this.prisma.recommendationResourceSnapshot.findMany({
           where: {
@@ -2170,11 +2899,8 @@ export class GenerationService {
           select: { resourceId: true },
         })
       : [];
-    const albumIdToSnapshot = new Map(
-      albumSnapshots.map((snapshot) => [snapshot.resourceId, snapshot]),
-    );
-    const albumNameToId = new Map(
-      albumSnapshots.map((s) => [s.name, s.resourceId]),
+    const albumSnapshotIds = new Set(
+      albumSnapshots.map((snapshot) => snapshot.resourceId),
     );
     const playlistSnapshotIds = new Set(
       playlistSnapshots.map((snapshot) => snapshot.resourceId),
@@ -2187,12 +2913,9 @@ export class GenerationService {
     const items: RecentItem[] = [];
 
     for (const entry of albumLastPlayed.values()) {
-      const albumId = entry.albumId
-        ? albumIdToSnapshot.get(entry.albumId)?.resourceId
-        : albumNameToId.get(entry.albumName);
-      if (albumId) {
+      if (albumSnapshotIds.has(entry.albumId)) {
         items.push({
-          id: albumId,
+          id: entry.albumId,
           type: 'albums',
           time: entry.lastPlayedAt.getTime(),
         });
@@ -2221,9 +2944,8 @@ export class GenerationService {
 
     items.sort((a, b) => b.time - a.time);
 
-    // Album events can arrive with either a catalog ID or legacy name.  Both
-    // representations may resolve to the same catalog resource, so dedupe only
-    // after resolving them and sorting to retain the most recently played item.
+    // Multiple events can resolve to the same catalog resource, so dedupe
+    // after sorting to retain the most recently played item.
     const itemKeys = new Set<string>();
     const dedupedItems = items
       .filter((item) => {
@@ -2247,6 +2969,182 @@ export class GenerationService {
       resourceTypes,
       dedupedItems.map((i) => ({ id: i.id, type: i.type })),
     );
+  }
+
+  /**
+   * A Listen Again card represents the album with the highest cumulative play
+   * count across its tracks. Catalog resolution keeps an old listening record
+   * from surfacing an album that has since been unpublished.
+   */
+  private async mostListenedAlbumTopPick(
+    userId: string,
+    profile: TasteProfile,
+  ): Promise<{ id: string; type: 'albums'; lastPlayedAt: Date } | undefined> {
+    const albumGroups = await this.prisma.userListeningStats.groupBy({
+      by: ['albumId'],
+      where: {
+        userId,
+        albumId: { not: '' },
+        playCount: { gt: 0 },
+      },
+      _sum: { playCount: true },
+      _max: { lastPlayedAt: true },
+      orderBy: [{ _sum: { playCount: 'desc' } }, { albumId: 'asc' }],
+      take: LISTEN_AGAIN_ALBUM_CANDIDATE_LIMIT,
+    });
+    const candidateIds = albumGroups
+      .map((group) => group.albumId)
+      .filter((albumId) => !this.isHidden(profile, 'albums', albumId));
+    if (candidateIds.length === 0) return undefined;
+
+    const publishedAlbumIds = new Set(
+      (
+        await this.catalogService.resolve(
+          candidateIds.map((id) => ({ id, type: 'albums' })),
+        )
+      )
+        .filter((resource) => resource.type === 'albums')
+        .map((resource) => resource.id),
+    );
+    const group = albumGroups.find((candidate) =>
+      publishedAlbumIds.has(candidate.albumId),
+    );
+    if (!group?.albumId || !group._max.lastPlayedAt) return undefined;
+    return {
+      id: group.albumId,
+      type: 'albums',
+      lastPlayedAt: group._max.lastPlayedAt,
+    };
+  }
+
+  /**
+   * Top Picks is one ranked portfolio, not a fixed sequence of card types.
+   * The input candidates are already individually eligible for their source
+   * shelf; this method only decides their relative order on Home.
+   */
+  private async rankUserTopPickItems(input: {
+    systemPlaylist:
+      { id: string; type: 'playlists'; refreshedAt?: Date } | undefined;
+    moodStation:
+      { id: string; type: 'stations'; refreshedAt?: Date } | undefined;
+    personalizedStations: Array<{ id: string; type: 'stations' }>;
+    artistStations: Array<{ id: string; type: 'stations' }>;
+    listenAgainAlbum:
+      { id: string; type: 'albums'; lastPlayedAt: Date } | undefined;
+    newReleaseAlbums: Array<{ id: string; type: 'albums' }>;
+  }): Promise<
+    Array<{ id: string; type: 'albums' | 'playlists' | 'stations' }>
+  > {
+    const now = Date.now();
+    const snapshotIds = [...input.newReleaseAlbums.map((item) => item.id)];
+    type TopPickSnapshot = {
+      resourceId: string;
+      releaseDate: string;
+    };
+    const snapshotPromise: Promise<TopPickSnapshot[]> = snapshotIds.length
+      ? this.prisma.recommendationResourceSnapshot.findMany({
+          where: {
+            resourceType: 'albums',
+            resourceId: { in: snapshotIds },
+          },
+          select: { resourceId: true, releaseDate: true },
+        })
+      : Promise.resolve([]);
+    const [snapshots, playlistStates] = await Promise.all([
+      snapshotPromise,
+      this.prisma.systemPlaylistRefreshState.findMany({
+        orderBy: { refreshedAt: 'desc' },
+        take: 1,
+        select: { refreshedAt: true },
+      }),
+    ]);
+    const snapshotById = new Map(
+      snapshots.map((snapshot) => [snapshot.resourceId, snapshot]),
+    );
+    const freshness = (at: Date | undefined) =>
+      at
+        ? Math.max(
+            0,
+            1 - Math.max(0, now - at.getTime()) / TOP_PICK_FRESHNESS_WINDOW_MS,
+          )
+        : 0;
+    const revisit = (at: Date | undefined) =>
+      at
+        ? Math.min(
+            1,
+            Math.max(0, now - at.getTime()) / TOP_PICK_REVISIT_WINDOW_MS,
+          )
+        : 0;
+    const releaseDate = (value: string | undefined) => {
+      const date = value ? new Date(value) : undefined;
+      return date && !Number.isNaN(date.getTime()) ? date : undefined;
+    };
+    const candidates: RankedTopPickItem[] = [];
+    const add = (candidate: RankedTopPickItem) => candidates.push(candidate);
+
+    if (input.systemPlaylist) {
+      add({
+        ...input.systemPlaylist,
+        relevance: 0.75,
+        freshnessAt:
+          input.systemPlaylist.refreshedAt ?? playlistStates[0]?.refreshedAt,
+      });
+    }
+    if (input.moodStation) {
+      add({
+        ...input.moodStation,
+        relevance: 0.62,
+        freshnessAt: input.moodStation.refreshedAt,
+      });
+    }
+    input.personalizedStations.forEach((station, index) => {
+      add({
+        ...station,
+        relevance: index === 0 ? 0.9 : 0.58,
+      });
+    });
+    input.artistStations.forEach((station, index) => {
+      add({
+        ...station,
+        relevance: index === 0 ? 0.82 : 0.52,
+      });
+    });
+    if (input.listenAgainAlbum) {
+      add({
+        id: input.listenAgainAlbum.id,
+        type: 'albums',
+        relevance: 0.95,
+        revisitAt: input.listenAgainAlbum.lastPlayedAt,
+      });
+    }
+    for (const album of input.newReleaseAlbums) {
+      add({
+        ...album,
+        relevance: 0.78,
+        freshnessAt: releaseDate(snapshotById.get(album.id)?.releaseDate),
+      });
+    }
+
+    const unique = new Map<string, RankedTopPickItem>();
+    for (const candidate of candidates) {
+      const key = `${candidate.type}:${candidate.id}`;
+      const score =
+        candidate.relevance * TOP_PICK_RELEVANCE_WEIGHT +
+        freshness(candidate.freshnessAt) * TOP_PICK_FRESHNESS_WEIGHT +
+        revisit(candidate.revisitAt) * TOP_PICK_REVISIT_WEIGHT;
+      const existing = unique.get(key);
+      if (!existing || score > (existing.score ?? 0)) {
+        unique.set(key, { ...candidate, score });
+      }
+    }
+    return [...unique.values()]
+      .sort(
+        (left, right) =>
+          (right.score ?? 0) - (left.score ?? 0) ||
+          left.type.localeCompare(right.type) ||
+          left.id.localeCompare(right.id),
+      )
+      .map(({ id, type }) => ({ id, type }));
   }
 
   private removeDuplicateSections(
@@ -2364,49 +3262,107 @@ export class GenerationService {
       },
     });
     const albumById = new Map(albums.map((album) => [album.resourceId, album]));
-    const preferredAlbumIdByKey = new Map<string, string>();
-
-    for (const album of albums) {
-      const key = this.albumPresentationKey(album);
-      const preferredAlbumId = preferredAlbumIdByKey.get(key);
-      const preferredAlbum = preferredAlbumId
-        ? albumById.get(preferredAlbumId)
-        : undefined;
-
-      if (
-        !preferredAlbum ||
-        album.trackCount > preferredAlbum.trackCount ||
-        (album.trackCount === preferredAlbum.trackCount &&
-          album.resourceId.localeCompare(preferredAlbum.resourceId) < 0)
-      ) {
-        preferredAlbumIdByKey.set(key, album.resourceId);
-      }
-    }
-
-    const displayedAlbumKeys = new Set<string>();
-    const displayedArtworkFamilyKeys = new Set<string>();
+    const previewAlbumKeys = new Set<string>();
+    const previewArtworkFamilyKeys = new Set<string>();
     return sections.flatMap((section) => {
       const contents = section.relationships?.contents;
       if (!contents) return [section];
 
+      const preferredAlbumIdByKey = new Map<string, string>();
+      for (const item of contents.data) {
+        if (item.type !== 'albums') continue;
+        const album = albumById.get(item.id);
+        if (!album) continue;
+        const key = this.albumPresentationKey(album);
+        const preferredId = preferredAlbumIdByKey.get(key);
+        const preferred = preferredId ? albumById.get(preferredId) : undefined;
+        if (
+          !preferred ||
+          album.trackCount > preferred.trackCount ||
+          (album.trackCount === preferred.trackCount &&
+            album.resourceId.localeCompare(preferred.resourceId) < 0)
+        ) {
+          preferredAlbumIdByKey.set(key, album.resourceId);
+        }
+      }
+
+      const isAlbumShelf =
+        section.attributes?.resourceTypes?.includes('albums');
+      const isPersonalTopPicks = section.id === 'user-top-picks';
+      const isChronologicalNewRelease = section.id === 'user-new-releases';
+      const isMixedGlobalTopPicks = section.id === 'global-top-picks';
+      // Album rails render a fixed Home preview before their detail view is
+      // opened. System playlist/station shelves retain their own card counts.
+      // `HOME_SHELF_ITEM_LIMIT` (40) is the detail-page payload cap, not the
+      // Home preview size; using it here incorrectly discarded valid Global
+      // shelves that had exactly their required twelve preview albums.
+      const previewLimit =
+        section.attributes?.display?.kind === 'MusicNotesHeroShelf'
+          ? HOME_HERO_SHELF_ITEM_LIMIT
+          : isAlbumShelf
+            ? PRODUCTION_RECOMMENDATION_POLICY.shelfLimit
+            : HOME_SHELF_ITEM_LIMIT;
+      const localAlbumKeys = new Set<string>();
+      const localArtworkFamilyKeys = new Set<string>();
+      let visibleContentCount = 0;
+
       const deduped = contents.data.filter((item) => {
-        if (item.type !== 'albums') return true;
+        if (item.type !== 'albums') {
+          visibleContentCount += 1;
+          return true;
+        }
         const album = albumById.get(item.id);
         const key = album ? this.albumPresentationKey(album) : `id:${item.id}`;
         if (album && preferredAlbumIdByKey.get(key) !== item.id) return false;
-        if (displayedAlbumKeys.has(key)) return false;
         const artworkFamilyKey = album
           ? this.albumArtworkFamilyKey(album)
           : `id:${item.id}`;
-        if (displayedArtworkFamilyKeys.has(artworkFamilyKey)) return false;
-        displayedAlbumKeys.add(key);
-        displayedArtworkFamilyKeys.add(artworkFamilyKey);
+        if (
+          localAlbumKeys.has(key) ||
+          localArtworkFamilyKeys.has(artworkFamilyKey)
+        ) {
+          return false;
+        }
+
+        const isPreviewCard = visibleContentCount < previewLimit;
+        if (
+          isPreviewCard &&
+          !isChronologicalNewRelease &&
+          (previewAlbumKeys.has(key) ||
+            previewArtworkFamilyKeys.has(artworkFamilyKey))
+        ) {
+          return false;
+        }
+
+        localAlbumKeys.add(key);
+        localArtworkFamilyKeys.add(artworkFamilyKey);
+        if (isPreviewCard) {
+          previewAlbumKeys.add(key);
+          previewArtworkFamilyKeys.add(artworkFamilyKey);
+        }
+        visibleContentCount += 1;
         return true;
       });
 
-      // A shelf whose only cards were already used above is not useful and
-      // would otherwise render as an empty section on Home.
-      if (deduped.length === 0) return [];
+      // Global Top Picks is a mixed hero shelf: playlist/station cards count
+      // toward its visible contract just like albums. Its generation contract
+      // guarantees at least six cards; ordinary album rails require a full
+      // preview, while New Releases remains chronological.
+      const minimumVisibleItems = isMixedGlobalTopPicks
+        ? Math.min(
+            PRODUCTION_RECOMMENDATION_POLICY.globalMinimumShelfSize,
+            previewLimit,
+          )
+        : previewLimit;
+      if (
+        (isAlbumShelf &&
+          !isPersonalTopPicks &&
+          !isChronologicalNewRelease &&
+          visibleContentCount < minimumVisibleItems) ||
+        deduped.length === 0
+      ) {
+        return [];
+      }
 
       return [
         {
@@ -2538,6 +3494,7 @@ export class GenerationService {
         sourceAlbumUrl: '',
         sourceAlbumArtworkUrl: '',
         sourceAlbumArtworkBgColor: '',
+        listenAgainAlbumId: '',
       },
       relationships: {
         contents: {
@@ -2583,6 +3540,209 @@ export class GenerationService {
     };
   }
 
+  private async latestSystemStationTopPick(
+    userId: string,
+    moodStations: PersonalRecommendationResource | null,
+  ): Promise<{ id: string; type: 'stations'; refreshedAt?: Date } | undefined> {
+    if (!moodStations) return undefined;
+
+    const states = await this.prisma.systemStationRefreshState.findMany({
+      orderBy: { refreshedAt: 'desc' },
+    });
+    const stationKeys = states.length
+      ? states.map((state) => state.stationKey)
+      : PRODUCTION_RECOMMENDATION_POLICY.moodStations
+          .map((station, index) => ({
+            key: station.key,
+            refreshedAt: systemStationScheduledRefresh(index),
+          }))
+          .sort(
+            (left, right) =>
+              right.refreshedAt.getTime() - left.refreshedAt.getTime(),
+          )
+          .map((station) => station.key);
+    const refreshedAtByKey = new Map(
+      states.map((state) => [state.stationKey, state.refreshedAt]),
+    );
+
+    const artworkByKey =
+      await this.systemStationArtworkService.byStationKeys(stationKeys);
+    for (const stationKey of stationKeys) {
+      const index = PRODUCTION_RECOMMENDATION_POLICY.moodStations.findIndex(
+        (station) => station.key === stationKey,
+      );
+      if (index < 0 || !artworkByKey.get(stationKey)?.heroVideo) {
+        continue;
+      }
+      const stationId = this.stationId(userId, index);
+      if (
+        !moodStations.relationships?.contents?.data.some(
+          (item) => item.type === 'stations' && item.id === stationId,
+        )
+      ) {
+        continue;
+      }
+      return {
+        id: stationId,
+        type: 'stations',
+        refreshedAt: refreshedAtByKey.get(stationKey),
+      };
+    }
+    return undefined;
+  }
+
+  private async rankGlobalTopPickItems(input: {
+    albums: Array<{ id: string; type: 'albums' }>;
+    albumScores: Record<string, number>;
+    playlist: { id: string; type: 'playlists'; refreshedAt?: Date } | undefined;
+    station: { id: string; type: 'stations'; refreshedAt?: Date } | undefined;
+  }): Promise<Array<{ id: string; type: GlobalTopPickItem['type'] }>> {
+    const auxiliaryItems = [input.playlist, input.station].filter(
+      (item): item is NonNullable<typeof item> => Boolean(item),
+    );
+    const since = new Date(
+      Date.now() -
+        PRODUCTION_RECOMMENDATION_POLICY.historyWindowDays * 86_400_000,
+    );
+    const interactions = auxiliaryItems.length
+      ? await this.prisma.recommendationInteraction.findMany({
+          where: {
+            occurredAt: { gte: since },
+            OR: auxiliaryItems.map((item) => ({
+              resourceType: item.type,
+              resourceId: item.id,
+            })),
+          },
+          select: {
+            resourceType: true,
+            resourceId: true,
+            eventType: true,
+            occurredAt: true,
+          },
+          orderBy: [{ occurredAt: 'desc' }, { id: 'asc' }],
+          take: PRODUCTION_RECOMMENDATION_POLICY.globalTopPickInteractionLimit,
+        })
+      : [];
+    const engagement = new Map<string, number>();
+    for (const interaction of interactions) {
+      const weight =
+        interaction.eventType === 'PLAY'
+          ? 1
+          : interaction.eventType === 'OPEN'
+            ? 0.35
+            : interaction.eventType === 'DISMISS'
+              ? -0.5
+              : 0.02;
+      const ageDays =
+        Math.max(0, Date.now() - interaction.occurredAt.getTime()) / 86_400_000;
+      const recentWeight = weight * Math.pow(0.5, ageDays / 90);
+      const key = `${interaction.resourceType}:${interaction.resourceId}`;
+      engagement.set(
+        key,
+        Math.max(0, (engagement.get(key) ?? 0) + recentWeight),
+      );
+    }
+    const maximumEngagement = Math.max(1, ...engagement.values());
+    const freshness = (refreshedAt: Date | undefined) =>
+      refreshedAt
+        ? Math.max(
+            0,
+            1 -
+              Math.max(0, Date.now() - refreshedAt.getTime()) /
+                (PRODUCTION_RECOMMENDATION_POLICY.globalTopPickFreshnessWindowDays *
+                  86_400_000),
+          )
+        : 0;
+    const ranked: GlobalTopPickItem[] = [
+      ...input.albums.map((album) => ({
+        ...album,
+        score: input.albumScores[album.id] ?? 0,
+      })),
+      ...auxiliaryItems.map((item) => {
+        const interactionScore =
+          (engagement.get(`${item.type}:${item.id}`) ?? 0) / maximumEngagement;
+        return {
+          ...item,
+          // Play/open interaction is the global proxy for both popularity
+          // and engagement; refresh time is the independent freshness signal.
+          score: scoreGlobalTopPick({
+            popularity: interactionScore,
+            freshness: freshness(item.refreshedAt),
+            engagement: interactionScore,
+          }),
+        };
+      }),
+    ];
+    return ranked
+      .sort(
+        (left, right) =>
+          (right.score ?? 0) - (left.score ?? 0) ||
+          (right.refreshedAt?.getTime() ?? 0) -
+            (left.refreshedAt?.getTime() ?? 0) ||
+          left.type.localeCompare(right.type) ||
+          left.id.localeCompare(right.id),
+      )
+      .map(({ id, type }) => ({ id, type }));
+  }
+
+  private composeGlobalTopPicks(
+    section: PersonalRecommendationResource | undefined,
+    rankedItems: Array<{ id: string; type: GlobalTopPickItem['type'] }>,
+  ): PersonalRecommendationResource | undefined {
+    if (!section) return section;
+    const attributes = section.attributes;
+    const relationships = section.relationships;
+    const contents = relationships?.contents;
+    if (!attributes || !relationships || !contents) return section;
+    const items = rankedItems.map((item) => ({
+      id: item.id,
+      type: item.type,
+      href: `/catalog/vn/${item.type}/${item.id}`,
+    }));
+    return {
+      ...section,
+      attributes: {
+        ...attributes,
+        resourceTypes: ['stations', 'playlists', 'albums'],
+      },
+      relationships: {
+        ...relationships,
+        contents: {
+          ...contents,
+          data: items,
+        },
+      },
+    };
+  }
+
+  private composeRankedTopPicks(
+    section: PersonalRecommendationResource | undefined,
+    items: Array<{ id: string; type: 'albums' | 'playlists' | 'stations' }>,
+    listenAgainAlbumId?: string,
+  ): PersonalRecommendationResource | undefined {
+    if (!section?.attributes || !section.relationships?.contents) {
+      return section;
+    }
+    return {
+      ...section,
+      attributes: {
+        ...section.attributes,
+        resourceTypes: [...new Set(items.map((item) => item.type))],
+        ...(listenAgainAlbumId ? { listenAgainAlbumId } : {}),
+      },
+      relationships: {
+        ...section.relationships,
+        contents: {
+          ...section.relationships.contents,
+          data: items.map((item) => ({
+            ...item,
+            href: `/catalog/vn/${item.type}/${item.id}`,
+          })),
+        },
+      },
+    };
+  }
+
   /**
    * Global is a composed editorial surface, not a flat ranked list. Keep the
    * first screen balanced between timely albums, a playlist destination and
@@ -2591,8 +3751,10 @@ export class GenerationService {
    */
   private composeGlobalHomeSections(
     albumSections: PersonalRecommendationResource[],
-    playlistSection: PersonalRecommendationResource | null,
-    moodSection: PersonalRecommendationResource | null,
+    catalogSections: {
+      playlists: PersonalRecommendationResource | null;
+      moodStations: PersonalRecommendationResource | null;
+    },
   ): PersonalRecommendationResource[] {
     const consumed = new Set<string>();
     const take = (id: string) => {
@@ -2613,13 +3775,13 @@ export class GenerationService {
 
     return [
       take('global-top-picks'),
-      take('global-trending-now'),
+      take('global-popular-now'),
       take('global-new-releases'),
       takeFirstGenre(),
-      playlistSection ?? undefined,
-      moodSection ?? undefined,
-      take('global-popular-now'),
-      take('global-discover'),
+      catalogSections.playlists ?? undefined,
+      catalogSections.moodStations ?? undefined,
+      take('global-chill-music'),
+      take('global-listener-favourites'),
       ...albumSections.filter((section) => !consumed.has(section.id)),
     ]
       .filter((section): section is PersonalRecommendationResource =>
@@ -2633,34 +3795,5 @@ export class GenerationService {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '');
-  }
-
-  private async buildCatalogBrowseSection(
-    sectionId: string,
-    title: string,
-    resourceType: string,
-    displayKind: string,
-  ): Promise<PersonalRecommendationResource | null> {
-    try {
-      const items = await this.catalogService.browse(
-        resourceType,
-        HOME_SHELF_ITEM_LIMIT,
-        'latest',
-      );
-      if (items.length < HOME_SHELF_ITEM_MIN) {
-        return null;
-      }
-      if (items.length === 0) return null;
-
-      return this.buildSection(
-        sectionId,
-        title,
-        displayKind,
-        [resourceType],
-        items.map((i) => ({ id: i.id, type: i.type })),
-      );
-    } catch {
-      return null;
-    }
   }
 }

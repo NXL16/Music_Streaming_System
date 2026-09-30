@@ -3,9 +3,9 @@
  * This is deliberately the only place that defines ranking weights and Home
  * shelf limits: changing a recommendation is an explicit product decision.
  */
-// Bump when the candidate/ranking contract changes so cached Home pages are
-// regenerated lazily instead of silently serving a previous model.
-export const PRODUCTION_RECOMMENDATION_MODEL_VERSION = 33;
+// Bump when the candidate, ranking, or Home-composition contract changes so
+// cached Home pages regenerate instead of silently serving a previous model.
+export const PRODUCTION_RECOMMENDATION_MODEL_VERSION = 94;
 
 export const PRODUCTION_RECOMMENDATION_POLICY = {
   candidateLimit: 600,
@@ -14,11 +14,18 @@ export const PRODUCTION_RECOMMENDATION_POLICY = {
   // for long-lived tastes, neighbour signals and worthwhile older releases.
   candidatePoolLimit: 1_200,
   freshCandidateLimit: 320,
+  // A deterministic older-catalog reservoir complements popular and fresh
+  // candidates, so Global editorial shelves do not ignore quiet back catalog.
+  globalCatalogCoverageLimit: 600,
   affinityCandidateLimit: 320,
   signalCandidateLimit: 240,
   audioCandidateLimit: 240,
   audioNeighboursPerSeed: 24,
   minimumAudioSimilarity: 0.2,
+  // Catalog eligibility can legitimately leave some mood or artist shelves
+  // empty. Eight real personalised shelves are a useful Home; discard it
+  // only when fewer remain after visibility and catalog checks.
+  minUserHomeShelves: 8,
   maxHomeShelves: 22,
   // Home renders a compact preview; the complete ranked collection is kept
   // for the shelf-detail route behind the disclosure affordance.
@@ -26,25 +33,23 @@ export const PRODUCTION_RECOMMENDATION_POLICY = {
   shelfDetailLimit: 48,
   topPicksLimit: 10,
   globalShelfLimit: 12,
-  // Pages may grow while the catalog supports distinct, useful topics. The
-  // upper bound protects rendering and interaction volume without forcing a
-  // thin fixed layout.
-  globalAlbumShelfTarget: 20,
   userAlbumShelfTarget: 18,
   globalGenreShelfLimit: 8,
-  globalArtistShelfLimit: 3,
+  userGenreShelfLimit: 3,
   minimumShelfSize: 3,
   globalMinimumShelfSize: 6,
   maxPerArtist: 2,
   maxPerGenre: 6,
   freshnessWindowDays: 120,
+  globalTopPickFreshnessWindowDays: 30,
+  globalTopPickInteractionLimit: 5_000,
   historyWindowDays: 365,
   interactionQueryLimit: 20_000,
   collaborativeOverlapLimit: 5_000,
   collaborativeCandidateLimit: 10_000,
   collaborativeNeighbourLimit: 100,
   minimumHistoryEvents: 3,
-  dailyMixWeights: {
+  personalizedPlaylistWeights: {
     taste: 0.65,
     popularity: 0.15,
     collaborative: 0.2,
@@ -60,15 +65,21 @@ export const PRODUCTION_RECOMMENDATION_POLICY = {
     novelty: 0.04,
     feedback: 0.1,
   },
+  globalTopPickWeights: {
+    popularity: 0.4,
+    freshness: 0.3,
+    engagement: 0.3,
+  },
   personalizedOrder: [
     'top-picks',
     'recently-played',
-    'more-like-1',
     'genre-1',
+    'more-like-1',
     'made-for-you',
     'stations-for-you',
     'find-your-mood',
     'new-releases',
+    'chill-music',
     'more-like-2',
     'fans-like',
     'more-like-3',
@@ -178,4 +189,23 @@ export const PRODUCTION_RECOMMENDATION_POLICY = {
       allowGenreFallback: false,
     },
   ],
+  // These are shared visual templates only. Their Station snapshots and
+  // tracklists remain user-scoped, unlike the editorial Mood Station set.
+  personalizedStations: [
+    { key: 'your-station', title: 'Your Station' },
+    { key: 'discovery-station', title: 'Discovery Station' },
+  ],
 } as const;
+
+export function scoreGlobalTopPick(input: {
+  popularity: number;
+  freshness: number;
+  engagement: number;
+}) {
+  const { globalTopPickWeights } = PRODUCTION_RECOMMENDATION_POLICY;
+  return (
+    input.popularity * globalTopPickWeights.popularity +
+    input.freshness * globalTopPickWeights.freshness +
+    input.engagement * globalTopPickWeights.engagement
+  );
+}

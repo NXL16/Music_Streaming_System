@@ -25,12 +25,15 @@ service RecommendationService {
   rpc SetArtistFollow(SetArtistFollowRequest) returns (ArtistFollowResponse);
   rpc GetArtistFollow(GetArtistFollowRequest) returns (ArtistFollowResponse);
   rpc UpsertSystemStationArtwork(UpsertSystemStationArtworkRequest) returns (SystemStationArtworkResponse);
+  rpc UpsertSystemPlaylistArtwork(UpsertSystemPlaylistArtworkRequest) returns (SystemPlaylistArtworkResponse);
+  rpc SetSystemPlaylistArtworkColor(SetSystemPlaylistArtworkColorRequest) returns (SystemPlaylistArtworkResponse);
   rpc CreateSongStation(CreateSongStationRequest) returns (SongStationResponse);
   rpc GetSongStation(GetSongStationRequest) returns (SongStationResponse);
   rpc GetSongStationTracks(GetSongStationTracksRequest) returns (SongStationTracksResponse);
   rpc CreateArtistStation(CreateArtistStationRequest) returns (ArtistStationResponse);
   rpc GetArtistStation(GetArtistStationRequest) returns (ArtistStationResponse);
   rpc GetArtistStationTracks(GetArtistStationTracksRequest) returns (SongStationTracksResponse);
+  rpc GetSystemPlaylistTracks(GetSystemPlaylistTracksRequest) returns (SystemPlaylistTracksResponse);
 }
 
 message CleanupPlaylistHistoryRequest {
@@ -42,14 +45,36 @@ message CleanupPlaylistHistoryResponse { bool success = 1; }
 
 message UpsertSystemStationArtworkRequest {
   string station_key   = 1;
-  string asset_id      = 2;
+  string cover_asset_id = 2;
   string actor_user_id = 3;
+  string hero_video_asset_id = 4;
 }
 
 message SystemStationArtworkResponse {
   string station_key = 1;
-  string asset_id    = 2;
+  string cover_asset_id = 2;
+  string hero_video_asset_id = 3;
 }
+
+message UpsertSystemPlaylistArtworkRequest {
+  string playlist_key = 1;
+  string cover_asset_id = 2;
+  string home_card_asset_id = 3;
+  string actor_user_id = 4;
+  string detail_square_video_asset_id = 5;
+  string detail_mobile_video_asset_id = 6;
+  string home_hero_video_asset_id = 7;
+}
+message SystemPlaylistArtworkResponse {
+  string playlist_key = 1;
+  string cover_asset_id = 2;
+  string home_card_asset_id = 3;
+  string detail_square_video_asset_id = 4;
+  string detail_mobile_video_asset_id = 5;
+  string home_hero_video_asset_id = 6;
+}
+message SetSystemPlaylistArtworkColorRequest { string playlist_key = 1; string bg_color = 2; string actor_user_id = 3; }
+
 
 message CreateSongStationRequest {
   string user_id = 1;
@@ -125,6 +150,17 @@ message GetArtistStationTracksRequest {
   string station_id = 2;
   repeated string excluded_song_ids = 3;
   int32 limit = 4;
+}
+
+// Resolves the signed-in listener's cached contents of one of the three fixed
+// catalog playlists. It never creates a user playlist.
+message GetSystemPlaylistTracksRequest {
+  string user_id = 1;
+  string playlist_id = 2;
+}
+
+message SystemPlaylistTracksResponse {
+  repeated string track_ids = 1;
 }
 
 enum RecommendationPageScope {
@@ -255,6 +291,7 @@ message PersonalRecommendationAttributes {
   string                         source_album_url              = 13;
   string                         source_album_artwork_url      = 14;
   string                         source_album_artwork_bg_color = 15;
+  string                         listen_again_album_id        = 16;
 }
 
 message PersonalRecommendationResource {

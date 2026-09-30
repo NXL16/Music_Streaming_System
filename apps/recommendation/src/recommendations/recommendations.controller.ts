@@ -22,6 +22,9 @@ import {
   RecommendationQualityAnalyticsResponse,
   UpsertSystemStationArtworkRequest,
   SystemStationArtworkResponse,
+  UpsertSystemPlaylistArtworkRequest,
+  SetSystemPlaylistArtworkColorRequest,
+  SystemPlaylistArtworkResponse,
   CleanupPlaylistHistoryRequest,
   CleanupPlaylistHistoryResponse,
   RecordPreferenceEventRequest,
@@ -38,6 +41,8 @@ import {
   GetArtistStationRequest,
   ArtistStationResponse,
   GetArtistStationTracksRequest,
+  GetSystemPlaylistTracksRequest,
+  SystemPlaylistTracksResponse,
 } from '@musical/shared-proto';
 import { RecommendationsService } from './recommendations.service';
 import { ListeningService } from '../listening/listening.service';
@@ -45,6 +50,7 @@ import { GenerationService } from '../generation/generation.service';
 import { InternalGrpcGuard } from '../common/guards/internal-grpc.guard';
 import { RecommendationRpcMetricsInterceptor } from '../common/observability/recommendation-rpc-metrics.interceptor';
 import { SystemStationArtworkService } from './system-station-artwork.service';
+import { SystemPlaylistArtworkService } from './system-playlist-artwork.service';
 import { developmentCacheDisabled } from '../common/configs/development-cache';
 import { RecommendationEngineService } from '../generation/recommendation-engine.service';
 import { PreferenceService } from '../preferences/preference.service';
@@ -63,11 +69,12 @@ export class RecommendationsController implements RecommendationServiceControlle
     private readonly listeningService: ListeningService,
     private readonly generationService: GenerationService,
     private readonly systemStationArtworkService: SystemStationArtworkService,
+    private readonly systemPlaylistArtworkService: SystemPlaylistArtworkService,
     private readonly recommendationEngine: RecommendationEngineService,
     private readonly preferenceService: PreferenceService,
     private readonly songStationService: SongStationService,
     private readonly artistStationService: ArtistStationService,
-  ) {}
+  ) { }
 
   async cleanupPlaylistHistory(
     request: CleanupPlaylistHistoryRequest,
@@ -133,6 +140,17 @@ export class RecommendationsController implements RecommendationServiceControlle
       request.excludedSongIds,
       request.limit,
     );
+  }
+
+  async getSystemPlaylistTracks(
+    request: GetSystemPlaylistTracksRequest,
+  ): Promise<SystemPlaylistTracksResponse> {
+    return {
+      trackIds: await this.recommendationsService.getSystemPlaylistTracks(
+        request.userId,
+        request.playlistId,
+      ),
+    };
   }
 
   async getAlbumRelatedRecommendations(
@@ -201,8 +219,9 @@ export class RecommendationsController implements RecommendationServiceControlle
           request.platform,
         );
       } else {
-        // User regeneration follows the stale-while-revalidate contract in
-        // normal operation, preserving the fast path for listeners.
+        // Keep Home on its fast path. The web client listens for telemetry
+        // acceptance and schedules a debounced revalidation after this
+        // background regeneration has had time to publish the new page.
         void this.generationService
           .tryLazyGenerateUser(
             request.userId,
@@ -219,9 +238,9 @@ export class RecommendationsController implements RecommendationServiceControlle
 
     return request.userId
       ? this.recommendationsService.getHomeRecommendations(
-          request,
-          globalResult,
-        )
+        request,
+        globalResult,
+      )
       : globalResult;
   }
 
@@ -317,8 +336,60 @@ export class RecommendationsController implements RecommendationServiceControlle
   ): Promise<SystemStationArtworkResponse> {
     const artwork = await this.systemStationArtworkService.bind(
       request.stationKey,
-      request.assetId,
+      request.coverAssetId,
+      request.heroVideoAssetId,
     );
-    return { stationKey: request.stationKey, assetId: artwork.assetId };
+    return {
+      stationKey: request.stationKey,
+      coverAssetId: artwork.cover.assetId,
+      heroVideoAssetId: request.heroVideoAssetId,
+    };
+  }
+
+  async upsertSystemPlaylistArtwork(
+    request: UpsertSystemPlaylistArtworkRequest,
+  ): Promise<SystemPlaylistArtworkResponse> {
+    const hasVideoMedia = Boolean(
+      request.detailSquareVideoAssetId ||
+      request.detailMobileVideoAssetId ||
+      request.homeHeroVideoAssetId,
+    );
+    const artwork = hasVideoMedia
+      ? await this.systemPlaylistArtworkService.bindVideos(
+        request.playlistKey,
+        request.detailSquareVideoAssetId,
+        request.detailMobileVideoAssetId,
+        request.homeHeroVideoAssetId,
+      )
+      : await this.systemPlaylistArtworkService.bind(
+        request.playlistKey,
+        request.coverAssetId,
+        request.homeCardAssetId,
+      );
+    return {
+      playlistKey: request.playlistKey,
+      coverAssetId: artwork.cover.assetId,
+      homeCardAssetId: artwork.homeCard.assetId,
+      detailSquareVideoAssetId: request.detailSquareVideoAssetId,
+      detailMobileVideoAssetId: request.detailMobileVideoAssetId,
+      homeHeroVideoAssetId: request.homeHeroVideoAssetId,
+    };
+  }
+
+  async setSystemPlaylistArtworkColor(
+    request: SetSystemPlaylistArtworkColorRequest,
+  ): Promise<SystemPlaylistArtworkResponse> {
+    const artwork = await this.systemPlaylistArtworkService.setColor(
+      request.playlistKey,
+      request.bgColor,
+    );
+    return {
+      playlistKey: request.playlistKey,
+      coverAssetId: artwork.cover.assetId,
+      homeCardAssetId: artwork.homeCard.assetId,
+      detailSquareVideoAssetId: '',
+      detailMobileVideoAssetId: '',
+      homeHeroVideoAssetId: '',
+    };
   }
 }

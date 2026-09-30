@@ -67,4 +67,129 @@ describe('RecommendationEngineService candidate retrieval', () => {
     expect(strings.join('')).toContain('"createdAt" >= ');
     expect(strings.join('')).toContain("'PLAY_COMPLETE'");
   });
+
+  it('allows a genre shelf to fill its twelve-card preview', () => {
+    const service = new RecommendationEngineService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const internals = service as unknown as {
+      allocateGlobal: (
+        candidates: unknown[],
+        allocated: Set<string>,
+        previewLimit: number,
+        detailLimit: number,
+        minimumPreviewItems: number,
+        limits: { maxPerGenre?: number },
+      ) => Array<{ id: string }>;
+    };
+    const candidates = Array.from({ length: 12 }, (_, index) => ({
+      id: `album-${index}`,
+      artistName: `artist-${index}`,
+      genreNames: ['Pop'],
+    }));
+
+    const selected = internals.allocateGlobal(
+      candidates,
+      new Set(),
+      12,
+      48,
+      12,
+      { maxPerGenre: Number.POSITIVE_INFINITY },
+    );
+
+    expect(selected).toHaveLength(12);
+  });
+
+  it('does not reserve detail overflow from the next Global preview', () => {
+    const service = new RecommendationEngineService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const internals = service as unknown as {
+      allocateGlobal: (
+        candidates: unknown[],
+        allocated: Set<string>,
+        previewLimit: number,
+        detailLimit: number,
+        minimumPreviewItems: number,
+        limits: Record<string, never>,
+      ) => Array<{ id: string }>;
+    };
+    const candidates = Array.from({ length: 24 }, (_, index) => ({
+      id: `album-${index}`,
+      artistName: `artist-${index}`,
+      genreNames: [`Genre-${index}`],
+    }));
+    const previewAllocated = new Set<string>();
+
+    const firstShelf = internals.allocateGlobal(
+      candidates,
+      previewAllocated,
+      12,
+      48,
+      12,
+      {},
+    );
+    const secondShelf = internals.allocateGlobal(
+      candidates,
+      previewAllocated,
+      12,
+      48,
+      12,
+      {},
+    );
+
+    expect(firstShelf).toHaveLength(24);
+    expect(secondShelf).toHaveLength(24);
+    expect(secondShelf.slice(0, 12).map((item) => item.id)).toEqual(
+      Array.from({ length: 12 }, (_, index) => `album-${index + 12}`),
+    );
+    expect(previewAllocated.size).toBe(24);
+  });
+
+  it('keeps only same-genre new releases in release-date order', () => {
+    const service = new RecommendationEngineService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const internals = service as unknown as {
+      generateNewReleasesShelf: (candidates: unknown[]) => {
+        items: Array<{ id: string }>;
+      } | null;
+    };
+    const candidate = (id: string, releaseDate: string, overrides = {}) => ({
+      id,
+      releaseDate,
+      freshness: 1,
+      artistAffinity: 0,
+      genreAffinity: 1,
+      contentSimilarity: 0,
+      audioSimilarity: 0,
+      collaborative: 0,
+      ...overrides,
+    });
+
+    const shelf = internals.generateNewReleasesShelf([
+      candidate('relevant-today', '2026-09-29'),
+      candidate('unrelated-today', '2026-09-29', { genreAffinity: 0 }),
+      candidate('artist-only', '2026-09-29', {
+        genreAffinity: 0,
+        artistAffinity: 1,
+      }),
+      candidate('relevant-yesterday', '2026-09-28'),
+      candidate('old-relevant', '2026-01-01', { freshness: 0 }),
+    ]);
+
+    expect(shelf?.items.map((item) => item.id)).toEqual([
+      'relevant-today',
+      'relevant-yesterday',
+    ]);
+  });
 });

@@ -14,6 +14,7 @@ import { RecommendationCatalogService } from '../recommendations/recommendation-
 const INDEX_STATE_ID = 'catalog-song-audio-vectors';
 const PAGE_SIZE = 100;
 const INCREMENTAL_SYNC_INTERVAL_MS = 5 * 60 * 1000;
+const FULL_RECONCILIATION_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class AudioVectorSynchronizationService
@@ -70,13 +71,17 @@ export class AudioVectorSynchronizationService
         collectionName: this.qdrant.collectionName,
       },
     });
-    const cursor =
+    const fullReconciliation =
       collectionWasCreated ||
-      state.collectionName !== this.qdrant.collectionName
-        ? ''
-        : state.cursor;
+      state.collectionName !== this.qdrant.collectionName ||
+      !state.cursor ||
+      !state.synchronizedAt ||
+      Date.now() - state.synchronizedAt.getTime() >=
+        FULL_RECONCILIATION_INTERVAL_MS;
+    const cursor = fullReconciliation ? '' : state.cursor;
     let nextCursor = cursor;
     let indexed = 0;
+    const authoritativeSongIds = new Set<string>();
 
     do {
       const page = await this.catalogService.browseAudioAnalysisPage(
@@ -99,6 +104,7 @@ export class AudioVectorSynchronizationService
         },
       }));
       await this.qdrant.upsert(points);
+      for (const point of points) authoritativeSongIds.add(point.songId);
       indexed += points.length;
       nextCursor = page.nextCursor;
 
@@ -115,22 +121,28 @@ export class AudioVectorSynchronizationService
       if (!page.hasMore) break;
     } while (nextCursor);
 
+    const pruned = fullReconciliation
+      ? await this.qdrant.pruneExcept(authoritativeSongIds)
+      : 0;
+
     await this.prisma.audioVectorIndexState.upsert({
       where: { id: INDEX_STATE_ID },
       update: {
         collectionName: this.qdrant.collectionName,
-        cursor: nextCursor,
+        cursor: nextCursor || cursor,
         synchronizedAt: new Date(),
       },
       create: {
         id: INDEX_STATE_ID,
         collectionName: this.qdrant.collectionName,
-        cursor: nextCursor,
+        cursor: nextCursor || cursor,
         synchronizedAt: new Date(),
       },
     });
-    if (indexed > 0)
-      this.logger.log(`Indexed ${indexed} audio vector(s) in Qdrant`);
+    if (indexed > 0 || pruned > 0)
+      this.logger.log(
+        `Indexed ${indexed} audio vector(s); pruned ${pruned} stale vector(s) in Qdrant`,
+      );
     return indexed;
   }
 

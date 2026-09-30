@@ -19,12 +19,15 @@ import { RecommendationEngineService } from '../generation/recommendation-engine
 import { RecommendationRpcMetricsService } from '../common/observability/recommendation-rpc-metrics.service';
 import { RecommendationRpcMetricsInterceptor } from '../common/observability/recommendation-rpc-metrics.interceptor';
 import { SystemStationArtworkService } from './system-station-artwork.service';
+import { SystemPlaylistArtworkService } from './system-playlist-artwork.service';
 import { GenerationLeaseService } from '../generation/generation-lease.service';
 import { PreferencesModule } from '../preferences/preferences.module';
 import { QdrantAudioVectorService } from '../vector/qdrant-audio-vector.service';
 import { AudioVectorSynchronizationService } from '../vector/audio-vector-synchronization.service';
 import { SongStationService } from '../stations/song-station.service';
 import { ArtistStationService } from '../stations/artist-station.service';
+import { StationTrackSelectionService } from '../stations/station-track-selection.service';
+import { SystemStationRefreshService } from '../generation/system-station-refresh.service';
 
 const CATALOG_GRPC_MAX_MESSAGE_LENGTH = 16 * 1024 * 1024;
 
@@ -72,15 +75,18 @@ const CATALOG_GRPC_MAX_MESSAGE_LENGTH = 16 * 1024 * 1024;
     RecommendationCatalogService,
     CatalogSynchronizationService,
     GenerationService,
+    SystemStationRefreshService,
     GenerationLeaseService,
     RecommendationEngineService,
     RecommendationRpcMetricsService,
     RecommendationRpcMetricsInterceptor,
     SystemStationArtworkService,
+    SystemPlaylistArtworkService,
     QdrantAudioVectorService,
     AudioVectorSynchronizationService,
     SongStationService,
     ArtistStationService,
+    StationTrackSelectionService,
     InternalGrpcGuard,
   ],
   exports: [RecommendationsService],

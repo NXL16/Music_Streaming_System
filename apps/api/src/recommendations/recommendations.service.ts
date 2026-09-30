@@ -30,6 +30,9 @@ import {
   RecommendationQualityAnalyticsResponse,
   SystemStationArtworkResponse,
   UpsertSystemStationArtworkRequest,
+  SystemPlaylistArtworkResponse,
+  UpsertSystemPlaylistArtworkRequest,
+  SetSystemPlaylistArtworkColorRequest,
   CleanupPlaylistHistoryRequest,
   CleanupPlaylistHistoryResponse,
   RecordPreferenceEventRequest,
@@ -48,6 +51,8 @@ import {
   GetArtistStationRequest,
   ArtistStationResponse,
   GetArtistStationTracksRequest,
+  GetSystemPlaylistTracksRequest,
+  SystemPlaylistTracksResponse,
 } from '@musical/shared-proto';
 import { grpcFirstValueFrom } from '../common/utils/grpc-timeout';
 import { ConfigService } from '@nestjs/config';
@@ -372,6 +377,21 @@ export class RecommendationsService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  upsertSystemPlaylistArtwork(
+    request: UpsertSystemPlaylistArtworkRequest,
+  ): Promise<SystemPlaylistArtworkResponse> {
+    return grpcFirstValueFrom(
+      this.recommendationClient.upsertSystemPlaylistArtwork(request, this.metadata()),
+    );
+  }
+  setSystemPlaylistArtworkColor(
+    request: SetSystemPlaylistArtworkColorRequest,
+  ): Promise<SystemPlaylistArtworkResponse> {
+    return grpcFirstValueFrom(
+      this.recommendationClient.setSystemPlaylistArtworkColor(request, this.metadata()),
+    );
+  }
+
   createSongStation(
     request: CreateSongStationRequest,
   ): Promise<SongStationResponse> {
@@ -421,6 +441,17 @@ export class RecommendationsService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  getSystemPlaylistTracks(
+    request: GetSystemPlaylistTracksRequest,
+  ): Promise<SystemPlaylistTracksResponse> {
+    return grpcFirstValueFrom(
+      this.recommendationClient.getSystemPlaylistTracks(
+        request,
+        this.metadata(),
+      ),
+    );
+  }
+
   private normalizeResponse(
     response: GetHomeRecommendationsResponse,
   ): GetHomeRecommendationsResponse {
@@ -460,4 +491,5 @@ export class RecommendationsService implements OnModuleInit, OnModuleDestroy {
       ]),
     );
   }
+
 }

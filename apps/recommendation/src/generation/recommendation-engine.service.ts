@@ -3,10 +3,12 @@ import { PrismaService } from '../database/prisma.service';
 import { ListeningService, TasteProfile } from '../listening/listening.service';
 import { RecommendationCatalogService } from '../recommendations/recommendation-catalog.service';
 import { QdrantAudioVectorService } from '../vector/qdrant-audio-vector.service';
-import { MORE_LIKE_SHELF_LIMIT } from '@musical/shared-constants';
+import { audioFeaturesFromAttributes } from '../common/audio-features';
+import { chillIntentScore, hasAudioAnalysis } from '../common/chill-intent';
 import {
   PRODUCTION_RECOMMENDATION_MODEL_VERSION,
   PRODUCTION_RECOMMENDATION_POLICY as policy,
+  scoreGlobalTopPick,
 } from './production-recommendation-policy';
 
 export const PERSONALIZATION_MODEL_VERSION =
@@ -20,6 +22,8 @@ type AlbumCandidate = {
   artworkPerceptualHash?: string;
   genreNames: string[];
   audioTraits: string[];
+  audioTags?: string[];
+  audioEnergy?: number;
   releaseDate: string;
   score: number;
   artistAffinity: number;
@@ -31,6 +35,24 @@ type AlbumCandidate = {
   freshness: number;
   feedback: number;
   sources: Set<CandidateSource>;
+};
+
+type AlbumCandidateSignals = {
+  collaborative: Map<string, number>;
+  popularity: Map<string, number>;
+  feedback: Map<string, number>;
+  seeds: Array<{ genreNames: string[]; audioTraits: string[] }>;
+  audioSimilarity: Map<string, number>;
+};
+
+type UserAlbumCandidateSets = {
+  personalized: AlbumCandidate[];
+  newReleases: AlbumCandidate[];
+};
+
+type AllocationLimits = {
+  maxPerArtist?: number;
+  maxPerGenre?: number;
 };
 
 type AlbumPopularityRow = {
@@ -51,6 +73,8 @@ export type GeneratedShelf = {
   sourceAlbumUrl?: string;
   sourceAlbumArtworkUrl?: string;
   sourceAlbumArtworkBgColor?: string;
+  /** Transient Global Top Picks score; never persisted in the shelf payload. */
+  topPickScores?: Record<string, number>;
 };
 
 /**
@@ -73,49 +97,64 @@ export class RecommendationEngineService {
   ): Promise<GeneratedShelf[]> {
     const resolvedProfile =
       profile ?? (await this.listeningService.getUserTasteProfile(userId));
-    const candidates = await this.collectAlbumCandidates(
+    const candidateSets = await this.collectUserAlbumCandidateSets(
       userId,
       resolvedProfile,
     );
+    const candidates = candidateSets.personalized;
     if (candidates.length < policy.minimumShelfSize) return [];
+    const newReleases = this.generateNewReleasesShelf(
+      candidateSets.newReleases,
+    );
+    // New Releases deliberately bypasses the shared allocation so it can show
+    // every relevant fresh release. Reserve its complete detail collection
+    // here before forming later album rails; otherwise semantic de-duplication
+    // would remove overlapping Chill Music cards only after allocation.
+    const newReleaseAlbumIds = new Set(
+      newReleases?.items.map((item) => item.id) ?? [],
+    );
 
     const allocated = new Set<string>();
     const result: GeneratedShelf[] = [];
     const seeds = await this.recentAlbumSeeds(userId);
     const topGenres = resolvedProfile.genres
       .map((genre) => genre.name)
-      .slice(0, 4);
+      .slice(0, policy.userGenreShelfLimit);
     const topArtists = resolvedProfile.artists
       .map((artist) => artist.name)
       .slice(0, 3);
-    const perShelfLimit = policy.shelfLimit;
-
     const add = (
       id: string,
       title: string,
       ranked: AlbumCandidate[],
-      limit: number = perShelfLimit,
       sourceAlbumId?: string,
       sourceAlbumName?: string,
       sourceAlbumUrl?: string,
       sourceAlbumArtworkUrl?: string,
       sourceAlbumArtworkBgColor?: string,
     ) => {
-      // Keep the Home rail at 12 cards. The remaining unique, ranked albums
-      // belong to the same shelf detail instead of making every Home rail
-      // artificially short by dividing the candidate pool across slots.
-      const items = this.allocate(
+      // Reserve only cards visible on Home. Detail overflow belongs to this
+      // rail's See All route and must not starve later personalised rails.
+      const previewLimit =
+        id === 'user-top-picks'
+          ? Math.min(policy.topPicksLimit, policy.shelfLimit)
+          : policy.shelfLimit;
+      const items = this.allocateGlobal(
         this.diversifyArtwork(ranked),
         allocated,
-        Math.max(limit, policy.shelfDetailLimit),
+        previewLimit,
+        policy.shelfDetailLimit,
+        previewLimit,
+        id.startsWith('user-genre-') || id === 'user-chill-music'
+          ? { maxPerGenre: Number.POSITIVE_INFINITY }
+          : {},
       );
-      if (items.length < policy.minimumShelfSize) return;
-      items.forEach((item) => allocated.add(item.id));
+      if (items.length === 0) return;
       result.push({
         id,
         title,
         items,
-        hasMore: items.length > perShelfLimit,
+        hasMore: items.length > previewLimit,
         modelVersion: PERSONALIZATION_MODEL_VERSION,
         sourceAlbumId,
         sourceAlbumName,
@@ -125,41 +164,38 @@ export class RecommendationEngineService {
       });
     };
 
-    add(
-      'user-top-picks',
-      'Top Picks for You',
-      candidates,
-      Math.min(policy.topPicksLimit, perShelfLimit),
-    );
-    if (seeds[0])
-      add(
-        'user-more-like-1',
-        `More Like ${seeds[0].name}`,
-        this.nearSeed(candidates, seeds[0]),
-        MORE_LIKE_SHELF_LIMIT,
-        seeds[0].id,
-        seeds[0].name,
-        seeds[0].url,
-        seeds[0].artworkUrl,
-        seeds[0].artworkBgColor,
-      );
+    add('user-top-picks', 'Top Picks for You', candidates);
+    // Genre 1 has a reserved Home position directly below Recently Played.
+    // Allocate it before a generic "More Like" rail so a strong genre is not
+    // starved by overlapping album cards.
     if (topGenres[0])
       add(
         'user-genre-1',
         `${topGenres[0]}`,
         this.forGenre(candidates, topGenres[0]),
       );
-    add(
-      'user-new-releases',
-      'New Releases for You',
-      this.byFreshness(candidates),
+    if (seeds[0])
+      add(
+        'user-more-like-1',
+        `More Like ${seeds[0].name}`,
+        this.nearSeed(candidates, seeds[0]),
+        seeds[0].id,
+        seeds[0].name,
+        seeds[0].url,
+        seeds[0].artworkUrl,
+        seeds[0].artworkBgColor,
+      );
+    if (newReleases) result.push(newReleases);
+    const chillMatches = this.forChillMusic(candidates);
+    const chillCandidates = chillMatches.filter(
+      (candidate) => !newReleaseAlbumIds.has(candidate.id),
     );
+    add('user-chill-music', 'Chill Music', chillCandidates);
     if (seeds[1])
       add(
         'user-more-like-2',
         `More Like ${seeds[1].name}`,
         this.nearSeed(candidates, seeds[1]),
-        MORE_LIKE_SHELF_LIMIT,
         seeds[1].id,
         seeds[1].name,
         seeds[1].url,
@@ -177,7 +213,6 @@ export class RecommendationEngineService {
         'user-more-like-3',
         `More Like ${seeds[2].name}`,
         this.nearSeed(candidates, seeds[2]),
-        MORE_LIKE_SHELF_LIMIT,
         seeds[2].id,
         seeds[2].name,
         seeds[2].url,
@@ -195,7 +230,6 @@ export class RecommendationEngineService {
         `user-more-like-${index + 4}`,
         `More Like ${seed.name}`,
         this.nearSeed(candidates, seed),
-        MORE_LIKE_SHELF_LIMIT,
         seed.id,
         seed.name,
         seed.url,
@@ -203,11 +237,11 @@ export class RecommendationEngineService {
         seed.artworkBgColor,
       );
     }
-    for (const [index, genre] of topGenres.slice(2).entries()) {
+    if (topGenres[2]) {
       add(
-        `user-genre-${index + 3}`,
-        `${genre}`,
-        this.forGenre(candidates, genre),
+        'user-genre-3',
+        `${topGenres[2]}`,
+        this.forGenre(candidates, topGenres[2]),
       );
     }
     for (const artist of topArtists.slice(1)) {
@@ -320,15 +354,18 @@ export class RecommendationEngineService {
   /** Global Home is editorial-style: no user-history signals, only freshness,
    * audience quality and controlled catalog diversity. */
   async generateGlobalShelves(): Promise<GeneratedShelf[]> {
-    const [popularity, feedback, freshAlbumIds] = await Promise.all([
-      this.popularAlbumScores(),
-      this.interactionScores(),
-      this.latestAlbumIds(policy.freshCandidateLimit),
-    ]);
+    const [popularity, feedback, freshAlbumIds, catalogCoverageAlbumIds] =
+      await Promise.all([
+        this.popularAlbumScores(),
+        this.interactionScores(),
+        this.latestAlbumIds(policy.freshCandidateLimit),
+        this.catalogCoverageAlbumIds(policy.globalCatalogCoverageLimit),
+      ]);
     const candidateIds = this.candidateIds(
       this.rankedIds(popularity, policy.signalCandidateLimit),
       this.rankedIds(feedback, policy.signalCandidateLimit),
       freshAlbumIds,
+      catalogCoverageAlbumIds,
     );
     const [albums, publishedAlbumIds] = await Promise.all([
       this.albumSnapshots(candidateIds),
@@ -337,7 +374,12 @@ export class RecommendationEngineService {
     const candidates = albums
       .filter((album) => publishedAlbumIds.has(album.resourceId))
       .map((album) => {
+        const audio = audioFeaturesFromAttributes(album.attributes);
         const freshness = this.freshness(album.releaseDate);
+        const topPickFreshness = this.freshness(
+          album.releaseDate,
+          policy.globalTopPickFreshnessWindowDays,
+        );
         const popularityScore = popularity.get(album.resourceId) ?? 0;
         const feedbackScore = feedback.get(album.resourceId) ?? 0;
         return {
@@ -346,6 +388,10 @@ export class RecommendationEngineService {
           artworkPerceptualHash: this.artworkPerceptualHash(album.attributes),
           genreNames: album.genreNames,
           audioTraits: album.audioTraits,
+          audioTags: audio.tags,
+          audioEnergy: hasAudioAnalysis(album.attributes)
+            ? audio.energy
+            : undefined,
           releaseDate: album.releaseDate,
           artistAffinity: 0,
           genreAffinity: 0,
@@ -359,8 +405,11 @@ export class RecommendationEngineService {
             ...(freshness > 0 ? ['fresh' as const] : []),
             ...(popularityScore > 0 ? ['popular' as const] : []),
           ]),
-          score:
-            freshness * 0.52 + popularityScore * 0.36 + feedbackScore * 0.12,
+          score: scoreGlobalTopPick({
+            popularity: popularityScore,
+            freshness: topPickFreshness,
+            engagement: feedbackScore,
+          }),
         };
       })
       .sort(
@@ -370,14 +419,7 @@ export class RecommendationEngineService {
     const allocated = new Set<string>();
     const shelves: GeneratedShelf[] = [];
     const genreCounts = new Map<string, number>();
-    const artistCounts = new Map<string, number>();
     for (const candidate of candidates) {
-      if (candidate.artistName) {
-        artistCounts.set(
-          candidate.artistName,
-          (artistCounts.get(candidate.artistName) ?? 0) + 1,
-        );
-      }
       for (const genre of candidate.genreNames) {
         const value = genre.trim();
         if (!value || value.toLowerCase() === 'music') continue;
@@ -385,44 +427,54 @@ export class RecommendationEngineService {
       }
     }
     const genres = [...genreCounts.entries()]
-      .filter(([, count]) => count >= policy.globalMinimumShelfSize)
+      .filter(([, count]) => count >= policy.globalShelfLimit)
       .sort(
         (left, right) => right[1] - left[1] || left[0].localeCompare(right[0]),
       )
       .slice(0, policy.globalGenreShelfLimit)
       .map(([genre]) => genre);
-    const spotlightArtists = [...artistCounts.entries()]
-      .filter(([, count]) => count >= policy.globalMinimumShelfSize)
-      .sort(
-        (left, right) => right[1] - left[1] || left[0].localeCompare(right[0]),
-      )
-      .slice(0, policy.globalArtistShelfLimit)
-      .map(([artist]) => artist);
     // Global Home uses the same 12-card preview contract as Personal Home;
     // detail pages retain the rest of each unique editorial collection.
-    const perShelfLimit = Math.min(
-      policy.globalShelfLimit,
-      Math.max(policy.minimumShelfSize, candidates.length),
-    );
+    const perShelfLimit = policy.globalShelfLimit;
     const add = (
       id: string,
       title: string,
       ranked: AlbumCandidate[],
-      limit = perShelfLimit,
+      limit: number = perShelfLimit,
+      limits: AllocationLimits = {},
     ) => {
+      const isGenreShelf = id.startsWith('global-genre-');
       const items = this.allocateGlobal(
         ranked,
         allocated,
-        Math.max(limit, policy.shelfDetailLimit),
+        limit,
+        policy.shelfDetailLimit,
+        id === 'global-top-picks'
+          ? Math.min(policy.globalMinimumShelfSize, limit)
+          : policy.globalShelfLimit,
+        {
+          ...limits,
+          ...(isGenreShelf ? { maxPerGenre: Number.POSITIVE_INFINITY } : {}),
+        },
       );
-      if (items.length < policy.globalMinimumShelfSize) return;
-      items.forEach((item) => allocated.add(item.id));
+      if (items.length === 0) return;
+      const topPickScores =
+        id === 'global-top-picks'
+          ? Object.fromEntries(
+              items.map((item) => [
+                item.id,
+                ranked.find((candidate) => candidate.id === item.id)?.score ??
+                  0,
+              ]),
+            )
+          : undefined;
       shelves.push({
         id,
         title,
         items,
         hasMore: items.length > policy.globalShelfLimit,
         modelVersion: PERSONALIZATION_MODEL_VERSION,
+        ...(topPickScores ? { topPickScores } : {}),
       });
     };
     add(
@@ -432,7 +484,7 @@ export class RecommendationEngineService {
       Math.min(policy.topPicksLimit, perShelfLimit),
     );
     add(
-      'global-trending-now',
+      'global-popular-now',
       'Trending Now',
       [...candidates].sort(
         (left, right) =>
@@ -443,22 +495,19 @@ export class RecommendationEngineService {
     );
     add('global-new-releases', 'New Releases', this.byFreshness(candidates));
     add(
-      'global-popular-now',
-      'Popular Now',
+      'global-chill-music',
+      'Chill Music',
+      this.forChillMusic(candidates),
+      perShelfLimit,
+      { maxPerGenre: Number.POSITIVE_INFINITY },
+    );
+    add(
+      'global-listener-favourites',
+      'Listener Favourites',
       [...candidates].sort(
         (left, right) =>
           right.feedback - left.feedback ||
           right.popularity - left.popularity ||
-          left.id.localeCompare(right.id),
-      ),
-    );
-    add(
-      'global-discover',
-      'Discover Something New',
-      [...candidates].sort(
-        (left, right) =>
-          right.freshness - left.freshness ||
-          right.score - left.score ||
           left.id.localeCompare(right.id),
       ),
     );
@@ -468,63 +517,71 @@ export class RecommendationEngineService {
         `${genre}`,
         this.forGenre(candidates, genre),
       );
-    for (const spotlightArtist of spotlightArtists) {
-      add(
-        `global-artist-${this.slug(spotlightArtist)}`,
-        `More from ${spotlightArtist}`,
-        candidates.filter(
-          (candidate) => candidate.artistName === spotlightArtist,
-        ),
-      );
-    }
-
-    // Genre coverage depends on the current catalog. Fill any remaining
-    // editorial slots from independently ranked catalog cuts so Global Home
-    // has a stable, complete shape even when only a few genres are present.
-    const editorialFallbacks: Array<[string, string, AlbumCandidate[]]> = [
+    // These are intentionally separate editorial intents. Unlike the old
+    // fallback rails, none is a title-only variation of another ranking.
+    const editorialShelves: Array<
+      [string, string, AlbumCandidate[], AllocationLimits?]
+    > = [
       [
-        'global-fresh-finds',
-        'Catalog Spotlight',
+        'global-artists-to-discover',
+        'Artists to Discover',
         [...candidates].sort(
           (left, right) =>
             right.freshness - left.freshness ||
             right.score - left.score ||
             left.id.localeCompare(right.id),
         ),
+        { maxPerArtist: 1 },
       ],
       [
-        'global-rising-now',
-        'Rising Now',
-        [...candidates].sort(
-          (left, right) =>
-            right.feedback - left.feedback ||
-            right.popularity - left.popularity ||
-            right.freshness - left.freshness ||
-            left.id.localeCompare(right.id),
-        ),
+        'global-timeless-favourites',
+        'Timeless Favourites',
+        [...candidates].sort((left, right) => {
+          const leftTimeless =
+            (1 - left.freshness) * 0.65 + left.popularity * 0.35;
+          const rightTimeless =
+            (1 - right.freshness) * 0.65 + right.popularity * 0.35;
+          return (
+            rightTimeless - leftTimeless ||
+            right.score - left.score ||
+            left.id.localeCompare(right.id)
+          );
+        }),
       ],
       [
-        'global-albums-to-explore',
-        'Discover More',
-        [...candidates].sort(
-          (left, right) =>
-            right.score - left.score || left.id.localeCompare(right.id),
-        ),
+        'global-hidden-gems',
+        'Hidden Gems',
+        [...candidates].sort((left, right) => {
+          const leftHiddenGem =
+            left.freshness * 0.55 +
+            left.feedback * 0.45 -
+            left.popularity * 0.6;
+          const rightHiddenGem =
+            right.freshness * 0.55 +
+            right.feedback * 0.45 -
+            right.popularity * 0.6;
+          return (
+            rightHiddenGem - leftHiddenGem ||
+            right.score - left.score ||
+            left.id.localeCompare(right.id)
+          );
+        }),
       ],
       [
         'global-deep-cuts',
-        'From the Catalog',
+        'Deep Cuts',
         [...candidates].sort(
           (left, right) =>
-            left.freshness - right.freshness ||
-            right.popularity - left.popularity ||
+            (1 - left.freshness) * 0.65 -
+              left.popularity * 0.2 -
+              ((1 - right.freshness) * 0.65 - right.popularity * 0.2) ||
+            right.score - left.score ||
             left.id.localeCompare(right.id),
         ),
       ],
     ];
-    for (const [id, title, ranked] of editorialFallbacks) {
-      if (shelves.length >= policy.globalAlbumShelfTarget) break;
-      add(id, title, ranked);
+    for (const [id, title, ranked, limits] of editorialShelves) {
+      add(id, title, ranked, perShelfLimit, limits);
     }
     return shelves;
   }
@@ -533,6 +590,15 @@ export class RecommendationEngineService {
     userId: string,
     profile: TasteProfile,
   ): Promise<AlbumCandidate[]> {
+    return (await this.collectUserAlbumCandidateSets(userId, profile, false))
+      .personalized;
+  }
+
+  private async collectUserAlbumCandidateSets(
+    userId: string,
+    profile: TasteProfile,
+    includeCompleteFreshPool = true,
+  ): Promise<UserAlbumCandidateSets> {
     const [
       collaborative,
       popularity,
@@ -548,9 +614,9 @@ export class RecommendationEngineService {
       this.recentAlbumSeeds(userId),
       this.latestAlbumIds(policy.freshCandidateLimit),
       this.affinityAlbumIds(profile, [...profile.listenedAlbumIds]),
-      this.audioSimilarAlbumScores([...profile.listenedSongIds]),
+      this.audioSimilarAlbumScores([...profile.audioSeedSongIds]),
     ]);
-    const candidateIds = this.candidateIds(
+    const personalizedIds = this.candidateIds(
       affinityAlbumIds,
       this.rankedIds(collaborative, policy.signalCandidateLimit),
       this.rankedIds(popularity, policy.signalCandidateLimit),
@@ -558,9 +624,46 @@ export class RecommendationEngineService {
       this.rankedIds(audioSimilarity, policy.audioCandidateLimit),
       freshAlbumIds,
     );
+    // New Releases owns its own complete fresh pool. It must not inherit the
+    // 1,200-card cap or priority order used by general personalisation. Other
+    // consumers (for example album-related recommendations) use only the
+    // normal personalisation pool and do not pay for this extra work.
+    const scoredIds = includeCompleteFreshPool
+      ? [...new Set([...personalizedIds, ...freshAlbumIds])]
+      : personalizedIds;
+    const candidates = await this.scoreAlbumCandidates(scoredIds, profile, {
+      collaborative,
+      popularity,
+      feedback,
+      seeds,
+      audioSimilarity,
+    });
+    const personalizedIdSet = new Set(personalizedIds);
+    const listenedAlbumIds = profile.listenedAlbumIds;
+    const freshIdSet = includeCompleteFreshPool
+      ? new Set(freshAlbumIds)
+      : undefined;
+
+    return {
+      personalized: candidates.filter(
+        (candidate) =>
+          personalizedIdSet.has(candidate.id) &&
+          !listenedAlbumIds.has(candidate.id),
+      ),
+      newReleases: includeCompleteFreshPool
+        ? candidates.filter((candidate) => freshIdSet?.has(candidate.id))
+        : [],
+    };
+  }
+
+  private async scoreAlbumCandidates(
+    ids: string[],
+    profile: TasteProfile,
+    signals: AlbumCandidateSignals,
+  ): Promise<AlbumCandidate[]> {
     const [albums, publishedAlbumIds] = await Promise.all([
-      this.albumSnapshots(candidateIds, [...profile.listenedAlbumIds]),
-      this.publishedAlbumIds(candidateIds),
+      this.albumSnapshots(ids),
+      this.publishedAlbumIds(ids),
     ]);
     const artists = new Map(
       profile.artists.map((entry) => [entry.name, entry.weight]),
@@ -575,6 +678,7 @@ export class RecommendationEngineService {
           !profile.hiddenResourceIds.get('albums')?.has(album.resourceId),
       )
       .map((album) => {
+        const audio = audioFeaturesFromAttributes(album.attributes);
         const artistAffinity = artists.get(album.artistName) ?? 0;
         const genreAffinity = Math.min(
           1,
@@ -584,11 +688,29 @@ export class RecommendationEngineService {
           ),
         );
         const freshness = this.freshness(album.releaseDate);
-        const collaborativeScore = collaborative.get(album.resourceId) ?? 0;
-        const popularityScore = popularity.get(album.resourceId) ?? 0;
-        const feedbackScore = feedback.get(album.resourceId) ?? 0;
-        const contentSimilarity = this.contentAffinity(album, seeds);
-        const audioSimilarityScore = audioSimilarity.get(album.resourceId) ?? 0;
+        const collaborativeScore =
+          signals.collaborative.get(album.resourceId) ?? 0;
+        const popularityScore = signals.popularity.get(album.resourceId) ?? 0;
+        const feedbackScore = signals.feedback.get(album.resourceId) ?? 0;
+        const contentSimilarity = this.contentAffinity(album, signals.seeds);
+        const audioSimilarityScore =
+          signals.audioSimilarity.get(album.resourceId) ?? 0;
+        const audioTagAffinity = this.audioTagAffinity(
+          album.attributes,
+          profile,
+        );
+        const bpmAffinity = this.audioMetricAffinity(
+          album.attributes,
+          'audioBpm',
+          profile.preferredBpm,
+          profile.bpmTolerance,
+        );
+        const energyAffinity = this.audioMetricAffinity(
+          album.attributes,
+          'audioEnergy',
+          profile.preferredEnergy,
+          profile.energyTolerance,
+        );
         const novelty = artistAffinity === 0 ? 1 : 0;
         const sources = new Set<CandidateSource>();
         if (artistAffinity || genreAffinity) sources.add('taste');
@@ -603,6 +725,10 @@ export class RecommendationEngineService {
           artworkPerceptualHash: this.artworkPerceptualHash(album.attributes),
           genreNames: album.genreNames,
           audioTraits: album.audioTraits,
+          audioTags: audio.tags,
+          audioEnergy: hasAudioAnalysis(album.attributes)
+            ? audio.energy
+            : undefined,
           releaseDate: album.releaseDate,
           artistAffinity,
           genreAffinity,
@@ -618,6 +744,9 @@ export class RecommendationEngineService {
             genreAffinity * policy.weights.genreAffinity +
             contentSimilarity * policy.weights.contentSimilarity +
             audioSimilarityScore * policy.weights.audioSimilarity +
+            audioTagAffinity * 0.06 +
+            bpmAffinity * 0.04 +
+            energyAffinity * 0.04 +
             collaborativeScore * policy.weights.collaborative +
             popularityScore * policy.weights.popularity +
             freshness * policy.weights.freshness +
@@ -662,6 +791,33 @@ export class RecommendationEngineService {
     }
   }
 
+  private audioTagAffinity(attributes: unknown, profile: TasteProfile): number {
+    if (profile.audioTags.length === 0) return 0;
+    const preferences = new Map(
+      profile.audioTags.map((tag) => [tag.name, tag.weight]),
+    );
+    return audioFeaturesFromAttributes(attributes).tags.reduce((best, tag) => {
+      return Math.max(best, preferences.get(tag) ?? 0);
+    }, 0);
+  }
+
+  private audioMetricAffinity(
+    attributes: unknown,
+    key: 'audioBpm' | 'audioEnergy',
+    preferred: number | null,
+    tolerance: number | null,
+  ): number {
+    if (preferred === null) return 0;
+    const audio = audioFeaturesFromAttributes(attributes);
+    const value = key === 'audioBpm' ? audio.bpm : audio.energy;
+    if (value === undefined) return 0;
+    const defaultTolerance = key === 'audioBpm' ? 20 : 0.2;
+    return Math.max(
+      0,
+      1 - Math.abs(value - preferred) / (tolerance ?? defaultTolerance),
+    );
+  }
+
   private async latestAlbumIds(limit: number): Promise<string[]> {
     const albums = await this.prisma.recommendationResourceSnapshot.findMany({
       where: { resourceType: 'albums' },
@@ -670,6 +826,21 @@ export class RecommendationEngineService {
       orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
     });
 
+    return albums.map((album) => album.resourceId);
+  }
+
+  /**
+   * Supplies stable older releases to the Global-only candidate pool. Recent
+   * releases are already supplied separately, so ascending release order
+   * widens editorial coverage without making the surface random.
+   */
+  private async catalogCoverageAlbumIds(limit: number): Promise<string[]> {
+    const albums = await this.prisma.recommendationResourceSnapshot.findMany({
+      where: { resourceType: 'albums' },
+      select: { resourceId: true },
+      take: limit,
+      orderBy: [{ releaseDate: 'asc' }, { resourceId: 'asc' }],
+    });
     return albums.map((album) => album.resourceId);
   }
 
@@ -726,7 +897,7 @@ export class RecommendationEngineService {
       .map(([id]) => id);
   }
 
-  private async albumSnapshots(ids: string[], excludedIds: string[] = []) {
+  private async albumSnapshots(ids: string[]) {
     if (ids.length === 0) return [];
 
     return this.prisma.recommendationResourceSnapshot.findMany({
@@ -734,7 +905,6 @@ export class RecommendationEngineService {
         resourceType: 'albums',
         resourceId: {
           in: ids,
-          ...(excludedIds.length ? { notIn: excludedIds } : {}),
         },
       },
       select: {
@@ -894,6 +1064,24 @@ export class RecommendationEngineService {
       );
   }
 
+  private forChillMusic(candidates: AlbumCandidate[]) {
+    return candidates
+      .filter((candidate) => this.chillScore(candidate) > 0)
+      .sort(
+        (left, right) =>
+          this.chillScore(right) - this.chillScore(left) ||
+          right.score - left.score ||
+          left.id.localeCompare(right.id),
+      );
+  }
+
+  private chillScore(candidate: AlbumCandidate): number {
+    return chillIntentScore({
+      tags: [...candidate.audioTraits, ...(candidate.audioTags ?? [])],
+      energy: candidate.audioEnergy,
+    });
+  }
+
   private byFreshness(candidates: AlbumCandidate[]) {
     return [...candidates].sort(
       (left, right) =>
@@ -902,6 +1090,47 @@ export class RecommendationEngineService {
         right.score - left.score ||
         left.id.localeCompare(right.id),
     );
+  }
+
+  /**
+   * New Releases starts with new catalog releases, then keeps only the genres
+   * the listener already enjoys. It bypasses Home's shared allocation,
+   * artist/genre caps, and artwork diversification so earlier shelves cannot
+   * displace a genuinely newer relevant release. A previously heard release
+   * remains eligible; `releaseDate` comes from Album.releaseDate, never the
+   * snapshot createdAt.
+   */
+  private generateNewReleasesShelf(
+    candidates: AlbumCandidate[],
+  ): GeneratedShelf | null {
+    const items = candidates
+      .filter(
+        (candidate) =>
+          candidate.freshness > 0 && this.hasNewReleaseGenreAffinity(candidate),
+      )
+      .sort(
+        (left, right) =>
+          right.releaseDate.localeCompare(left.releaseDate) ||
+          left.id.localeCompare(right.id),
+      )
+      .slice(0, policy.shelfDetailLimit + 1)
+      .map((candidate) => ({
+        id: candidate.id,
+        type: 'albums' as const,
+      }));
+    if (items.length === 0) return null;
+
+    return {
+      id: 'user-new-releases',
+      title: 'New Releases for You',
+      items: items.slice(0, policy.shelfDetailLimit),
+      hasMore: items.length > policy.shelfLimit,
+      modelVersion: PERSONALIZATION_MODEL_VERSION,
+    };
+  }
+
+  private hasNewReleaseGenreAffinity(candidate: AlbumCandidate): boolean {
+    return candidate.genreAffinity > 0;
   }
 
   private forFans(candidates: AlbumCandidate[], artist: string) {
@@ -922,7 +1151,10 @@ export class RecommendationEngineService {
     candidates: AlbumCandidate[],
     allocated: Set<string>,
     limit: number = policy.shelfLimit,
+    limits: AllocationLimits = {},
   ) {
+    const maxPerArtist = limits.maxPerArtist ?? policy.maxPerArtist;
+    const maxPerGenre = limits.maxPerGenre ?? policy.maxPerGenre;
     const artistCounts = new Map<string, number>();
     const genreCounts = new Map<string, number>();
     const selected: Array<{ id: string; type: 'albums' }> = [];
@@ -930,14 +1162,11 @@ export class RecommendationEngineService {
       if (selected.length >= limit) break;
       if (
         allocated.has(candidate.id) ||
-        (artistCounts.get(candidate.artistName) ?? 0) >= policy.maxPerArtist
+        (artistCounts.get(candidate.artistName) ?? 0) >= maxPerArtist
       )
         continue;
       const primaryGenre = candidate.genreNames[0] ?? '';
-      if (
-        primaryGenre &&
-        (genreCounts.get(primaryGenre) ?? 0) >= policy.maxPerGenre
-      )
+      if (primaryGenre && (genreCounts.get(primaryGenre) ?? 0) >= maxPerGenre)
         continue;
       artistCounts.set(
         candidate.artistName,
@@ -1077,10 +1306,31 @@ export class RecommendationEngineService {
   /** Global and personal Home both keep album cards unique across shelves. */
   private allocateGlobal(
     candidates: AlbumCandidate[],
-    allocated: Set<string>,
-    limit: number,
+    previewAllocated: Set<string>,
+    previewLimit: number,
+    detailLimit: number,
+    minimumPreviewItems: number,
+    limits: AllocationLimits,
   ) {
-    return this.allocate(candidates, allocated, limit);
+    // Home shelves compete only for cards that are actually visible on Home.
+    // Overflow belongs to the shelf detail and must not starve genre/artist
+    // previews later in the same Global page.
+    const preview = this.allocate(
+      candidates,
+      new Set(previewAllocated),
+      previewLimit,
+      limits,
+    );
+    if (preview.length < minimumPreviewItems) return [];
+
+    preview.forEach((item) => previewAllocated.add(item.id));
+    const overflow = this.allocate(
+      candidates,
+      new Set(preview.map((item) => item.id)),
+      Math.max(0, detailLimit - preview.length),
+      limits,
+    );
+    return [...preview, ...overflow];
   }
 
   private async popularAlbumScores() {
@@ -1241,12 +1491,15 @@ export class RecommendationEngineService {
     );
   }
 
-  private freshness(releaseDate: string) {
+  private freshness(
+    releaseDate: string,
+    windowDays: number = policy.freshnessWindowDays,
+  ) {
     const timestamp = new Date(releaseDate).getTime();
     if (!Number.isFinite(timestamp)) return 0;
-    return Math.max(
-      0,
-      1 - (Date.now() - timestamp) / (policy.freshnessWindowDays * 86_400_000),
+    return Math.min(
+      1,
+      Math.max(0, 1 - (Date.now() - timestamp) / (windowDays * 86_400_000)),
     );
   }
 

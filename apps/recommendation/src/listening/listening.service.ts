@@ -9,13 +9,22 @@ import {
 import { PrismaService } from '../database/prisma.service';
 import { RECENTLY_PLAYED_CONTEXT_LIMIT } from '@musical/shared-constants';
 import { Prisma } from '../generated/prisma/client';
+import { audioFeaturesFromAttributes } from '../common/audio-features';
 
 export type TasteProfile = {
   genres: Array<{ name: string; weight: number }>;
   artists: Array<{ name: string; weight: number }>;
+  /** Upload-time AI labels, learned only from qualified listening behaviour. */
+  audioTags: Array<{ name: string; weight: number }>;
+  preferredBpm: number | null;
+  bpmTolerance: number | null;
+  preferredEnergy: number | null;
+  energyTolerance: number | null;
   avgCompletionRate: number;
   totalListenTimeSec: number;
   listenedSongIds: Set<string>;
+  /** Ordered audio-vector seeds: explicit positive song preferences first. */
+  audioSeedSongIds: Set<string>;
   listenedAlbumIds: Set<string>;
   listenedAlbumNames: Set<string>;
   hiddenResourceIds: Map<string, Set<string>>;
@@ -44,12 +53,43 @@ const MAX_ANALYTICS_SONG_IDS = 1_000;
 // smaller durable signal from their older history.
 const TASTE_AFFINITY_HALF_LIFE_DAYS = 120;
 const PROFILE_ACTIVITY_LIMIT = 1_000;
+const MAX_PREFERENCE_AUDIO_SEEDS = 12;
 const EARLY_SKIP_SECONDS = 3;
 const SHORT_LISTEN_RATIO = 0.3;
 const ENGAGED_LISTEN_RATIO = 0.7;
 const COMPLETION_LISTEN_RATIO = 0.9;
 const MAX_REPLAY_AFFINITY = 3;
 const AFFINITY_EPSILON = 1e-6;
+const HOME_REGENERATION_MIN_INTERVAL_MS = 30 * 60 * 1000;
+
+type WeightedAudioMetric = {
+  weight: number;
+  sum: number;
+  squaredSum: number;
+};
+
+function audioMetricValue(
+  metric: WeightedAudioMetric,
+  minimumTolerance: number,
+): { preferred: number | null; tolerance: number | null } {
+  if (metric.weight <= AFFINITY_EPSILON) {
+    return { preferred: null, tolerance: null };
+  }
+  // Store a stable public profile value instead of exposing harmless IEEE-754
+  // residue such as 120.00000000000001 to ranking, logs, or API consumers.
+  const preferred =
+    Math.round((metric.sum / metric.weight) * 1_000_000) / 1_000_000;
+  const variance = Math.max(
+    0,
+    metric.squaredSum / metric.weight - preferred * preferred,
+  );
+  // A tolerance floor prevents a few nearly-identical recent songs from
+  // making the profile too narrow and starving discovery candidates.
+  return {
+    preferred,
+    tolerance: Math.max(minimumTolerance, Math.sqrt(variance) * 1.5),
+  };
+}
 
 type AggregateCount = bigint | number;
 
@@ -114,6 +154,22 @@ function normalizeOptionalValue(
   return normalized.length <= maxLength ? normalized : '';
 }
 
+function trackIdsFromRelationships(value: unknown): string[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  const relationships = value as Record<string, unknown>;
+  const tracks = relationships.tracks;
+  if (!tracks || typeof tracks !== 'object' || Array.isArray(tracks)) return [];
+  const data = (tracks as Record<string, unknown>).data;
+  if (!Array.isArray(data)) return [];
+  return data.flatMap((track) => {
+    if (!track || typeof track !== 'object' || Array.isArray(track)) return [];
+    const reference = track as Record<string, unknown>;
+    return reference.type === 'songs' && typeof reference.id === 'string'
+      ? [reference.id]
+      : [];
+  });
+}
+
 function isValidDuration(value: number): boolean {
   return (
     Number.isSafeInteger(value) && value >= 0 && value <= MAX_DURATION_SECONDS
@@ -146,7 +202,7 @@ function isListeningEventIdempotencyConflict(error: unknown): boolean {
     return false;
   }
 
-  const meta = error.meta as Record<string, unknown> | undefined;
+  const meta = error.meta;
   const target = meta?.target;
   if (target === 'listening_events_userId_eventId_key') return true;
 
@@ -438,6 +494,22 @@ export class ListeningService {
             },
           });
         }
+
+        // Coalesce listening signals rather than regenerating Home during a
+        // listening session. The next Home visit receives a fresh snapshot.
+        const now = new Date();
+        const refreshEligibleBefore = new Date(
+          now.getTime() - HOME_REGENERATION_MIN_INTERVAL_MS,
+        );
+        await tx.recommendationPage.updateMany({
+          where: {
+            userId,
+            status: 'PUBLISHED',
+            publishedAt: { lte: refreshEligibleBefore },
+            staleAfter: { gt: now },
+          },
+          data: { staleAfter: now },
+        });
       });
 
       if (context) {
@@ -516,21 +588,38 @@ export class ListeningService {
             select: {
               resourceType: true,
               resourceId: true,
+              name: true,
               genreNames: true,
               artistName: true,
+              attributes: true,
+              relationships: true,
             },
           })
         : [];
     const songGenres = new Map(
-      snapshots.map((s) => [s.resourceId, s.genreNames]),
+      snapshots
+        .filter((snapshot) => snapshot.resourceType === 'songs')
+        .map((snapshot) => [snapshot.resourceId, snapshot.genreNames]),
+    );
+    const songAudio = new Map(
+      snapshots
+        .filter((snapshot) => snapshot.resourceType === 'songs')
+        .map((snapshot) => [
+          snapshot.resourceId,
+          audioFeaturesFromAttributes(snapshot.attributes),
+        ]),
     );
 
     const genreScores = new Map<string, number>();
     const artistScores = new Map<string, number>();
+    const audioTagScores = new Map<string, number>();
+    const bpmMetric: WeightedAudioMetric = { weight: 0, sum: 0, squaredSum: 0 };
+    const energyMetric: WeightedAudioMetric = { weight: 0, sum: 0, squaredSum: 0 };
     let totalCompletions = 0;
     let totalPlays = 0;
     let totalListenSec = 0;
     const listenedSongIds = new Set<string>();
+    const preferenceSongScores = new Map<string, number>();
     const listenedAlbumIds = new Set<string>();
     const listenedAlbumNames = new Set<string>();
 
@@ -575,6 +664,23 @@ export class ListeningService {
       for (const genre of genres) {
         genreScores.set(genre, (genreScores.get(genre) ?? 0) + engagement);
       }
+
+      const audio = songAudio.get(stat.songId);
+      if (audio) {
+        for (const tag of audio.tags) {
+          audioTagScores.set(tag, (audioTagScores.get(tag) ?? 0) + engagement);
+        }
+        if (audio.bpm !== undefined) {
+          bpmMetric.weight += engagement;
+          bpmMetric.sum += audio.bpm * engagement;
+          bpmMetric.squaredSum += audio.bpm * audio.bpm * engagement;
+        }
+        if (audio.energy !== undefined) {
+          energyMetric.weight += engagement;
+          energyMetric.sum += audio.energy * engagement;
+          energyMetric.squaredSum += audio.energy * audio.energy * engagement;
+        }
+      }
     }
 
     const snapshotByKey = new Map(
@@ -592,14 +698,59 @@ export class ListeningService {
         Math.max(0, Date.now() - event.occurredAt.getTime()) / 86_400_000;
       const contribution =
         event.weight * Math.pow(0.5, ageDays / TASTE_AFFINITY_HALF_LIFE_DAYS);
-      if (snapshot.artistName) {
+      const preferenceSongIds =
+        event.resourceType === 'songs'
+          ? [event.resourceId]
+          : event.resourceType === 'albums' || event.resourceType === 'playlists'
+            ? trackIdsFromRelationships(
+                snapshotByKey.get(
+                  `${event.resourceType}:${event.resourceId}`,
+                )?.relationships,
+              )
+            : [];
+      for (const songId of preferenceSongIds) {
+        preferenceSongScores.set(
+          songId,
+          (preferenceSongScores.get(songId) ?? 0) + contribution,
+        );
+      }
+      // Artist resources use `name` as their canonical artist label, whereas
+      // songs/albums expose the performer through `artistName`.
+      const artistName =
+        snapshot.artistName ||
+        (snapshot.resourceType === 'artists' ? snapshot.name : '');
+      if (artistName) {
         artistScores.set(
-          snapshot.artistName,
-          (artistScores.get(snapshot.artistName) ?? 0) + contribution,
+          artistName,
+          (artistScores.get(artistName) ?? 0) + contribution,
         );
       }
       for (const genre of snapshot.genreNames) {
         genreScores.set(genre, (genreScores.get(genre) ?? 0) + contribution);
+      }
+
+      // Explicit actions (Favourite, Queue, Search) should inform the same
+      // AI-derived taste dimensions as qualified listening. Negative actions
+      // may reduce a tag's affinity, but they never enter a mean/variance
+      // calculation where a negative sample weight would be invalid.
+      const audio = audioFeaturesFromAttributes(snapshot.attributes);
+      for (const tag of audio.tags) {
+        audioTagScores.set(
+          tag,
+          (audioTagScores.get(tag) ?? 0) + contribution,
+        );
+      }
+      if (contribution > AFFINITY_EPSILON) {
+        if (audio.bpm !== undefined) {
+          bpmMetric.weight += contribution;
+          bpmMetric.sum += audio.bpm * contribution;
+          bpmMetric.squaredSum += audio.bpm * audio.bpm * contribution;
+        }
+        if (audio.energy !== undefined) {
+          energyMetric.weight += contribution;
+          energyMetric.sum += audio.energy * contribution;
+          energyMetric.squaredSum += audio.energy * audio.energy * contribution;
+        }
       }
     }
 
@@ -626,12 +777,31 @@ export class ListeningService {
       hiddenResourceIds.set(hidden.resourceType, ids);
     }
 
+    const bpm = audioMetricValue(bpmMetric, 12);
+    const energy = audioMetricValue(energyMetric, 0.12);
+    const audioSeedSongIds = new Set([
+      ...[...preferenceSongScores.entries()]
+        .filter(([, score]) => score > AFFINITY_EPSILON)
+        .sort(
+          (left, right) =>
+            right[1] - left[1] || left[0].localeCompare(right[0]),
+        )
+        .slice(0, MAX_PREFERENCE_AUDIO_SEEDS)
+        .map(([songId]) => songId),
+      ...listenedSongIds,
+    ]);
     return {
       genres: normalize(genreScores),
       artists: normalize(artistScores),
+      audioTags: normalize(audioTagScores),
+      preferredBpm: bpm.preferred,
+      bpmTolerance: bpm.tolerance,
+      preferredEnergy: energy.preferred,
+      energyTolerance: energy.tolerance,
       avgCompletionRate: totalPlays > 0 ? totalCompletions / totalPlays : 0,
       totalListenTimeSec: totalListenSec,
       listenedSongIds,
+      audioSeedSongIds,
       listenedAlbumIds,
       listenedAlbumNames,
       hiddenResourceIds,
@@ -767,21 +937,19 @@ export class ListeningService {
   async getTopAlbumsGlobal(
     days = 30,
     limit = 20,
-  ): Promise<
-    Array<{ albumId: string | null; albumName: string; totalPlays: bigint }>
-  > {
+  ): Promise<Array<{ albumId: string; albumName: string; totalPlays: bigint }>> {
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     return this.prisma.$queryRaw<
-      Array<{ albumId: string | null; albumName: string; totalPlays: bigint }>
+      Array<{ albumId: string; albumName: string; totalPlays: bigint }>
     >`
       SELECT
-        MAX(NULLIF("albumId", '')) AS "albumId",
+        "albumId",
         MAX("albumName") AS "albumName",
         SUM("playCount")::bigint AS "totalPlays"
       FROM user_listening_stats
       WHERE "lastPlayedAt" >= ${since}
-        AND ("albumId" != '' OR "albumName" != '')
-      GROUP BY COALESCE(NULLIF("albumId", ''), CONCAT('legacy:', "albumName"))
+        AND "albumId" != ''
+      GROUP BY "albumId"
       ORDER BY "totalPlays" DESC
       LIMIT ${limit}
     `;

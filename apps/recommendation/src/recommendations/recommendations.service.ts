@@ -22,6 +22,7 @@ import {
 } from '@musical/shared-proto';
 import {
   HERO_SHELF_PREVIEW_LIMIT,
+  HOME_SHELF_PREVIEW_FETCH_LIMIT,
   HOME_SHELF_PREVIEW_LIMIT,
   RECENTLY_PLAYED_CONTEXT_LIMIT,
 } from '@musical/shared-constants';
@@ -42,6 +43,8 @@ import {
   GENERATION_LEASE_LOST_MESSAGE,
   type GenerationLease,
 } from '../generation/generation-lease.types';
+import { systemPlaylistArtistPreview } from './system-playlist-artist-preview';
+import { systemPlaylistTrackIds } from './system-playlist-track-ids';
 
 const SUPPORTED_RESOURCE_TYPES = new Set([
   'albums',
@@ -62,7 +65,6 @@ const GLOBAL_SCOPE_KEY = 'GLOBAL';
 const GLOBAL_TIMEZONE = '*';
 const DEFAULT_DISPLAY_KIND = 'MusicCoverShelf';
 const INTERACTION_DEDUPE_WINDOW_MS = 30_000;
-const SYSTEM_DAILY_MIX_ID_PATTERN = /^daily-mix-[a-f0-9]{32}(?:-\d+)?$/;
 const MOOD_STATION_ID_PATTERN = /^mood-station-[a-f0-9]{32}-\d+$/;
 const SUPPORTED_DISPLAY_KINDS = new Set([
   'MusicCircleCoverShelf',
@@ -317,6 +319,24 @@ export class RecommendationsService {
     return { success: true };
   }
 
+  async getSystemPlaylistTracks(
+    userId: string,
+    playlistId: string,
+  ): Promise<string[]> {
+    const playlist = await this.prisma.generatedSystemPlaylist.findFirst({
+      where: { scopeKey: 'GLOBAL', playlistId },
+      select: { playlistKey: true },
+    });
+    if (!playlist || !userId) return [];
+
+    const tracks = await this.prisma.userSystemPlaylistTrack.findMany({
+      where: { userId, playlistKey: playlist.playlistKey },
+      orderBy: { sortOrder: 'asc' },
+      select: { songId: true },
+    });
+    return tracks.map((track) => track.songId);
+  }
+
   async getRecommendationQualityAnalytics(
     request: GetRecommendationQualityAnalyticsRequest,
   ): Promise<RecommendationQualityAnalyticsResponse> {
@@ -503,7 +523,7 @@ export class RecommendationsService {
                   // grow with shelf-detail size even though the client can
                   // render at most twelve cards. The section endpoint keeps
                   // the unbounded detail query for an explicit See All.
-                  take: HOME_SHELF_PREVIEW_LIMIT,
+                  take: HOME_SHELF_PREVIEW_FETCH_LIMIT,
                   include: { resource: true },
                 },
               },
@@ -546,7 +566,7 @@ export class RecommendationsService {
               include: {
                 items: {
                   orderBy: { sortOrder: 'asc' },
-                  take: HOME_SHELF_PREVIEW_LIMIT,
+                  take: HOME_SHELF_PREVIEW_FETCH_LIMIT,
                   include: { resource: true },
                 },
               },
@@ -576,9 +596,23 @@ export class RecommendationsService {
 
     // Home base là snapshot đã publish. Recently Played được lấy từ endpoint
     // section riêng để playback không làm thay đổi các shelf nền.
-    return request.userId
-      ? this.deduplicateHomePreviewResources(response)
-      : response;
+    // An empty user ID is used only by internal Global-page generation. Every
+    // browser request reaches this service with an authenticated user ID.
+    if (!request.userId) {
+      if (response.resources) {
+        await this.applySystemPlaylistDescriptions(response.resources);
+      }
+      return response;
+    }
+
+    const personalizedResponse = this.deduplicateHomePreviewResources(response);
+    if (personalizedResponse.resources) {
+      await this.applySystemPlaylistDescriptions(
+        personalizedResponse.resources,
+        request.userId,
+      );
+    }
+    return personalizedResponse;
   }
 
   private async homeResponseForPage(
@@ -617,12 +651,15 @@ export class RecommendationsService {
       const limit = isHeroShelf
         ? HERO_SHELF_PREVIEW_LIMIT
         : HOME_SHELF_PREVIEW_LIMIT;
+      const hasOverflow = section.items.length > limit;
 
       return {
         ...section,
         items: section.items.slice(0, limit),
-        // Hero shelves are a fixed ten-card rail, never a See All entry point.
-        hasSeeAll: isHeroShelf ? false : section.hasSeeAll,
+        // Hero shelves are a fixed ten-card rail. Other shelves expose the
+        // entry point only when the thirteenth fetched item proves detail
+        // content exists; do not trust an old persisted hasSeeAll flag here.
+        hasSeeAll: isHeroShelf ? false : hasOverflow,
       };
     });
   }
@@ -935,16 +972,21 @@ export class RecommendationsService {
             const presentationMode = this.presentationMode(
               attributes.presentationMode,
             );
-            const sourceAlbumAttributes = attributes.sourceAlbumId
-              ? {
-                  sourceAlbumId: attributes.sourceAlbumId,
-                  sourceAlbumName: attributes.sourceAlbumName,
-                  sourceAlbumUrl: attributes.sourceAlbumUrl,
-                  sourceAlbumArtworkUrl: attributes.sourceAlbumArtworkUrl,
-                  sourceAlbumArtworkBgColor:
-                    attributes.sourceAlbumArtworkBgColor,
-                }
-              : undefined;
+            const sectionExtraAttributes = {
+              ...(attributes.sourceAlbumId
+                ? {
+                    sourceAlbumId: attributes.sourceAlbumId,
+                    sourceAlbumName: attributes.sourceAlbumName,
+                    sourceAlbumUrl: attributes.sourceAlbumUrl,
+                    sourceAlbumArtworkUrl: attributes.sourceAlbumArtworkUrl,
+                    sourceAlbumArtworkBgColor:
+                      attributes.sourceAlbumArtworkBgColor,
+                  }
+                : {}),
+              ...(attributes.listenAgainAlbumId
+                ? { listenAgainAlbumId: attributes.listenAgainAlbumId }
+                : {}),
+            };
 
             const created = await tx.recommendationSection.create({
               data: {
@@ -970,8 +1012,8 @@ export class RecommendationsService {
                 // the standard section fields already have dedicated columns.
                 attributes: preserveImportedRaw
                   ? this.toInputJson(attributes)
-                  : sourceAlbumAttributes
-                    ? this.toInputJson(sourceAlbumAttributes)
+                  : Object.keys(sectionExtraAttributes).length > 0
+                    ? this.toInputJson(sectionExtraAttributes)
                     : Prisma.DbNull,
                 relationships: relationships
                   ? this.toInputJson(relationships)
@@ -1250,9 +1292,12 @@ export class RecommendationsService {
     const resourceLinks =
       page.resourceLinks as RecommendationPageResourceRecord[];
 
+    const resources = this.buildResources(sections, page.name, resourceLinks);
+    await this.applySystemPlaylistDescriptions(resources, request.userId);
+
     return {
       data: sections.map((section) => this.sectionRef(section, page.name)),
-      resources: this.buildResources(sections, page.name, resourceLinks),
+      resources,
       meta: {
         name: page.name,
         locale: page.locale,
@@ -1287,6 +1332,98 @@ export class RecommendationsService {
     }
 
     return resources;
+  }
+
+  private async applySystemPlaylistDescriptions(
+    resources: RecommendationResources,
+    userId = '',
+  ): Promise<void> {
+    const playlistIds = Object.keys(resources.playlists);
+    if (!playlistIds.length) return;
+    const systemPlaylists = await this.prisma.generatedSystemPlaylist.findMany({
+      where: { scopeKey: GLOBAL_SCOPE_KEY, playlistId: { in: playlistIds } },
+      select: { playlistId: true, playlistKey: true },
+    });
+    if (!systemPlaylists.length) return;
+
+    const descriptionByPlaylistKey = userId
+      ? await this.userSystemPlaylistDescriptionByKey(systemPlaylists, userId)
+      : await this.globalSystemPlaylistDescriptionByKey(systemPlaylists);
+    for (const playlist of systemPlaylists) {
+      const resource = resources.playlists[playlist.playlistId];
+      const description = descriptionByPlaylistKey.get(playlist.playlistKey);
+      if (!resource?.attributes) continue;
+      // A listener without sufficient signals has no private playlist cache.
+      // Their Home is the Global page, whose artist line must remain intact.
+      if (userId && description === undefined) continue;
+      const attributes = this.unwrapStruct(resource.attributes);
+      resource.attributes = {
+        ...this.wrapStruct({
+          ...attributes,
+          description: {
+            short: description ?? '',
+            standard: description ?? '',
+          },
+        }),
+      };
+    }
+  }
+
+
+  private async userSystemPlaylistDescriptionByKey(
+    playlists: Array<{ playlistId: string; playlistKey: string }>,
+    userId: string,
+  ): Promise<Map<string, string>> {
+    const metadata = await this.prisma.userSystemPlaylistMetadata.findMany({
+      where: {
+        userId,
+        playlistKey: { in: playlists.map((playlist) => playlist.playlistKey) },
+      },
+      select: { playlistKey: true, shortDescription: true },
+    });
+    return new Map(
+      metadata.map((item) => [item.playlistKey, item.shortDescription]),
+    );
+  }
+
+  private async globalSystemPlaylistDescriptionByKey(
+    playlists: Array<{ playlistId: string; playlistKey: string }>,
+  ): Promise<Map<string, string>> {
+    const snapshots = await this.prisma.recommendationResourceSnapshot.findMany(
+      {
+        where: {
+          resourceType: 'playlists',
+          resourceId: { in: playlists.map((playlist) => playlist.playlistId) },
+        },
+        select: { resourceId: true, relationships: true },
+      },
+    );
+    const trackIdsByPlaylistId = new Map(
+      snapshots.map((snapshot) => [
+        snapshot.resourceId,
+        systemPlaylistTrackIds(snapshot.relationships),
+      ]),
+    );
+    const trackIds = [...new Set([...trackIdsByPlaylistId.values()].flat())];
+    if (!trackIds.length) return new Map();
+
+    const tracks = await this.prisma.recommendationResourceSnapshot.findMany({
+      where: { resourceType: 'songs', resourceId: { in: trackIds } },
+      select: { resourceId: true, artistName: true },
+    });
+    const artistByTrackId = new Map(
+      tracks.map((track) => [track.resourceId, track.artistName]),
+    );
+    return new Map(
+      playlists.map((playlist) => [
+        playlist.playlistKey,
+        systemPlaylistArtistPreview(
+          (trackIdsByPlaylistId.get(playlist.playlistId) ?? []).map(
+            (trackId) => artistByTrackId.get(trackId) ?? '',
+          ),
+        ),
+      ]),
+    );
   }
 
   private async hydrateReferencedArtists(
@@ -1388,10 +1525,14 @@ export class RecommendationsService {
         ...section,
         attributes: {
           ...section.attributes!,
-          // A Home shelf is selectable only when it has entries outside the
-          // preview. Do not retain a stale author-provided flag: it made the
-          // arrow appear for shelves that already fit on Home.
-          hasSeeAll: sectionResources.size > preview.length,
+          // `limitHomePreviewSections` has already looked one item beyond
+          // Home's twelve-card preview. Preserve that authoritative sentinel
+          // result: this late dedupe step receives only the compact preview,
+          // so recalculating from it would turn `12 > 12` into false and hide
+          // a valid See All arrow for every overflowing shelf.
+          hasSeeAll:
+            section.attributes?.hasSeeAll === true ||
+            sectionResources.size > preview.length,
         },
         relationships: {
           ...section.relationships,
@@ -1644,6 +1785,7 @@ export class RecommendationsService {
         sourceAlbumUrl: '',
         sourceAlbumArtworkUrl: '',
         sourceAlbumArtworkBgColor: '',
+        listenAgainAlbumId: '',
       },
       relationships: {
         contents: {
@@ -1722,6 +1864,9 @@ export class RecommendationsService {
         ),
         sourceAlbumArtworkBgColor: this.stringValue(
           storedAttributes?.sourceAlbumArtworkBgColor,
+        ),
+        listenAgainAlbumId: this.stringValue(
+          storedAttributes?.listenAgainAlbumId,
         ),
       },
       relationships: {
@@ -1843,6 +1988,7 @@ export class RecommendationsService {
     name: string,
     resource: RecommendationItemRecord['resource'],
   ): Record<string, unknown> {
+    const snapshotAttributes = this.jsonObject(resource?.attributes);
     const common = {
       name,
       url: resource?.externalUrl || href,
@@ -1907,8 +2053,12 @@ export class RecommendationsService {
           requiresSubscription: resource?.requiresSubscription ?? false,
           stationArtworkReady:
             resource?.stationKind === 'artist-context'
-              ? this.jsonObject(resource.attributes)?.stationArtworkReady ===
-                true
+              ? snapshotAttributes?.stationArtworkReady === true
+              : undefined,
+          primaryArtistName:
+            resource?.stationKind === 'artist-context' &&
+            typeof snapshotAttributes?.primaryArtistName === 'string'
+              ? snapshotAttributes.primaryArtistName
               : undefined,
         });
       case 'editorial-items':
@@ -2504,13 +2654,7 @@ export class RecommendationsService {
       isComplete: this.booleanValue(attributes.isComplete),
       isStudioMastered: this.booleanValue(attributes.isStudioMastered),
       isPrerelease: this.booleanValue(attributes.isPrerelease),
-      // Catalog owns release classification. The fallback accepts an old
-      // imported payload during a rolling deployment, without persisting a
-      // second boolean source of truth.
-      releaseType: this.releaseTypeValue(
-        attributes.releaseType,
-        attributes.isSingle,
-      ),
+      releaseType: this.releaseTypeValue(attributes.releaseType),
       playlistType: this.stringValue(attributes.playlistType),
       editorialPlaylistKind: this.stringValue(attributes.editorialPlaylistKind),
       hasCollaboration: this.booleanValue(attributes.hasCollaboration),
@@ -3284,12 +3428,12 @@ export class RecommendationsService {
     }
   }
 
-  private releaseTypeValue(value: unknown, legacyIsSingle: unknown): string {
+  private releaseTypeValue(value: unknown): string {
     if (value === 'album' || value === 'ep' || value === 'single') {
       return value;
     }
 
-    return this.booleanValue(legacyIsSingle) ? 'single' : 'album';
+    return 'album';
   }
 
   private resourceKey(resourceType: string, resourceId: string): string {
@@ -3297,10 +3441,7 @@ export class RecommendationsService {
   }
 
   private isSystemGeneratedRef(ref: { type: string; id: string }): boolean {
-    return (
-      (ref.type === 'playlists' && SYSTEM_DAILY_MIX_ID_PATTERN.test(ref.id)) ||
-      (ref.type === 'stations' && MOOD_STATION_ID_PATTERN.test(ref.id))
-    );
+    return ref.type === 'stations' && MOOD_STATION_ID_PATTERN.test(ref.id);
   }
 
   private async assertGenerationLease(

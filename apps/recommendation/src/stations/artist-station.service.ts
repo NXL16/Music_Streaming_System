@@ -15,6 +15,16 @@ import { firstValueFrom } from 'rxjs';
 import { PrismaService } from '../database/prisma.service';
 import { Prisma } from '../generated/prisma/client';
 import { CatalogSynchronizationService } from '../recommendations/catalog-synchronization.service';
+import {
+  ListeningService,
+  type TasteProfile,
+} from '../listening/listening.service';
+import { isStationCandidateEligible } from './station-personalization';
+import {
+  StationTrackCandidate,
+  StationTrackSelectionService,
+  STATION_TRACK_SELECTION_VERSION,
+} from './station-track-selection.service';
 
 const TRACK_LIMIT = 30;
 const REFILL_LIMIT = 20;
@@ -32,7 +42,9 @@ export class ArtistStationService implements OnModuleInit {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly listeningService: ListeningService,
     private readonly catalogSynchronizationService: CatalogSynchronizationService,
+    private readonly stationTrackSelection: StationTrackSelectionService,
     @Inject('ASSET_SERVICE') private readonly grpcClient: ClientGrpc,
     private readonly config: ConfigService,
   ) {}
@@ -108,6 +120,8 @@ export class ArtistStationService implements OnModuleInit {
     const attributes = {
       name,
       kind: artistOnly ? 'artist-play-context' : 'artist-context',
+      primaryArtistName: artist.name || '',
+      trackCount: trackIds.length,
       stationArtworkReady: Boolean(boundArtwork),
       artwork: {
         url: artworkUrl,
@@ -128,6 +142,7 @@ export class ArtistStationService implements OnModuleInit {
       artworkHeight: boundArtwork?.height || artist.artworkHeight || 1080,
       shortDescription: '',
       standardDescription: '',
+      trackCount: trackIds.length,
       stationKind: artistOnly ? 'artist-play-context' : 'artist-context',
       attributes: attributes as Prisma.InputJsonObject,
       relationships: {
@@ -149,6 +164,7 @@ export class ArtistStationService implements OnModuleInit {
           featuredArtistIds: featured.ids,
           artworkAssetId: assetId,
           artworkVersion: assetId ? artworkVersion : '',
+          trackSelectionVersion: STATION_TRACK_SELECTION_VERSION,
           artistOnly,
         },
       },
@@ -252,6 +268,7 @@ export class ArtistStationService implements OnModuleInit {
       this.object(this.object(station.raw).artistStation).seedArtistId,
     );
     if (!seedArtistId) this.notFound('ARTIST_STATION_SEED_NOT_FOUND');
+    const profile = await this.listeningService.getUserTasteProfile(userId);
     return {
       trackIds: await this.trackIds(
         seedArtistId,
@@ -262,7 +279,10 @@ export class ArtistStationService implements OnModuleInit {
             .slice(0, MAX_EXCLUDED),
         ),
         Math.min(REFILL_LIMIT, Math.max(1, Math.floor(limit) || REFILL_LIMIT)),
-        this.boolean(this.object(this.object(station.raw).artistStation).artistOnly),
+        this.boolean(
+          this.object(this.object(station.raw).artistStation).artistOnly,
+        ),
+        profile,
       ),
     };
   }
@@ -294,13 +314,23 @@ export class ArtistStationService implements OnModuleInit {
     artistId: string,
     artistOnly = false,
   ): Promise<string[]> {
-    let trackIds = await this.trackIds(artistId, new Set(), TRACK_LIMIT, artistOnly);
+    let trackIds = await this.trackIds(
+      artistId,
+      new Set(),
+      TRACK_LIMIT,
+      artistOnly,
+    );
     if (trackIds.length) return trackIds;
 
     // The Song catalog can be newer than Recommendation's denormalized read
     // model. Synchronize only on this stale-read miss, never on every click.
     await this.catalogSynchronizationService.ensureFreshCatalog();
-    trackIds = await this.trackIds(artistId, new Set(), TRACK_LIMIT, artistOnly);
+    trackIds = await this.trackIds(
+      artistId,
+      new Set(),
+      TRACK_LIMIT,
+      artistOnly,
+    );
     if (!trackIds.length) {
       this.notFound('ARTIST_STATION_SEED_TRACK_NOT_FOUND');
     }
@@ -312,6 +342,7 @@ export class ArtistStationService implements OnModuleInit {
     excluded = new Set<string>(),
     limit = TRACK_LIMIT,
     artistOnly = false,
+    profile?: TasteProfile,
   ): Promise<string[]> {
     const artist = await this.artist(artistId);
     const ownCandidates =
@@ -322,144 +353,106 @@ export class ArtistStationService implements OnModuleInit {
         orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
         take: ARTIST_TRACK_CANDIDATES,
       });
+    const ownSongIds = ownCandidates
+      .filter(
+        (song) =>
+          this.hasRelationship(song.relationships, 'artists', artistId) &&
+          isStationCandidateEligible(song, profile),
+      )
+      .map((song) => song.resourceId);
     if (artistOnly) {
-      return ownCandidates
-        .filter(
-          (song) =>
-            !excluded.has(song.resourceId) &&
-            this.hasRelationship(song.relationships, 'artists', artistId),
-        )
-        .slice(0, limit)
-        .map((song) => song.resourceId);
+      return ownSongIds
+        .filter((songId) => !excluded.has(songId))
+        .slice(0, limit);
     }
-    const seedSong = ownCandidates.find(
-      (song) =>
-        !excluded.has(song.resourceId) &&
-        this.hasRelationship(song.relationships, 'artists', artistId),
-    );
+    const seedSongId = ownSongIds.find((songId) => !excluded.has(songId));
     // Never start an Artist Station with a same-genre fallback: its first
     // audible track must belong to the artist selected in the menu.
-    if (!seedSong && excluded.size === 0) return [];
-    const selected = seedSong ? [seedSong.resourceId] : [];
-    const used = new Set([...excluded, ...selected]);
-    const genreCandidates = artist.genreNames.length
-      ? this.rankCandidates(
-          await this.prisma.recommendationResourceSnapshot.findMany({
-            where: {
-              resourceType: 'songs',
-              resourceId: { notIn: [...used] },
-              genreNames: { hasSome: artist.genreNames },
-            },
-            select: { resourceId: true, relationships: true },
-            orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
-            take: ARTIST_TRACK_CANDIDATES,
-          }),
-          artistId,
-        )
-      : [];
-    const genreSelection = await this.selectStationCandidates(
-      genreCandidates,
-      artistId,
-      limit - selected.length,
-    );
-    selected.push(...genreSelection.trackIds);
-    if (selected.length >= limit) return selected;
-    const fallback = this.rankCandidates(
-      await this.prisma.recommendationResourceSnapshot.findMany({
-        where: {
-          resourceType: 'songs',
-          resourceId: { notIn: [...excluded, ...selected] },
-        },
-        select: { resourceId: true, relationships: true },
-        orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
-        take: ARTIST_TRACK_CANDIDATES,
-      }),
-      artistId,
-    );
-    const fallbackSelection = await this.selectStationCandidates(
-      fallback,
-      artistId,
-      limit - selected.length,
-      genreSelection.featuredArtistIds,
-    );
-    return [...selected, ...fallbackSelection.trackIds];
-  }
+    if (!seedSongId && excluded.size === 0) return [];
 
-  private async selectStationCandidates(
-    candidates: Array<{
-      resourceId: string;
-      relationships: Prisma.JsonValue | null;
-    }>,
-    seedArtistId: string,
-    limit: number,
-    existingFeaturedArtistIds = new Set<string>(),
-  ): Promise<{ trackIds: string[]; featuredArtistIds: Set<string> }> {
-    const selected: string[] = [];
-    const featured = new Set(existingFeaturedArtistIds);
-    const eligibleFeaturedArtistIds = await this.artistIdsWithArtwork(
-      candidates.flatMap((song) =>
-        this.relationshipIds(song.relationships, 'artists'),
-      ),
-    );
-    // Give two distinct artists that can actually be rendered a place in the
-    // tracklist first. The later ranking still selects the two most frequent.
-    for (const song of candidates) {
-      if (featured.size >= 2) break;
-      const artists = this.relationshipIds(song.relationships, 'artists');
-      const artist = artists.find(
-        (id) =>
-          id !== seedArtistId &&
-          eligibleFeaturedArtistIds.has(id) &&
-          !featured.has(id),
-      );
-      if (!artist) continue;
-      featured.add(artist);
-      selected.push(song.resourceId);
-      if (featured.size >= 2 || selected.length === limit) break;
-    }
-    for (const song of candidates) {
-      if (selected.length === limit) break;
-      if (!selected.includes(song.resourceId)) selected.push(song.resourceId);
-    }
-    return { trackIds: selected, featuredArtistIds: featured };
-  }
-
-  private rankCandidates<T extends { resourceId: string }>(
-    candidates: T[],
-    seedArtistId: string,
-  ): T[] {
-    // The candidate pool is still genre-filtered. This stable seed-specific
-    // ordering prevents every artist in that genre from receiving the same
-    // two secondary portraits while keeping reopens reproducible.
-    return candidates
-      .map((candidate) => ({
-        candidate,
-        rank: this.candidateRank(seedArtistId, candidate.resourceId),
-      }))
-      .sort((left, right) => left.rank.localeCompare(right.rank))
-      .map(({ candidate }) => candidate);
-  }
-
-  private candidateRank(seedArtistId: string, songId: string): string {
-    return createHash('sha256')
-      .update(`${seedArtistId}:${songId}`)
-      .digest('hex');
-  }
-
-  private async artistIdsWithArtwork(
-    artistIds: string[],
-  ): Promise<Set<string>> {
-    const uniqueIds = [...new Set(artistIds.filter(Boolean))];
-    if (!uniqueIds.length) return new Set();
-    const artists = await this.prisma.recommendationResourceSnapshot.findMany({
+    const catalog = await this.prisma.recommendationResourceSnapshot.findMany({
       where: {
-        resourceType: 'artists',
-        resourceId: { in: uniqueIds },
-        artworkUrl: { not: '' },
+        resourceType: 'songs',
+        resourceId: { notIn: [...excluded] },
       },
-      select: { resourceId: true },
+      select: { resourceId: true, genreNames: true, relationships: true },
+      orderBy: [{ releaseDate: 'desc' }, { resourceId: 'asc' }],
+      take: ARTIST_TRACK_CANDIDATES,
     });
-    return new Set(artists.map((artist) => artist.resourceId));
+    const candidates: StationTrackCandidate[] = catalog
+      .filter((song) => isStationCandidateEligible(song, profile))
+      .map((song) => ({
+        id: song.resourceId,
+        artistIds: this.relationshipIds(song.relationships, 'artists'),
+      }));
+    const genreSet = new Set(artist.genreNames);
+    const sameGenre = catalog
+      .filter(
+        (song) =>
+          isStationCandidateEligible(song, profile) &&
+          song.genreNames.some((genre) => genreSet.has(genre)),
+      )
+      .map((song) => ({
+        id: song.resourceId,
+        artistIds: this.relationshipIds(song.relationships, 'artists'),
+      }));
+    const audioCandidates = await this.audioCandidates(
+      ownSongIds,
+      excluded,
+      profile,
+    );
+    const seedSong = seedSongId
+      ? ownCandidates.find((song) => song.resourceId === seedSongId)
+      : undefined;
+    return this.stationTrackSelection.select({
+      // Several tracks from the seed artist make an Artist Station represent
+      // the artist's sound instead of one arbitrary recording.
+      initialTrackIds: seedSongId ? [seedSongId] : [],
+      initialCandidates: seedSong
+        ? [
+            {
+              id: seedSong.resourceId,
+              artistIds: this.relationshipIds(
+                seedSong.relationships,
+                'artists',
+              ),
+            },
+          ]
+        : [],
+      candidateTiers: [audioCandidates, sameGenre, candidates],
+      excludedSongIds: excluded,
+      limit,
+    });
+  }
+
+  private async audioCandidates(
+    seedSongIds: string[],
+    excludedSongIds: ReadonlySet<string>,
+    profile?: TasteProfile,
+  ): Promise<StationTrackCandidate[]> {
+    const ids = await this.stationTrackSelection.audioCandidateIds(
+      seedSongIds.slice(0, 12),
+    );
+    if (!ids.length) return [];
+    const songs = await this.prisma.recommendationResourceSnapshot.findMany({
+      where: {
+        resourceType: 'songs',
+        resourceId: { in: ids.filter((id) => !excludedSongIds.has(id)) },
+      },
+      select: { resourceId: true, relationships: true },
+    });
+    const byId = new Map(songs.map((song) => [song.resourceId, song]));
+    return ids.flatMap((id) => {
+      const song = byId.get(id);
+      return song && isStationCandidateEligible(song, profile)
+        ? [
+            {
+              id,
+              artistIds: this.relationshipIds(song.relationships, 'artists'),
+            },
+          ]
+        : [];
+    });
   }
 
   private async featuredArtists(trackIds: string[], seedArtistId: string) {

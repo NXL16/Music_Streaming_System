@@ -17,6 +17,7 @@ import type {
   GetRecommendationPageForAdminRequest,
   PublishRecommendationPageRequest,
   ReplaceHomeRecommendationsRequest,
+  GetHomeRecommendationsResponse,
   SongStationResponse,
   ArtistStationResponse,
 } from '@musical/shared-proto';
@@ -36,6 +37,7 @@ import { Permissions } from '../common/decorators/permissions.decorator';
 import { RecommendationsService } from './recommendations.service';
 import { SongStationArtworkService } from './song-station-artwork.service';
 import { ArtistStationArtworkService } from './artist-station-artwork.service';
+import { AuthService } from '../auth/auth.service';
 import { PREFERENCE_SIGNAL_WEIGHT } from '@musical/shared-constants';
 
 function normalizePageScope(value: unknown): RecommendationPageScope {
@@ -55,6 +57,35 @@ function normalizePageScope(value: unknown): RecommendationPageScope {
     default:
       throw new BadRequestException('scope must be GLOBAL or USER');
   }
+}
+
+function applyPersonalStationLabel(
+  response: GetHomeRecommendationsResponse,
+  displayName: string,
+): GetHomeRecommendationsResponse {
+  const listenerName = displayName.trim().slice(0, 80);
+  if (!listenerName || !response.resources?.stations) return response;
+
+  const stations = Object.fromEntries(
+    Object.entries(response.resources.stations).map(([id, station]) => {
+      const attributes = station.attributes;
+      if (attributes?.kind !== 'personalized-user') return [id, station];
+      const title = `${listenerName}'s Station`;
+      const artworkValue: unknown = attributes.artwork;
+      const artwork =
+        artworkValue && typeof artworkValue === 'object'
+          ? { ...artworkValue, alt: title }
+          : artworkValue;
+      return [
+        id,
+        { ...station, attributes: { ...attributes, name: title, artwork } },
+      ];
+    }),
+  );
+  return {
+    ...response,
+    resources: { ...response.resources, stations },
+  };
 }
 
 function publicSongStationResponse(
@@ -175,10 +206,11 @@ export class RecommendationsController {
     private readonly recommendationsService: RecommendationsService,
     private readonly songStationArtworkService: SongStationArtworkService,
     private readonly artistStationArtworkService: ArtistStationArtworkService,
+    private readonly authService: AuthService,
   ) {}
 
   @Get()
-  getHomeRecommendations(
+  async getHomeRecommendations(
     @Req() req: Request,
     @Query('name') name?: string,
     @Query('l') locale?: string,
@@ -187,13 +219,17 @@ export class RecommendationsController {
   ) {
     const user = req.user as JwtUser;
 
-    return this.recommendationsService.getHomeRecommendations({
-      userId: user.userId,
-      name: name || 'listen-now',
-      locale: locale || 'en-GB',
-      timezone: timezone || '+07:00',
-      platform: platform || 'web',
-    });
+    const [response, profile] = await Promise.all([
+      this.recommendationsService.getHomeRecommendations({
+        userId: user.userId,
+        name: name || 'listen-now',
+        locale: locale || 'en-GB',
+        timezone: timezone || '+07:00',
+        platform: platform || 'web',
+      }),
+      this.authService.getProfile({ userId: user.userId }),
+    ]);
+    return applyPersonalStationLabel(response, profile.displayName);
   }
 
   @Get('suggest-less')
@@ -229,8 +265,20 @@ export class RecommendationsController {
     );
   }
 
+  @Get('system-playlists/:playlistId/tracks')
+  getSystemPlaylistTracks(
+    @Req() req: Request,
+    @Param('playlistId') playlistId: string,
+  ) {
+    const user = req.user as JwtUser;
+    return this.recommendationsService.getSystemPlaylistTracks({
+      userId: user.userId,
+      playlistId,
+    });
+  }
+
   @Get(':id')
-  getRecommendationSection(
+  async getRecommendationSection(
     @Req() req: Request,
     @Param('id') sectionId: string,
     @Query('name') name?: string,
@@ -247,11 +295,13 @@ export class RecommendationsController {
       timezone: timezone || '+07:00',
     };
 
-    if (action === 'refresh') {
-      return this.recommendationsService.refreshRecommendationSection(request);
-    }
-
-    return this.recommendationsService.getRecommendationSection(request);
+    const [response, profile] = await Promise.all([
+      action === 'refresh'
+        ? this.recommendationsService.refreshRecommendationSection(request)
+        : this.recommendationsService.getRecommendationSection(request),
+      this.authService.getProfile({ userId: user.userId }),
+    ]);
+    return applyPersonalStationLabel(response, profile.displayName);
   }
 
   @Post('listening-events')
@@ -763,16 +813,80 @@ export class RecommendationAdminController {
   bindSystemStationArtwork(
     @Req() req: Request,
     @Param('stationKey') stationKey: string,
-    @Body() body: { assetId?: string },
+    @Body() body: { coverAssetId?: string; heroVideoAssetId?: string },
   ) {
     const actor = req.user as JwtUser;
-    if (!body?.assetId?.trim()) {
-      throw new BadRequestException('assetId is required');
+    if (!body?.coverAssetId?.trim() || !body?.heroVideoAssetId?.trim()) {
+      throw new BadRequestException(
+        'coverAssetId and heroVideoAssetId are required',
+      );
     }
     return this.recommendationsService.upsertSystemStationArtwork({
       stationKey,
-      assetId: body.assetId.trim(),
+      coverAssetId: body.coverAssetId.trim(),
+      heroVideoAssetId: body.heroVideoAssetId.trim(),
       actorUserId: actor.userId,
+    });
+  }
+
+  @Put('system-playlist-artwork/:playlistKey')
+  bindSystemPlaylistArtwork(
+    @Req() req: Request,
+    @Param('playlistKey') playlistKey: string,
+    @Body()
+    body: {
+      coverAssetId?: string;
+      homeCardAssetId?: string;
+      detailSquareVideoAssetId?: string;
+      detailMobileVideoAssetId?: string;
+      homeHeroVideoAssetId?: string;
+    },
+  ) {
+    const videoIds = [
+      body?.detailSquareVideoAssetId,
+      body?.detailMobileVideoAssetId,
+      body?.homeHeroVideoAssetId,
+    ];
+    const hasAnyVideo = videoIds.some((id) => id?.trim());
+    if (hasAnyVideo && !videoIds.every((id) => id?.trim())) {
+      throw new BadRequestException(
+        'All three system playlist video asset IDs are required',
+      );
+    }
+    if (
+      !hasAnyVideo &&
+      (!body?.coverAssetId?.trim() || !body?.homeCardAssetId?.trim())
+    ) {
+      throw new BadRequestException(
+        'System playlist video assets are required',
+      );
+    }
+
+    return this.recommendationsService.upsertSystemPlaylistArtwork({
+      playlistKey,
+      coverAssetId: body.coverAssetId?.trim() ?? '',
+      homeCardAssetId: body.homeCardAssetId?.trim() ?? '',
+      detailSquareVideoAssetId: body.detailSquareVideoAssetId?.trim() ?? '',
+      detailMobileVideoAssetId: body.detailMobileVideoAssetId?.trim() ?? '',
+      homeHeroVideoAssetId: body.homeHeroVideoAssetId?.trim() ?? '',
+      actorUserId: (req.user as JwtUser).userId,
+    });
+  }
+
+  @Put('system-playlist-artwork/:playlistKey/color')
+  setSystemPlaylistArtworkColor(
+    @Req() req: Request,
+    @Param('playlistKey') playlistKey: string,
+    @Body() body: { bgColor?: string },
+  ) {
+    if (!body?.bgColor?.trim()) {
+      throw new BadRequestException('bgColor is required');
+    }
+
+    return this.recommendationsService.setSystemPlaylistArtworkColor({
+      playlistKey,
+      bgColor: body.bgColor.trim(),
+      actorUserId: (req.user as JwtUser).userId,
     });
   }
 }

@@ -14,12 +14,14 @@ import { RecommendationsService } from './recommendations.service';
 import { AssetsModule } from '../assets/assets.module';
 import { SongStationArtworkService } from './song-station-artwork.service';
 import { ArtistStationArtworkService } from './artist-station-artwork.service';
+import { AuthModule } from '../auth/auth.module';
 
 const RECOMMENDATION_GRPC_MAX_MESSAGE_LENGTH = 16 * 1024 * 1024;
 
 @Module({
   imports: [
     ConfigModule,
+    AuthModule,
     AssetsModule,
     ClientsModule.registerAsync([
       {

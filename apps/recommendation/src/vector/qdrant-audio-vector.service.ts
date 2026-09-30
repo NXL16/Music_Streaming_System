@@ -123,6 +123,28 @@ export class QdrantAudioVectorService {
       throw await this.requestError('upsert audio vectors', response);
   }
 
+  /** Removes vectors absent from the authoritative Song analysis feed. */
+  async pruneExcept(authoritativeSongIds: ReadonlySet<string>): Promise<number> {
+    if (!this.isEnabled()) return 0;
+    await this.ensureCollection();
+    const stalePointIds = (await this.pointIds()).filter(
+      (songId) => !authoritativeSongIds.has(songId),
+    );
+    if (stalePointIds.length === 0) return 0;
+
+    const response = await fetch(
+      this.url(`/collections/${this.collectionName}/points/delete?wait=true`),
+      {
+        method: 'POST',
+        headers: this.headers(true),
+        body: JSON.stringify({ points: stalePointIds }),
+      },
+    );
+    if (!response.ok)
+      throw await this.requestError('delete stale audio vectors', response);
+    return stalePointIds.length;
+  }
+
   async findNeighboursBySongIds(
     seedSongIds: readonly string[],
     limitPerSeed: number,
@@ -219,6 +241,39 @@ export class QdrantAudioVectorService {
       vectors.set(point.id, numericVector);
     }
     return vectors;
+  }
+
+  private async pointIds(): Promise<string[]> {
+    const ids: string[] = [];
+    let offset: unknown;
+    do {
+      const response = await fetch(
+        this.url(`/collections/${this.collectionName}/points/scroll`),
+        {
+          method: 'POST',
+          headers: this.headers(true),
+          body: JSON.stringify({
+            limit: 256,
+            with_payload: false,
+            with_vector: false,
+            ...(offset === undefined ? {} : { offset }),
+          }),
+        },
+      );
+      if (!response.ok)
+        throw await this.requestError('list audio vector points', response);
+      const body = (await response.json()) as {
+        result?: {
+          points?: Array<{ id?: unknown }>;
+          next_page_offset?: unknown;
+        };
+      };
+      for (const point of body.result?.points ?? []) {
+        if (typeof point.id === 'string') ids.push(point.id);
+      }
+      offset = body.result?.next_page_offset;
+    } while (offset !== undefined && offset !== null);
+    return ids;
   }
 
   private async ensurePayloadIndexes(): Promise<void> {
