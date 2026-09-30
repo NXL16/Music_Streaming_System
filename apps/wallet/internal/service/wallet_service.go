@@ -308,6 +308,35 @@ func calculateCoinAmount(amountVnd, rateVnd, rateCoin int64) (int64, error) {
 	return coinAmount, nil
 }
 
+// coinAmountForWithdrawal rounds up so a withdrawal can never pay out more VND
+// than the Coin value debited from the user's wallet.
+func (s *WalletService) coinAmountForWithdrawal(ctx context.Context, amountVnd int64) (int64, error) {
+	var rateVnd, rateCoin int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT amount_vnd, coin_amount FROM coin_rates
+		WHERE is_active = true AND effective_at <= NOW()
+		ORDER BY effective_at DESC LIMIT 1`).Scan(&rateVnd, &rateCoin)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrActiveCoinRateNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("fetch active exchange rate: %w", err)
+	}
+	return calculateWithdrawalCoinAmount(amountVnd, rateVnd, rateCoin)
+}
+
+func calculateWithdrawalCoinAmount(amountVnd, rateVnd, rateCoin int64) (int64, error) {
+	if rateVnd <= 0 || rateCoin <= 0 || amountVnd <= 0 || amountVnd > math.MaxInt64/rateCoin {
+		return 0, ErrInvalidActiveCoinRate
+	}
+	product := amountVnd * rateCoin
+	coinAmount := product / rateVnd
+	if product%rateVnd != 0 {
+		coinAmount++
+	}
+	return coinAmount, nil
+}
+
 func (s *WalletService) createPendingDepositOrder(ctx context.Context, req *walletpb.DepositOrderRequest, provider string) (*domain.BankPaymentOrder, error) {
 	wallet, err := s.repo.GetByUserIdTx(ctx, nil, req.UserId)
 	if err != nil {
@@ -638,6 +667,274 @@ func (s *WalletService) ProcessNFBankDepositWebhook(ctx context.Context, orderID
 	return s.processDepositWebhook(ctx, orderID, amountVnd, resultCode, "NFBANK_ORDER", "NF-Bank")
 }
 
+type nfBankVerifyAccountRequest struct {
+	PartnerCode   string `json:"partnerCode"`
+	AccessKey     string `json:"accessKey"`
+	RequestID     string `json:"requestId"`
+	AccountNumber string `json:"accountNumber"`
+	Signature     string `json:"signature"`
+}
+
+type nfBankVerifyAccountResponse struct {
+	ResultCode  int    `json:"resultCode"`
+	Message     string `json:"message"`
+	AccountName string `json:"accountName"`
+}
+
+type nfBankPayoutRequest struct {
+	PartnerCode   string `json:"partnerCode"`
+	AccessKey     string `json:"accessKey"`
+	RequestID     string `json:"requestId"`
+	OrderID       string `json:"orderId"`
+	Amount        int64  `json:"amount"`
+	AccountNumber string `json:"accountNumber"`
+	OrderInfo     string `json:"orderInfo"`
+	Signature     string `json:"signature"`
+}
+
+type nfBankPayoutResponse struct {
+	ResultCode int    `json:"resultCode"`
+	Message    string `json:"message"`
+	TransID    string `json:"transId"`
+}
+
+func (s *WalletService) nfBankEnabled() error {
+	if s.cfg.NFBankPartnerCode == "" || s.cfg.NFBankAccessKey == "" || s.cfg.NFBankSecretKey == "" || s.cfg.NFBankAPIURL == "" {
+		return errors.New("NF-Bank payment gateway is not fully configured")
+	}
+	return nil
+}
+
+func (s *WalletService) nfBankSignature(raw string) string {
+	h := hmac.New(sha256.New, []byte(s.cfg.NFBankSecretKey))
+	h.Write([]byte(raw))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func validNFBankAccountNumber(accountNumber string) bool {
+	if len(accountNumber) < 6 || len(accountNumber) > 30 {
+		return false
+	}
+	for _, char := range accountNumber {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// VerifyNFBankAccount is deliberately server-side: neither access nor secret
+// keys are ever exposed to the browser while a customer enters an account.
+func (s *WalletService) VerifyNFBankAccount(ctx context.Context, req *walletpb.VerifyNFBankAccountRequest) (*walletpb.VerifyNFBankAccountResponse, error) {
+	if err := s.nfBankEnabled(); err != nil {
+		return nil, err
+	}
+	if !validNFBankAccountNumber(req.AccountNumber) {
+		return nil, errors.New("invalid NF-Bank account number")
+	}
+	requestID, err := newPaymentOrderCode("NFVERIFY")
+	if err != nil {
+		return nil, err
+	}
+	raw := fmt.Sprintf("accessKey=%s&accountNumber=%s&partnerCode=%s&requestId=%s", s.cfg.NFBankAccessKey, req.AccountNumber, s.cfg.NFBankPartnerCode, requestID)
+	body := nfBankVerifyAccountRequest{PartnerCode: s.cfg.NFBankPartnerCode, AccessKey: s.cfg.NFBankAccessKey, RequestID: requestID, AccountNumber: req.AccountNumber, Signature: s.nfBankSignature(raw)}
+	var response nfBankVerifyAccountResponse
+	if err := s.postJSON(ctx, strings.TrimRight(s.cfg.NFBankAPIURL, "/")+"/payments/verify-account", body, &response); err != nil {
+		return nil, fmt.Errorf("NF-Bank verify account request: %w", err)
+	}
+	if response.ResultCode != 0 || strings.TrimSpace(response.AccountName) == "" {
+		return nil, fmt.Errorf("NF-Bank could not verify account: %s", response.Message)
+	}
+	return &walletpb.VerifyNFBankAccountResponse{AccountName: response.AccountName}, nil
+}
+
+func (s *WalletService) CreateNFBankWithdrawal(ctx context.Context, req *walletpb.NFBankWithdrawalRequest) (*walletpb.NFBankWithdrawalResponse, error) {
+	if err := s.nfBankEnabled(); err != nil {
+		return nil, err
+	}
+	if req.UserId == "" || req.AmountVnd <= 0 || req.IdempotencyKey == "" {
+		return nil, errors.New("invalid NF-Bank withdrawal request")
+	}
+
+	accountNumber := req.AccountNumber
+	if req.BankAccountId != "" {
+		bankAcc, err := s.repo.GetBankAccountByID(ctx, req.BankAccountId, req.UserId)
+		if err != nil {
+			return nil, fmt.Errorf("không tìm thấy tài khoản ngân hàng liên kết: %w", err)
+		}
+		accountNumber = bankAcc.AccountNumber
+	} else if accountNumber == "" {
+		accounts, err := s.repo.GetUserBankAccounts(ctx, req.UserId)
+		if err != nil || len(accounts) == 0 {
+			return nil, errors.New("vui lòng liên kết tài khoản ngân hàng trước khi rút tiền")
+		}
+		accountNumber = accounts[0].AccountNumber
+	}
+
+	if !validNFBankAccountNumber(accountNumber) {
+		return nil, errors.New("số tài khoản NF Bank không hợp lệ")
+	}
+
+	walletForPin, err := s.repo.GetByUserIdTx(ctx, nil, req.UserId)
+	if err != nil {
+		return nil, fmt.Errorf("wallet not found: %w", err)
+	}
+	if req.Pin == "" || !s.verifyPIN(walletForPin, req.Pin) {
+		return nil, errors.New("Mã PIN rút tiền không chính xác")
+	}
+
+	// A retry must not require NF-Bank to be available. It also must be scoped
+	// to its original request so an idempotency key cannot reveal another user's
+	// order or be reused with different payout details.
+	var existingOrder, existingStatus, existingTransaction, existingUserID, existingAccount string
+	var existingAmount, existingCoin int64
+	err = s.db.QueryRowContext(ctx, `SELECT order_code, status, coin_amount, COALESCE(bank_tx_reference, ''), user_id, account_number, amount_vnd FROM nfbank_withdrawal_orders WHERE idempotency_key = $1`, req.IdempotencyKey).Scan(&existingOrder, &existingStatus, &existingCoin, &existingTransaction, &existingUserID, &existingAccount, &existingAmount)
+	if err == nil {
+		if existingUserID != req.UserId || existingAccount != accountNumber || existingAmount != req.AmountVnd {
+			return nil, ErrIdempotencyKeyConflict
+		}
+		return &walletpb.NFBankWithdrawalResponse{OrderId: existingOrder, Status: existingStatus, CoinAmount: existingCoin, TransactionId: existingTransaction}, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("check withdrawal idempotency: %w", err)
+	}
+	// Verify immediately before debit, preventing payout to an account which was
+	// changed or closed after the UI's earlier verification.
+	verified, err := s.VerifyNFBankAccount(ctx, &walletpb.VerifyNFBankAccountRequest{AccountNumber: accountNumber})
+	if err != nil {
+		return nil, err
+	}
+	coinAmount, err := s.coinAmountForWithdrawal(ctx, req.AmountVnd)
+	if err != nil {
+		return nil, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin withdrawal transaction: %w", err)
+	}
+	defer tx.Rollback()
+	wallet, err := s.repo.GetByUserIdForUpdateTx(ctx, tx, req.UserId)
+	if err != nil {
+		return nil, fmt.Errorf("find wallet: %w", err)
+	}
+	err = tx.QueryRowContext(ctx, `SELECT order_code, status, coin_amount, COALESCE(bank_tx_reference, ''), user_id, account_number, amount_vnd FROM nfbank_withdrawal_orders WHERE idempotency_key = $1`, req.IdempotencyKey).Scan(&existingOrder, &existingStatus, &existingCoin, &existingTransaction, &existingUserID, &existingAccount, &existingAmount)
+	if err == nil {
+		if existingUserID != req.UserId || existingAccount != accountNumber || existingAmount != req.AmountVnd {
+			return nil, ErrIdempotencyKeyConflict
+		}
+		return &walletpb.NFBankWithdrawalResponse{OrderId: existingOrder, Status: existingStatus, CoinAmount: existingCoin, TransactionId: existingTransaction}, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("check withdrawal idempotency: %w", err)
+	}
+	if !s.verifySignature(wallet) {
+		return nil, errors.New("wallet signature validation failed")
+	}
+	if wallet.CoinBalance < coinAmount {
+		return nil, errors.New("insufficient balance")
+	}
+	orderCode, err := newPaymentOrderCode("NFBANK-WITHDRAW")
+	if err != nil {
+		return nil, err
+	}
+	balanceAfter := wallet.CoinBalance - coinAmount
+	version, err := nextWalletVersion(wallet.Version)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.UpdateBalanceTx(ctx, tx, wallet.ID, balanceAfter, version, s.generateSignature(wallet.ID, wallet.UserID, balanceAfter, wallet.FrozenBalance, version, wallet.CurrencyType, wallet.Status), wallet.Version); err != nil {
+		return nil, err
+	}
+	var withdrawalID string
+	err = tx.QueryRowContext(ctx, `INSERT INTO nfbank_withdrawal_orders (user_id, wallet_id, order_code, idempotency_key, account_number, account_name, amount_vnd, coin_amount, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'PENDING') RETURNING id`, req.UserId, wallet.ID, orderCode, req.IdempotencyKey, accountNumber, verified.AccountName, req.AmountVnd, coinAmount).Scan(&withdrawalID)
+	if err != nil {
+		return nil, fmt.Errorf("create withdrawal order: %w", err)
+	}
+	if err := s.repo.CreateTransactionTx(ctx, tx, &domain.TransactionLog{WalletID: wallet.ID, Amount: coinAmount, BalanceBefore: wallet.CoinBalance, BalanceAfter: balanceAfter, TransactionType: domain.TxTypeDebit, Status: "SUCCESS", ReferenceType: "NFBANK_WITHDRAWAL", ReferenceID: &withdrawalID, IdempotencyKey: "withdrawal:" + req.IdempotencyKey, Description: fmt.Sprintf("Rút %d VND qua NF-Bank", req.AmountVnd)}); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	requestID := "REQ_" + orderCode
+	raw := fmt.Sprintf("accessKey=%s&accountNumber=%s&amount=%d&orderId=%s&partnerCode=%s&requestId=%s", s.cfg.NFBankAccessKey, accountNumber, req.AmountVnd, orderCode, s.cfg.NFBankPartnerCode, requestID)
+	var payout nfBankPayoutResponse
+	payoutErr := s.postJSON(ctx, strings.TrimRight(s.cfg.NFBankAPIURL, "/")+"/payments/payout", nfBankPayoutRequest{PartnerCode: s.cfg.NFBankPartnerCode, AccessKey: s.cfg.NFBankAccessKey, RequestID: requestID, OrderID: orderCode, Amount: req.AmountVnd, AccountNumber: accountNumber, OrderInfo: fmt.Sprintf("Rút tiền Chillfy %s", orderCode), Signature: s.nfBankSignature(raw)}, &payout)
+	if payoutErr != nil { // Outcome is unknown: retain the debit for later reconciliation, never risk a double payout.
+		_ = s.updateWithdrawalStatus(ctx, orderCode, "PROCESSING", "", "NF-Bank payout request outcome is unknown")
+		return &walletpb.NFBankWithdrawalResponse{OrderId: orderCode, Status: "PROCESSING", CoinAmount: coinAmount}, nil
+	}
+	if payout.ResultCode != 0 {
+		if err := s.refundNFBankWithdrawal(ctx, orderCode, payout.Message); err != nil {
+			return nil, err
+		}
+		return &walletpb.NFBankWithdrawalResponse{OrderId: orderCode, Status: "FAILED", CoinAmount: coinAmount}, nil
+	}
+	if err := s.updateWithdrawalStatus(ctx, orderCode, "SUCCESS", payout.TransID, ""); err != nil {
+		return nil, err
+	}
+	return &walletpb.NFBankWithdrawalResponse{OrderId: orderCode, Status: "SUCCESS", CoinAmount: coinAmount, TransactionId: payout.TransID}, nil
+}
+
+func (s *WalletService) updateWithdrawalStatus(ctx context.Context, orderCode, status, transactionID, failureReason string) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE nfbank_withdrawal_orders SET status=$1, bank_tx_reference=NULLIF($2,''), failure_reason=NULLIF($3,''), updated_at=NOW() WHERE order_code=$4`, status, transactionID, failureReason, orderCode)
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated != 1 {
+		return fmt.Errorf("withdrawal order not found with code: %s", orderCode)
+	}
+	return nil
+}
+
+func (s *WalletService) refundNFBankWithdrawal(ctx context.Context, orderCode, reason string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var userID, walletID, status, withdrawalID string
+	var coinAmount int64
+	err = tx.QueryRowContext(ctx, `SELECT id, user_id, wallet_id, coin_amount, status FROM nfbank_withdrawal_orders WHERE order_code=$1 FOR UPDATE`, orderCode).Scan(&withdrawalID, &userID, &walletID, &coinAmount, &status)
+	if err != nil {
+		return err
+	}
+	if status != "PENDING" {
+		return nil
+	}
+	wallet, err := s.repo.GetByUserIdForUpdateTx(ctx, tx, userID)
+	if err != nil {
+		return err
+	}
+	if !s.verifySignature(wallet) {
+		return errors.New("wallet signature validation failed during refund")
+	}
+	balanceAfter, err := creditWalletBalance(wallet.CoinBalance, coinAmount)
+	if err != nil {
+		return err
+	}
+	version, err := nextWalletVersion(wallet.Version)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.UpdateBalanceTx(ctx, tx, walletID, balanceAfter, version, s.generateSignature(wallet.ID, wallet.UserID, balanceAfter, wallet.FrozenBalance, version, wallet.CurrencyType, wallet.Status), wallet.Version); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE nfbank_withdrawal_orders SET status='FAILED', failure_reason=$1, updated_at=NOW() WHERE id=$2`, reason, withdrawalID); err != nil {
+		return err
+	}
+	if err := s.repo.CreateTransactionTx(ctx, tx, &domain.TransactionLog{WalletID: walletID, Amount: coinAmount, BalanceBefore: wallet.CoinBalance, BalanceAfter: balanceAfter, TransactionType: domain.TxTypeCredit, Status: "SUCCESS", ReferenceType: "NFBANK_WITHDRAWAL_REFUND", ReferenceID: &withdrawalID, IdempotencyKey: "withdrawal-refund:" + orderCode, Description: "Hoàn Coin do NF-Bank từ chối yêu cầu rút tiền"}); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *WalletService) postJSON(
 	ctx context.Context,
 	endpoint string,
@@ -685,4 +982,140 @@ func (s *WalletService) generateSignature(id string, userID string, balance int6
 func (s *WalletService) verifySignature(w *domain.Wallet) bool {
 	expectedSig := s.generateSignature(w.ID, w.UserID, w.CoinBalance, w.FrozenBalance, w.Version, w.CurrencyType, w.Status)
 	return hmac.Equal([]byte(w.Signature), []byte(expectedSig))
+}
+
+func (s *WalletService) hashPIN(pin string) string {
+	h := sha256.New()
+	h.Write([]byte(fmt.Sprintf("%s:pin:%s", s.cfg.NFBankSecretKey, pin)))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func (s *WalletService) verifyPIN(wallet *domain.Wallet, pin string) bool {
+	if wallet == nil || wallet.WithdrawPinHash == nil || *wallet.WithdrawPinHash == "" {
+		return false
+	}
+	return *wallet.WithdrawPinHash == s.hashPIN(pin)
+}
+
+func (s *WalletService) GetWithdrawStatus(ctx context.Context, req *walletpb.GetWithdrawStatusRequest) (*walletpb.GetWithdrawStatusResponse, error) {
+	if req.UserId == "" {
+		return nil, errors.New("user_id is required")
+	}
+	wallet, err := s.repo.GetByUserIdTx(ctx, nil, req.UserId)
+	isPinSet := false
+	if err == nil && wallet != nil && wallet.WithdrawPinHash != nil && *wallet.WithdrawPinHash != "" {
+		isPinSet = true
+	}
+
+	accounts, err := s.repo.GetUserBankAccounts(ctx, req.UserId)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("get bank accounts: %w", err)
+	}
+
+	var protoAccounts []*walletpb.BankAccountResponse
+	for _, acc := range accounts {
+		protoAccounts = append(protoAccounts, &walletpb.BankAccountResponse{
+			Id:            acc.ID,
+			UserId:        acc.UserID,
+			BankCode:      acc.BankCode,
+			BankName:      acc.BankName,
+			AccountNumber: acc.AccountNumber,
+			AccountName:   acc.AccountName,
+			IsDefault:     acc.IsDefault,
+		})
+	}
+
+	return &walletpb.GetWithdrawStatusResponse{
+		IsPinSet:     isPinSet,
+		BankAccounts: protoAccounts,
+	}, nil
+}
+
+func (s *WalletService) SetWithdrawPIN(ctx context.Context, req *walletpb.SetWithdrawPINRequest) (*walletpb.SetWithdrawPINResponse, error) {
+	if req.UserId == "" {
+		return nil, errors.New("user_id is required")
+	}
+	if len(req.Pin) != 5 {
+		return nil, errors.New("Mã PIN rút tiền phải đúng 5 chữ số")
+	}
+	for _, ch := range req.Pin {
+		if ch < '0' || ch > '9' {
+			return nil, errors.New("Mã PIN rút tiền chỉ bao gồm chữ số")
+		}
+	}
+
+	pinHash := s.hashPIN(req.Pin)
+	if err := s.repo.SetWithdrawPin(ctx, req.UserId, pinHash); err != nil {
+		return nil, fmt.Errorf("set withdraw pin: %w", err)
+	}
+	return &walletpb.SetWithdrawPINResponse{Success: true}, nil
+}
+
+func (s *WalletService) LinkBankAccount(ctx context.Context, req *walletpb.LinkBankAccountRequest) (*walletpb.BankAccountResponse, error) {
+	if req.UserId == "" || req.AccountNumber == "" || len(req.Pin) != 5 {
+		return nil, errors.New("thông tin liên kết tài khoản ngân hàng không hợp lệ")
+	}
+	wallet, err := s.repo.GetByUserIdTx(ctx, nil, req.UserId)
+	if err != nil {
+		return nil, fmt.Errorf("wallet not found: %w", err)
+	}
+	if !s.verifyPIN(wallet, req.Pin) {
+		return nil, errors.New("Mã PIN rút tiền không chính xác")
+	}
+
+	verified, err := s.VerifyNFBankAccount(ctx, &walletpb.VerifyNFBankAccountRequest{AccountNumber: req.AccountNumber})
+	if err != nil {
+		return nil, fmt.Errorf("không thể xác thực số tài khoản NF Bank: %w", err)
+	}
+
+	bankCode := req.BankCode
+	if bankCode == "" {
+		bankCode = "NFBANK"
+	}
+	bankName := "NF Bank"
+
+	acc := &domain.UserBankAccount{
+		UserID:        req.UserId,
+		BankCode:      bankCode,
+		BankName:      bankName,
+		AccountNumber: req.AccountNumber,
+		AccountName:   verified.AccountName,
+	}
+
+	if err := s.repo.LinkBankAccount(ctx, acc); err != nil {
+		return nil, fmt.Errorf("link bank account: %w", err)
+	}
+
+	return &walletpb.BankAccountResponse{
+		Id:            acc.ID,
+		UserId:        acc.UserID,
+		BankCode:      acc.BankCode,
+		BankName:      acc.BankName,
+		AccountNumber: acc.AccountNumber,
+		AccountName:   acc.AccountName,
+		IsDefault:     acc.IsDefault,
+	}, nil
+}
+
+func (s *WalletService) GetUserBankAccounts(ctx context.Context, req *walletpb.GetUserBankAccountsRequest) (*walletpb.GetUserBankAccountsResponse, error) {
+	if req.UserId == "" {
+		return nil, errors.New("user_id is required")
+	}
+	accounts, err := s.repo.GetUserBankAccounts(ctx, req.UserId)
+	if err != nil {
+		return nil, err
+	}
+	var list []*walletpb.BankAccountResponse
+	for _, acc := range accounts {
+		list = append(list, &walletpb.BankAccountResponse{
+			Id:            acc.ID,
+			UserId:        acc.UserID,
+			BankCode:      acc.BankCode,
+			BankName:      acc.BankName,
+			AccountNumber: acc.AccountNumber,
+			AccountName:   acc.AccountName,
+			IsDefault:     acc.IsDefault,
+		})
+	}
+	return &walletpb.GetUserBankAccountsResponse{BankAccounts: list}, nil
 }

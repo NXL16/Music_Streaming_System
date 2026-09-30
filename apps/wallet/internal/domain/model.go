@@ -17,14 +17,28 @@ const (
 
 // Wallet đại diện cho bảng wallets trong DB
 type Wallet struct {
+	ID              string    `json:"id"`
+	UserID          string    `json:"user_id"`
+	CoinBalance     int64     `json:"coin_balance"`
+	FrozenBalance   int64     `json:"frozen_balance"`
+	CurrencyType    string    `json:"currency_type"`
+	Status          string    `json:"status"`
+	Version         int64     `json:"version"`
+	Signature       string    `json:"signature"`
+	WithdrawPinHash *string   `json:"withdraw_pin_hash"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+// UserBankAccount đại diện cho bảng user_bank_accounts
+type UserBankAccount struct {
 	ID            string    `json:"id"`
 	UserID        string    `json:"user_id"`
-	CoinBalance   int64     `json:"coin_balance"`
-	FrozenBalance int64     `json:"frozen_balance"`
-	CurrencyType  string    `json:"currency_type"`
-	Status        string    `json:"status"`
-	Version       int64     `json:"version"`
-	Signature     string    `json:"signature"`
+	BankCode      string    `json:"bank_code"`
+	BankName      string    `json:"bank_name"`
+	AccountNumber string    `json:"account_number"`
+	AccountName   string    `json:"account_name"`
+	IsDefault     bool      `json:"is_default"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }

@@ -84,6 +84,22 @@ func TestCalculateCoinAmountRejectsUnsafeRates(t *testing.T) {
 	}
 }
 
+func TestCalculateWithdrawalCoinAmountRoundsUp(t *testing.T) {
+	coinAmount, err := calculateWithdrawalCoinAmount(1_001, 1_000, 1)
+	if err != nil || coinAmount != 2 {
+		t.Fatalf("withdrawal conversion = (%d, %v), want (2, nil)", coinAmount, err)
+	}
+
+	coinAmount, err = calculateWithdrawalCoinAmount(100_000, 1_000, 1)
+	if err != nil || coinAmount != 100 {
+		t.Fatalf("exact withdrawal conversion = (%d, %v), want (100, nil)", coinAmount, err)
+	}
+
+	if _, err := calculateWithdrawalCoinAmount(math.MaxInt64, 1, 2); !errors.Is(err, ErrInvalidActiveCoinRate) {
+		t.Fatalf("overflowing withdrawal conversion error = %v, want ErrInvalidActiveCoinRate", err)
+	}
+}
+
 func TestValidateWebhookAmount(t *testing.T) {
 	if err := validateWebhookAmount(100_000, 100_000); err != nil {
 		t.Fatalf("matching callback amount was rejected: %v", err)

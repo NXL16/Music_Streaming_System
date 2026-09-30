@@ -61,7 +61,7 @@ func LoadConfig() *Config {
 		NFBankPartnerCode: os.Getenv("NFBANK_PARTNER_CODE"),
 		NFBankAccessKey:   os.Getenv("NFBANK_ACCESS_KEY"),
 		NFBankSecretKey:   os.Getenv("NFBANK_SECRET_KEY"),
-		NFBankAPIURL:      os.Getenv("NFBANK_API_URL"),
+		NFBankAPIURL:      firstEnv("NFBANK_API_BASE_URL", "NFBANK_API_URL"),
 		NFBankRedirectURL: os.Getenv("NFBANK_REDIRECT_URL"),
 		NFBankNotifyURL:   os.Getenv("NFBANK_NOTIFY_URL"),
 	}
@@ -94,6 +94,15 @@ func LoadConfig() *Config {
 	}
 
 	return cfg
+}
+
+func firstEnv(keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func isLoopbackListenAddr(address string) bool {

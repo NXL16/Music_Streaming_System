@@ -42,17 +42,17 @@ func (r *PostgresRepository) CreateWalletTx(ctx context.Context, tx *sql.Tx, w *
 
 func (r *PostgresRepository) GetByUserIdTx(ctx context.Context, tx *sql.Tx, userID string) (*domain.Wallet, error) {
 	query := `
-		SELECT id, user_id, coin_balance, frozen_balance, currency_type, status, version, signature, created_at, updated_at 
-		FROM wallets 
+		SELECT id, user_id, coin_balance, frozen_balance, currency_type, status, version, signature, withdraw_pin_hash, created_at, updated_at
+		FROM wallets
 		WHERE user_id = $1 LIMIT 1`
 
 	var w domain.Wallet
 	var err error
 
 	if tx != nil {
-		err = tx.QueryRowContext(ctx, query, userID).Scan(&w.ID, &w.UserID, &w.CoinBalance, &w.FrozenBalance, &w.CurrencyType, &w.Status, &w.Version, &w.Signature, &w.CreatedAt, &w.UpdatedAt)
+		err = tx.QueryRowContext(ctx, query, userID).Scan(&w.ID, &w.UserID, &w.CoinBalance, &w.FrozenBalance, &w.CurrencyType, &w.Status, &w.Version, &w.Signature, &w.WithdrawPinHash, &w.CreatedAt, &w.UpdatedAt)
 	} else {
-		err = r.db.QueryRowContext(ctx, query, userID).Scan(&w.ID, &w.UserID, &w.CoinBalance, &w.FrozenBalance, &w.CurrencyType, &w.Status, &w.Version, &w.Signature, &w.CreatedAt, &w.UpdatedAt)
+		err = r.db.QueryRowContext(ctx, query, userID).Scan(&w.ID, &w.UserID, &w.CoinBalance, &w.FrozenBalance, &w.CurrencyType, &w.Status, &w.Version, &w.Signature, &w.WithdrawPinHash, &w.CreatedAt, &w.UpdatedAt)
 	}
 
 	if err != nil {
@@ -68,13 +68,13 @@ func (r *PostgresRepository) GetByUserIdForUpdateTx(ctx context.Context, tx *sql
 	}
 
 	query := `
-		SELECT id, user_id, coin_balance, frozen_balance, currency_type, status, version, signature, created_at, updated_at 
-		FROM wallets 
+		SELECT id, user_id, coin_balance, frozen_balance, currency_type, status, version, signature, withdraw_pin_hash, created_at, updated_at
+		FROM wallets
 		WHERE user_id = $1 LIMIT 1
 		FOR UPDATE`
 
 	var w domain.Wallet
-	err := tx.QueryRowContext(ctx, query, userID).Scan(&w.ID, &w.UserID, &w.CoinBalance, &w.FrozenBalance, &w.CurrencyType, &w.Status, &w.Version, &w.Signature, &w.CreatedAt, &w.UpdatedAt)
+	err := tx.QueryRowContext(ctx, query, userID).Scan(&w.ID, &w.UserID, &w.CoinBalance, &w.FrozenBalance, &w.CurrencyType, &w.Status, &w.Version, &w.Signature, &w.WithdrawPinHash, &w.CreatedAt, &w.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -210,4 +210,78 @@ func (r *PostgresRepository) UpdateDepositOrderStatusByCodeTx(ctx context.Contex
 	}
 
 	return nil
+}
+
+func (r *PostgresRepository) SetWithdrawPin(ctx context.Context, userID string, pinHash string) error {
+	query := `UPDATE wallets SET withdraw_pin_hash = $1, updated_at = NOW() WHERE user_id = $2`
+	res, err := r.db.ExecContext(ctx, query, pinHash, userID)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return fmt.Errorf("wallet not found for user: %s", userID)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) GetUserBankAccounts(ctx context.Context, userID string) ([]*domain.UserBankAccount, error) {
+	query := `
+		SELECT id, user_id, bank_code, bank_name, account_number, account_name, is_default, created_at, updated_at
+		FROM user_bank_accounts
+		WHERE user_id = $1
+		ORDER BY is_default DESC, created_at DESC`
+	rows, err := r.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []*domain.UserBankAccount
+	for rows.Next() {
+		var acc domain.UserBankAccount
+		if err := rows.Scan(&acc.ID, &acc.UserID, &acc.BankCode, &acc.BankName, &acc.AccountNumber, &acc.AccountName, &acc.IsDefault, &acc.CreatedAt, &acc.UpdatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, &acc)
+	}
+	return list, nil
+}
+
+func (r *PostgresRepository) LinkBankAccount(ctx context.Context, acc *domain.UserBankAccount) error {
+	var count int
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM user_bank_accounts WHERE user_id = $1`, acc.UserID).Scan(&count); err != nil {
+		return err
+	}
+
+	isDefault := count == 0
+	query := `
+		INSERT INTO user_bank_accounts (user_id, bank_code, bank_name, account_number, account_name, is_default)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (user_id, bank_code, account_number) DO UPDATE
+		SET account_name = EXCLUDED.account_name, updated_at = NOW()
+		RETURNING id, is_default, created_at, updated_at`
+
+	err := r.db.QueryRowContext(ctx, query, acc.UserID, acc.BankCode, acc.BankName, acc.AccountNumber, acc.AccountName, isDefault).Scan(&acc.ID, &acc.IsDefault, &acc.CreatedAt, &acc.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("link bank account: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) GetBankAccountByID(ctx context.Context, id string, userID string) (*domain.UserBankAccount, error) {
+	query := `
+		SELECT id, user_id, bank_code, bank_name, account_number, account_name, is_default, created_at, updated_at
+		FROM user_bank_accounts
+		WHERE id = $1 AND user_id = $2`
+
+	var acc domain.UserBankAccount
+	err := r.db.QueryRowContext(ctx, query, id, userID).Scan(&acc.ID, &acc.UserID, &acc.BankCode, &acc.BankName, &acc.AccountNumber, &acc.AccountName, &acc.IsDefault, &acc.CreatedAt, &acc.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &acc, nil
 }

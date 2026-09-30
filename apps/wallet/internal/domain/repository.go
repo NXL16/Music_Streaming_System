@@ -31,4 +31,10 @@ type WalletRepository interface {
 
 	// Cập nhật trạng thái đơn hàng nạp tiền theo mã order_code khi Webhook báo về
 	UpdateDepositOrderStatusByCodeTx(ctx context.Context, tx *sql.Tx, orderCode string, status string) error
+
+	// Quản lý PIN rút tiền và Tài khoản ngân hàng liên kết
+	SetWithdrawPin(ctx context.Context, userID string, pinHash string) error
+	GetUserBankAccounts(ctx context.Context, userID string) ([]*UserBankAccount, error)
+	LinkBankAccount(ctx context.Context, acc *UserBankAccount) error
+	GetBankAccountByID(ctx context.Context, id string, userID string) (*UserBankAccount, error)
 }

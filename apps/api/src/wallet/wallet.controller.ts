@@ -15,6 +15,10 @@ import type { JwtUser } from '@musical/shared-types';
 import { StrictJwtAuthGuard } from '../common/guards/strict-jwt-auth.guard';
 import { WalletService } from './wallet.service';
 import { CreateDepositDto } from './dto/create-deposit.dto';
+import { VerifyNFBankAccountDto } from './dto/verify-nfbank-account.dto';
+import { CreateNFBankWithdrawalDto } from './dto/create-nfbank-withdrawal.dto';
+import { SetWithdrawPinDto } from './dto/set-withdraw-pin.dto';
+import { LinkBankAccountDto } from './dto/link-bank-account.dto';
 
 @Controller('wallet')
 export class WalletController {
@@ -32,6 +36,32 @@ export class WalletController {
     return this.walletService.getBalance(user.userId);
   }
 
+  @Get('withdraw/status')
+  @UseGuards(StrictJwtAuthGuard)
+  async getWithdrawStatus(@Req() req: Request) {
+    const user = req.user as JwtUser;
+    return this.walletService.getWithdrawStatus(user.userId);
+  }
+
+  @Post('withdraw/pin')
+  @UseGuards(StrictJwtAuthGuard)
+  async setWithdrawPin(@Req() req: Request, @Body() body: SetWithdrawPinDto) {
+    const user = req.user as JwtUser;
+    return this.walletService.setWithdrawPin(user.userId, body.pin);
+  }
+
+  @Post('bank-accounts/link')
+  @UseGuards(StrictJwtAuthGuard)
+  async linkBankAccount(@Req() req: Request, @Body() body: LinkBankAccountDto) {
+    const user = req.user as JwtUser;
+    return this.walletService.linkBankAccount(
+      user.userId,
+      body.accountNumber,
+      body.pin,
+      body.bankCode,
+    );
+  }
+
   @Post('deposit')
   @UseGuards(StrictJwtAuthGuard)
   async createDeposit(@Req() req: Request, @Body() body: CreateDepositDto) {
@@ -41,6 +71,29 @@ export class WalletController {
       userId: user.userId,
       amountVnd: body.amountVnd,
       paymentMethod: body.paymentMethod,
+    });
+  }
+
+  @Post('withdraw/nfbank/verify-account')
+  @UseGuards(StrictJwtAuthGuard)
+  async verifyNFBankAccount(@Body() body: VerifyNFBankAccountDto) {
+    return this.walletService.verifyNFBankAccount(body.accountNumber);
+  }
+
+  @Post('withdraw/nfbank')
+  @UseGuards(StrictJwtAuthGuard)
+  async createNFBankWithdrawal(
+    @Req() req: Request,
+    @Body() body: CreateNFBankWithdrawalDto,
+  ) {
+    const user = req.user as JwtUser;
+    return this.walletService.createNFBankWithdrawal({
+      userId: user.userId,
+      accountNumber: body.accountNumber ?? '',
+      bankAccountId: body.bankAccountId ?? '',
+      pin: body.pin,
+      amountVnd: body.amountVnd,
+      idempotencyKey: body.idempotencyKey,
     });
   }
 

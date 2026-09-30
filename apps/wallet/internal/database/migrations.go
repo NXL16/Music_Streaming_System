@@ -16,8 +16,16 @@ type migration struct {
 //go:embed migrations/000001_init.sql
 var initialSchema string
 
+//go:embed migrations/000002_nfbank_withdrawals.sql
+var nfBankWithdrawalsSchema string
+
+//go:embed migrations/000003_withdraw_pin_and_bank_accounts.sql
+var withdrawPinAndBankAccountsSchema string
+
 var migrations = []migration{
 	{version: 1, name: "init", sql: initialSchema},
+	{version: 2, name: "nfbank_withdrawals", sql: nfBankWithdrawalsSchema},
+	{version: 3, name: "withdraw_pin_and_bank_accounts", sql: withdrawPinAndBankAccountsSchema},
 }
 
 const walletMigrationAdvisoryLockID int64 = 4_409_210_001

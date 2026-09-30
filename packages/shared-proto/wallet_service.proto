@@ -9,6 +9,12 @@ service WalletService {
   rpc GetBalance (GetBalanceRequest) returns (GetBalanceResponse);
   rpc DebitWallet (DebitWalletRequest) returns (DebitWalletResponse);
   rpc CreateDepositOrder (DepositOrderRequest) returns (DepositOrderResponse);
+  rpc VerifyNFBankAccount (VerifyNFBankAccountRequest) returns (VerifyNFBankAccountResponse);
+  rpc CreateNFBankWithdrawal (NFBankWithdrawalRequest) returns (NFBankWithdrawalResponse);
+  rpc GetWithdrawStatus (GetWithdrawStatusRequest) returns (GetWithdrawStatusResponse);
+  rpc SetWithdrawPIN (SetWithdrawPINRequest) returns (SetWithdrawPINResponse);
+  rpc LinkBankAccount (LinkBankAccountRequest) returns (BankAccountResponse);
+  rpc GetUserBankAccounts (GetUserBankAccountsRequest) returns (GetUserBankAccountsResponse);
 }
 
 message CreateWalletRequest {
@@ -50,4 +56,71 @@ message DepositOrderRequest {
 message DepositOrderResponse {
   string order_id    = 1;
   string payment_url = 2;
+}
+
+message VerifyNFBankAccountRequest {
+  string account_number = 1;
+}
+
+message VerifyNFBankAccountResponse {
+  string account_name = 1;
+}
+
+message NFBankWithdrawalRequest {
+  string user_id         = 1;
+  string account_number  = 2;
+  int64  amount_vnd      = 3;
+  string idempotency_key = 4;
+  string pin             = 5;
+  string bank_account_id = 6;
+}
+
+message NFBankWithdrawalResponse {
+  string order_id       = 1;
+  string status         = 2;
+  int64  coin_amount     = 3;
+  string transaction_id = 4;
+}
+
+message BankAccountResponse {
+  string id             = 1;
+  string user_id        = 2;
+  string bank_code      = 3;
+  string bank_name      = 4;
+  string account_number = 5;
+  string account_name   = 6;
+  bool   is_default     = 7;
+}
+
+message GetWithdrawStatusRequest {
+  string user_id = 1;
+}
+
+message GetWithdrawStatusResponse {
+  bool is_pin_set = 1;
+  repeated BankAccountResponse bank_accounts = 2;
+}
+
+message SetWithdrawPINRequest {
+  string user_id = 1;
+  string pin     = 2;
+}
+
+message SetWithdrawPINResponse {
+  bool success = 1;
+}
+
+message LinkBankAccountRequest {
+  string user_id        = 1;
+  string bank_code      = 2;
+  string account_number = 3;
+  string pin            = 4;
+}
+
+message GetUserBankAccountsRequest {
+  string user_id = 1;
+}
+
+message GetUserBankAccountsResponse {
+  repeated BankAccountResponse bank_accounts = 1;
 }

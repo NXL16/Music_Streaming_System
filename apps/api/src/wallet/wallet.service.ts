@@ -4,9 +4,15 @@ import { ConfigService } from '@nestjs/config';
 import type { ClientGrpc } from '@nestjs/microservices';
 import { grpcFirstValueFrom } from '../common/utils/grpc-timeout';
 import type {
+  BankAccountResponse,
   DepositOrderRequest,
   DepositOrderResponse,
   GetBalanceResponse,
+  GetWithdrawStatusResponse,
+  NFBankWithdrawalRequest,
+  NFBankWithdrawalResponse,
+  SetWithdrawPINResponse,
+  VerifyNFBankAccountResponse,
   WalletServiceClient,
 } from '@musical/shared-proto';
 
@@ -49,6 +55,51 @@ export class WalletService implements OnModuleInit {
   ): Promise<DepositOrderResponse> {
     return grpcFirstValueFrom(
       this.walletClient.createDepositOrder(payload, this.metadata()),
+    );
+  }
+
+  async verifyNFBankAccount(
+    accountNumber: string,
+  ): Promise<VerifyNFBankAccountResponse> {
+    return grpcFirstValueFrom(
+      this.walletClient.verifyNfBankAccount({ accountNumber }, this.metadata()),
+    );
+  }
+
+  async createNFBankWithdrawal(
+    payload: NFBankWithdrawalRequest,
+  ): Promise<NFBankWithdrawalResponse> {
+    return grpcFirstValueFrom(
+      this.walletClient.createNfBankWithdrawal(payload, this.metadata()),
+    );
+  }
+
+  async getWithdrawStatus(userId: string): Promise<GetWithdrawStatusResponse> {
+    return grpcFirstValueFrom(
+      this.walletClient.getWithdrawStatus({ userId }, this.metadata()),
+    );
+  }
+
+  async setWithdrawPin(
+    userId: string,
+    pin: string,
+  ): Promise<SetWithdrawPINResponse> {
+    return grpcFirstValueFrom(
+      this.walletClient.setWithdrawPin({ userId, pin }, this.metadata()),
+    );
+  }
+
+  async linkBankAccount(
+    userId: string,
+    accountNumber: string,
+    pin: string,
+    bankCode = 'NFBANK',
+  ): Promise<BankAccountResponse> {
+    return grpcFirstValueFrom(
+      this.walletClient.linkBankAccount(
+        { userId, bankCode, accountNumber, pin },
+        this.metadata(),
+      ),
     );
   }
 }

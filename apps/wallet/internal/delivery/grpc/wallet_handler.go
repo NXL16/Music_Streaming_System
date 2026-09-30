@@ -32,3 +32,27 @@ func (h *WalletGRPCHandler) DebitWallet(ctx context.Context, req *walletpb.Debit
 func (h *WalletGRPCHandler) CreateDepositOrder(ctx context.Context, req *walletpb.DepositOrderRequest) (*walletpb.DepositOrderResponse, error) {
 	return h.walletService.CreateDepositOrder(ctx, req)
 }
+
+func (h *WalletGRPCHandler) VerifyNFBankAccount(ctx context.Context, req *walletpb.VerifyNFBankAccountRequest) (*walletpb.VerifyNFBankAccountResponse, error) {
+	return h.walletService.VerifyNFBankAccount(ctx, req)
+}
+
+func (h *WalletGRPCHandler) CreateNFBankWithdrawal(ctx context.Context, req *walletpb.NFBankWithdrawalRequest) (*walletpb.NFBankWithdrawalResponse, error) {
+	return h.walletService.CreateNFBankWithdrawal(ctx, req)
+}
+
+func (h *WalletGRPCHandler) GetWithdrawStatus(ctx context.Context, req *walletpb.GetWithdrawStatusRequest) (*walletpb.GetWithdrawStatusResponse, error) {
+	return h.walletService.GetWithdrawStatus(ctx, req)
+}
+
+func (h *WalletGRPCHandler) SetWithdrawPIN(ctx context.Context, req *walletpb.SetWithdrawPINRequest) (*walletpb.SetWithdrawPINResponse, error) {
+	return h.walletService.SetWithdrawPIN(ctx, req)
+}
+
+func (h *WalletGRPCHandler) LinkBankAccount(ctx context.Context, req *walletpb.LinkBankAccountRequest) (*walletpb.BankAccountResponse, error) {
+	return h.walletService.LinkBankAccount(ctx, req)
+}
+
+func (h *WalletGRPCHandler) GetUserBankAccounts(ctx context.Context, req *walletpb.GetUserBankAccountsRequest) (*walletpb.GetUserBankAccountsResponse, error) {
+	return h.walletService.GetUserBankAccounts(ctx, req)
+}
