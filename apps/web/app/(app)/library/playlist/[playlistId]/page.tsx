@@ -23,7 +23,6 @@ import {
 import { playlistArtworkVariants } from "@/lib/playlists/generated-playlist-cover";
 import {
   getCatalogPlaylist,
-  getCatalogPlaylistTracks,
 } from "@/lib/catalog/catalog.api";
 import { mapCatalogTracks } from "@/lib/catalog/catalog.mapper";
 import { getLibraryResources } from "@/lib/library/library-resources.api";
@@ -296,7 +295,7 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
         isFavorites
           ? undefined
           : catalogPlaylist
-            ? async () => mapCatalogTracks(await getCatalogPlaylistTracks(playlistId))
+            ? async () => mapCatalogTracks(await getCatalogPlaylist(playlistId))
             : async () =>
                 (await getAllUserPlaylistTracks(playlistId)).map(
                   projectSongSummary,

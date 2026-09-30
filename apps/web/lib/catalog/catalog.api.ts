@@ -2,6 +2,7 @@ import { http } from "@/lib/api/http";
 import { developmentCacheDisabled } from "@/lib/config/development-cache";
 import { hydrateCatalogMediaEntities } from "./hydrate-catalog-media-entities";
 import { invalidateAllMediaEntities } from "@/lib/media/media-entity-store";
+import { notifyHomeRecommendationsStale } from "@/lib/recommendations/home-revalidation";
 import type {
   CatalogArtistSongsPage,
   CatalogAlbumRelatedResponse,
@@ -250,22 +251,67 @@ export async function getCatalogPlaylist(
   playlistId: string,
   signal?: AbortSignal,
 ) {
-  return getCatalogDetail(
+  const catalog = await getCatalogDetail(
     `playlists:${playlistId}`,
     `/catalog/${STOREFRONT}/playlists/${encodeURIComponent(playlistId)}`,
     signal,
   );
+  const root = catalog.data.find((resource) => resource.type === "playlists");
+  const playlist = root ? catalog.resources.playlists[root.id] : undefined;
+  if (!root || playlist?.attributes.playlistType !== "system-personalized") {
+    return catalog;
+  }
+
+  // There are only three catalog playlists. For these cards the identity and
+  // URL stay global, while this authenticated endpoint supplies the current
+  // listener's cached recommendation order.
+  const trackIds = await getPersonalizedSystemPlaylistTrackIds(
+    playlistId,
+    signal,
+  ).catch(() => []);
+  if (trackIds.length === 0) return catalog;
+
+  const tracks = await getCatalogResources(
+    trackIds.map((id) => ({ id, type: "songs" })),
+    signal,
+  );
+  const trackRefs = trackIds
+    .filter((id) => Boolean(tracks.resources.songs[id]))
+    .map((id) => ({ id, type: "songs", href: `/catalog/${STOREFRONT}/songs/${id}` }));
+  if (trackRefs.length === 0) return catalog;
+
+  return {
+    data: [root, ...trackRefs],
+    resources: {
+      ...catalog.resources,
+      songs: { ...catalog.resources.songs, ...tracks.resources.songs },
+      artists: { ...catalog.resources.artists, ...tracks.resources.artists },
+      albums: { ...catalog.resources.albums, ...tracks.resources.albums },
+      playlists: {
+        ...catalog.resources.playlists,
+        [root.id]: {
+          ...playlist,
+          relationships: {
+            ...playlist.relationships,
+            tracks: { href: "", data: trackRefs },
+          },
+        },
+      },
+    },
+  };
 }
 
-export async function getCatalogPlaylistTracks(
+async function getPersonalizedSystemPlaylistTrackIds(
   playlistId: string,
   signal?: AbortSignal,
-) {
-  const response = await http.get<CatalogResponse>(
-    `/catalog/${STOREFRONT}/playlists/${encodeURIComponent(playlistId)}/tracks`,
+): Promise<string[]> {
+  const response = await http.get<{ trackIds?: unknown }>(
+    `/me/recommendations/system-playlists/${encodeURIComponent(playlistId)}/tracks`,
     { signal },
   );
-  return hydrateCatalogMediaEntities(response.data);
+  return Array.isArray(response.data.trackIds)
+    ? response.data.trackIds.filter((id): id is string => typeof id === "string")
+    : [];
 }
 
 export async function getCatalogResources(
@@ -282,11 +328,22 @@ export async function getCatalogResources(
   return hydrateCatalogMediaEntities(response.data);
 }
 
-export async function searchCatalog(query: string, signal?: AbortSignal) {
+export type CatalogSearchOptions = {
+  types?: Array<"songs" | "artists" | "albums" | "playlists">;
+};
+
+export async function searchCatalog(
+  query: string,
+  options: CatalogSearchOptions = {},
+  signal?: AbortSignal,
+) {
   const response = await http.get<CatalogResponse>(
     `/catalog/${STOREFRONT}/search`,
     {
-      params: { q: query },
+      params: {
+        q: query,
+        ...(options.types?.length ? { types: options.types.join(",") } : {}),
+      },
       signal,
     },
   );
@@ -301,6 +358,7 @@ export async function recordCatalogSearchClick(
     resourceType,
     resourceId,
   });
+  notifyHomeRecommendationsStale();
 }
 
 export async function getCatalogArtist(artistId: string, signal?: AbortSignal) {

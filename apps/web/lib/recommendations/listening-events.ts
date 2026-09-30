@@ -79,6 +79,27 @@ type QueuedListeningEvent = {
   payload: ListeningEventPayload;
 };
 
+function telemetrySeconds(value: number | undefined): number {
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value ?? 0)) : 0;
+}
+
+/**
+ * This is deliberately applied at the delivery boundary as well as in the
+ * player. It repairs terminal events saved by an older browser bundle in the
+ * localStorage outbox, and keeps any future caller from poisoning taste data.
+ */
+function normalizeListeningEventPayload(
+  payload: ListeningEventPayload,
+): ListeningEventPayload {
+  const totalSec = telemetrySeconds(payload.totalSec);
+  const durationSec = telemetrySeconds(payload.durationSec);
+  return {
+    ...payload,
+    totalSec,
+    durationSec: totalSec > 0 ? Math.min(durationSec, totalSec) : durationSec,
+  };
+}
+
 function withEventId(payload: ListeningEventPayload): ListeningEventPayload {
   return {
     ...payload,
@@ -125,7 +146,10 @@ export function queueListeningEvent(payload: ListeningEventPayload) {
   if (!userId) return;
 
   const events = readQueuedListeningEvents();
-  events.push({ userId, payload: withEventId(payload) });
+  events.push({
+    userId,
+    payload: withEventId(normalizeListeningEventPayload(payload)),
+  });
   writeQueuedListeningEvents(events.slice(-MAX_QUEUED_LISTENING_EVENTS));
 }
 
@@ -140,17 +164,18 @@ export async function flushQueuedListeningEvents() {
   for (const event of queued) {
     if (event.userId !== userId) continue;
     try {
+      const payload = normalizeListeningEventPayload(event.payload);
       const response = await http.post<{ success?: boolean }>(
         "/me/recommendations/listening-events",
-        event.payload,
+        payload,
       );
       if (response.data.success === false) throw new Error("LISTENING_EVENT_REJECTED");
       if (
-        event.payload.eventType === "PLAY_START" &&
-        event.payload.recentlyPlayedItem
+        payload.eventType === "PLAY_START" &&
+        payload.recentlyPlayedItem
       ) {
         invalidateRecommendationSectionCache(RECENTLY_PLAYED_SHELF_ID);
-        publishRecentlyPlayedItem(event.payload.recentlyPlayedItem);
+        publishRecentlyPlayedItem(payload.recentlyPlayedItem);
       }
     } catch {
       retained.push(event);
@@ -160,7 +185,7 @@ export async function flushQueuedListeningEvents() {
 }
 
 export async function sendListeningEvent(payload: ListeningEventPayload) {
-  const requestPayload = withEventId(payload);
+  const requestPayload = withEventId(normalizeListeningEventPayload(payload));
 
   if (
     payload.eventType === "PLAY_START" &&
@@ -176,8 +201,9 @@ export async function sendListeningEvent(payload: ListeningEventPayload) {
       requestPayload,
     );
     if (response.data.success === false) throw new Error("LISTENING_EVENT_REJECTED");
-    // A later Home mount must not reuse a section response captured before
-    // this qualified play was persisted.
+    // Recently Played is updated locally. Behavioural telemetry deliberately
+    // does not invalidate or refetch the full Home: a listener must not see
+    // shelves flicker or switch from Global to personal Home mid-session.
     if (payload.eventType === "PLAY_START") {
       invalidateRecommendationSectionCache(RECENTLY_PLAYED_SHELF_ID);
     }

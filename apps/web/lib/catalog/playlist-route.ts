@@ -6,8 +6,5 @@ export function playlistRoute(playlistUrl: string, playlistId: string) {
     playlistSegment >= 0
       ? routeSegments[playlistSegment + 1] || "playlist"
       : value || "playlist";
-  const slug = extractedSlug.startsWith("daily-mix-")
-    ? "daily-mix"
-    : extractedSlug;
-  return `/playlist/${encodeURIComponent(slug)}/${encodeURIComponent(playlistId)}`;
+  return `/playlist/${encodeURIComponent(extractedSlug)}/${encodeURIComponent(playlistId)}`;
 }

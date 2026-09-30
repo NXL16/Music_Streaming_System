@@ -68,17 +68,13 @@ function contrastTextColor(backgroundColor: string) {
   return luminance > 0.52 ? "#000000" : "#ffffff";
 }
 
-type HeroTextPalette = {
+type HeroBackgroundPalette = {
   bgColor?: string;
-  textColor1?: string;
-  textColor2?: string;
-  textColor3?: string;
-  textColor4?: string;
-  scrimColor?: string;
-  scrimOpacity?: number;
 };
 
-function getHeroTextPalette(artwork: Artwork): HeroTextPalette | undefined {
+function getHeroBackgroundPalette(
+  artwork: Artwork,
+): HeroBackgroundPalette | undefined {
   if (!artwork.variants || typeof artwork.variants !== "object") {
     return undefined;
   }
@@ -89,16 +85,50 @@ function getHeroTextPalette(artwork: Artwork): HeroTextPalette | undefined {
   const palette = (hero as { palette?: unknown }).palette;
   if (!palette || typeof palette !== "object") return undefined;
 
-  const value = palette as HeroTextPalette;
+  const value = palette as HeroBackgroundPalette;
   return {
     bgColor: value.bgColor,
-    textColor1: value.textColor1,
-    textColor2: value.textColor2,
-    textColor3: value.textColor3,
-    textColor4: value.textColor4,
-    scrimColor: value.scrimColor,
-    scrimOpacity:
-      typeof value.scrimOpacity === "number" ? value.scrimOpacity : undefined,
+  };
+}
+
+function isLightNeutralColor(color: string) {
+  const normalized = color.replace(/^#/, "");
+  const channels = /^[0-9a-f]{6}$/i.test(normalized)
+    ? [
+        Number.parseInt(normalized.slice(0, 2), 16),
+        Number.parseInt(normalized.slice(2, 4), 16),
+        Number.parseInt(normalized.slice(4, 6), 16),
+      ]
+    : undefined;
+  const brightest = channels ? Math.max(...channels) : 0;
+  const darkest = channels ? Math.min(...channels) : 0;
+  const luminance = channels
+    ? (0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]) / 255
+    : 0;
+  // Hero artwork commonly uses pastel or saturated bright colours. Dark
+  // typography is for white, off-white, and light neutral areas only; vivid
+  // bright artwork continues to use the white Hero type scale.
+  return luminance >= 0.72 && brightest - darkest <= 56;
+}
+
+function heroMetadataTextColors(
+  heroBackgroundColor: string,
+  artworkBackgroundColor: string | undefined,
+) {
+  // Older Hero variants can carry a palette derived from an overly broad image
+  // region. The original artwork palette is a reliable second signal and lets
+  // existing cards recover without reprocessing their assets.
+  const usesDarkText =
+    isLightNeutralColor(heroBackgroundColor) ||
+    (artworkBackgroundColor
+      ? isLightNeutralColor(artworkBackgroundColor)
+      : false);
+  const primary = usesDarkText ? "#000000" : "#ffffff";
+
+  return {
+    primary,
+    secondary: usesDarkText ? "#1d1d1f" : "#f5f5f7",
+    tertiary: usesDarkText ? "#3a3a3c" : "#ebebf5",
   };
 }
 
@@ -133,18 +163,50 @@ const PORTRAIT_VIDEO_KEYS = [
   "motionDetailTall",
 ] as const;
 
+function systemPlaylistHomeHeroVideo(
+  attributes: CatalogResourceAttributes | undefined,
+): EditorialVideoAsset | undefined {
+  const homeHeroVideo = (
+    attributes?.artwork?.variants as
+      | {
+          systemPlaylistMedia?: { homeHeroVideo?: EditorialVideoAsset };
+        }
+      | undefined
+  )?.systemPlaylistMedia?.homeHeroVideo;
+  return homeHeroVideo?.video ? homeHeroVideo : undefined;
+}
+
+function systemStationHomeHeroVideo(
+  attributes: CatalogResourceAttributes | undefined,
+): EditorialVideoAsset | undefined {
+  const heroVideo = (
+    attributes?.artwork?.variants as
+      | { systemStationMedia?: { heroVideo?: EditorialVideoAsset } }
+      | undefined
+  )?.systemStationMedia?.heroVideo;
+  return heroVideo?.video ? heroVideo : undefined;
+}
+
 function selectHeroVideo(
   resource: CatalogResource,
 ): EditorialVideoAsset | undefined {
-  const editorialVideo = resource.attributes?.editorialVideo;
-  if (!editorialVideo) return undefined;
+  const attributes = resource.attributes;
+  const editorialVideo = attributes?.editorialVideo;
 
-  for (const key of PORTRAIT_VIDEO_KEYS) {
-    const asset = editorialVideo[key];
-    if (asset?.video) return asset;
+  if (editorialVideo) {
+    for (const key of PORTRAIT_VIDEO_KEYS) {
+      const asset = editorialVideo[key];
+      if (asset?.video) return asset;
+    }
   }
 
-  return undefined;
+  // System playlists persist their three breakpoint-specific video slots with
+  // artwork. This fallback keeps an already published Home snapshot playable
+  // when its catalog projection has not yet materialized `editorialVideo`.
+  return (
+    systemPlaylistHomeHeroVideo(attributes) ??
+    systemStationHomeHeroVideo(attributes)
+  );
 }
 
 function getDisplayKind(sourceKind: string): MediaShelfDisplayKind | undefined {
@@ -240,10 +302,15 @@ function selectArtwork(
   attributes: CatalogResourceAttributes,
   videoAsset: EditorialVideoAsset | undefined,
   isHero: boolean,
+  preferVideoPoster = false,
 ) {
   const editorialArtwork = attributes.editorialArtwork;
+  const homeCardArtwork = (
+    attributes.artwork?.variants as { homeCard?: Artwork } | undefined
+  )?.homeCard;
   const artworkCandidates = {
     ...editorialArtwork,
+    homeCardArtwork,
     standardArtwork: attributes.artwork,
   };
 
@@ -251,6 +318,7 @@ function selectArtwork(
 
   if (isHero) {
     artwork =
+      (preferVideoPoster ? videoAsset?.previewFrame : undefined) ??
       closestArtwork(artworkCandidates, 3 / 4, 0.08) ??
       closestArtwork(artworkCandidates, 3 / 4) ??
       videoAsset?.previewFrame;
@@ -389,27 +457,81 @@ export function mapHomeRecommendations(
         resource.attributes.stationArtworkReady !== true;
       if (isArtistStationArtworkPending) return [];
 
+      const stationKind =
+        resource.type === "stations" ? resource.attributes.kind : undefined;
+      const isSystemMoodStation = stationKind === "system-mood";
+      const isPersonalizedStation =
+        stationKind === "personalized-user" ||
+        stationKind === "personalized-discovery";
       const videoAsset = isHero ? selectHeroVideo(resource) : undefined;
-      const artwork = selectArtwork(resource.attributes, videoAsset, isHero);
+      const isSystemStationWithHeroMedia =
+        isSystemMoodStation || isPersonalizedStation;
+      const artwork = selectArtwork(
+        resource.attributes,
+        videoAsset,
+        isHero,
+        isSystemStationWithHeroMedia,
+      );
       if (!artwork?.url) return [];
 
-      const heroPalette = isHero ? getHeroTextPalette(artwork) : undefined;
+      const heroBackgroundPalette = isHero
+        ? getHeroBackgroundPalette(artwork)
+        : undefined;
       const color =
-        formatColor(heroPalette?.bgColor ?? artwork.bgColor) ?? "#2c2c2e";
+        formatColor(heroBackgroundPalette?.bgColor ?? artwork.bgColor) ??
+        "#2c2c2e";
+      const heroTextColors = isHero
+        ? heroMetadataTextColors(color, formatColor(artwork.bgColor))
+        : undefined;
       const primaryTextColor =
-        formatColor(heroPalette?.textColor1 ?? artwork.textColor1) ??
+        heroTextColors?.primary ??
+        formatColor(artwork.textColor1) ??
         contrastTextColor(color);
       const secondaryTextColor =
-        formatColor(heroPalette?.textColor2 ?? artwork.textColor2) ??
+        heroTextColors?.secondary ??
+        formatColor(artwork.textColor2) ??
         primaryTextColor;
-      const tertiaryTextColor = formatColor(heroPalette?.textColor3);
-      const scrimColor = formatColor(heroPalette?.scrimColor);
+      const tertiaryTextColor = heroTextColors?.tertiary;
       const subtitle = getSubtitle(resource.attributes);
       const notes = resource.attributes.plainEditorialNotes;
+      const isSystemMadeForYouPlaylist =
+        resource.type === "playlists" &&
+        resource.attributes.playlistType === "system-personalized";
+      const isArtistStationForYou =
+        resource.type === "stations" &&
+        resource.attributes.kind === "artist-context";
+      const isTopPicks =
+        section.id === "user-top-picks" || section.id === "global-top-picks";
+      const isListenAgainTopPickAlbum =
+        section.id === "user-top-picks" &&
+        resource.type === "albums" &&
+        resource.id === section.attributes?.listenAgainAlbumId;
+      // Remaining album cards in User Top Picks are reused from New Releases.
+      const isNewReleaseTopPickAlbum =
+        section.id === "user-top-picks" &&
+        resource.type === "albums" &&
+        !isListenAgainTopPickAlbum;
+      const isMadeForYouTopPick =
+        section.id === "user-top-picks" &&
+        (isSystemMadeForYouPlaylist || isPersonalizedStation);
+      const isMadeForYouShelf =
+        section.id === "user-playlists-made-for-you" ||
+        section.id === "global-playlists-made-for-you";
       const isContextStation =
         resource.type === "stations" &&
         (resource.attributes.kind === "song-context" ||
           resource.attributes.kind === "artist-context");
+      const description = isContextStation || isPersonalizedStation
+        ? undefined
+        : isSystemMadeForYouPlaylist
+          ? (resource.attributes.description?.short ??
+            resource.attributes.description?.standard ??
+            subtitle)
+          : (notes?.short ??
+            notes?.standard ??
+            resource.attributes.description?.short ??
+            resource.attributes.description?.standard ??
+            subtitle);
 
       return [
         createMediaResourceCard(
@@ -440,22 +562,27 @@ export function mapHomeRecommendations(
               textPrimary: primaryTextColor,
               textSecondary: secondaryTextColor,
               ...(tertiaryTextColor ? { textTertiary: tertiaryTextColor } : {}),
-              ...(scrimColor && heroPalette?.scrimOpacity !== undefined
-                ? {
-                    textScrimColor: scrimColor,
-                    textScrimOpacity: heroPalette.scrimOpacity,
-                  }
-                : {}),
             },
             ...(videoAsset?.video ? { videoSrc: videoAsset.video } : {}),
-            typeTag: notes?.tag ?? (isHero ? sectionTitle : notes?.name),
-            description: isContextStation
-              ? undefined
-              : notes?.short ??
-                notes?.standard ??
-                resource.attributes.description?.short ??
-                resource.attributes.description?.standard ??
-                subtitle,
+            typeTag:
+              isTopPicks && isArtistStationForYou
+                ? `Featuring ${resource.attributes.primaryArtistName ?? "Artist"}`
+                : section.id === "user-top-picks" && isSystemMoodStation
+                ? "Mood for You"
+                : isListenAgainTopPickAlbum
+                ? "Listen Again"
+                : isNewReleaseTopPickAlbum
+                ? "New Releases"
+                : isMadeForYouTopPick
+                ? "Made for You"
+                : (isTopPicks
+                  ? undefined
+                  : (notes?.tag ?? (isHero ? sectionTitle : notes?.name))),
+            showTypeTag: !(isSystemMadeForYouPlaylist && isMadeForYouShelf),
+            showTitle: !isSystemMadeForYouPlaylist,
+            hideHeroDescription:
+              isHero && (isArtistStationForYou || isPersonalizedStation),
+            description,
             altText: artwork.alt ?? resource.attributes.name,
           },
         ),

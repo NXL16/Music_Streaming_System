@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
+import { getAppScrollContainer } from "@/lib/layout/use-app-scroll-to-top";
 
 type InfiniteScrollSentinelOptions = {
   enabled: boolean;
@@ -37,9 +38,7 @@ export function useInfiniteScrollSentinel({
       return;
     }
 
-    const root = document.querySelector<HTMLElement>(
-      "[data-app-scroll-container]",
-    );
+    const root = getAppScrollContainer();
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) onLoadMore();

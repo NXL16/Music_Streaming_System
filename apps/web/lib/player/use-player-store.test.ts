@@ -75,6 +75,176 @@ describe("player queue insertion", () => {
   });
 });
 
+describe("Autoplay and Repeat", () => {
+  it("keeps Autoplay separate from the manual queue and turns it off for Repeat", () => {
+    const player = usePlayerStore.getState();
+    player.setQueue([song("a"), song("b")]);
+    player.toggleAutoplay();
+    player.appendAutoplayTracks([song("c"), song("d")]);
+
+    player.enqueue([song("e")], "last");
+    expect(usePlayerStore.getState().queue.map((item) => item.id)).toEqual([
+      "a",
+      "b",
+      "e",
+      "c",
+      "d",
+    ]);
+
+    player.cycleRepeatMode();
+    expect(usePlayerStore.getState()).toMatchObject({
+      autoplayEnabled: false,
+      repeatMode: 2,
+    });
+    expect(usePlayerStore.getState().queue.map((item) => item.id)).toEqual([
+      "a",
+      "b",
+      "e",
+    ]);
+  });
+
+  it("turns Repeat off when Autoplay is enabled", () => {
+    const player = usePlayerStore.getState();
+    player.setQueue([song("a")]);
+    player.cycleRepeatMode();
+    player.toggleAutoplay();
+
+    expect(usePlayerStore.getState()).toMatchObject({
+      autoplayEnabled: true,
+      repeatMode: 0,
+    });
+  });
+
+  it("resets Shuffle and restores manual queue order when Autoplay is enabled", () => {
+    const player = usePlayerStore.getState();
+    player.setQueue([song("a"), song("b"), song("c")]);
+    player.toggleShuffle();
+    player.toggleAutoplay();
+
+    expect(usePlayerStore.getState()).toMatchObject({
+      autoplayEnabled: true,
+      shuffleEnabled: false,
+      currentSong: expect.objectContaining({ id: "a" }),
+      currentIndex: 0,
+    });
+    expect(usePlayerStore.getState().queue.map((item) => item.id)).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
+  });
+
+  it("does not shuffle when only Autoplay songs remain after the current song", () => {
+    const player = usePlayerStore.getState();
+    player.setQueue([song("a")]);
+    player.toggleAutoplay();
+    player.appendAutoplayTracks([song("b"), song("c")]);
+    player.toggleShuffle();
+
+    expect(usePlayerStore.getState()).toMatchObject({
+      currentSong: expect.objectContaining({ id: "a" }),
+      shuffleEnabled: false,
+    });
+  });
+
+  it("keeps the Autoplay preference when a new queue starts", () => {
+    const player = usePlayerStore.getState();
+    player.setQueue([song("a")]);
+    player.toggleAutoplay();
+    player.setQueue([song("b"), song("c")]);
+
+    expect(usePlayerStore.getState()).toMatchObject({
+      autoplayEnabled: true,
+      currentSong: expect.objectContaining({ id: "b" }),
+    });
+    expect(usePlayerStore.getState().queue.map((item) => item.id)).toEqual([
+      "b",
+      "c",
+    ]);
+  });
+
+  it("keeps Autoplay ordered at the end when Shuffle changes", () => {
+    const player = usePlayerStore.getState();
+    player.setQueue([song("a"), song("b"), song("c")]);
+    player.toggleAutoplay();
+    player.appendAutoplayTracks([song("d"), song("e")]);
+
+    player.toggleShuffle();
+    expect(usePlayerStore.getState().queue[0]?.id).toBe("a");
+    expect(usePlayerStore.getState().queue.slice(-2).map((item) => item.id)).toEqual([
+      "d",
+      "e",
+    ]);
+
+    player.toggleShuffle();
+    expect(usePlayerStore.getState().queue.map((item) => item.id)).toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+    ]);
+  });
+
+  it("keeps Autoplay intact because Repeat is locked on an Autoplay track", () => {
+    const player = usePlayerStore.getState();
+    player.setQueue([song("a"), song("b")]);
+    player.toggleAutoplay();
+    player.appendAutoplayTracks([song("c"), song("d")]);
+    player.next();
+    player.next();
+
+    player.cycleRepeatMode();
+    expect(usePlayerStore.getState().queue.map((item) => item.id)).toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+    ]);
+    expect(usePlayerStore.getState()).toMatchObject({
+      currentSong: expect.objectContaining({ id: "c" }),
+      currentIndex: 2,
+      autoplayEnabled: true,
+      repeatMode: 0,
+    });
+  });
+
+  it("locks Shuffle and Repeat while an Autoplay track is playing", () => {
+    const player = usePlayerStore.getState();
+    player.setQueue([song("a"), song("b")]);
+    player.toggleAutoplay();
+    player.appendAutoplayTracks([song("c")]);
+    player.next();
+    player.next();
+
+    player.toggleShuffle();
+    player.cycleRepeatMode();
+
+    expect(usePlayerStore.getState()).toMatchObject({
+      currentSong: expect.objectContaining({ id: "c", sourceAutoplay: true }),
+      shuffleEnabled: false,
+      repeatMode: 0,
+    });
+  });
+
+  it("resets Shuffle when playback enters the Autoplay section", () => {
+    const player = usePlayerStore.getState();
+    player.setQueue([song("a"), song("b")]);
+    player.toggleShuffle();
+    player.toggleAutoplay();
+    player.appendAutoplayTracks([song("c")]);
+
+    player.next();
+    player.next();
+
+    expect(usePlayerStore.getState()).toMatchObject({
+      currentSong: expect.objectContaining({ id: "c", sourceAutoplay: true }),
+      shuffleEnabled: false,
+      repeatMode: 0,
+    });
+  });
+});
+
 describe("video playback state", () => {
   const videoSong = (id: string, videoId: string): PlayerSong => ({
     ...song(id),

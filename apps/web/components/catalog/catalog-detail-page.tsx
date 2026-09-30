@@ -44,7 +44,10 @@ import {
   ShelfDetailLoading,
   ShelfDetailView,
 } from "../media/shelf-detail-view";
-import { useAppScrollToTop } from "@/lib/layout/use-app-scroll-to-top";
+import {
+  getAppScrollContainer,
+  useAppScrollToTop,
+} from "@/lib/layout/use-app-scroll-to-top";
 import { getCatalogAlbumRelated } from "@/lib/catalog/catalog.api";
 import {
   catalogAlbumReleaseYearCardOptions,
@@ -65,6 +68,8 @@ import PlaylistDetailView, {
 import { playlistRoute } from "@/lib/catalog/playlist-route";
 import { albumRoute } from "@/lib/catalog/album-route";
 import { CatalogMusicVideosShelf } from "../music-videos/catalog-music-videos-shelf";
+import { useArtworkPageTheme } from "@/lib/layout/use-artwork-page-theme";
+import { useMediaQuery } from "@/hooks/use-media-query";
 
 const AmbientVideo = dynamic(() => import("../custom-elements/AmpVideo"), {
   ssr: false,
@@ -119,6 +124,7 @@ export function CatalogDetailPage({
     resourceId,
   );
   const showInitialLoading = useMinimumLoadingDuration(loading && !data);
+  const maxWidth739 = useMediaQuery("(max-width: 739px)");
   const setQueue = usePlayerStore((state) => state.setQueue);
   const playShuffledQueue = usePlayerStore((state) => state.playShuffledQueue);
   const currentSong = usePlayerStore((state) => state.currentSong);
@@ -184,6 +190,9 @@ export function CatalogDetailPage({
     loadingMore: boolean;
   } | null>(null);
   const [expandedLibraryAlbumId, setExpandedLibraryAlbumId] = useState<
+    string | null
+  >(null);
+  const [revealedAlbumThemeKey, setRevealedAlbumThemeKey] = useState<
     string | null
   >(null);
   const selectedRelatedShelfSection = selectedRelatedShelf?.section;
@@ -290,8 +299,8 @@ export function CatalogDetailPage({
   const playlistSubtitle = playlistResource?.attributes.curatorName;
 
   const description =
-    playlistResource?.attributes.descriptionStandard ??
-    playlistResource?.attributes.descriptionShort;
+    albumResource?.attributes.editorialNotes?.standard ??
+    albumResource?.attributes.editorialNotes?.short;
 
   const catalogPlaylist = useMemo<GenericPlaylist | null>(() => {
     if (!playlistResource) return null;
@@ -315,6 +324,39 @@ export function CatalogDetailPage({
 
   const artworkData = resource?.attributes.artwork;
   const artworkUrl = catalogArtworkUrl(artworkData, 632);
+  const albumVideoSrc =
+    albumResource?.attributes.editorialVideo?.primary?.video;
+  const usesVideoAlbumLayout = Boolean(albumVideoSrc) && maxWidth739;
+  const pageThemeKey = `album:${resourceId}`;
+  const { isLoading: isWaitingForAlbumTheme } = useArtworkPageTheme({
+    sourceKey: pageThemeKey,
+    baseColor: artworkData?.bgColor,
+    artworkUrl,
+    enabled: resourceType === "albums" && Boolean(resource),
+  });
+
+  const canRevealAlbumLayout =
+    resourceType === "albums" &&
+    Boolean(resource) &&
+    !showInitialLoading &&
+    !isWaitingForAlbumTheme;
+
+  useEffect(() => {
+    if (!canRevealAlbumLayout) return;
+
+    let secondFrame = 0;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => {
+        setRevealedAlbumThemeKey(pageThemeKey);
+      });
+    });
+
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
+    };
+  }, [canRevealAlbumLayout, pageThemeKey]);
+
   const artworkProps = useMemo(() => {
     if (!artworkUrl) return null;
 
@@ -322,13 +364,18 @@ export function CatalogDetailPage({
     return {
       title,
       altText: title,
-      imageSrcSet: catalogArtworkSrcSet(artworkData, [296, 316, 592, 632]),
+      aspectRatio: usesVideoAlbumLayout ? "0.75" : "1",
+      imageSrcSet: catalogArtworkSrcSet(
+        artworkData,
+        usesVideoAlbumLayout ? [450, 600, 900, 1200] : [296, 316, 592, 632],
+        usesVideoAlbumLayout ? "hero" : "default",
+      ),
       artworkColors: {
         bg: artworkColor,
         main: artworkColor,
       },
     };
-  }, [artworkData, artworkUrl, title]);
+  }, [artworkData, artworkUrl, title, usesVideoAlbumLayout]);
 
   const headerIsExplicit =
     albumResource?.attributes.contentRating === "explicit";
@@ -393,22 +440,27 @@ export function CatalogDetailPage({
 
       scrolledInitialSelectionRef.current = initialSelectedTrackId;
       requestAnimationFrame(() => {
-        const scrollContainer = row.closest<HTMLElement>(
-          "[data-app-scroll-container]",
-        );
-
-        if (!scrollContainer) return;
-
-        const containerBounds = scrollContainer.getBoundingClientRect();
         const rowBounds = row.getBoundingClientRect();
-        scrollContainer.scrollTo({
-          top:
-            scrollContainer.scrollTop +
-            rowBounds.top -
-            containerBounds.top -
-            (scrollContainer.clientHeight - rowBounds.height) / 2,
-          behavior: "auto",
-        });
+        const scrollContainer = getAppScrollContainer();
+        if (scrollContainer) {
+          const containerBounds = scrollContainer.getBoundingClientRect();
+          scrollContainer.scrollTo({
+            top:
+              scrollContainer.scrollTop +
+              rowBounds.top -
+              containerBounds.top -
+              (scrollContainer.clientHeight - rowBounds.height) / 2,
+            behavior: "auto",
+          });
+        } else {
+          window.scrollTo({
+            top:
+              window.scrollY +
+              rowBounds.top -
+              (window.innerHeight - rowBounds.height) / 2,
+            behavior: "auto",
+          });
+        }
       });
     },
     [initialSelectedTrackId],
@@ -465,9 +517,7 @@ export function CatalogDetailPage({
       const el = listRef.current;
       if (!el) return;
 
-      const scrollContainer = el.closest<HTMLElement>(
-        "[data-app-scroll-container]",
-      );
+      const scrollContainer = getAppScrollContainer();
       const listBounds = el.getBoundingClientRect();
       const containerBounds = scrollContainer?.getBoundingClientRect();
       const scrollTop = scrollContainer?.scrollTop ?? window.scrollY;
@@ -487,9 +537,7 @@ export function CatalogDetailPage({
     };
 
     computeRange();
-    const scrollContainer = listRef.current?.closest<HTMLElement>(
-      "[data-app-scroll-container]",
-    );
+    const scrollContainer = getAppScrollContainer();
     const scrollTarget = scrollContainer ?? window;
     scrollTarget.addEventListener("scroll", computeRange, { passive: true });
     window.addEventListener("resize", computeRange);
@@ -543,14 +591,16 @@ export function CatalogDetailPage({
     return <PlaylistDetailView playlist={catalogPlaylist} />;
   }
 
-  const albumVideoSrc =
-    albumResource?.attributes.editorialVideo?.primary?.video;
+  const isPreparingAlbumLayout =
+    canRevealAlbumLayout && revealedAlbumThemeKey !== pageThemeKey;
+  const showPageLoading =
+    showInitialLoading || isWaitingForAlbumTheme || isPreparingAlbumLayout;
 
   return (
     <>
-      {showInitialLoading && <CatalogPageLoading />}
+      {showPageLoading && <CatalogPageLoading />}
 
-      {!showInitialLoading && error && (
+      {!showPageLoading && error && (
         <div
           role="alert"
           className="[--buttonTextColor:var(--systemSecondary)] [--buttonBorderColor:var(--systemSecondary)] items-center text-(--systemSecondary) flex flex-col gap-3 left-1/2 m-auto max-w-110 px-6.25 absolute text-center top-1/2 -translate-x-1/2 -translate-y-1/2 z-(--z-default)"
@@ -568,65 +618,83 @@ export function CatalogDetailPage({
         </div>
       )}
 
-      {!showInitialLoading && resource && (
+      {!showInitialLoading && !isWaitingForAlbumTheme && resource && (
         <div
-          className={`${isLibraryView ? "pb-10.75 min-[1000px]:pb-13.25" : ""}`}
+          className={`${isLibraryView ? "pb-10.75 min-[1000px]:pb-13.25" : ""} ${isPreparingAlbumLayout ? "invisible" : ""}`}
         >
           <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) in-[.has-theme-override]:[--header-title-chevron-color:var(--systemSecondary)]">
             <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
-              <div className="[view-timeline-name:--header-view] [view-timeline-axis:block] after:content-[''] after:bg-(--joe-color) after:block after:inset-0 after:absolute after:z-[calc(var(--z-default)-2)] min-[484px]:after:-inset-s-(--web-navigation-width)">
+              <div className="[view-timeline-name:--header-view] [view-timeline-axis:block] after:bg-(--joe-color) after:block after:inset-0 after:absolute after:z-[calc(var(--z-default)-2)] min-[484px]:after:-inset-s-(--web-navigation-width)">
                 <div
-                  className={`grid [grid-template-areas:var(--containerDetailHeaderGridAreas,'secondary-actions'_'artwork'_'headings'_'primary-actions'_'description')] [justify-items:var(--containerDetailHeaderAlign,center)] mx-(--bodyGutter) mb-(--containerDetailHeaderSpacer,32px) pt-3.75 min-[1000px]:grid-cols-[auto_1fr_auto] min-[1000px]:justify-items-start min-[1000px]:mb-(--containerDetailHeaderSpacer,40px) min-[1000px]:pt-2 ${description ? "min-[1000px]:[grid-template-areas:'secondary-actions_secondary-actions_secondary-actions'_'artwork_headings_headings'_'artwork_description_description'_'artwork_primary-actions_primary-actions'] min-[1000px]:grid-rows-[auto_1fr_auto_auto]" : "min-[1000px]:[grid-template-areas:'secondary-actions_secondary-actions_secondary-actions'_'artwork_headings_headings'_'artwork_headings_headings'_'artwork_primary-actions_primary-actions'] min-[1000px]:grid-rows-[auto_1fr_1fr_36px]"}`}
+                  className={`container-detail-header grid [grid-template-areas:var(--containerDetailHeaderGridAreas,'secondary-actions'_'artwork'_'headings'_'primary-actions'_'description')] [justify-items:var(--containerDetailHeaderAlign,center)] mx-(--bodyGutter) mb-(--containerDetailHeaderSpacer,32px) pt-3.75 min-[1000px]:grid-cols-[auto_1fr_auto] min-[1000px]:justify-items-start min-[1000px]:mb-(--containerDetailHeaderSpacer,40px) min-[1000px]:pt-2 ${description ? "min-[1000px]:[grid-template-areas:'secondary-actions_secondary-actions_secondary-actions'_'artwork_headings_headings'_'artwork_description_description'_'artwork_primary-actions_primary-actions'] min-[1000px]:grid-rows-[auto_1fr_auto_auto]" : "min-[1000px]:[grid-template-areas:'secondary-actions_secondary-actions_secondary-actions'_'artwork_headings_headings'_'artwork_headings_headings'_'artwork_primary-actions_primary-actions'] min-[1000px]:grid-rows-[auto_1fr_1fr_36px]"} ${usesVideoAlbumLayout ? "header--tall-artwork" : ""}`}
                 >
                   <div
                     slot="artwork"
-                    className="[--radiosity-effect-shadow-z:var(--z-gpu)] [align-self:start] rounded-(--global-border-radius-large,10px) [box-shadow:0_10px_20px_0_var(--radiosityShadowColor)] [grid-area:artwork] relative w-(--artworkSize,270px) z-(--radiosity-effect-shadow-z,var(--z-default)) min-[1000px]:mt-0 min-[1000px]:me-8.5 max-[999px]:m-[15px_auto_0] [@supports(animation-timeline:scroll())]:max-[483px]:motion-safe:animate-[artwork-scroll-effects_linear] [@supports(animation-timeline:scroll())]:max-[483px]:motion-safe:will-change-[transform,opacity,filter] [@supports(animation-timeline:scroll())]:max-[483px]:motion-safe:[animation-timeline:--header-view] [@supports(animation-timeline:scroll())]:max-[483px]:motion-safe:[animation-range:exit]"
+                    className={`${usesVideoAlbumLayout ? "absolute top-0 inset-x-0 z-[calc(var(--z-default)-1)]" : "[--radiosity-effect-shadow-z:var(--z-gpu)] [align-self:start] rounded-(--global-border-radius-large,10px) [box-shadow:0_10px_20px_0_var(--radiosityShadowColor)] [grid-area:artwork] relative w-(--artworkSize,270px) z-(--radiosity-effect-shadow-z,var(--z-default)) min-[1000px]:mt-0 min-[1000px]:me-8.5 max-[999px]:m-[15px_auto_0] [@supports(animation-timeline:scroll())]:max-[483px]:motion-safe:animate-[artwork-scroll-effects_linear] [@supports(animation-timeline:scroll())]:max-[483px]:motion-safe:will-change-[transform,opacity,filter] [@supports(animation-timeline:scroll())]:max-[483px]:motion-safe:[animation-timeline:--header-view] [@supports(animation-timeline:scroll())]:max-[483px]:motion-safe:[animation-range:exit]"}`}
                     style={
                       {
-                        "--contrast-gradient-opacity": "0",
-                        "--shadow-opacity": "0",
-                        "--base-border-opacity": "0",
-                        "--base-border-color": "0, 0, 0",
-                        "--refraction-border-opacity": "0",
-                        "--sheen-overlay-opacity": "0",
-                        "--pointer-pitch": "0.0000",
-                        "--pointer-roll": "0.0000",
-                        "--pointer-light-angle": "0",
-                        "--pointer-active": "0",
+                        "--contrast-gradient-opacity": "0.05047625720155632",
+                        "--shadow-opacity": "0.40650137164544764",
+                        "--base-border-opacity": "0.09988",
+                        "--base-border-color": "255, 255, 255",
+                        "--refraction-border-opacity": "0.38044",
+                        "--sheen-overlay-opacity": "0.08012",
                       } as CSSProperties
                     }
                   >
                     {artworkProps && (
                       <>
-                        <div className="[--artwork-override-max-height:100%] filter-[blur(20px)_saturate(2)] size-full opacity-40 absolute transform-[scale(.88)] origin-[bottom_center] z-(--radiosity-effect-z,var(--z-default)) dark:opacity-30">
-                          <CardArtwork variant="cover" {...artworkProps} />
-                        </div>
-
-                        <div className="[background:radial-gradient(circle_at_center,#fff_0,hsla(0,0%,100%,0)_70%)] rounded-[50%] inset-[-20%] opacity-(--contrast-gradient-opacity,0) pointer-events-none absolute z-0"></div>
-
-                        <div className="relative z-1 rounded-(--global-border-radius-large,10px) [box-shadow:calc(var(--pointer-roll,0)*8px)_calc(var(--pointer-pitch,0)*8px+3px)_10px_rgba(0,0,0,var(--shadow-opacity,0))] overflow-hidden">
-                          <CardArtwork variant="cover" {...artworkProps} />
-
-                          {albumVideoSrc && (
-                            <div className="rounded-[inherit] size-full pointer-events-none absolute top-0 z-(--z-default)">
-                              <AmbientVideo
-                                src={albumVideoSrc}
-                                variant="artist"
-                                keepAlive
-                              />
+                        {!usesVideoAlbumLayout && (
+                          <>
+                            <div className="[--artwork-override-max-height:100%] filter-[blur(20px)_saturate(2)] size-full opacity-40 absolute transform-[scale(.88)] origin-[bottom_center] z-(--radiosity-effect-z,var(--z-default)) dark:opacity-30">
+                              <CardArtwork variant="cover" {...artworkProps} />
                             </div>
+
+                            <div className="[background:radial-gradient(circle_at_center,#fff_0,hsla(0,0%,100%,0)_70%)] rounded-[50%] inset-[-20%] opacity-(--contrast-gradient-opacity,0) pointer-events-none absolute z-0"></div>
+                          </>
+                        )}
+
+                        <div
+                          className={`relative z-1 ${usesVideoAlbumLayout ? "[@supports(animation-timeline:scroll())]:max-[483px]:motion-safe:animate-[artwork-scroll-effects_linear] [@supports(animation-timeline:scroll())]:max-[483px]:motion-safe:will-change-[transform,opacity,filter] [@supports(animation-timeline:scroll())]:max-[483px]:motion-safe:[animation-timeline:--header-view] [@supports(animation-timeline:scroll())]:max-[483px]:motion-safe:[animation-range:exit] mask-[linear-gradient(0deg,transparent_0,rgba(0,0,0,.008)_3%,rgba(0,0,0,.031)_6%,rgba(0,0,0,.071)_9%,rgba(0,0,0,.129)_12%,rgba(0,0,0,.204)_15%,rgba(0,0,0,.294)_18%,rgba(0,0,0,.392)_21%,rgba(0,0,0,.502)_24%,rgba(0,0,0,.608)_27%,rgba(0,0,0,.706)_30%,rgba(0,0,0,.796)_33%,rgba(0,0,0,.871)_36%,rgba(0,0,0,.929)_39%,rgba(0,0,0,.969)_42%,rgba(0,0,0,.992)_45%,#000_48%)] rounded-[inherit]" : "rounded-(--global-border-radius-large,10px) [box-shadow:calc(var(--pointer-roll,0)*8px)_calc(var(--pointer-pitch,0)*8px+3px)_10px_rgba(0,0,0,var(--shadow-opacity,0))] overflow-hidden"}`}
+                        >
+                          <div className="rounded-[inherit] relative z-(--z-default)">
+                            <CardArtwork
+                              variant="cover"
+                              {...artworkProps}
+                              containerClassName="in-[.has-theme-override]:after:[box-shadow:inset_0_0_0_.5px_rgba(var(--base-border-color),var(--base-border-opacity,0))]"
+                            />
+
+                            {albumVideoSrc && (
+                              <div className="rounded-[inherit] size-full pointer-events-none absolute top-0 z-(--z-default)">
+                                <AmbientVideo
+                                  src={albumVideoSrc}
+                                  variant="artist"
+                                  keepAlive
+                                />
+                              </div>
+                            )}
+                          </div>
+
+                          {!usesVideoAlbumLayout && (
+                            <>
+                              <div
+                                className="[background:conic-gradient(from_calc(var(--pointer-light-angle,0)*1deg)_at_50%_50%,hsla(0,0%,100%,.6)_0deg,hsla(0,0%,100%,.15)_72deg,hsla(0,0%,100%,.05)_180deg,hsla(0,0%,100%,.15)_288deg,hsla(0,0%,100%,.6)_1turn)] rounded-[inherit] inset-0 [-webkit-mask:linear-gradient(#fff_0_0)_content-box,linear-gradient(#fff_0_0)] [mask:linear-gradient(#fff_0_0)_content-box,linear-gradient(#fff_0_0)] [-webkit-mask-composite:xor] mix-blend-plus-lighter opacity-(--refraction-border-opacity,0) p-px pointer-events-none absolute z-3"
+                                style={{ maskComposite: "exclude" }}
+                              ></div>
+
+                              <div className="[--sheen-x:calc(50%+var(--pointer-roll,0)*50%)] [--sheen-y:calc(50%+var(--pointer-pitch,0)*50%)] [background:radial-gradient(ellipse_100%_100%_at_var(--sheen-x)_var(--sheen-y),hsla(0,0%,100%,.6)_0,hsla(0,0%,100%,.3)_20%,hsla(0,0%,100%,0)_50%)] rounded-[inherit] inset-0 mix-blend-plus-lighter opacity-(--sheen-overlay-opacity,0) pointer-events-none absolute z-4"></div>
+                            </>
                           )}
-
-                          <div className="[background:conic-gradient(from_calc(var(--pointer-light-angle,0)*1deg)_at_50%_50%,hsla(0,0%,100%,.6)_0deg,hsla(0,0%,100%,.15)_72deg,hsla(0,0%,100%,.05)_180deg,hsla(0,0%,100%,.15)_288deg,hsla(0,0%,100%,.6)_1turn)] rounded-[inherit] inset-0 [mask:linear-gradient(#fff_0_0)_content-box,linear-gradient(#fff_0_0)] mask-exclude mix-blend-plus-lighter opacity-(--refraction-border-opacity,0) p-px pointer-events-none absolute z-3"></div>
-
-                          <div className="[--sheen-x:calc(50%+var(--pointer-roll,0)*50%)] [--sheen-y:calc(50%+var(--pointer-pitch,0)*50%)] [background:radial-gradient(ellipse_100%_100%_at_var(--sheen-x)_var(--sheen-y),hsla(0,0%,100%,.6)_0,hsla(0,0%,100%,.3)_20%,hsla(0,0%,100%,0)_50%)] rounded-[inherit] inset-0 mix-blend-plus-lighter opacity-(--sheen-overlay-opacity,0) pointer-events-none absolute z-4"></div>
                         </div>
                       </>
                     )}
                   </div>
 
-                  <div className="[align-items:var(--containerDetailHeaderAlign,center)] flex flex-col [grid-area:headings] mt-4.5 min-w-0 relative w-full self-center min-[1000px]:items-start min-[1000px]:self-center min-[1000px]:-my-1.25 min-[1000px]:py-1.25 max-[483px]:[--systemPrimary:var(--systemPrimary-onDark)] max-[483px]:[--systemSecondary:var(--systemSecondary-vibrantOnDark)] max-[483px]:[--systemTertiary:var(--systemTertiary-onDark)] max-[483px]:[--systemQuaternary:var(--systemQuaternary-onDark)] max-[483px]:[--systemQuinary:var(--systemQuinary-onDark)] max-[483px]:[--keyColor:var(--systemPrimary-onDark)] max-[483px]:[--button-pill-color:#000] max-[483px]:[--button-pill-background-color:#fff] max-[483px]:[--iconEllipsisFill:var(--systemPrimary-onDark)] max-[483px]:[--button-action-background-color:#fff] max-[483px]:[--button-action-color:#000] max-[483px]:[--explicitFillOverride:var(--systemSecondary-vibrantOnDark)] max-[483px]:[--favoriteBadgeColor:var(--systemSecondary-vibrantOnDark)] max-[483px]:mix-blend-plus-lighter">
+                  <div
+                    className={`headings [align-items:var(--containerDetailHeaderAlign,center)] flex flex-col [grid-area:headings] mt-4.5 min-w-0 relative w-full self-center min-[1000px]:items-start min-[1000px]:self-center min-[1000px]:-my-1.25 min-[1000px]:py-1.25 ${usesVideoAlbumLayout ? "mt-[94vw] min-[484px]:mt-[62.9673356946vw]" : ""}`}
+                  >
                     <div className="empty:hidden text-(--systemSecondary) [font:var(--subhead-emphasized)] mt-2.25"></div>
+
                     <h1 className="text-(--systemPrimary) cursor-text [font:var(--large-title-emphasized-short)] mb-[0.5px] wrap-break-word [text-align:var(--containerDetailHeaderAlign,center)] text-balance select-text line-clamp-2 min-[1000px]:[text-align:unset] max-[999px]:[font:var(--title-1-emphasized)] max-[999px]:mb-1">
                       <span dir="auto">{title}</span>
                       <span className="inline-flex items-center gap-1 ms-1 [--explicitBadgeSize:19px] [--favoriteBadgeSize:14px] [--favoriteBadgeMarginInlineStart:1px] has-[.explicit-wrapper]:ms-[6.5px] max-[999px]:[--explicitBadgeSize:16px]">
@@ -676,15 +744,26 @@ export function CatalogDetailPage({
                   </div>
 
                   {description && (
-                    <div className="[--truncate-font:var(--body-tall)] [grid-area:description] mt-4.5 max-w-110 min-[1000]:self-end min-[1000]:min-h-13.5 min-[1000]:mb-3.75 min-[1000]:mt-0">
-                      <div className="relative z-(--z-default) text-(--systemSecondary)">
-                        <p>{description}</p>
+                    <div className="wrap-anywhere [--truncate-font:var(--body-tall)] [grid-area:description] mt-4.5 max-w-110 min-[1000]:self-end min-[1000]:min-h-13.5 min-[1000]:mb-3.75 min-[1000]:mt-0">
+                      <div className="relative z-(--z-default) text-(--systemSecondary) truncate-wrapper">
+                        <p
+                          className="line-clamp-(--lines) [font:var(--truncate-font,var(--body-tall))] whitespace-pre-wrap wrap-anywhere"
+                          style={
+                            {
+                              "--lines": "3",
+                              "--line-height": "var(--lineHeight, 16)",
+                              "--link-length": "4",
+                            } as CSSProperties
+                          }
+                        >
+                          {description}
+                        </p>
                       </div>
                     </div>
                   )}
 
                   <div className="[--addToLibraryMarginEnd:0] grid [grid-template-areas:'primary-start_primary-center_primary-end'] grid-cols-[1fr_auto_1fr] mt-3.5 gap-3 [grid-area:primary-actions] pointer-coarse:gap-3.5 min-[1000px]:self-end min-[1000px]:justify-start min-[1000px]:mt-0">
-                    <div className="order-2 relative">
+                    <div className="order-2 relative primary-actions__button--play">
                       <div className="w-full">
                         <button
                           type="button"
@@ -699,7 +778,10 @@ export function CatalogDetailPage({
                               width="16"
                               viewBox="0 0 16 16"
                             >
-                              <path d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"></path>
+                              <path
+                                fill="currentColor"
+                                d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"
+                              ></path>
                             </svg>
                           </span>
                           <span className="contents">Play</span>
@@ -707,7 +789,7 @@ export function CatalogDetailPage({
                       </div>
                     </div>
 
-                    <div className="order-1">
+                    <div className="order-1 primary-actions__button--shuffle">
                       <div className="w-full">
                         <button
                           disabled={playableTrackCount < 2}
@@ -733,7 +815,7 @@ export function CatalogDetailPage({
                       </div>
                     </div>
 
-                    <div className="order-3 [--addToLibraryFillOverride:var(--systemPrimary)]">
+                    <div className="order-3 [--addToLibraryFillOverride:var(--systemPrimary)] primary-actions__button--add-to-library">
                       <div className="[--add-to-library-button-width:36px] [--add-to-library-icon-width:12px] pointer-coarse:[--add-to-library-button-width:48px] pointer-coarse:[--add-to-library-icon-width:16px]">
                         <AddToLibraryButton
                           resourceType={resourceType}
@@ -754,7 +836,7 @@ export function CatalogDetailPage({
                     </div>
                   </div>
 
-                  <div className="flex gap-2.5 [grid-area:secondary-actions] [justify-self:var(--containerDetailHeaderAlign,end)] relative min-[1000px]:[align-self:var(--containerDetailHeaderSecondaryActionsAlignSelf,end)]">
+                  <div className="secondary-actions flex gap-2.5 [grid-area:secondary-actions] [justify-self:var(--containerDetailHeaderAlign,end)] relative min-[1000px]:[align-self:var(--containerDetailHeaderSecondaryActionsAlignSelf,end)]">
                     <div className="flex gap-2 me-[calc(var(--bodyGutter)*-1+15px)] min-[484px]:me-[calc(var(--bodyGutter)*-1+8px)]">
                       <div className="cloud-buttons cloud-buttons--with-platter">
                         <div>
@@ -812,7 +894,7 @@ export function CatalogDetailPage({
             </div>
           </div>
 
-          <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) [--songs-list-row-border-radius:12px] relative z-(--z-default) pt-0">
+          <div className="section -ms-(--web-navigation-width) ps-(--web-navigation-width) [--songs-list-row-border-radius:12px] relative z-(--z-default) pt-0">
             <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
               <div
                 ref={listRef}
@@ -864,13 +946,13 @@ export function CatalogDetailPage({
                           : undefined
                       }
                       onClick={() => selectTrack(track.id)}
-                      className={`group ${selectedTrackId === track.id ? "selected" : ""} text-(--systemSecondary) table-row relative z-(--z-default) [--platterBorderColor:var(--pageBG)] bg-(--rowBackgroundColor,transparent) last:[&>.table-cell]:after:[border-bottom:.5px_solid_var(--labelDivider)] last:[&>.table-cell]:after:h-full last:[&>.table-cell]:after:pointer-events-none ${
+                      className={`group text-(--systemSecondary) table-row relative z-(--z-default) [--platterBorderColor:var(--pageBG)] bg-(--rowBackgroundColor,transparent) last:[&>.table-cell]:after:[border-bottom:.5px_solid_var(--labelDivider)] last:[&>.table-cell]:after:h-full last:[&>.table-cell]:after:pointer-events-none ${
                         selectedTrackId === track.id
-                          ? "[--rowBackgroundColor:var(--selectionColor)] [--platterBorderColor:var(--selectionColor)] [outline:0] [--linkColor:#fff] [--explicitFillOverride:#fff] [--contextMenuEllipsisFillOverride:#fff] [--addToLibraryFillOverride:#fff] text-white hover:[--playButtonOpacity:1] hover:[--addToLibraryOpacity:1] focus-within:[--playButtonOpacity:0] focus-within:[--addToLibraryOpacity:0] [&+_.group>.table-cell]:after:border-t-transparent"
+                          ? "selected hover:[--playButtonOpacity:1] hover:[--addToLibraryOpacity:1] focus-within:[--playButtonOpacity:0] focus-within:[--addToLibraryOpacity:0] [&+_.group>.table-cell]:after:border-t-transparent"
                           : "hover:[--playButtonOpacity:1] hover:[--addToLibraryOpacity:1] hover:[--rowBackgroundColor:var(--tracklistHoverColor)] hover:[--platterBorderColor:#f0f0f0] hover:[&+_.group>.table-cell]:after:border-t-transparent"
                       }`}
                     >
-                      <div className="table-cell [font:var(--body)] py-0 align-middle h-[inherit] inset-s-1.75 overflow-visible relative z-(--z-default) after:[border-top:0.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0 group-[.selected]:after:opacity-0">
+                      <div className="table-cell [font:var(--body)] py-0 align-middle h-[inherit] inset-s-1.75 overflow-visible relative z-(--z-default) after:[border-top:0.5px_solid_var(--labelDivider)] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0 group-[.selected]:after:opacity-0">
                         <div className="grid [grid-template-areas:'favorite-or-popular'] h-full -inset-s-8.25 p-0 place-items-center absolute top-1/2 transform-[translateY(-50%)] w-6.5 z-(--z-default)">
                           <div className="[grid-area:favorite-or-popular] leading-0 place-self-stretch">
                             <FavoriteSongButton
@@ -889,15 +971,15 @@ export function CatalogDetailPage({
                         </div>
                       </div>
 
-                      <div className="[font:var(--body)] py-0 table-cell align-middle px-0 text-(--systemPrimary) relative rounded-ee-none rounded-es-(--songs-list-row-border-radius,6px) rounded-se-none rounded-ss-(--songs-list-row-border-radius,6px) overflow-hidden text-ellipsis whitespace-nowrap after:[border-top:0.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0 group-[.selected]:after:opacity-0">
+                      <div className="[font:var(--body)] py-0 table-cell align-middle px-0 text-(--systemPrimary) relative rounded-ee-none rounded-es-(--songs-list-row-border-radius,6px) rounded-se-none rounded-ss-(--songs-list-row-border-radius,6px) overflow-hidden text-ellipsis whitespace-nowrap after:[border-top:0.5px_solid_var(--labelDivider)] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0 group-[.selected]:after:opacity-0">
                         <div className="items-center grid [grid-template-areas:'song-artwork_song-rank_song-icon_song-name'] grid-cols-[auto_auto_auto_1fr] min-h-11.5">
                           <div
-                            className={`grid relative mt-px ${isCurrentTrack ? "[--playButtonOpacity:1]" : ""} ${selectedTrackId === track.id ? "[--linkColor:#fff] text-white" : "text-(--systemSecondary)"}`}
+                            className={`grid relative mt-px ${isCurrentTrack ? "[--playButtonOpacity:1]" : ""} ${selectedTrackId === track.id ? "dark:[--linkColor:#fff] dark:text-white [--linkColor:rgba(0,0,0,.85)] text-[rgba(0,0,0,.85)]" : "text-(--systemSecondary)"}`}
                           >
                             <div className="[font:var(--body-tall)] [grid-area:song-index] opacity-[calc(1-var(--playButtonOpacity))] text-center w-10">
                               {catalogTrackPositions.get(track.id) ?? index + 1}
                             </div>
-                            <div className="[grid-area:song-index] opacity-(--playButtonOpacity,0) z-[calc(var(--z-default)+2)] [--playButtonIconHoverColor:var(--keyColor)] [--playButtonIconColor:var(--keyColor)] [--nonPlatterIconFill:var(--keyColor)] in-[.selected]:[--playButtonIconHoverColor:#fff] in-[.selected]:[--playButtonIconColor:#fff] in-[.selected]:[--nonPlatterIconFill:#fff]">
+                            <div className="[grid-area:song-index] opacity-(--playButtonOpacity,0) z-[calc(var(--z-default)+2)] [--playButtonIconHoverColor:var(--keyColor)] [--playButtonIconColor:var(--keyColor)] [--nonPlatterIconFill:var(--keyColor)] dark:in-[.selected]:[--playButtonIconHoverColor:#fff] dark:in-[.selected]:[--playButtonIconColor:#fff] dark:in-[.selected]:[--nonPlatterIconFill:#fff]">
                               <div className="[--nonPlatterIconFill:var(--nonPlatterOverrideIconColor,var(--keyColor))] size-full align-top">
                                 <button
                                   disabled={!track.playbackUrl}
@@ -1004,7 +1086,7 @@ export function CatalogDetailPage({
                         </div>
                       </div>
 
-                      <div className="table-cell [font:var(--body)] py-0 align-middle overflow-visible relative text-end z-(--z-default) rounded-ee-(--songs-list-row-border-radius,6px) rounded-es-none rounded-se-(--songs-list-row-border-radius,6px) rounded-ss-none pe-4.5 after:[border-top:0.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0 group-[.selected]:after:opacity-0">
+                      <div className="table-cell [font:var(--body)] py-0 align-middle overflow-visible relative text-end z-(--z-default) rounded-ee-(--songs-list-row-border-radius,6px) rounded-es-none rounded-se-(--songs-list-row-border-radius,6px) rounded-ss-none pe-4.5 after:[border-top:0.5px_solid_var(--labelDivider)] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0 group-[.selected]:after:opacity-0">
                         <div className="items-center inline-grid [grid-template-areas:'song-controls-add_song-controls-length_song-controls-context'] relative">
                           <div className="pointer-coarse:hidden max-[578px]:hidden [grid-area:song-controls-add] opacity-(--addToLibraryOpacity,0) me-1.75">
                             <AddSongToLibraryButton
@@ -1023,7 +1105,7 @@ export function CatalogDetailPage({
                           </time>
 
                           <div
-                            className={`[grid-area:song-controls-context] ms-1.75 [--contextMenuButtonSize:28px] ${selectedTrackId === track.id ? "[--contextMenuEllipsisFillOverride:#fff]" : "[--contextMenuEllipsisFillOverride:var(--systemSecondary)] hover:[--contextMenuEllipsisFillOverride:var(--keyColor)]"}`}
+                            className={`[grid-area:song-controls-context] ms-1.75 [--contextMenuButtonSize:28px] ${selectedTrackId === track.id ? "dark:[--contextMenuEllipsisFillOverride:#fff] [--contextMenuEllipsisFillOverride:#000000d9]" : "[--contextMenuEllipsisFillOverride:var(--systemSecondary)] hover:[--contextMenuEllipsisFillOverride:var(--keyColor)]"}`}
                           >
                             <AmpContextMenuButton
                               id={`song-${track.id}`}
@@ -1056,7 +1138,7 @@ export function CatalogDetailPage({
             </div>
           </div>
 
-          <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) pt-3 [--songs-list-row-border-radius:12px] relative z-(--z-default)">
+          <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) pt-3 [--songs-list-row-border-radius:12px] relative z-(--z-default) section">
             <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
               <div
                 className={`m-[0_var(--bodyGutter)] ps-3 -mt-3 min-[1000px]:flex min-[1000px]:flex-row min-[1000px]:justify-between ${isLibraryView ? "pb-0" : "pb-10.75 min-[1000px]:pb-13.25"}`}
@@ -1078,7 +1160,7 @@ export function CatalogDetailPage({
                   showFullLibraryAlbum ? null : resourceId,
                 );
               }}
-              className="mt-3 ms-[calc(var(--bodyGutter)+12px)] text-(--keyColor)"
+              className="mt-3 ms-[calc(var(--bodyGutter)+12px)] text-(#fff)"
             >
               {showFullLibraryAlbum
                 ? "Hide Songs Not in Library"
@@ -1087,7 +1169,7 @@ export function CatalogDetailPage({
           )}
 
           {showRelatedShelfSpacer && (
-            <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) pt-3 [--songs-list-row-border-radius:12px] relative z-(--z-default) bg-(--opaqueShelfBG)">
+            <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) pt-3 [--songs-list-row-border-radius:12px] relative z-(--z-default) bg-(--opaqueShelfBG) section--alternate">
               <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
                 <div className="pt-4 w-full"></div>
               </div>

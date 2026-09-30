@@ -42,6 +42,7 @@ import AmpPlaybackControlsProgress from "@/components/custom-elements/AmpPlaybac
 import Logo from "@/components/custom-elements/Logo";
 import AmpLyrics from "@/components/custom-elements/AmpLyrics";
 import {
+  countShuffleableManualSongs,
   usePlayerStore,
   type PlayerSong,
   type RepeatMode,
@@ -54,6 +55,7 @@ import VolumeControl from "@/components/custom-elements/VolumeControl";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { musicVideoRoute } from "@/lib/catalog/music-video-route";
+import M404AutoPlay from "@/components/custom-elements/m404-playback-controls-autoplay";
 
 // The detail modal owns the Pixi lyrics scene. It is only needed after the
 // listener opens the expanded player, so keep it out of the desktop controls
@@ -70,7 +72,7 @@ const restrictQueueToVerticalAxis: Modifier = ({ transform }) => ({
 function PlayerSongArtwork({ song }: { song: PlayerSong }) {
   return (
     <div
-      className="bg-(--override-placeholder-bg-color,var(--placeholder-bg-color,var(--genericJoeColor))) rounded-[inherit] box-border contain-content h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0px) min-w-(--artwork-override-min-width,0px) overflow-hidden relative w-(--artwork-override-width,100%) z-(--z-default) after:content-[''] after:block after:absolute after:top-0 after:w-full after:h-0 after:min-h-full after:min-w-full after:max-h-full after:max-w-full after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:opacity-(--containerInnerStrokeAlpha,0.25) after:pointer-events-none after:z-[calc(var(--z-default)+1)]"
+      className="bg-(--override-placeholder-bg-color,var(--placeholder-bg-color,var(--genericJoeColor))) rounded-[inherit] box-border contain-content h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0px) min-w-(--artwork-override-min-width,0px) overflow-hidden relative w-(--artwork-override-width,100%) z-(--z-default) after:block after:absolute after:top-0 after:w-full after:h-0 after:min-h-full after:min-w-full after:max-h-full after:max-w-full after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:opacity-(--containerInnerStrokeAlpha,0.25) after:pointer-events-none after:z-[calc(var(--z-default)+1)]"
       style={
         {
           "--aspect-ratio": "1",
@@ -242,8 +244,8 @@ type DesktopPlayerBarProps = {
   isPlaying: boolean;
   shuffleEnabled: boolean;
   stationMode: boolean;
+  autoplayEnabled: boolean;
   repeatMode: RepeatMode;
-  playableSongCount: number;
   isCurrentSongFavorite: boolean;
   isExpanded: boolean;
   setIsExpanded: (expanded: boolean) => void;
@@ -255,11 +257,14 @@ type DesktopPlayerBarProps = {
   onTogglePlayback: () => void;
   onToggleShuffle: () => void;
   onCycleRepeatMode: () => void;
+  onToggleAutoplay: () => void;
   onNext: () => void;
   onPrevious: () => void;
   onDrawerOpenChange: (open: boolean) => void;
   isStemActive: boolean;
   vocalVolume: number;
+  isVocalControlExpanded: boolean;
+  onVocalControlExpandedChange: (expanded: boolean) => void;
   onSetVocalVolume: (volume: number) => void;
   onPreviewVocalVolume: (volume: number) => void;
   isVideoPlayback: boolean;
@@ -274,8 +279,8 @@ export function DesktopPlayerBar({
   isPlaying,
   shuffleEnabled,
   stationMode,
+  autoplayEnabled,
   repeatMode,
-  playableSongCount,
   isCurrentSongFavorite,
   isExpanded,
   setIsExpanded,
@@ -287,11 +292,14 @@ export function DesktopPlayerBar({
   onTogglePlayback,
   onToggleShuffle,
   onCycleRepeatMode,
+  onToggleAutoplay,
   onNext,
   onPrevious,
   onDrawerOpenChange,
   isStemActive,
   vocalVolume,
+  isVocalControlExpanded,
+  onVocalControlExpandedChange,
   onSetVocalVolume,
   onPreviewVocalVolume,
   isVideoPlayback,
@@ -305,6 +313,10 @@ export function DesktopPlayerBar({
   const [queueMounted, setQueueMounted] = useState(false);
   const [isOpenMusicPlayer, setIsOpenMusicPlayer] = useState(false);
   const [isMusicPlayerLyricOpen, setIsMusicPlayerLyricOpen] = useState(false);
+  const shuffleableManualSongCount = useMemo(
+    () => countShuffleableManualSongs(queue, currentIndex),
+    [currentIndex, queue],
+  );
 
   const openMusicPlayer = (
     initialLyricOpen = currentSong?.hasLyrics ?? false,
@@ -389,10 +401,7 @@ export function DesktopPlayerBar({
         return;
       }
 
-      if (
-        previousIndex !== null &&
-        currentIndex < previousIndex
-      ) {
+      if (previousIndex !== null && currentIndex < previousIndex) {
         const revisitedSongs = queue
           .slice(currentIndex + 1, previousIndex + 1)
           .filter((song) => song.playbackUrl);
@@ -440,6 +449,25 @@ export function DesktopPlayerBar({
     const nextStationSong = remainingSongs.find((song) => song.playbackUrl);
     return nextStationSong ? [nextStationSong] : [];
   }, [currentIndex, queue, stationMode, stationVisibleQueueIds]);
+  const manualUpcomingSongs = useMemo(
+    () => upcomingSongs.filter((song) => !song.sourceAutoplay),
+    [upcomingSongs],
+  );
+  const autoplayUpcomingSongs = useMemo(
+    () => upcomingSongs.filter((song) => song.sourceAutoplay),
+    [upcomingSongs],
+  );
+  const hasManualUpcomingSongs = manualUpcomingSongs.length > 0;
+  const hasAutoplayUpcomingSongs = autoplayUpcomingSongs.length > 0;
+  const isAutoplayOnly = !hasManualUpcomingSongs && hasAutoplayUpcomingSongs;
+  const showClearQueue =
+    !stationMode && (hasManualUpcomingSongs || isAutoplayOnly);
+  const handleClearQueue = () => {
+    // Clear is terminal for this queue: stop Autoplay first so its refill
+    // effect cannot immediately repopulate the rows that were just cleared.
+    if (autoplayEnabled) onToggleAutoplay();
+    clearUpcomingQueue();
+  };
 
   useEffect(
     () => () => {
@@ -533,12 +561,21 @@ export function DesktopPlayerBar({
 
   return (
     <div className="block">
-      <div className="rounded-[1000px] grid grid-cols-[auto_1fr_auto] h-14 max-w-167 px-4 place-items-center relative mx-auto before:backdrop-saturate-220 before:backdrop-blur-lg before:bg-(--glassMaterialBackground) before:rounded-[1000px] before:shadow-[0_10px_40px_var(--glassMaterialShadowColor)] before:content-[''] before:inset-0 before:absolute before:z-(--z-default) after:content-[''] after:block after:h-0 after:min-w-full after:min-h-full after:max-w-full after:max-h-full after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)] after:rounded-[1000px] after:shadow-[inset_.5px_.5px_var(--glassMaterialInnerStroke),inset_.5px_-.5px_var(--glassMaterialInnerStroke),inset_-.5px_.5px_var(--glassMaterialInnerStroke),inset_-.5px_-.5px_var(--glassMaterialInnerStroke)] after:opacity-10 dark:after:opacity-25">
+      <div className="rounded-[1000px] grid grid-cols-[auto_1fr_auto] h-14 max-w-167 px-4 place-items-center relative mx-auto before:backdrop-saturate-220 before:backdrop-blur-lg before:bg-(--glassMaterialBackground) before:rounded-[1000px] before:shadow-[0_10px_40px_var(--glassMaterialShadowColor)] before:content-[''] before:inset-0 before:absolute before:z-(--z-default) after:block after:h-0 after:min-w-full after:min-h-full after:max-w-full after:max-h-full after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)] after:rounded-[1000px] after:shadow-[inset_.5px_.5px_var(--glassMaterialInnerStroke),inset_.5px_-.5px_var(--glassMaterialInnerStroke),inset_-.5px_.5px_var(--glassMaterialInnerStroke),inset_-.5px_-.5px_var(--glassMaterialInnerStroke)] after:opacity-10 dark:after:opacity-25">
         <div className="z-[calc(var(--z-default)+1)]">
           <div className="flex gap-2 [--playback-control-button-width:24px] [--playback-control-button-height:24px] [--playback-control-icon-width:30px] [--playback-controls-play-color:var(--systemPrimary)] [--shuffle-repeat-button-width:24px] [--shuffle-repeat-button-height:24px] [--skip-control-color:var(--systemPrimary)] [--skip-icon-width:28px]">
             <AmpShuffleButton
-              shuffled={shuffleEnabled && !stationMode}
-              disabled={playableSongCount < 2 || stationMode}
+              shuffled={
+                shuffleEnabled &&
+                !stationMode &&
+                shuffleableManualSongCount >= 2
+              }
+              disabled={
+                !currentSong ||
+                shuffleableManualSongCount < 2 ||
+                stationMode ||
+                currentSong.sourceAutoplay
+              }
               onToggle={onToggleShuffle}
             />
 
@@ -571,7 +608,9 @@ export function DesktopPlayerBar({
 
             <AmpRepeatButton
               mode={stationMode ? 0 : repeatMode}
-              disabled={!currentSong || stationMode}
+              disabled={
+                !currentSong || stationMode || currentSong.sourceAutoplay
+              }
               onCycle={onCycleRepeatMode}
             />
           </div>
@@ -616,6 +655,10 @@ export function DesktopPlayerBar({
                         onSetVolume={onSetVolume}
                         isStemActive={isStemActive}
                         vocalVolume={vocalVolume}
+                        isVocalControlExpanded={isVocalControlExpanded}
+                        onVocalControlExpandedChange={
+                          onVocalControlExpandedChange
+                        }
                         onSetVocalVolume={onSetVocalVolume}
                         onPreviewVocalVolume={onPreviewVocalVolume}
                         onTogglePlayback={onTogglePlayback}
@@ -742,7 +785,8 @@ export function DesktopPlayerBar({
                           isVideoPlayback
                             ? {
                                 kind: "video",
-                                videoId: currentSong.video?.id ?? currentSong.id,
+                                videoId:
+                                  currentSong.video?.id ?? currentSong.id,
                                 href: musicVideoRoute(
                                   currentSong.title,
                                   currentSong.video?.id ?? currentSong.id,
@@ -845,12 +889,7 @@ export function DesktopPlayerBar({
                         </div>
 
                         <AmpLyrics
-                          // The drawer remains structurally unchanged, but a
-                          // Music Video must never use its linked Song id to
-                          // request lyrics.
-                          songId={
-                            isVideoPlayback ? undefined : currentSong?.id
-                          }
+                          songId={isVideoPlayback ? undefined : currentSong?.id}
                           audioRef={audioRef}
                         />
                       </div>
@@ -883,52 +922,128 @@ export function DesktopPlayerBar({
                     <div className="[backdrop-filter:none] bg-transparent flex flex-col pb-3 pe-5 pt-5.75 ps-5 sticky top-0 z-[calc(var(--z-default)+6)]">
                       <div className="flex justify-between text-(--systemPrimary)">
                         <h3 className="pe-2.5 [font:var(--title-2-emphasized)]">
-                          Up next
+                          {isAutoplayOnly ? "AutoPlay" : "Up next"}
                         </h3>
+
                         <div className="flex items-center">
-                          {!stationMode && upcomingSongs.length > 0 && (
+                          {showClearQueue && (
                             <button
-                              onClick={clearUpcomingQueue}
+                              onClick={handleClearQueue}
                               className="text-(--keyColor) [font:var(--title-3)] px-2.5"
                             >
                               Clear
                             </button>
                           )}
-                          <div className="pe-2.5">{/* something */}</div>
+
+                          <div className="ps-2.5">
+                            <M404AutoPlay
+                              enabled={autoplayEnabled}
+                              disabled={!currentSong || stationMode}
+                              onToggle={onToggleAutoplay}
+                            />
+                          </div>
                         </div>
                       </div>
+
+                      {isAutoplayOnly && (
+                        <p className="text-(--systemSecondary) [font:var(--callout)] pt-1">
+                          Similar music will keep playing
+                        </p>
+                      )}
                     </div>
 
                     {upcomingSongs.length > 0 ? (
                       <div className="h-[calc(100dvh-58px)] overflow-y-auto">
                         <div className="px-2.5 min-h-full">
-                          <DndContext
-                            collisionDetection={closestCenter}
-                            modifiers={[restrictQueueToVerticalAxis]}
-                            onDragEnd={handleQueueDragEnd}
-                            sensors={queueSensors}
-                          >
-                            <SortableContext
-                              items={upcomingSongs.map((song) => song.id)}
-                              strategy={verticalListSortingStrategy}
+                          {hasManualUpcomingSongs && (
+                            <DndContext
+                              collisionDetection={closestCenter}
+                              modifiers={[restrictQueueToVerticalAxis]}
+                              onDragEnd={handleQueueDragEnd}
+                              sensors={queueSensors}
                             >
-                              <ul ref={queueListRef}>
-                                {upcomingSongs.map((song) => (
-                                  <SortableQueueSong
-                                    key={song.id}
-                                    song={song}
-                                    userId={userId}
-                                    isFavorite={favoriteSongIds.has(song.id)}
-                                    draggable={!stationMode}
-                                    selected={selectedQueueSongId === song.id}
-                                    active={activeQueueSongId === song.id}
-                                    selectedRowRef={selectedQueueRowRef}
-                                    onSelect={selectQueueSong}
-                                  />
-                                ))}
-                              </ul>
-                            </SortableContext>
-                          </DndContext>
+                              <SortableContext
+                                items={manualUpcomingSongs.map(
+                                  (song) => song.id,
+                                )}
+                                strategy={verticalListSortingStrategy}
+                              >
+                                <ul ref={queueListRef}>
+                                  {manualUpcomingSongs.map((song) => (
+                                    <SortableQueueSong
+                                      key={song.id}
+                                      song={song}
+                                      userId={userId}
+                                      isFavorite={favoriteSongIds.has(song.id)}
+                                      draggable={!stationMode}
+                                      selected={selectedQueueSongId === song.id}
+                                      active={activeQueueSongId === song.id}
+                                      selectedRowRef={selectedQueueRowRef}
+                                      onSelect={selectQueueSong}
+                                    />
+                                  ))}
+                                </ul>
+                              </SortableContext>
+                            </DndContext>
+                          )}
+
+                          {hasManualUpcomingSongs &&
+                            hasAutoplayUpcomingSongs && (
+                              <>
+                                <div className="ms-2.5 [border-bottom:var(--keyline-border-style)] me-2.5">
+                                  <div className="items-center flex pt-3.5">
+                                    <div className="shrink-0 size-5 me-1.5">
+                                      <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        viewBox="0 0 20 20"
+                                        className="fill-(--systemSecondary)"
+                                      >
+                                        <path d="M14.596 15C17.1 15 19 13.075 19 10.522s-1.89-4.488-4.383-4.488c-1.709 0-3.078.906-4.617 3.056C8.323 6.84 7.07 6 5.404 6 2.9 6 1 7.925 1 10.478s1.89 4.488 4.383 4.488c1.709 0 3.078-.906 4.617-3.056 1.677 2.25 2.93 3.09 4.596 3.09m-.011-1.802c-1.157 0-1.995-.638-3.545-2.687 1.348-1.97 2.324-2.72 3.556-2.72 1.507 0 2.6 1.142 2.6 2.698 0 1.567-1.104 2.709-2.611 2.709m-9.18.011c-1.508 0-2.6-1.142-2.6-2.698 0-1.567 1.103-2.709 2.61-2.709 1.157 0 1.995.638 3.545 2.687-1.348 1.97-2.324 2.72-3.556 2.72z"></path>
+                                      </svg>
+                                    </div>
+                                    <h3 className="text-(--systemPrimary) [font:var(--title-2-emphasized)]">
+                                      AutoPlay
+                                    </h3>
+                                  </div>
+                                  <p className="text-(--systemSecondary) [font:var(--callout)] pb-2">
+                                    Similar music will keep playing
+                                  </p>
+                                </div>
+                                <ul>
+                                  {autoplayUpcomingSongs.map((song) => (
+                                    <SortableQueueSong
+                                      key={song.id}
+                                      song={song}
+                                      userId={userId}
+                                      isFavorite={favoriteSongIds.has(song.id)}
+                                      draggable={false}
+                                      selected={selectedQueueSongId === song.id}
+                                      active={activeQueueSongId === song.id}
+                                      selectedRowRef={selectedQueueRowRef}
+                                      onSelect={selectQueueSong}
+                                    />
+                                  ))}
+                                </ul>
+                              </>
+                            )}
+
+                          {isAutoplayOnly && (
+                            <ul>
+                              {autoplayUpcomingSongs.map((song) => (
+                                <SortableQueueSong
+                                  key={song.id}
+                                  song={song}
+                                  userId={userId}
+                                  isFavorite={favoriteSongIds.has(song.id)}
+                                  draggable={false}
+                                  selected={selectedQueueSongId === song.id}
+                                  active={activeQueueSongId === song.id}
+                                  selectedRowRef={selectedQueueRowRef}
+                                  onSelect={selectQueueSong}
+                                />
+                              ))}
+                            </ul>
+                          )}
                         </div>
                       </div>
                     ) : (

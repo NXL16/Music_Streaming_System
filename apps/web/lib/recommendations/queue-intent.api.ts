@@ -1,4 +1,5 @@
 import { http } from '@/lib/api/http';
+import { notifyHomeRecommendationsStale } from './home-revalidation';
 
 const QUEUEABLE_RESOURCE_TYPES = new Set([
   'songs',
@@ -16,5 +17,6 @@ export function recordQueueIntent(resourceType: string, resourceId: string) {
 
   void http
     .post('/me/recommendations/queue-intent', { resourceType, resourceId })
+    .then(() => notifyHomeRecommendationsStale())
     .catch(() => undefined);
 }

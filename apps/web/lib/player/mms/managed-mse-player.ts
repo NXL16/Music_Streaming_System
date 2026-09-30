@@ -35,6 +35,14 @@ export class ManagedMsePlayer extends SegmentedMediaPlayer {
     return this.mayFetchSegments;
   }
 
+  protected override suspendFetching(): void {
+    // `endstreaming` means Safari has enough buffered data and asks us not to
+    // begin another batch. Do not abort a fragment already in flight: dropping
+    // it can leave the very small iOS audio buffer empty before the next
+    // `startstreaming` notification. The base fill loop checks
+    // `canFetchSegments()` before every new batch instead.
+  }
+
   private onStartStreaming = (): void => {
     this.mayFetchSegments = true;
     this.resumeFetching();

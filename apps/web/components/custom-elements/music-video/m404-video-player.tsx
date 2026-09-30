@@ -89,10 +89,7 @@ export default function M404VideoPlayer({
   };
 
   return (
-    <VideoPlayerTag
-      className="absolute inset-0 block"
-      hydrated=""
-    >
+    <VideoPlayerTag className="absolute inset-0 block" hydrated="">
       <div
         className="relative size-full overflow-hidden bg-black"
         onMouseMove={onActivity}
@@ -145,14 +142,19 @@ export default function M404VideoPlayer({
 
         <div
           data-player-controls
-          className={`absolute inset-x-0 bottom-0 p-5 pt-20 transition duration-250 sm:p-8 ${controlsClass}`}
+          className={`absolute inset-x-0 bottom-0 p-5 pt-20 transition duration-250 sm:px-5 ${controlsClass}`}
         >
-          <div className="mb-4 drop-shadow-md">
-            <p className="text-sm font-medium text-white/80">{source.title}</p>
-            <h2 className="text-lg font-semibold">{source.artist}</h2>
+          <div className="mt-auto mb-3.5 p-[0_10px] [grid-area:info] items-end overflow-x-hidden transform-none [transition:opacity_0.4s_cubic-bezier(0,0,0.2,1)_0.05s,transform_0.5s_cubic-bezier(0,0,0.2,1)]">
+            <div className="[font:var(--title-2-emphasized)] tracking-normal text-(--white80,rgba(255,255,255,0.8))">
+              {source.title}
+            </div>
+
+            <div className="[font:var(--large-title-emphasized)] tracking-normal mt-px mb-2.5">
+              {source.artist}
+            </div>
           </div>
 
-          <div className="flex items-center gap-3 text-xs tabular-nums text-white/80">
+          <div className="flex flex-[0_0_100%] items-center justify-between">
             <time dateTime={`PT${Math.floor(displayedTime)}S`}>
               {formatTime(displayedTime)}
             </time>

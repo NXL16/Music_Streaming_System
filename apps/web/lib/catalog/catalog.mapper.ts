@@ -1,7 +1,11 @@
 import type { PlayerSong } from "@/lib/player/use-player-store";
 import { projectPlayerSong } from "@/lib/songs/project-song-summary";
 import type { CatalogArtwork, CatalogResponse } from "./catalog.types";
-import { getArtworkRenditionUrl, getArtworkSrcSet } from "@/lib/media/artwork";
+import {
+  getArtworkRenditionUrl,
+  getArtworkSrcSet,
+  type ArtworkVariant,
+} from "@/lib/media/artwork";
 import { catalogArtists } from "./catalog-artists";
 
 export function catalogArtworkUrl(
@@ -14,8 +18,9 @@ export function catalogArtworkUrl(
 export function catalogArtworkSrcSet(
   artwork: CatalogArtwork | undefined,
   widths: number[],
+  variant: ArtworkVariant = "default",
 ): string {
-  return getArtworkSrcSet(artwork, widths);
+  return getArtworkSrcSet(artwork, widths, variant);
 }
 
 function mapTrackArtists(
@@ -114,6 +119,9 @@ export function mapCatalogTracks(
         hasLyrics: song.attributes.hasLyrics,
         durationSec: Math.round(song.attributes.durationInMillis / 1000),
         artworkUrl: catalogArtworkUrl(playbackArtwork, 316),
+        // Browser Media Session has no responsive artwork selection. Give OS
+        // surfaces the 2x cover directly while UI cards keep their 316w URL.
+        mediaSessionArtworkUrl: catalogArtworkUrl(playbackArtwork, 632),
         artworkSrcSet: catalogArtworkSrcSet(
           playbackArtwork,
           [296, 316, 592, 632],

@@ -5,6 +5,7 @@ describe("projectSongSummary", () => {
   it("projects all artist and album links from one song source", () => {
     const track = projectSongSummary({
       id: "song-1",
+      releaseTrackId: "release-track-1",
       title: "Track",
       artist: "Artist One, Artist Two",
       artists: [
@@ -16,7 +17,7 @@ describe("projectSongSummary", () => {
       albumUrl: "album",
     });
 
-    expect(track.url).toBe("/song/track/song-1");
+    expect(track.url).toBe("/song/track/release-track-1");
     expect(track.artists).toEqual([
       {
         id: "artist-1",
@@ -35,6 +36,7 @@ describe("projectSongSummary", () => {
   it("keeps the player contract stable for every normalized song adapter", () => {
     const track = projectPlayerSong({
       id: "song-1",
+      releaseTrackId: "release-track-1",
       title: "Track",
       artists: [
         {
@@ -48,16 +50,18 @@ describe("projectSongSummary", () => {
       albumUrl: "album",
       durationSec: 180,
       artworkUrl: "cover.jpg",
+      mediaSessionArtworkUrl: "cover-632.jpg",
       artworkSrcSet: "cover-316.jpg 316w",
       thumbnailArtworkSrcSet: "cover-40.jpg 40w",
       contentRating: "explicit",
     });
 
     expect(track).toMatchObject({
-      url: "/song/track/song-1",
+      url: "/song/track/release-track-1",
       artist: "Artist One",
       albumUrl: "/album/album/album-1",
       playbackUrl: "mse:song-1",
+      mediaSessionArtworkUrl: "cover-632.jpg",
       artworkSrcSet: "cover-316.jpg 316w",
       thumbnailArtworkSrcSet: "cover-40.jpg 40w",
     });

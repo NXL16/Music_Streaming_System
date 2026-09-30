@@ -106,7 +106,7 @@ export function StationDetailPage({ stationId }: StationDetailPageProps) {
               {station.name}
             </h1>
             {station.description && (
-              <p className="text-(--systemSecondary) [font:var(--large-title)] mb-2 line-clamp-2 max-[999px]:text-center">
+              <p className="text-(--systemSecondary) text-[20px]! [font:var(--large-title)] mb-2 line-clamp-2 max-[999px]:text-center">
                 {station.description}
               </p>
             )}

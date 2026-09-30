@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { mapCatalogAlbumResources } from "./search.mapper";
+import { mapCatalogAlbumResources, mapSearchResults } from "./search.mapper";
 import type {
   CatalogAlbumResource,
   CatalogArtistResource,
+  CatalogPlaylistResource,
 } from "./catalog.types";
 
 const album = {
@@ -46,5 +47,45 @@ describe("mapCatalogAlbumResources", () => {
         url: "/artist/host-artist/artist-1",
       },
     ]);
+  });
+});
+
+describe("mapSearchResults", () => {
+  it("maps public playlist resources into the playlist result group", () => {
+    const playlist = {
+      id: "playlist-1",
+      type: "playlists",
+      href: "/v1/catalog/vn/playlists/playlist-1",
+      attributes: {
+        name: "Late Night Mix",
+        curatorName: "M404",
+        playlistType: "editorial",
+        audioTraits: [],
+        descriptionShort: "",
+        descriptionStandard: "",
+        lastModifiedDate: "",
+        url: "late-night-mix",
+      },
+      relationships: { tracks: { href: "", data: [] } },
+    } as CatalogPlaylistResource;
+
+    const results = mapSearchResults({
+      data: [{ id: playlist.id, type: "playlists", href: playlist.href }],
+      resources: {
+        albums: {},
+        artists: {},
+        playlists: { [playlist.id]: playlist },
+        songs: {},
+      },
+    });
+
+    expect(results.playlists).toHaveLength(1);
+    expect(results.playlists[0]).toMatchObject({
+      resourceId: playlist.id,
+      resourceType: "playlists",
+      title: playlist.attributes.name,
+      subtitle: playlist.attributes.curatorName,
+    });
+    expect(results.isEmpty).toBe(false);
   });
 });

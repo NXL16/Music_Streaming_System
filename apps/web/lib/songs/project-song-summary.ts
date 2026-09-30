@@ -49,6 +49,7 @@ export type PlayerSongProjectionSource = {
   hasLyrics?: boolean;
   durationSec?: number;
   artworkUrl?: string;
+  mediaSessionArtworkUrl?: string;
   artworkSrcSet?: string;
   thumbnailArtworkSrcSet?: string;
   artworkBgColor?: string;
@@ -85,6 +86,7 @@ export function projectPlayerSong(
     hasLyrics: song.hasLyrics,
     durationSec: song.durationSec || 0,
     artworkUrl,
+    mediaSessionArtworkUrl: song.mediaSessionArtworkUrl,
     artworkSrcSet: song.artworkSrcSet || artworkUrl || undefined,
     thumbnailArtworkSrcSet:
       song.thumbnailArtworkSrcSet || artworkUrl || undefined,

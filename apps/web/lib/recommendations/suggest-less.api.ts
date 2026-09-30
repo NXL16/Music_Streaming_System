@@ -1,4 +1,5 @@
 import { http } from "@/lib/api/http";
+import { notifyHomeRecommendationsStale } from "./home-revalidation";
 
 const EVENT_NAME = "suggest-less-changed";
 const SYNC_CHANNEL = "suggest-less-changes";
@@ -94,6 +95,7 @@ export async function setSuggestLess(
       },
     );
     if (!data.success) throw new Error("SUGGEST_LESS_NOT_PERSISTED");
+    notifyHomeRecommendationsStale();
   } catch (error) {
     if (previous) hiddenKeys.add(resourceKey);
     else hiddenKeys.delete(resourceKey);

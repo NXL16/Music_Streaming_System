@@ -5,6 +5,7 @@ import MediaCardRenderer from "@/components/media/media-card-renderer";
 import type { MediaCardProps } from "@/components/media/media-card.types";
 import CardArtwork from "./common/card-artwork";
 import Link from "next/link";
+import { getAppScrollContainer } from "@/lib/layout/use-app-scroll-to-top";
 
 export type MediaShelfDisplayKind =
   | "MusicNotesHeroShelf"
@@ -19,6 +20,7 @@ export type MediaShelfProps = {
   /** Applies a shelf-specific presentation rule without coupling this generic shelf to a data source. */
   normalizeItem?: (item: MediaCardProps) => MediaCardProps;
   containerClassName?: string;
+  contentType?: "default" | "artist";
   /** Overrides selected CSS custom properties from the display-kind preset. */
   gridStyle?: CSSProperties;
   shelfId?: string;
@@ -156,7 +158,7 @@ function ShelfTitleButton({
       <span dir="auto">{title}</span>
       {isClickable && (
         <svg
-          className="h-(--header-title-chevron-size,12px) fill-(--header-title-chevron-color,var(--dropdownLightGrayIcon))"
+          className="h-(--header-title-chevron-size,12px) fill-(--header-title-chevron-color,var(--dropdownLightGrayIcon)) inline-block align-baseline ml-1"
           xmlns="http://www.w3.org/2000/svg"
           viewBox="0 0 64 64"
           aria-hidden="true"
@@ -171,10 +173,7 @@ function ShelfTitleButton({
 
   if (href) {
     return (
-      <Link
-        href={href}
-        className="flex items-center gap-x-1 appearance-none no-underline"
-      >
+      <Link href={href} className="text-start appearance-none no-underline">
         {content}
       </Link>
     );
@@ -182,7 +181,7 @@ function ShelfTitleButton({
 
   return (
     <button
-      className="flex items-center gap-x-1 appearance-none"
+      className="text-start appearance-none"
       onClick={onClick}
       type="button"
     >
@@ -231,6 +230,7 @@ function MediaShelf({
   items,
   normalizeItem,
   containerClassName,
+  contentType = "default",
   gridStyle,
   shelfId,
   prioritizeFirstCard = false,
@@ -243,6 +243,7 @@ function MediaShelf({
   sourceAlbumHref,
 }: MediaShelfProps) {
   const isHeroShelf = displayKind === "MusicNotesHeroShelf";
+  const isArtistShelf = contentType === "artist";
   const shelfContainerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const measuredHeightRef = useRef<number | undefined>(undefined);
@@ -301,15 +302,15 @@ function MediaShelf({
   const isClickable = Boolean(onSelect || onTitleClick);
 
   useEffect(() => {
+    // The hero is visually expensive to reconstruct (artwork, gradients and
+    // optional ambient media). Unlike ordinary shelves, retain its cards once
+    // loaded so the virtual-height placeholder never swaps them back in while
+    // the user scrolls past the Home hero.
+    if (isHeroShelf) return;
+
     const shelfContainer = shelfContainerRef.current;
-    const scrollContainer = document.querySelector<HTMLElement>(
-      "[data-app-scroll-container]",
-    );
-    if (
-      !shelfContainer ||
-      !scrollContainer ||
-      !("IntersectionObserver" in window)
-    ) {
+    const scrollContainer = getAppScrollContainer();
+    if (!shelfContainer || !("IntersectionObserver" in window)) {
       return;
     }
 
@@ -331,9 +332,11 @@ function MediaShelf({
 
     observer.observe(shelfContainer);
     return () => observer.disconnect();
-  }, []);
+  }, [isHeroShelf]);
 
   useEffect(() => {
+    if (isHeroShelf) return;
+
     const shelfContainer = shelfContainerRef.current;
     if (!shelfContainer || !("ResizeObserver" in window)) return;
 
@@ -349,27 +352,28 @@ function MediaShelf({
 
     observer.observe(shelfContainer);
     return () => observer.disconnect();
-  }, [isNearViewport]);
+  }, [isHeroShelf, isNearViewport]);
 
   useEffect(() => {
-    if (measuredHeight === undefined) return;
+    if (isHeroShelf || measuredHeight === undefined) return;
 
-    const scrollContainer = document.querySelector<HTMLElement>(
-      "[data-app-scroll-container]",
-    );
+    const scrollContainer = getAppScrollContainer();
     const shelfContainer = shelfContainerRef.current;
-    if (!scrollContainer || !shelfContainer) return;
+    if (!shelfContainer) return;
 
-    const containerRect = scrollContainer.getBoundingClientRect();
+    const containerRect = scrollContainer?.getBoundingClientRect();
     const shelfRect = shelfContainer.getBoundingClientRect();
     const isWithinRenderBuffer =
-      shelfRect.bottom > containerRect.top - SHELF_RENDER_AHEAD_ROOT_MARGIN &&
-      shelfRect.top < containerRect.bottom + SHELF_RENDER_AHEAD_ROOT_MARGIN;
+      shelfRect.bottom >
+        (containerRect?.top ?? 0) - SHELF_RENDER_AHEAD_ROOT_MARGIN &&
+      shelfRect.top <
+        (containerRect?.bottom ?? window.innerHeight) +
+          SHELF_RENDER_AHEAD_ROOT_MARGIN;
 
     setIsNearViewport((current) =>
       current === isWithinRenderBuffer ? current : isWithinRenderBuffer,
     );
-  }, [isNearViewport, measuredHeight]);
+  }, [isHeroShelf, isNearViewport, measuredHeight]);
 
   useEffect(() => {
     const shelf = listRef.current;
@@ -668,7 +672,7 @@ function MediaShelf({
   return (
     <div
       ref={shelfContainerRef}
-      className={`min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-3 ${containerClassName ?? ""}`}
+      className={`min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-3 ${containerClassName ?? ""} section--alternate`}
       style={
         !isNearViewport
           ? {
@@ -677,7 +681,7 @@ function MediaShelf({
           : undefined
       }
     >
-      <div>
+      <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
         <div className="flex items-center justify-end m-[0_var(--bodyGutter)_13px]">
           {isMoreLikeShelf ? (
             <>
@@ -728,7 +732,7 @@ function MediaShelf({
 
         <div className="pb-8">
           <section
-            className="box-border px-(--shelfGridPaddingInline,var(--bodyGutter)) relative w-full z-(--z-default) max-[999px]:ps-(--shelfGridPaddingInline,var(--bodyGutter)) max-[999px]:pe-0"
+            className={`box-border px-(--shelfGridPaddingInline,var(--bodyGutter)) relative w-full z-(--z-default) ${isArtistShelf ? "max-[999px]:ps-0 max-[999px]:pe-0" : "max-[999px]:ps-(--shelfGridPaddingInline,var(--bodyGutter)) max-[999px]:pe-0"}`}
             style={
               {
                 ...mediaShelfPresets[displayKind],
@@ -739,8 +743,7 @@ function MediaShelf({
             <div className="box-content -mx-0.5 overflow-visible px-0.5 w-full">
               <ul
                 ref={listRef}
-                className={`shelf-grid__list ${isHeroShelf ? "shelf-grid__list--align-items-end" : ""}`}
-                style={undefined}
+                className={`${isArtistShelf ? "shelf-grid__list--artist" : `shelf-grid__list ${isHeroShelf ? "shelf-grid__list--align-items-end" : ""}`}`}
               >
                 {isNearViewport &&
                   items.map((item, index) => {
@@ -750,6 +753,7 @@ function MediaShelf({
                       <MediaCardRenderer
                         key={card.id}
                         {...card}
+                        isArtistShelfItem={isArtistShelf}
                         priority={
                           (prioritizeFirstCard || isHeroShelf) && index === 0
                         }

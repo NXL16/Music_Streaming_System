@@ -1,8 +1,4 @@
-export type MediaCardType =
-  | "hero"
-  | "collection"
-  | "station"
-  | "circle";
+export type MediaCardType = "hero" | "collection" | "station" | "circle";
 
 /** The content advisory values supported by the media-card UI contract. */
 export type ContentRating = "explicit" | "clean";
@@ -55,10 +51,14 @@ export interface MediaCardProps {
     textPrimary?: string;
     textSecondary?: string;
     textTertiary?: string;
-    textScrimColor?: string;
-    textScrimOpacity?: number;
   };
   typeTag?: string;
+  /** Hides the Hero eyebrow when the surrounding shelf already supplies it. */
+  showTypeTag?: boolean;
+  /** Hides the Hero title while retaining its description. */
+  showTitle?: boolean;
+  /** Suppresses the supporting copy for card types whose title is sufficient. */
+  hideHeroDescription?: boolean;
   description?: string;
   contentRating?: ContentRating;
   isFavorite?: boolean;

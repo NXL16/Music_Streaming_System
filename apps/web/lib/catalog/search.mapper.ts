@@ -10,11 +10,15 @@ import { formatArtistNames } from "@/lib/media/artist-names";
 import { formatReleaseYear } from "@/lib/format/release-date";
 import { createMediaResourceCard } from "@/lib/media/normalize-media-resource";
 import { catalogArtists, catalogArtistsFromResources } from "./catalog-artists";
+import { songRoute } from "./song-route";
+import { projectPlayerSong } from "@/lib/songs/project-song-summary";
+import { usePlayerStore } from "@/lib/player/use-player-store";
 
 export type SearchResults = {
   songs: MediaCardProps[];
   artists: MediaCardProps[];
   albums: MediaCardProps[];
+  playlists: MediaCardProps[];
   isEmpty: boolean;
 };
 
@@ -22,6 +26,24 @@ function mapSong(
   response: CatalogResponse,
   song: CatalogSongResource,
 ): MediaCardProps {
+  const artists = catalogArtists(response, song.relationships.artists?.data);
+  const albumReference = song.relationships.albums?.data[0];
+  const releaseTrackId = albumReference?.meta?.releaseTrackId;
+  const playbackSong = projectPlayerSong({
+    id: song.id,
+    releaseTrackId,
+    title: song.attributes.name,
+    artist: formatArtistNames(song.attributes.artistName),
+    artists,
+    album: song.attributes.albumName,
+    albumId: albumReference?.id,
+    hasLyrics: song.attributes.hasLyrics,
+    durationSec: Math.round(song.attributes.durationInMillis / 1000),
+    artworkUrl: song.attributes.artwork?.url,
+    releaseDate: song.attributes.releaseDate,
+    contentRating: song.attributes.contentRating,
+  });
+
   return createMediaResourceCard(
     {
       id: song.id,
@@ -32,7 +54,21 @@ function mapSong(
     },
     {
       cardType: "collection",
-      artists: catalogArtists(response, song.relationships.artists?.data),
+      artists,
+      slug: releaseTrackId
+        ? songRoute(song.attributes.name, releaseTrackId)
+        : undefined,
+      onPlay: () => usePlayerStore.getState().setQueue([playbackSong]),
+      menuContext: {
+        kind: "song",
+        songId: song.id,
+        releaseTrackId,
+        title: song.attributes.name,
+        subtitle: formatArtistNames(song.attributes.artistName),
+        artworkUrl: playbackSong.artworkUrl,
+        sourceAlbumId: albumReference?.id,
+        albumHref: playbackSong.albumUrl,
+      },
     },
   );
 }
@@ -155,13 +191,14 @@ export function mapCatalogPlaylists(
   });
 }
 
-// The search response groups references in `data` (songs → artists → albums).
-// Preserve that ordering per group while pulling the full resource from the
-// `resources` maps.
+// The search response groups references in `data` (songs → artists → albums
+// → playlists). Preserve that ordering per group while pulling the full
+// resource from the `resources` maps.
 export function mapSearchResults(response: CatalogResponse): SearchResults {
   const songs: MediaCardProps[] = [];
   const artists: MediaCardProps[] = [];
   const albums: MediaCardProps[] = [];
+  const playlists: MediaCardProps[] = [];
 
   for (const reference of response.data) {
     if (reference.type === "songs") {
@@ -180,6 +217,9 @@ export function mapSearchResults(response: CatalogResponse): SearchResults {
           ),
         );
       }
+    } else if (reference.type === "playlists") {
+      const playlist = response.resources.playlists[reference.id];
+      if (playlist) playlists.push(mapPlaylist(playlist));
     }
   }
 
@@ -187,6 +227,8 @@ export function mapSearchResults(response: CatalogResponse): SearchResults {
     songs,
     artists,
     albums,
-    isEmpty: !songs.length && !artists.length && !albums.length,
+    playlists,
+    isEmpty:
+      !songs.length && !artists.length && !albums.length && !playlists.length,
   };
 }

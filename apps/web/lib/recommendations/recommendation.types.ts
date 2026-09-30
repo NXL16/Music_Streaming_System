@@ -61,6 +61,7 @@ export type CatalogResourceAttributes = {
   url?: string;
   contentRating?: string;
   stationArtworkReady?: boolean;
+  primaryArtistName?: string;
   [key: string]: unknown;
 };
 
@@ -112,6 +113,7 @@ export type RecommendationSection = {
     sourceAlbumUrl?: string;
     sourceAlbumArtworkUrl?: string;
     sourceAlbumArtworkBgColor?: string;
+    listenAgainAlbumId?: string;
   };
   relationships?: {
     contents?: RecommendationRelationship;

@@ -29,24 +29,8 @@ import {
 } from "@musical/shared-constants";
 import { useAppScrollToTop } from "@/lib/layout/use-app-scroll-to-top";
 
-const DAILY_MIX_SHELF_ID = "user-daily-mix";
-const STATIONS_FOR_YOU_SHELF_ID = "user-stations-for-you";
 const FEATURED_ARTISTS_SHELF_ID = "global-top-artists";
-const PERSONALIZED_HOME_ORDER = [
-  "user-top-picks",
-  "global-top-picks",
-  RECENTLY_PLAYED_SHELF_ID,
-  "user-more-like-1",
-  "user-genre-1",
-  DAILY_MIX_SHELF_ID,
-  STATIONS_FOR_YOU_SHELF_ID,
-  "user-find-your-mood",
-  "user-new-releases",
-  "user-more-like-2",
-  "user-fans-like",
-  "user-more-like-3",
-  "user-genre-2",
-] as const;
+const STATIONS_FOR_YOU_SHELF_ID = "user-stations-for-you";
 
 export default function HomePage() {
   const { data, loading, error, refresh, retry } = useHomeRecommendations();
@@ -112,9 +96,7 @@ export default function HomePage() {
 
   const shelvesWithRecentlyPlayed = useMemo(
     () =>
-      orderPersonalizedHomeShelves(
-        ensureRecentlyPlayedShelf(shelves, recentlyPlayedShelf),
-      ),
+      ensureRecentlyPlayedShelf(shelves, recentlyPlayedShelf),
     [recentlyPlayedShelf, shelves],
   );
 
@@ -221,7 +203,7 @@ export default function HomePage() {
       )}
 
       {error && (
-        <div className="mx-auto min-h-full relative w-full z-(--z-default)">
+        <div className="mx-auto min-h-full w-full z-(--z-default)">
           <div
             role="alert"
             className="[--buttonTextColor:var(--systemSecondary)] [--buttonBorderColor:var(--systemSecondary)] items-center text-(--systemSecondary) flex flex-col gap-3 left-1/2 m-auto max-w-110 px-6.25 absolute text-center top-1/2 -translate-x-1/2 -translate-y-1/2 z-(--z-default)"
@@ -312,64 +294,6 @@ function ensureRecentlyPlayedShelf(
     ...shelvesWithoutRecentlyPlayed.slice(0, heroIndex + 1),
     recentlyPlayedShelf,
     ...shelvesWithoutRecentlyPlayed.slice(heroIndex + 1),
-  ];
-}
-
-function orderPersonalizedHomeShelves(
-  shelves: ReturnType<typeof mapHomeRecommendations>,
-) {
-  const order = new Map<string, number>(
-    PERSONALIZED_HOME_ORDER.map((id, index) => [id, index]),
-  );
-  const ordered = shelves
-    .map((shelf, index) => ({ shelf, index }))
-    .sort(
-      (left, right) =>
-        (order.get(left.shelf.id) ?? Number.MAX_SAFE_INTEGER) -
-          (order.get(right.shelf.id) ?? Number.MAX_SAFE_INTEGER) ||
-        left.index - right.index,
-    )
-    .map(({ shelf }) => shelf);
-
-  const recentlyPlayedIndex = ordered.findIndex(
-    (shelf) => shelf.id === RECENTLY_PLAYED_SHELF_ID,
-  );
-  const playlistIndex = ordered.findIndex(
-    (shelf) => shelf.id === DAILY_MIX_SHELF_ID,
-  );
-
-  // The Home rhythm is intentional: two discovery shelves separate recent
-  // listening from the made-for-you playlist. If a sparse taste profile could
-  // not generate More Like or Genre, promote the next meaningful shelf rather
-  // than letting Playlist Made for You jump directly below Recently Played.
-  if (recentlyPlayedIndex < 0 || playlistIndex < 0) return ordered;
-
-  const recentlyPlayed = ordered[recentlyPlayedIndex];
-  const playlist = ordered[playlistIndex];
-  const beforeRecentlyPlayed = ordered
-    .slice(0, recentlyPlayedIndex)
-    .filter((shelf) => shelf.id !== DAILY_MIX_SHELF_ID);
-  const afterRecentlyPlayed = ordered
-    .slice(recentlyPlayedIndex + 1)
-    .filter((shelf) => shelf.id !== DAILY_MIX_SHELF_ID);
-  // Stations and moods are listening destinations, not discovery bridges.
-  // They must stay after Playlist Made for You even when More Like/Genre is
-  // unavailable for a sparse profile.
-  const bridgeCandidates = afterRecentlyPlayed.filter(
-    (shelf) =>
-      shelf.id !== STATIONS_FOR_YOU_SHELF_ID &&
-      shelf.id !== "user-find-your-mood",
-  );
-  const bridgeShelves = bridgeCandidates.slice(0, 2);
-  const bridgeIds = new Set(bridgeShelves.map((shelf) => shelf.id));
-  const rest = afterRecentlyPlayed.filter((shelf) => !bridgeIds.has(shelf.id));
-
-  return [
-    ...beforeRecentlyPlayed,
-    recentlyPlayed,
-    ...bridgeShelves,
-    playlist,
-    ...rest,
   ];
 }
 

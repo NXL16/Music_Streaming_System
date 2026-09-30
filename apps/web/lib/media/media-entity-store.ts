@@ -2,11 +2,7 @@ import type { MediaCardProps } from "./media-card.types";
 import { developmentCacheDisabled } from "@/lib/config/development-cache";
 
 export type MediaEntitySource =
-  | "catalog"
-  | "library"
-  | "recommendation"
-  | "player"
-  | "local";
+  "catalog" | "library" | "recommendation" | "player" | "local";
 
 type MediaEntityData = Pick<
   MediaCardProps,
@@ -16,6 +12,9 @@ type MediaEntityData = Pick<
   | "contentRating"
   | "artists"
   | "typeTag"
+  | "showTypeTag"
+  | "showTitle"
+  | "hideHeroDescription"
   | "artwork"
 >;
 
@@ -50,6 +49,9 @@ function pickEntityData(card: MediaCardProps): MediaEntityData {
     contentRating: card.contentRating,
     artists: card.artists,
     typeTag: card.typeTag,
+    showTypeTag: card.showTypeTag,
+    showTitle: card.showTitle,
+    hideHeroDescription: card.hideHeroDescription,
     artwork: card.artwork,
   };
 }

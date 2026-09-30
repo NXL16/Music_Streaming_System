@@ -40,6 +40,8 @@ type MusicPlayDetailProps = {
   onSetVolume: (volume: number) => void;
   isStemActive: boolean;
   vocalVolume: number;
+  isVocalControlExpanded: boolean;
+  onVocalControlExpandedChange: (expanded: boolean) => void;
   onSetVocalVolume: (volume: number) => void;
   onPreviewVocalVolume: (volume: number) => void;
   onTogglePlayback: () => void;
@@ -54,6 +56,8 @@ export default function MusicPlayDetail({
   onSetVolume,
   isStemActive,
   vocalVolume,
+  isVocalControlExpanded,
+  onVocalControlExpandedChange,
   onSetVocalVolume,
   onPreviewVocalVolume,
   onTogglePlayback,
@@ -200,6 +204,8 @@ export default function MusicPlayDetail({
                 {isStemActive && isOpenLyric && (
                   <VocalVolumeControl
                     value={vocalVolume}
+                    isExpanded={isVocalControlExpanded}
+                    onExpandedChange={onVocalControlExpandedChange}
                     onValueChange={onSetVocalVolume}
                     onPreviewValueChange={onPreviewVocalVolume}
                   />

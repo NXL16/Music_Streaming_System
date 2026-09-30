@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { isAxiosError } from "axios";
 import { recordCatalogSearchClick, searchCatalog } from "./catalog.api";
 import { mapSearchResults, type SearchResults } from "./search.mapper";
@@ -8,11 +8,28 @@ import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-durati
 
 const DEBOUNCE_MS = 300;
 
+export const CATALOG_SEARCH_FILTERS = [
+  "all",
+  "songs",
+  "artists",
+  "albums",
+  "playlists",
+] as const;
+
+export type CatalogSearchFilter = (typeof CATALOG_SEARCH_FILTERS)[number];
+
 const EMPTY_RESULTS: SearchResults = {
   songs: [],
   artists: [],
   albums: [],
+  playlists: [],
   isEmpty: true,
+};
+
+type SearchState = {
+  key: string;
+  results: SearchResults;
+  error: string | null;
 };
 
 function withSearchClickTracking(results: SearchResults): SearchResults {
@@ -32,33 +49,57 @@ function withSearchClickTracking(results: SearchResults): SearchResults {
     songs: attach(results.songs),
     artists: attach(results.artists),
     albums: attach(results.albums),
+    playlists: attach(results.playlists),
   };
 }
 
-export function useCatalogSearch(query: string) {
-  const [results, setResults] = useState<SearchResults>(EMPTY_RESULTS);
+function typesForFilter(filter: CatalogSearchFilter) {
+  return filter === "all" ? undefined : [filter];
+}
+
+/** Searches the catalog with debouncing, cancellation, and stale-result guards. */
+export function useCatalogSearch(
+  query: string,
+  filter: CatalogSearchFilter = "all",
+) {
+  const trimmedQuery = query.trim();
+  const hasQuery = Boolean(trimmedQuery);
+  const searchKey = `${filter}:${trimmedQuery.toLocaleLowerCase()}`;
+  const [state, setState] = useState<SearchState>({
+    key: "",
+    results: EMPTY_RESULTS,
+    error: null,
+  });
   const [loading, setLoading] = useMinimumLoadingState();
-  const [error, setError] = useState<string | null>(null);
-  const hasQuery = Boolean(query.trim());
+  const types = useMemo(() => typesForFilter(filter), [filter]);
 
   useEffect(() => {
-    const trimmed = query.trim();
-
-    if (!trimmed) return;
+    if (!hasQuery) return;
 
     const controller = new AbortController();
+    setLoading(true);
     const timer = window.setTimeout(() => {
-      setLoading(true);
-      searchCatalog(trimmed, controller.signal)
+      searchCatalog(trimmedQuery, { types }, controller.signal)
         .then((response) => {
-          setResults(withSearchClickTracking(mapSearchResults(response)));
-          setError(null);
+          if (controller.signal.aborted) return;
+          setState({
+            key: searchKey,
+            results: withSearchClickTracking(mapSearchResults(response)),
+            error: null,
+          });
         })
         .catch((cause) => {
-          // A superseded query aborts its request; that is not a user error.
-          if (isAxiosError(cause) && cause.code === "ERR_CANCELED") return;
-          setResults(EMPTY_RESULTS);
-          setError("Không thể tìm kiếm. Vui lòng thử lại.");
+          if (
+            controller.signal.aborted ||
+            (isAxiosError(cause) && cause.code === "ERR_CANCELED")
+          ) {
+            return;
+          }
+          setState({
+            key: searchKey,
+            results: EMPTY_RESULTS,
+            error: "KhÃ´ng thá»ƒ tÃ¬m kiáº¿m. Vui lÃ²ng thá»­ láº¡i.",
+          });
         })
         .finally(() => {
           if (!controller.signal.aborted) setLoading(false);
@@ -69,14 +110,13 @@ export function useCatalogSearch(query: string) {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [query, setLoading]);
+  }, [hasQuery, searchKey, setLoading, trimmedQuery, types]);
 
-  // Empty-query state is derived instead of synchronously resetting state in
-  // the effect. This avoids an unnecessary render cascade when the user
-  // clears the search input while preserving the same visible result.
+  const isCurrentResult = state.key === searchKey;
+
   return {
-    results: hasQuery ? results : EMPTY_RESULTS,
+    results: hasQuery && isCurrentResult ? state.results : EMPTY_RESULTS,
     loading: hasQuery && loading,
-    error: hasQuery ? error : null,
+    error: hasQuery && isCurrentResult ? state.error : null,
   };
 }

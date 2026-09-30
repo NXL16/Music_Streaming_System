@@ -44,8 +44,7 @@ export default function VolumeControl({
       <div className="[--chromeVolumeIconFill:var(--systemPrimary)] flex h-full relative z-[calc(var(--z-default)+1)]">
         <button onClick={onToggleMute} className="flex items-center">
           <svg
-            className="h-6 w-6"
-            fill="currentColor"
+            className="h-6 w-6 fill-(--chromeVolumeIcon) dark:fill-current"
             role="presentation"
             version="1.1"
             viewBox="0 0 64 64"

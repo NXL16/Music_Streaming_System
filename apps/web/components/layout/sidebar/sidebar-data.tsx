@@ -45,7 +45,7 @@ export const primaryNavigationItems: SidebarItem[] = [
   },
 ];
 
-const roomUrl = process.env.NEXT_PUBLIC_ROOM_URL?.trim();
+const roomUrl = process.env.NEXT_PUBLIC_ROOM_URL?.trim() + "/rooms";
 
 export const roomNavigationItems: SidebarItem[] = roomUrl
   ? [

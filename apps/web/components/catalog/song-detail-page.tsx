@@ -259,7 +259,7 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
     <>
       <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) in-[.has-theme-override]:[--header-title-chevron-color:var(--systemSecondary)]">
         <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
-          <div className="[view-timeline-name:--header-view] [view-timeline-axis:block] after:content-[''] after:bg-(--joe-color) after:block after:inset-0 after:absolute after:z-[calc(var(--z-default)-2)] min-[484px]:after:-inset-s-(--web-navigation-width)">
+          <div className="[view-timeline-name:--header-view] [view-timeline-axis:block] after:bg-(--joe-color) after:block after:inset-0 after:absolute after:z-[calc(var(--z-default)-2)] min-[484px]:after:-inset-s-(--web-navigation-width)">
             <div
               className={`grid [grid-template-areas:var(--containerDetailHeaderGridAreas,'secondary-actions'_'artwork'_'headings'_'primary-actions'_'description')] [justify-items:var(--containerDetailHeaderAlign,center)] mx-(--bodyGutter) mb-(--containerDetailHeaderSpacer,32px) pt-3.75 min-[1000px]:grid-cols-[auto_1fr_auto] min-[1000px]:justify-items-start min-[1000px]:mb-(--containerDetailHeaderSpacer,46px) min-[1000px]:pt-2 min-[1000px]:[grid-template-areas:'secondary-actions_secondary-actions_secondary-actions'_'artwork_headings_headings'_'artwork_headings_headings'_'artwork_primary-actions_primary-actions'] min-[1000px]:grid-rows-[auto_1fr_1fr_36px]`}
             >
@@ -300,7 +300,7 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
                 )}
               </div>
 
-              <div className="[align-items:var(--containerDetailHeaderAlign,center)] flex flex-col [grid-area:headings] mt-4.5 min-w-0 relative w-full self-center min-[1000px]:items-start min-[1000px]:self-center min-[1000px]:-my-1.25 min-[1000px]:py-1.25 max-[483px]:[--systemPrimary:var(--systemPrimary-onDark)] max-[483px]:[--systemSecondary:var(--systemSecondary-vibrantOnDark)] max-[483px]:[--systemTertiary:var(--systemTertiary-onDark)] max-[483px]:[--systemQuaternary:var(--systemQuaternary-onDark)] max-[483px]:[--systemQuinary:var(--systemQuinary-onDark)] max-[483px]:[--keyColor:var(--systemPrimary-onDark)] max-[483px]:[--button-pill-color:#000] max-[483px]:[--button-pill-background-color:#fff] max-[483px]:[--iconEllipsisFill:var(--systemPrimary-onDark)] max-[483px]:[--button-action-background-color:#fff] max-[483px]:[--button-action-color:#000] max-[483px]:[--explicitFillOverride:var(--systemSecondary-vibrantOnDark)] max-[483px]:[--favoriteBadgeColor:var(--systemSecondary-vibrantOnDark)] max-[483px]:mix-blend-plus-lighter">
+              <div className="[align-items:var(--containerDetailHeaderAlign,center)] flex flex-col [grid-area:headings] mt-4.5 min-w-0 relative w-full self-center min-[1000px]:items-start min-[1000px]:self-center min-[1000px]:-my-1.25 min-[1000px]:py-1.25">
                 <div className="empty:hidden text-(--systemSecondary) [font:var(--subhead-emphasized)] mt-2.25"></div>
                 <h1 className="text-(--systemPrimary) cursor-text [font:var(--large-title-emphasized-short)] mb-[0.5px] wrap-break-word [text-align:var(--containerDetailHeaderAlign,center)] text-balance select-text line-clamp-2 min-[1000px]:[text-align:unset] max-[999px]:[font:var(--title-1-emphasized)] max-[999px]:mb-1">
                   <span dir="auto">{title}</span>
@@ -334,7 +334,7 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
               </div>
 
               <div className="[--addToLibraryMarginEnd:0] grid [grid-template-areas:'primary-start_primary-center_primary-end'] grid-cols-[1fr_auto_1fr] mt-3.5 gap-3 [grid-area:primary-actions] pointer-coarse:gap-3.5 min-[1000px]:self-end min-[1000px]:justify-start min-[1000px]:mt-0">
-                <div className="order-2 relative">
+                <div className="order-2 relative primary-actions__button--play">
                   <div className="w-full">
                     <button
                       type="button"
@@ -349,7 +349,10 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
                           width="16"
                           viewBox="0 0 16 16"
                         >
-                          <path d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"></path>
+                          <path
+                            fill="currentColor"
+                            d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"
+                          ></path>
                         </svg>
                       </span>
                       <span className="contents">Play</span>
@@ -357,7 +360,7 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
                   </div>
                 </div>
 
-                <div className="order-1 [--favoriteButtonStarOutline:var(--systemPrimary)]">
+                <div className="order-1 [--favoriteButtonStarOutline:var(--systemPrimary)] primary-actions__button--shuffle">
                   <div className="w-full">
                     <FavoriteSongButton
                       songId={song.id}
@@ -369,7 +372,7 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
                   </div>
                 </div>
 
-                <div className="order-3 [--addToLibraryFillOverride:var(--systemPrimary)]">
+                <div className="order-3 [--addToLibraryFillOverride:var(--systemPrimary)] primary-actions__button--add-to-library">
                   <div className="[--add-to-library-button-width:36px] [--add-to-library-icon-width:12px] pointer-coarse:[--add-to-library-button-width:48px] pointer-coarse:[--add-to-library-icon-width:16px]">
                     <AddToLibraryButton
                       resourceType="songs"
@@ -446,7 +449,7 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
                     {section.people.map(({ artist, roles }) => (
                       <li
                         key={artist.id || artist.name}
-                        className="h-full relative z-(--z-default) max-[999px]:not-last:after:[border-bottom:var(--keyline-border-style)] max-[999px]:not-last:after:bottom-0 max-[999px]:not-last:after:content-[''] max-[999px]:not-last:after:block max-[999px]:not-last:after:inset-e-0 max-[999px]:not-last:after:absolute max-[999px]:not-last:after:w-[calc(100%-57px)] max-[999px]:not-last:after:z-(--z-default) min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:[border-bottom:var(--keyline-border-style)] min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:bottom-0 min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:content-[''] min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:block min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:inset-e-0 min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:absolute min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:w-[calc(100%-57px)] min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:z-(--z-default) min-[1260px]:not-nth-last-[-n+3]:after:[border-bottom:var(--keyline-border-style)] min-[1260px]:not-nth-last-[-n+3]:after:bottom-0 min-[1260px]:not-nth-last-[-n+3]:after:content-[''] min-[1260px]:not-nth-last-[-n+3]:after:block min-[1260px]:not-nth-last-[-n+3]:after:inset-e-0 min-[1260px]:not-nth-last-[-n+3]:after:absolute min-[1260px]:not-nth-last-[-n+3]:after:w-[calc(100%-57px)] min-[1260px]:not-nth-last-[-n+3]:after:z-(--z-default)"
+                        className="h-full relative z-(--z-default) max-[999px]:not-last:after:[border-bottom:var(--keyline-border-style)] max-[999px]:not-last:after:bottom-0 max-[999px]:not-last:after:block max-[999px]:not-last:after:inset-e-0 max-[999px]:not-last:after:absolute max-[999px]:not-last:after:w-[calc(100%-57px)] max-[999px]:not-last:after:z-(--z-default) min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:[border-bottom:var(--keyline-border-style)] min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:bottom-0 min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:block min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:inset-e-0 min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:absolute min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:w-[calc(100%-57px)] min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:z-(--z-default) min-[1260px]:not-nth-last-[-n+3]:after:[border-bottom:var(--keyline-border-style)] min-[1260px]:not-nth-last-[-n+3]:after:bottom-0 min-[1260px]:not-nth-last-[-n+3]:after:block min-[1260px]:not-nth-last-[-n+3]:after:inset-e-0 min-[1260px]:not-nth-last-[-n+3]:after:absolute min-[1260px]:not-nth-last-[-n+3]:after:w-[calc(100%-57px)] min-[1260px]:not-nth-last-[-n+3]:after:z-(--z-default)"
                       >
                         <div className="flex p-[15px_0]">
                           <div className="[--artwork-override-width:46px] [--artwork-override-height:46px] rounded-[50%] h-11.5 mr-2.5 min-w-11.5">

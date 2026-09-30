@@ -15,6 +15,9 @@ import {
 
 const MSE_PREFIX = "mse:";
 const STEM_SYNC_DRIFT_SEC = 0.12;
+// HTMLMediaElement.HAVE_FUTURE_DATA. Keep this numeric so the client module
+// remains safe when Next evaluates its import during SSR.
+const STEM_READY_STATE = 3;
 
 function isMseSong(playbackUrl: string | undefined): boolean {
   return !!playbackUrl?.startsWith(MSE_PREFIX);
@@ -22,6 +25,13 @@ function isMseSong(playbackUrl: string | undefined): boolean {
 
 function extractSongId(playbackUrl: string): string {
   return playbackUrl.slice(MSE_PREFIX.length);
+}
+
+function syncAudioTimeline(
+  source: HTMLAudioElement,
+  target: HTMLAudioElement,
+): void {
+  target.currentTime = source.currentTime;
 }
 
 export function useMsePlayback(
@@ -37,6 +47,10 @@ export function useMsePlayback(
   const vocalPlayerRef = useRef<MediaPlayer | null>(null);
   const isStemPlaybackRef = useRef(false);
   const playerReadyRef = useRef(false);
+  const stemRecoveryPendingRef = useRef(false);
+  const stemRecoveryGenerationRef = useRef(0);
+  const stemResumeInFlightRef = useRef(false);
+  const stemPairHasStartedRef = useRef(false);
   const [isStemActive, setIsStemActive] = useState(false);
 
   const isMseActive = isMseSong(currentSong?.playbackUrl);
@@ -54,6 +68,9 @@ export function useMsePlayback(
       vocalPlayerRef.current?.detach();
       vocalPlayerRef.current = null;
       isStemPlaybackRef.current = false;
+      stemRecoveryPendingRef.current = false;
+      stemResumeInFlightRef.current = false;
+      stemPairHasStartedRef.current = false;
       setIsStemActive(false);
       return;
     }
@@ -68,6 +85,10 @@ export function useMsePlayback(
     vocalPlayerRef.current?.detach();
     vocalPlayerRef.current = null;
     isStemPlaybackRef.current = false;
+    stemRecoveryPendingRef.current = false;
+    stemResumeInFlightRef.current = false;
+    stemPairHasStartedRef.current = false;
+    stemRecoveryGenerationRef.current += 1;
     setIsStemActive(false);
 
     const player = createMediaPlayer();
@@ -164,9 +185,16 @@ export function useMsePlayback(
         playerReadyRef.current = true;
         if (usePlayerStore.getState().playing) {
           const plays = [audio.play()];
-          if (isStemPlaybackRef.current && vocalAudio)
+          const isStemPlayback = isStemPlaybackRef.current && !!vocalAudio;
+          if (isStemPlayback && vocalAudio)
             plays.push(vocalAudio.play());
-          Promise.all(plays).catch(() => pause());
+          Promise.all(plays)
+            .then(() => {
+              if (playerRef.current === player && isStemPlayback) {
+                stemPairHasStartedRef.current = true;
+              }
+            })
+            .catch(() => pause());
         }
       })
       .catch(() => {
@@ -186,6 +214,9 @@ export function useMsePlayback(
         vocalPlayerRef.current?.detach();
         vocalPlayerRef.current = null;
         isStemPlaybackRef.current = false;
+        stemRecoveryPendingRef.current = false;
+        stemResumeInFlightRef.current = false;
+        stemPairHasStartedRef.current = false;
         setIsStemActive(false);
         playerRef.current = null;
         playerReadyRef.current = false;
@@ -205,8 +236,19 @@ export function useMsePlayback(
 
       const plays = [audio.play()];
       const vocal = vocalAudioRef?.current;
-      if (isStemPlaybackRef.current && vocal) plays.push(vocal.play());
-      Promise.all(plays).catch(() => pause());
+      const isStemPlayback = isStemPlaybackRef.current && !!vocal;
+      if (isStemPlayback && vocal) {
+        // The instrumental timeline is always the source of truth. This also
+        // covers a user manually resuming while the pair was buffering.
+        syncAudioTimeline(audio, vocal);
+        plays.push(vocal.play());
+      }
+      Promise.all(plays)
+        .then(() => {
+          stemRecoveryPendingRef.current = false;
+          if (isStemPlayback) stemPairHasStartedRef.current = true;
+        })
+        .catch(() => pause());
     } else {
       audio.pause();
       if (isStemPlaybackRef.current) vocalAudioRef?.current?.pause();
@@ -249,6 +291,126 @@ export function useMsePlayback(
       instrumental.removeEventListener("timeupdate", correctPlaybackDrift);
     };
   }, [audioRef, vocalAudioRef, isMseActive]);
+
+  useEffect(() => {
+    const instrumental = audioRef.current;
+    const vocal = vocalAudioRef?.current;
+    if (!instrumental || !vocal || !isMseActive) return;
+
+    const beginStemRecovery = () => {
+      stemRecoveryPendingRef.current = true;
+      stemRecoveryGenerationRef.current += 1;
+      instrumental.pause();
+      vocal.pause();
+    };
+
+    const pauseStemPairForBuffering = () => {
+      if (
+        !isStemPlaybackRef.current ||
+        !stemPairHasStartedRef.current ||
+        !usePlayerStore.getState().playing ||
+        // Safari may emit a delayed waiting event after a stem has already
+        // regained enough data. Pausing a healthy pair here leaves no later
+        // event that can resume it.
+        (instrumental.readyState >= STEM_READY_STATE &&
+          vocal.readyState >= STEM_READY_STATE) ||
+        // Seeking has its own recovery path below. Treating its transient
+        // `waiting` event as a buffer stall can otherwise leave the pair
+        // paused before both media elements emit `seeked`.
+        instrumental.seeking ||
+        vocal.seeking
+      ) {
+        return;
+      }
+
+      // Treat two independent MediaSource buffers as one playback unit. If
+      // either stream cannot continue, neither is allowed to advance.
+      beginStemRecovery();
+    };
+
+    const recoverStemPairAfterSeek = () => {
+      if (
+        !isStemPlaybackRef.current ||
+        !stemPairHasStartedRef.current ||
+        !usePlayerStore.getState().playing
+      ) {
+        return;
+      }
+
+      // The instrumental event starts a user seek. Pause the pair until both
+      // independent MediaSources have reached the requested timeline; the
+      // existing `seeked` handlers below then resume them atomically.
+      beginStemRecovery();
+    };
+
+    const resumeStemPairWhenReady = () => {
+      if (
+        !stemRecoveryPendingRef.current ||
+        stemResumeInFlightRef.current ||
+        !isStemPlaybackRef.current
+      ) {
+        return;
+      }
+      if (!usePlayerStore.getState().playing) {
+        stemRecoveryPendingRef.current = false;
+        return;
+      }
+      if (
+        instrumental.readyState < STEM_READY_STATE ||
+        vocal.readyState < STEM_READY_STATE ||
+        instrumental.seeking ||
+        vocal.seeking ||
+        instrumental.ended ||
+        vocal.ended
+      ) {
+        return;
+      }
+
+      stemResumeInFlightRef.current = true;
+      const recoveryGeneration = stemRecoveryGenerationRef.current;
+      // A stream may have buffered at a different pace. Never resume from its
+      // own clock; make it join the instrumental clock immediately before the
+      // paired play request.
+      vocal.currentTime = instrumental.currentTime;
+      Promise.all([instrumental.play(), vocal.play()])
+        .then(() => {
+          if (stemRecoveryGenerationRef.current === recoveryGeneration) {
+            stemRecoveryPendingRef.current = false;
+          }
+        })
+        .catch(() => {
+          if (usePlayerStore.getState().playing) pause();
+        })
+        .finally(() => {
+          stemResumeInFlightRef.current = false;
+        });
+    };
+
+    const stopOnStemError = () => {
+      if (isStemPlaybackRef.current && usePlayerStore.getState().playing) {
+        pause();
+      }
+    };
+
+    for (const stream of [instrumental, vocal]) {
+      stream.addEventListener("waiting", pauseStemPairForBuffering);
+      stream.addEventListener("canplay", resumeStemPairWhenReady);
+      stream.addEventListener("playing", resumeStemPairWhenReady);
+      stream.addEventListener("seeked", resumeStemPairWhenReady);
+      stream.addEventListener("error", stopOnStemError);
+    }
+    instrumental.addEventListener("seeking", recoverStemPairAfterSeek);
+    return () => {
+      for (const stream of [instrumental, vocal]) {
+        stream.removeEventListener("waiting", pauseStemPairForBuffering);
+        stream.removeEventListener("canplay", resumeStemPairWhenReady);
+        stream.removeEventListener("playing", resumeStemPairWhenReady);
+        stream.removeEventListener("seeked", resumeStemPairWhenReady);
+        stream.removeEventListener("error", stopOnStemError);
+      }
+      instrumental.removeEventListener("seeking", recoverStemPairAfterSeek);
+    };
+  }, [audioRef, vocalAudioRef, isMseActive, pause]);
 
   useEffect(() => {
     if (!isMseActive || currentIndex < 0) return;

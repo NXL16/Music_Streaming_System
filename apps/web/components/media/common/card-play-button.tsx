@@ -28,7 +28,7 @@ const CardPlayButton = memo(function CardPlayButton({
         >
           <svg
             aria-hidden="true"
-            className="inline-block h-7.5 w-7.5 rounded-[50%] bg-[rgba(40,40,40,.4)] backdrop-saturate-180 backdrop-blur-[60px]"
+            className="inline-block h-7.5 w-7.5 rounded-[50%] bg-(--systemStandardThinMaterialSover) backdrop-saturate-180 backdrop-blur-[60px]"
             data-icon-state="play"
           >
             <use href="#play-circle-fill"></use>

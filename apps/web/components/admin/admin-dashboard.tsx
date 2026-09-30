@@ -430,7 +430,7 @@ export default function AdminDashboard() {
                           <button
                             type="button"
                             onClick={() => void openUser(user.userId)}
-                            className="group items-center text-(--systemPrimary) grid grid-cols-[minmax(140px,1fr)_minmax(120px,1fr)_minmax(220px,1.4fr)_150px_130px] gap-4 pb-[7.5px] pt-[7.5px] relative w-full pe-(--trackLockupPaddingInlineEnd,14px) cursor-pointer after:[border-top:var(--keyline-border-style)] after:content-[''] after:inset-e-0 after:inset-s-0 after:absolute after:top-0 after:z-(--z-default) text-left max-lg:block"
+                            className="group items-center text-(--systemPrimary) grid grid-cols-[minmax(140px,1fr)_minmax(120px,1fr)_minmax(220px,1.4fr)_150px_130px] gap-4 pb-[7.5px] pt-[7.5px] relative w-full pe-(--trackLockupPaddingInlineEnd,14px) cursor-pointer after:[border-top:var(--keyline-border-style)] after:inset-e-0 after:inset-s-0 after:absolute after:top-0 after:z-(--z-default) text-left max-lg:block"
                           >
                             <span className="truncate text-(--systemPrimary) [font:var(--body-emphasized)]">
                               {user.displayName || user.username}
@@ -667,13 +667,10 @@ function CatalogAdminActions({
         defaultValue='{"artistId":"","userId":"","role":"OWNER"}'
         onRun={(payload) =>
           onRun(() =>
-            assignArtistWorkspaceMember(
-              requiredString(payload, "artistId"),
-              {
-                userId: requiredString(payload, "userId"),
-                role: requiredArtistMemberRole(payload.role),
-              },
-            ),
+            assignArtistWorkspaceMember(requiredString(payload, "artistId"), {
+              userId: requiredString(payload, "userId"),
+              role: requiredArtistMemberRole(payload.role),
+            }),
           )
         }
         help="The account must have the ARTIST role. Use OWNER for the seed artist account; use MANAGER, EDITOR, PRODUCTION, or ANALYST for team seats."
@@ -826,7 +823,9 @@ function requiredString(payload: Record<string, unknown>, key: string) {
 }
 
 function requiredArtistMemberRole(value: unknown) {
-  const role = String(value ?? "").trim().toUpperCase();
+  const role = String(value ?? "")
+    .trim()
+    .toUpperCase();
   if (
     role !== "OWNER" &&
     role !== "MANAGER" &&

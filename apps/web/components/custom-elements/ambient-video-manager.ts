@@ -1,4 +1,6 @@
-const MAX_CONCURRENT_VIDEOS = 4;
+// Keep several visible hero cards animated, while retaining a bounded decoder
+// and buffer budget for the whole page.
+const MAX_CONCURRENT_VIDEOS = 10;
 const MAX_WARM_VIDEOS = 4;
 
 type WarmVideoEntry = { destroy: () => void; priority: number };
@@ -56,7 +58,12 @@ export const ambientVideoManager = {
       }
       if (candidate) {
         const [candidateId, candidateVideo] = candidate;
-        if (candidateVideo.interactionPriority > interactionPriority) {
+        // Automatic viewport requests must never churn the active MSE player.
+        // A hero shelf can make several cards intersect at once; replacing the
+        // current player for each of them repeatedly destroys and recreates
+        // video buffers while the user is scrolling. Only an explicitly more
+        // important interaction (such as hovering a card) may take over.
+        if (candidateVideo.interactionPriority >= interactionPriority) {
           return false;
         }
         candidateVideo.evict();

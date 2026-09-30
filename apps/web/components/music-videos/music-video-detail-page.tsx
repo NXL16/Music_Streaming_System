@@ -35,7 +35,6 @@ export function MusicVideoDetailPage({
   songVideoId,
 }: MusicVideoDetailPageProps) {
   const { data: video, loading, error } = useCatalogMusicVideo(songVideoId);
-  const showLoading = useMinimumLoadingDuration(loading);
   const releaseTrackId = video?.releaseTrackId ?? "";
   const { song: sourceSong } = useCatalogSong(releaseTrackId);
   const isFavorite = useFavoriteStore((state) =>
@@ -61,9 +60,14 @@ export function MusicVideoDetailPage({
         : Promise.resolve({ videos: [], nextCursor: "" }),
     [primaryArtist],
   );
-  const { data: moreByPage } = useAsyncResource(
+  const {
+    data: moreByPage,
+    loading: isMoreByLoading,
+    error: moreByError,
+  } = useAsyncResource(
     loadMoreByArtist,
     "Không thể tải Music Video khác của artist.",
+    { enabled: Boolean(primaryArtist) },
   );
   const loadRelatedVideos = useCallback(
     (signal?: AbortSignal) =>
@@ -74,7 +78,7 @@ export function MusicVideoDetailPage({
       ),
     [songVideoId],
   );
-  const { data: relatedVideos } = useAsyncResource(
+  const { data: relatedVideos, loading: isRelatedLoading } = useAsyncResource(
     loadRelatedVideos,
     "Không thể tải Music Video gợi ý.",
   );
@@ -104,6 +108,12 @@ export function MusicVideoDetailPage({
       ),
     [relatedVideos, video?.id],
   );
+
+  const shelvesLoading =
+    isRelatedLoading ||
+    (Boolean(primaryArtist) &&
+      (isMoreByLoading || (moreByPage === null && !moreByError)));
+  const showLoading = useMinimumLoadingDuration(loading || shelvesLoading);
   const loadNextMoreByPage = useCallback(async () => {
     if (
       !selectedShelf?.nextCursor ||
@@ -258,8 +268,8 @@ export function MusicVideoDetailPage({
                 </div>
               </div>
 
-              <div className="mt-1.5 relative text-ellipsis w-full z-(--z-default) min-[1000px]:mt-5 min-[1000px]:items-start min-[1000px]:flex min-[1000px]:flex-1 min-[1000px]:flex-col min-[1000px]:justify-center min-[1000px]:min-w-50 min-[1000px]:pt-0 min-[1000px]:ps-5">
-                <h1 className="[font:var(--large-title-semibold)] leading-1 pt-2 text-ellipsis">
+              <div className="mt-4 relative text-ellipsis w-full z-(--z-default) min-[1000px]:mt-0 min-[1000px]:items-start min-[1000px]:flex min-[1000px]:flex-1 min-[1000px]:flex-col min-[1000px]:justify-center min-[1000px]:min-w-50 min-[1000px]:pt-0 min-[1000px]:ps-5">
+                <h1 className="leading-none! [font:var(--large-title-semibold)] pt-2 text-ellipsis">
                   <span dir="auto">{video.songTitle}</span>
 
                   <span className="inline-flex items-center gap-1 ms-1 [--explicitBadgeSize:19px] [--favoriteBadgeSize:14px] [--favoriteBadgeMarginInlineStart:1px] has-[.explicit-wrapper]:ms-[6.5px] max-[999px]:[--explicitBadgeSize:16px]">

@@ -10,6 +10,7 @@ import {
   isSuggestLessActive,
   setSuggestLess,
 } from "@/lib/recommendations/suggest-less.api";
+import { notifyHomeRecommendationsStale } from "@/lib/recommendations/home-revalidation";
 import {
   notifyPlaylistFavoriteChanged,
   subscribePlaylistFavoriteChanges,
@@ -71,6 +72,7 @@ export async function setPlaylistFavorite(
         operation: "sync",
       });
     }
+    notifyHomeRecommendationsStale();
     return nextValue;
   } catch (error) {
     notifyPlaylistFavoriteChanged(playlistId, !isFavorite);

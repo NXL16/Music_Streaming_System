@@ -15,12 +15,7 @@ import type {
 } from "@/lib/media/media-card.types";
 
 export type CanonicalMediaResourceType =
-  | "albums"
-  | "artists"
-  | "playlists"
-  | "songs"
-  | "stations"
-  | "editorial-items";
+  "albums" | "artists" | "playlists" | "songs" | "stations" | "editorial-items";
 
 export type MediaResourceSource = {
   id: string;
@@ -45,12 +40,17 @@ export type MediaResourceProjection = {
   artists?: MediaCardArtist[];
   description?: string;
   typeTag?: string;
+  showTypeTag?: boolean;
+  showTitle?: boolean;
+  hideHeroDescription?: boolean;
   videoSrc?: string;
   altText?: string;
   slug?: string;
   imageUrl?: string;
   imageSrcSet?: string;
   artworkColors?: MediaCardProps["artworkColors"];
+  menuContext?: MediaCardProps["menuContext"];
+  onPlay?: MediaCardProps["onPlay"];
 };
 
 const COVER_WIDTHS = [296, 316, 592, 632];
@@ -146,7 +146,12 @@ export function createMediaResourceCard(
     artworkColors: projection.artworkColors ?? { bg: color, main: color },
     description: projection.description,
     typeTag: projection.typeTag,
+    showTypeTag: projection.showTypeTag,
+    showTitle: projection.showTitle,
+    hideHeroDescription: projection.hideHeroDescription,
     videoSrc: projection.videoSrc,
+    menuContext: projection.menuContext,
+    onPlay: projection.onPlay,
     altText: projection.altText ?? resource.name,
   });
 }

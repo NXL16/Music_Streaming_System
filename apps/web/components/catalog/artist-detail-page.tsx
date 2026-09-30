@@ -344,6 +344,8 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
     };
   }, [loadedAlbumSections, selectedAlbumSection]);
 
+  useAppScrollToTop(artistId);
+
   useAppScrollToTop(
     selectedAlbumSection ?? (selectedSimilarArtists ? "similar-artists" : null),
   );
@@ -395,7 +397,7 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
       <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) min-[484px]:pt-3">
         <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
           <div
-            className={`${videoSrc ? "overflow-hidden relative h-[calc((100vw-var(--web-navigation-width))/2.28571)] min-h-81 min-[1000px]:max-h-[calc(1680px/var(--fixed-artwork-ratio-lg,2.5714285714))] min-[1000px]:relative min-[1000px]:z-(--z-default) min-[1260px]:h-[calc((100vw-var(--web-navigation-width))/2.57143)] min-[1260px]:max-h-[653.33333px] before:bg-transparent before:bg-none before:bg-top before:bg-no-repeat before:bg-cover before:content-[''] before:h-[calc((100vw-var(--sidebar-width-expanded,260px))/var(--fixed-artwork-ratio-lg,2.2857142857))] before:max-h-[calc(1680px/var(--fixed-artwork-ratio-sm,2.5714285714))] before:max-w-[1680px] before:absolute before:w-[calc(100vw-var(--sidebar-width-expanded,260px))] before:z-(--z-default) min-[1000px]:before:bg-(--background-color) min-[1000px]:before:bg-(image:--background-image-xs) min-[1260px]:before:bg-(image:--background-image) min-[1260px]:before:h-[calc((100vw-var(--sidebar-width-expanded,260px))/var(--fixed-artwork-ratio-sm,2.5714285714))] after:bg-[linear-gradient(0deg,rgba(0,0,0,.36)_0,rgba(0,0,0,.25)_36%,transparent)] after:bottom-0 after:content-[''] after:block after:left-0 after:pointer-events-none after:absolute after:right-0 after:top-auto after:z-(--z-default) after:h-37.5" : "h-(--artistHeaderHeightXs,324px) overflow-hidden relative min-[1000px]:h-96.5 before:bg-transparent before:bg-none before:bg-top before:bg-no-repeat before:bg-cover before:content-[''] before:h-[calc((100vw-var(--sidebar-width-expanded,260px))/var(--fixed-artwork-ratio-lg,2.2857142857))] before:max-h-[calc(1680px/var(--fixed-artwork-ratio-sm,2.5714285714))] before:max-w-[1680px] before:absolute before:w-[calc(100vw-var(--sidebar-width-expanded,260px))] before:z-(--z-default) min-[1000px]:before:bg-(--background-color) min-[1000px]:before:bg-(image:--background-image-xs) min-[1260px]:before:bg-(image:--background-image) min-[1260px]:before:h-[calc((100vw-var(--sidebar-width-expanded,260px))/var(--fixed-artwork-ratio-sm,2.5714285714))] after:bg-[linear-gradient(0deg,rgba(0,0,0,.36)_0,rgba(0,0,0,.25)_36%,transparent)] after:bottom-0 after:content-[''] after:block after:left-0 after:pointer-events-none after:absolute after:right-0 after:top-auto after:z-(--z-default) after:h-36.5"}`}
+            className={`${videoSrc ? "overflow-hidden relative h-[calc((100vw-var(--web-navigation-width))/2.28571)] min-h-81 min-[1000px]:max-h-[calc(1680px/var(--fixed-artwork-ratio-lg,2.5714285714))] min-[1000px]:relative min-[1000px]:z-(--z-default) min-[1260px]:h-[calc((100vw-var(--web-navigation-width))/2.57143)] min-[1260px]:max-h-[653.33333px] before:bg-transparent before:bg-none before:bg-top before:bg-no-repeat before:bg-cover before:content-[''] before:h-[calc((100vw-var(--sidebar-width-expanded,260px))/var(--fixed-artwork-ratio-lg,2.2857142857))] before:max-h-[calc(1680px/var(--fixed-artwork-ratio-sm,2.5714285714))] before:max-w-[1680px] before:absolute before:w-[calc(100vw-var(--sidebar-width-expanded,260px))] before:z-(--z-default) min-[1000px]:before:bg-(--background-color) min-[1000px]:before:bg-(image:--background-image-xs) min-[1260px]:before:bg-(image:--background-image) min-[1260px]:before:h-[calc((100vw-var(--sidebar-width-expanded,260px))/var(--fixed-artwork-ratio-sm,2.5714285714))] after:bg-[linear-gradient(0deg,rgba(0,0,0,.36)_0,rgba(0,0,0,.25)_36%,transparent)] after:bottom-0 after:block after:left-0 after:pointer-events-none after:absolute after:right-0 after:top-auto after:z-(--z-default) after:h-37.5" : "h-(--artistHeaderHeightXs,324px) overflow-hidden relative min-[1000px]:h-96.5 before:bg-transparent before:bg-none before:bg-top before:bg-no-repeat before:bg-cover before:content-[''] before:h-[calc((100vw-var(--sidebar-width-expanded,260px))/var(--fixed-artwork-ratio-lg,2.2857142857))] before:max-h-[calc(1680px/var(--fixed-artwork-ratio-sm,2.5714285714))] before:max-w-[1680px] before:absolute before:w-[calc(100vw-var(--sidebar-width-expanded,260px))] before:z-(--z-default) min-[1000px]:before:bg-(--background-color) min-[1000px]:before:bg-(image:--background-image-xs) min-[1260px]:before:bg-(image:--background-image) min-[1260px]:before:h-[calc((100vw-var(--sidebar-width-expanded,260px))/var(--fixed-artwork-ratio-sm,2.5714285714))] after:bg-[linear-gradient(0deg,rgba(0,0,0,.36)_0,rgba(0,0,0,.25)_36%,transparent)] after:bottom-0 after:block after:left-0 after:pointer-events-none after:absolute after:right-0 after:top-auto after:z-(--z-default) after:h-36.5"}`}
           >
             {videoSrc ? (
               <div className="rounded-[inherit] [--artist-header-aspect-ratio:2.2857142857] [--artwork-override-width:100vw] [--artwork-override-height:calc(var(--artwork-override-width)/var(--artist-header-aspect-ratio))] [--artwork-override-min-height:324px] [--artwork-override-max-width:1680px] [--artwork-override-max-height:calc(1680px/2.5714285714)] inset-s-auto static min-[484px]:[--artwork-override-width:calc(100vw-var(--web-navigation-width))] min-[484px]:[--artwork-override-height:calc(var(--artwork-override-width)/var(--artist-header-aspect-ratio))] min-[484px]:h-(--artwork-override-height) min-[484px]:max-h-(--artwork-override-max-height) min-[484px]:max-w-(--artwork-override-max-width) min-[484px]:min-h-(--artwork-override-min-height) min-[484px]:w-(--artwork-override-width)">
@@ -502,77 +504,77 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
       </div>
 
       <div className="max-[999px]:[display:unset] flex pt-3 in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
-        <div>
-          <div className="flex justify-end items-center m-[0_var(--bodyGutter)_13px]">
-            <div className="flex-1">
-              <h2 className="text-(--header-title-color,var(--systemPrimary,#000)) inline-block [font:var(--header-title-font,var(--title-2-emphasized))]">
-                <span dir="auto">Latest Release</span>
-              </h2>
-            </div>
-          </div>
-
+        {latestRelease && (
           <div>
-            <div className="[--iconCircleFillBGOverride:transparent] items-center flex justify-start pb-8 ms-(--bodyGutter) w-[calc(100%-var(--bodyGutter))] min-[1000px]:w-[calc(50vw-var(--web-navigation-width,0)*2/4-50px)] min-[1260px]:w-[calc(40vw-var(--web-navigation-width,0)*2/5-44px)] min-[1580px]:w-[calc(25vw-var(--web-navigation-width,0)*2/8-35px)]">
-              <div className="rounded-[7px] shadow-[0_1px_1px_rgba(0,0,0,0.01),0_2px_2px_rgba(0,0,0,0.01),0_4px_4px_rgba(0,0,0,0.02),0_8px_8px_rgba(0,0,0,0.03),0_14px_14px_rgba(0,0,0,0.03)] cursor-pointer relative [--scrimOpacity:0] hover:[--scrimOpacity:1]">
-                <div className="rounded-[7px] after:content-[''] after:absolute after:inset-0 after:rounded-[inherit] after:bg-[#333333]/30 after:opacity-(--scrimOpacity,0) after:transition-opacity after:duration-100 after:ease-in after:z-1">
-                  <CardArtwork
-                    altText={latestRelease?.attributes.name ?? ""}
-                    artworkColors={{
-                      bg: latestReleaseArtworkColor,
-                      main: latestReleaseArtworkColor,
-                    }}
-                    containerClassName="contain-content min-[415px]:[--artwork-override-width:165px] min-[1000px]:[--artwork-override-width:calc(165px*var(--aspect-ratio))] min-[1000px]:[--artwork-override-height:165px]"
-                    imageSrcSet={latestReleaseSrcSet}
-                    sizes="(max-width:1319px) 296px,(min-width:1320px) and (max-width:1679px) 316px,316px"
-                    title={latestRelease?.attributes.name ?? ""}
-                    variant="cover"
-                  />
-                </div>
+            <div className="flex justify-end items-center m-[0_var(--bodyGutter)_13px]">
+              <div className="flex-1">
+                <h2 className="text-(--header-title-color,var(--systemPrimary,#000)) inline-block [font:var(--header-title-font,var(--title-2-emphasized))]">
+                  <span dir="auto">Latest Release</span>
+                </h2>
+              </div>
+            </div>
 
-                {latestRelease && (
-                  <div
-                    onClick={() =>
-                      router.push(
-                        albumRoute(
-                          latestRelease.attributes.url,
-                          latestRelease.id,
-                        ),
-                      )
-                    }
-                    className="media-card-interaction rounded-[inherit] size-full opacity-(--scrimOpacity,0) absolute top-0 transition-(--global-transition) z-[calc(var(--z-default)+1)]"
-                  >
-                    <CardPlayButton
-                      ariaLabel={`Play ${latestRelease.attributes.name}`}
+            <div>
+              <div className="[--iconCircleFillBGOverride:transparent] items-center flex justify-start pb-8 ms-(--bodyGutter) w-[calc(100%-var(--bodyGutter))] min-[1000px]:w-[calc(50vw-var(--web-navigation-width,0)*2/4-50px)] min-[1260px]:w-[calc(40vw-var(--web-navigation-width,0)*2/5-44px)] min-[1580px]:w-[calc(25vw-var(--web-navigation-width,0)*2/8-35px)]">
+                <div className="rounded-[7px] shadow-[0_1px_1px_rgba(0,0,0,0.01),0_2px_2px_rgba(0,0,0,0.01),0_4px_4px_rgba(0,0,0,0.02),0_8px_8px_rgba(0,0,0,0.03),0_14px_14px_rgba(0,0,0,0.03)] cursor-pointer relative [--scrimOpacity:0] hover:[--scrimOpacity:1]">
+                  <div className="rounded-[7px] after:absolute after:inset-0 after:rounded-[inherit] after:bg-[#333333]/30 after:opacity-(--scrimOpacity,0) after:transition-opacity after:duration-100 after:ease-in after:z-1">
+                    <CardArtwork
+                      altText={latestRelease?.attributes.name ?? ""}
+                      artworkColors={{
+                        bg: latestReleaseArtworkColor,
+                        main: latestReleaseArtworkColor,
+                      }}
+                      containerClassName="contain-content min-[415px]:[--artwork-override-width:165px] min-[1000px]:[--artwork-override-width:calc(165px*var(--aspect-ratio))] min-[1000px]:[--artwork-override-height:165px]"
+                      imageSrcSet={latestReleaseSrcSet}
+                      sizes="(max-width:1319px) 296px,(min-width:1320px) and (max-width:1679px) 316px,316px"
+                      title={latestRelease?.attributes.name ?? ""}
                       variant="cover"
-                      onPlay={() => {
-                        void playCatalogResource("albums", latestRelease.id);
-                      }}
-                    />
-                    <CardContextMenu
-                      id={`artist-latest-release-${latestRelease.id}`}
-                      context={{
-                        kind: "collection",
-                        resourceId: latestRelease.id,
-                        resourceType: "albums",
-                        sourceOrigin: "catalog",
-                        title: latestRelease.attributes.name,
-                        subtitle: artistName,
-                        artworkUrl: latestReleaseArtwork?.url,
-                        href: albumRoute(
-                          latestRelease.attributes.url,
-                          latestRelease.id,
-                        ),
-                        userId,
-                        songIds: latestReleaseTracks.map((track) => track.id),
-                        trackSources: toTrackSources(latestReleaseTracks),
-                        inLibrary: false,
-                      }}
                     />
                   </div>
-                )}
-              </div>
 
-              {latestRelease && (
+                  {latestRelease && (
+                    <div
+                      onClick={() =>
+                        router.push(
+                          albumRoute(
+                            latestRelease.attributes.url,
+                            latestRelease.id,
+                          ),
+                        )
+                      }
+                      className="media-card-interaction rounded-[inherit] size-full opacity-(--scrimOpacity,0) absolute top-0 transition-(--global-transition) z-[calc(var(--z-default)+1)]"
+                    >
+                      <CardPlayButton
+                        ariaLabel={`Play ${latestRelease.attributes.name}`}
+                        variant="cover"
+                        onPlay={() => {
+                          void playCatalogResource("albums", latestRelease.id);
+                        }}
+                      />
+                      <CardContextMenu
+                        id={`artist-latest-release-${latestRelease.id}`}
+                        context={{
+                          kind: "collection",
+                          resourceId: latestRelease.id,
+                          resourceType: "albums",
+                          sourceOrigin: "catalog",
+                          title: latestRelease.attributes.name,
+                          subtitle: artistName,
+                          artworkUrl: latestReleaseArtwork?.url,
+                          href: albumRoute(
+                            latestRelease.attributes.url,
+                            latestRelease.id,
+                          ),
+                          userId,
+                          songIds: latestReleaseTracks.map((track) => track.id),
+                          trackSources: toTrackSources(latestReleaseTracks),
+                          inLibrary: false,
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+
                 <ul className="whitespace-normal ms-5 me-5">
                   {latestReleaseDate && (
                     <li className="text-(--systemSecondary) [font:var(--subhead-emphasized)] mb-1.5">
@@ -624,10 +626,10 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
                     </div>
                   </li>
                 </ul>
-              )}
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         <div className="min-[1000px]:flex-1 min-[1000px]:-ms-5 min-[1000px]:min-w-0">
           <div className="items-center flex justify-end m-[0_var(--bodyGutter)_13px]">
@@ -678,7 +680,7 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
                 } as CSSProperties
               }
             >
-              <div className="box-content -me-0.5 -ms-0.5 overflow-visible pe-0.5 ps-0.5 w-full">
+              <div className="top-song box-content -me-0.5 -ms-0.5 overflow-visible pe-0.5 ps-0.5 w-full">
                 <ul
                   className="shelf-grid__list--artist"
                   onClickCapture={(event) => {
@@ -793,7 +795,7 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
                         key={song.id}
                       >
                         <div
-                          className="group items-center text-(--systemPrimary) grid grid-cols-[auto_auto_1fr_auto] pb-[7.5px] pt-[7.5px] relative w-full pe-(--trackLockupPaddingInlineEnd,14px) cursor-pointer after:[border-top:var(--keyline-border-style)] after:content-[''] after:inset-e-0 after:inset-s-0 after:absolute after:top-0 after:z-(--z-default)"
+                          className="group items-center text-(--systemPrimary) grid grid-cols-[auto_auto_1fr_auto] pb-[7.5px] pt-[7.5px] relative w-full pe-(--trackLockupPaddingInlineEnd,14px) cursor-pointer after:[border-top:var(--keyline-border-style)] after:inset-e-0 after:inset-s-0 after:absolute after:top-0 after:z-(--z-default)"
                           onClick={() => {
                             if (!song.albumUrl) return;
                             router.push(
@@ -1087,6 +1089,7 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
           shelfId="artist-similar-artists"
           title="Similar Artists"
           displayKind="MusicCircleCoverShelf"
+          contentType="artist"
           containerClassName="bg-(--opaqueShelfBG)"
           items={similarArtistCards.slice(
             0,

@@ -124,49 +124,22 @@ export default memo(function MediaShelfSkeleton({
       className={`min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-3 ${containerClassName ?? ""}`}
       style={mediaShelfVisibility[displayKind]}
     >
-      <style>{`
-        @keyframes master-diagonal-shimmer {
-          0% {
-            background-position: 150% 150%;
-          }
-          100% {
-            background-position: -150% -150%;
-          }
-        }
-
-        .perfect-sync-shimmer {
-          background: #3a3a3a;
-          background-image: linear-gradient(
-            135deg,
-            #3a3a3a 20%,
-            #3f3f3f 30%,
-            #4a4a4a 40%,
-            #3f3f3f 50%,
-            #3a3a3a 60%
-          );
-          background-repeat: no-repeat;
-          background-size: 250% 250%;
-          background-attachment: fixed;
-          animation: master-diagonal-shimmer 1.4s infinite linear;
-        }
-      `}</style>
-
       <div>
         <div className="flex items-center justify-end mx-(--bodyGutter) mb-3.25">
           {isMoreLike ? (
             <>
               <div className="mt-0.75 pe-3">
-                <div className="size-10 rounded-[5px] perfect-sync-shimmer" />
+                <div className="size-10 rounded-[5px] media-shelf-skeleton__shimmer" />
               </div>
               <div className="flex-1">
-                <div className="h-4 w-20 mt-0.75 rounded perfect-sync-shimmer" />
-                <div className="h-6 w-44 mt-1 rounded-md perfect-sync-shimmer" />
+                <div className="h-4 w-20 mt-0.75 rounded media-shelf-skeleton__shimmer" />
+                <div className="h-6 w-44 mt-1 rounded-md media-shelf-skeleton__shimmer" />
               </div>
             </>
           ) : (
             <div className="flex-1">
               <h2 className="inline-block leading-none">
-                <div className="h-7 w-48 rounded-md perfect-sync-shimmer" />
+                <div className="h-7 w-48 rounded-md media-shelf-skeleton__shimmer" />
               </h2>
             </div>
           )}
@@ -198,24 +171,24 @@ export default memo(function MediaShelfSkeleton({
                           }`}
                         >
                           {isHeroShelf ? (
-                            <div className="size-full rounded-(--global-border-radius-xlarge,14px) relative perfect-sync-shimmer">
-                              <div className="absolute bottom-0 w-full p-4 pb-5 space-y-2.5 z-10 text-start bg-linear-to-t from-[#3a3a3a] via-[#3a3a3a]/40 to-transparent">
-                                <div className="h-4 w-1/3 bg-[#4a4a4a]/80 rounded" />
-                                <div className="h-3.5 w-3/4 bg-[#4a4a4a]/50 rounded" />
+                            <div className="size-full rounded-(--global-border-radius-xlarge,14px) relative media-shelf-skeleton__shimmer">
+                              <div className="media-shelf-skeleton__hero-gradient absolute bottom-0 w-full p-4 pb-5 space-y-2.5 z-10 text-start">
+                                <div className="media-shelf-skeleton__highlight h-4 w-1/3 rounded opacity-80" />
+                                <div className="media-shelf-skeleton__highlight h-3.5 w-3/4 rounded opacity-50" />
                               </div>
                             </div>
                           ) : isCircleShelf ? (
                             <>
                               <div className="rounded-full shadow-[0_1px_1px_rgba(0,0,0,0.01),0_2px_2px_rgba(0,0,0,0.01),0_4px_4px_rgba(0,0,0,0.02),0_8px_8px_rgba(0,0,0,0.03),0_14px_14px_rgba(0,0,0,0.03)] relative z-(--z-default) overflow-hidden">
                                 <div
-                                  className="rounded-full relative w-full perfect-sync-shimmer"
+                                  className="rounded-full relative w-full media-shelf-skeleton__shimmer"
                                   style={{ aspectRatio: "1" }}
                                 />
                               </div>
 
                               <div className="mt-2">
                                 <div className="flex flex-col items-center space-y-1.5 pt-1">
-                                  <div className="h-3.5 w-9/12 rounded perfect-sync-shimmer" />
+                                  <div className="h-3.5 w-9/12 rounded media-shelf-skeleton__shimmer" />
                                 </div>
                               </div>
                             </>
@@ -223,7 +196,7 @@ export default memo(function MediaShelfSkeleton({
                             <>
                               <div className="rounded-(--global-border-radius-medium,7px) shadow-[0_1px_1px_rgba(0,0,0,0.01),0_2px_2px_rgba(0,0,0,0.01),0_4px_4px_rgba(0,0,0,0.02),0_8px_8px_rgba(0,0,0,0.03),0_14px_14px_rgba(0,0,0,0.03)] relative z-(--z-default)">
                                 <div
-                                  className="rounded-[inherit] relative w-full perfect-sync-shimmer"
+                                  className="rounded-[inherit] relative w-full media-shelf-skeleton__shimmer"
                                   style={{
                                     aspectRatio: isVideoShelf
                                       ? "1.7777777777777777"
@@ -235,10 +208,10 @@ export default memo(function MediaShelfSkeleton({
                               <div className="mt-1">
                                 <div className="text-start space-y-1.5 pt-1.5">
                                   <div className="grid grid-cols-[minmax(0,1fr)_auto]">
-                                    <div className="h-3.5 w-11/12 rounded perfect-sync-shimmer" />
+                                    <div className="h-3.5 w-11/12 rounded media-shelf-skeleton__shimmer" />
                                   </div>
 
-                                  <div className="h-3 w-7/12 rounded perfect-sync-shimmer" />
+                                  <div className="h-3 w-7/12 rounded media-shelf-skeleton__shimmer" />
                                 </div>
                               </div>
                             </>

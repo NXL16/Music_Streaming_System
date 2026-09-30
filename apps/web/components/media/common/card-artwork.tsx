@@ -21,19 +21,11 @@ type SharedCardArtworkProps = Pick<
   priority?: boolean;
 };
 
-type CardArtworkProps = SharedCardArtworkProps &
-  (
-    | {
-        variant: "hero";
-        videoSrc?: string;
-        keepVideoMountedHorizontally?: boolean;
-      }
-    | {
-        variant: "cover";
-        videoSrc?: never;
-        keepVideoMountedHorizontally?: never;
-      }
-  );
+type CardArtworkProps = SharedCardArtworkProps & {
+  variant: "hero" | "cover";
+  videoSrc?: string;
+  keepVideoMountedHorizontally?: boolean;
+};
 
 const PLACEHOLDER_SRC = "/assets/artwork/1x1.gif";
 
@@ -98,7 +90,7 @@ export default function CardArtwork({
 
   return (
     <div
-      className={`bg-(--override-placeholder-bg-color,var(--placeholder-bg-color,var(--genericJoeColor))) rounded-[inherit] box-border contain-content h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0) min-w-(--artwork-override-min-width,0) overflow-hidden relative w-(--artwork-override-width,100%) z-(--z-default) after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:content-[''] after:block after:h-0 after:max-h-full after:max-w-full after:min-h-full after:min-w-full after:opacity-(--containerInnerStrokeAlpha,0.1) after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)] dark:after:opacity-(--containerInnerStrokeAlpha,0.25) ${containerClassName ?? ""}`}
+      className={`bg-(--override-placeholder-bg-color,var(--placeholder-bg-color,var(--genericJoeColor))) rounded-[inherit] box-border contain-content h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0) min-w-(--artwork-override-min-width,0) overflow-hidden relative w-(--artwork-override-width,100%) z-(--z-default) after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:block after:h-0 after:max-h-full after:max-w-full after:min-h-full after:min-w-full after:opacity-(--containerInnerStrokeAlpha,0.1) after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)] dark:after:opacity-(--containerInnerStrokeAlpha,0.25) ${containerClassName ?? ""}`}
       style={
         {
           "--artwork-bg-color": artworkColors.bg,
@@ -127,6 +119,11 @@ export default function CardArtwork({
         style={{ opacity: 1, objectFit: "cover", objectPosition: "top" }}
         width={316}
       />
+      {videoSrc && (
+        <div className="absolute inset-0 pointer-events-none">
+          <AmbientVideo src={videoSrc} variant="hero" />
+        </div>
+      )}
     </div>
   );
 }

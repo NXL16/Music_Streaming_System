@@ -35,10 +35,10 @@ function StandardSidebarItemContent({
 }: SidebarItemContentProps) {
   return (
     <div
-      className={`items-center rounded-[inherit] flex gap-2 size-full in-[.app-container]:gap-1.5 min-[484px]:in-[.app-container]:gap-0.5 ${isSelected ? "text-(--keyColor)" : "text-(--navigation-item-text-color,var(--systemPrimary))"}`}
+      className={`items-center rounded-[inherit] flex gap-2 size-full in-[.app-container]:gap-1.5 min-[484px]:in-[.app-container]:gap-0.5 text-(--navigation-item-text-color,var(--systemPrimary)) ${isSelected ? "font-semibold!" : ""}`}
     >
       <span
-        className={`max-[483px]:basis-(--navigation-item-icon-size,28px) flex-[0_0] basis-(--navigation-item-icon-size,32px) leading-0 in-[.app-container]:mx-0.5 min-[484px]:basis-(--navigation-item-icon-size,24px) [&>svg]:h-full [&>svg]:w-full ${isSelected ? "[&>svg]:fill-(--keyColor)" : "[&>svg]:fill-(--navigation-item-icon-color,var(--systemPrimary))"}`}
+        className={`max-[483px]:basis-(--navigation-item-icon-size,28px) flex-[0_0] basis-(--navigation-item-icon-size,32px) leading-0 in-[.app-container]:mx-0.5 min-[484px]:basis-(--navigation-item-icon-size,24px) [&>svg]:h-full [&>svg]:w-full [&>svg]:fill-(--navigation-item-icon-color,var(--systemPrimary))`}
       >
         {item.icon}
       </span>
@@ -64,7 +64,7 @@ function PinnedSidebarItemContent({
 
   return (
     <div
-      className={`items-center rounded-[inherit] flex gap-2 size-full in-[.app-container]:gap-1.5 min-[484px]:in-[.app-container]:gap-0.5 ${isCurrentPin ? "[--playButtonOpacity:1]" : ""} ${isSelected ? "text-(--keyColor)" : "text-(--navigation-item-text-color,var(--systemPrimary))"}`}
+      className={`items-center rounded-[inherit] flex gap-2 size-full in-[.app-container]:gap-1.5 min-[484px]:in-[.app-container]:gap-0.5 text-(--navigation-item-text-color,var(--systemPrimary)) ${isCurrentPin ? "[--playButtonOpacity:1]" : ""} ${isSelected ? "font-semibold!" : ""}`}
     >
       <span
         className={`max-[483px]:basis-(--navigation-item-icon-size,28px) flex-[0_0] basis-(--navigation-item-icon-size,32px) leading-0 in-[.app-container]:mx-0.5 min-[484px]:basis-(--navigation-item-icon-size,24px) [&>svg]:h-full [&>svg]:w-full ${isSelected ? "[&>svg]:fill-(--keyColor)" : "[&>svg]:fill-(--navigation-item-icon-color,var(--systemPrimary))"}`}
@@ -72,7 +72,7 @@ function PinnedSidebarItemContent({
         <div className="[--navigation-item-icon-color:#fff] grid relative rounded-[3px] [grid-template-areas:'pin-artwork']">
           <div className="[grid-area:pin-artwork]">
             <div
-              className="bg-(--override-placeholder-bg-color,var(--placeholder-bg-color,var(--genericJoeColor))) rounded-[inherit] box-border contain-content h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0) min-w-(--artwork-override-min-width,0) overflow-hidden relative w-(--artwork-override-width,100%) z-(--z-default) after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:content-[''] after:block after:h-0 after:max-h-full after:max-w-full after:min-h-full after:min-w-full after:opacity-(--containerInnerStrokeAlpha,0.1) after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)] dark:after:opacity-(--containerInnerStrokeAlpha,0.25)"
+              className="bg-(--override-placeholder-bg-color,var(--placeholder-bg-color,var(--genericJoeColor))) rounded-[inherit] box-border contain-content h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0) min-w-(--artwork-override-min-width,0) overflow-hidden relative w-(--artwork-override-width,100%) z-(--z-default) after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:block after:h-0 after:max-h-full after:max-w-full after:min-h-full after:min-w-full after:opacity-(--containerInnerStrokeAlpha,0.1) after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)] dark:after:opacity-(--containerInnerStrokeAlpha,0.25)"
               style={
                 {
                   "--aspect-ratio": "1",

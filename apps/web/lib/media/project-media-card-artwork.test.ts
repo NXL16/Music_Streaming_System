@@ -3,11 +3,11 @@ import { projectMediaCardArtwork } from "./project-media-card-artwork";
 import type { MediaCardProps } from "./media-card.types";
 
 const baseCard: MediaCardProps = {
-  id: "playlists-daily-mix",
-  resourceId: "daily-mix",
+  id: "playlists-1c8f2273-26cf-4fa5-9b6f-40d3296d7ab5",
+  resourceId: "1c8f2273-26cf-4fa5-9b6f-40d3296d7ab5",
   resourceType: "playlists",
   cardType: "collection",
-  title: "Daily Mix",
+  title: "Chill",
   subtitle: "Musical",
   imageUrl: "stale-632w.webp",
   imageSrcSet: "stale-632w.webp",

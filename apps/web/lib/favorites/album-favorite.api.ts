@@ -9,6 +9,7 @@ import {
   isSuggestLessActive,
   setSuggestLess,
 } from "@/lib/recommendations/suggest-less.api";
+import { notifyHomeRecommendationsStale } from "@/lib/recommendations/home-revalidation";
 import {
   notifyAlbumFavoriteChanged,
   subscribeAlbumFavoriteChanges,
@@ -76,6 +77,7 @@ export async function setAlbumFavorite(
         operation: "sync",
       });
     }
+    notifyHomeRecommendationsStale();
     return nextValue;
   } catch (error) {
     notifyAlbumFavoriteChanged(albumId, !isFavorite);

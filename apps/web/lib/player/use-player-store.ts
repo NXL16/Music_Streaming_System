@@ -1,6 +1,5 @@
 ﻿import { create } from "zustand";
 
-
 export type PlayerArtist = {
   id?: string;
   name: string;
@@ -34,6 +33,8 @@ export type PlayerSong = {
   hasLyrics?: boolean;
   durationSec: number;
   artworkUrl: string;
+  /** High-resolution artwork reserved for the OS/Media Session surface. */
+  mediaSessionArtworkUrl?: string;
   artworkSrcSet?: string;
   thumbnailArtworkSrcSet?: string;
   artworkBgColor?: string;
@@ -69,10 +70,37 @@ export type PlayerSong = {
     artworkBgColor?: string;
     artworkReady?: boolean;
   };
+  /** Added by the continuous Autoplay recommendation queue. */
+  sourceAutoplay?: boolean;
 };
 
 export type RepeatMode = 0 | 1 | 2;
 export type QueueInsertionPosition = "next" | "last";
+
+const AUTOPLAY_PREFERENCE_STORAGE_KEY = "autoplayMode";
+
+function readAutoplayPreference(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return (
+      window.localStorage.getItem(AUTOPLAY_PREFERENCE_STORAGE_KEY) === "true"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function saveAutoplayPreference(enabled: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      AUTOPLAY_PREFERENCE_STORAGE_KEY,
+      String(enabled),
+    );
+  } catch {
+    // Storage can be unavailable in private browsing; playback still works.
+  }
+}
 
 type PlayerState = {
   currentSong: PlayerSong | null;
@@ -82,6 +110,7 @@ type PlayerState = {
   playing: boolean;
   shuffleEnabled: boolean;
   stationMode: boolean;
+  autoplayEnabled: boolean;
   repeatMode: RepeatMode;
   drawerOpen: boolean;
   playbackTimeMs: number;
@@ -106,6 +135,7 @@ type PlayerState = {
     preserveSeedPlayback?: boolean,
   ) => void;
   appendStationTracks: (stationId: string, songs: PlayerSong[]) => void;
+  appendAutoplayTracks: (songs: PlayerSong[]) => void;
   updateStationArtwork: (
     stationId: string,
     artwork: { url: string; bgColor: string },
@@ -113,6 +143,7 @@ type PlayerState = {
   togglePlayback: () => void;
   toggleShuffle: () => void;
   cycleRepeatMode: () => void;
+  toggleAutoplay: () => void;
   pause: () => void;
   next: (stopAtEnd?: boolean) => boolean;
   previous: () => boolean;
@@ -160,6 +191,25 @@ function shuffleAllSongs(songs: PlayerSong[]) {
   return shuffled;
 }
 
+function samePlayback(left: PlayerSong, right: PlayerSong | null) {
+  return Boolean(
+    right &&
+    left.id === right.id &&
+    left.releaseTrackId === right.releaseTrackId &&
+    left.playbackKind === right.playbackKind &&
+    left.video?.id === right.video?.id,
+  );
+}
+
+export function countShuffleableManualSongs(
+  songs: PlayerSong[],
+  startIndex: number,
+) {
+  return songs
+    .slice(Math.max(0, startIndex))
+    .filter((song) => !song.sourceAutoplay && Boolean(song.playbackUrl)).length;
+}
+
 export const usePlayerStore = create<PlayerState>((set) => ({
   currentSong: null,
   queue: [],
@@ -168,6 +218,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
   playing: false,
   shuffleEnabled: false,
   stationMode: false,
+  autoplayEnabled: readAutoplayPreference(),
   repeatMode: 0,
   drawerOpen: false,
   playbackTimeMs: 0,
@@ -183,7 +234,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
     }),
   setVideoPlayerOpen: (open) => set({ videoPlayerOpen: open }),
   setSong: (song) =>
-    set({
+    set((state) => ({
       currentSong: song,
       queue: [song],
       originalQueue: [song],
@@ -192,9 +243,10 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       playing: Boolean(song.playbackUrl),
       shuffleEnabled: false,
       stationMode: false,
+      autoplayEnabled: state.autoplayEnabled,
       repeatMode: 0,
       videoPlayerOpen: false,
-    }),
+    })),
   replaceCurrentSong: (song) =>
     set((state) => {
       const currentSong = state.currentSong;
@@ -222,7 +274,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       };
     }),
   setQueue: (songs, startIndex = 0) =>
-    set(() => {
+    set((state) => {
       const requestedIndex =
         songs.length === 0
           ? -1
@@ -246,6 +298,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
         playing: Boolean(selectedSong),
         shuffleEnabled: false,
         stationMode: false,
+        autoplayEnabled: state.autoplayEnabled,
         repeatMode: 0,
         videoPlayerOpen: false,
       };
@@ -312,7 +365,14 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       const queueInsertionIndex =
         position === "next" && currentIndex >= 0
           ? currentIndex + 1
-          : queueWithoutRequested.length;
+          : (() => {
+              const firstAutoplay = queueWithoutRequested.findIndex(
+                (song) => song.sourceAutoplay,
+              );
+              return firstAutoplay < 0
+                ? queueWithoutRequested.length
+                : firstAutoplay;
+            })();
       const queue = [...queueWithoutRequested];
       queue.splice(queueInsertionIndex, 0, ...queuedSongs);
 
@@ -323,7 +383,12 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       const originalInsertionIndex =
         position === "next" && originalCurrentIndex >= 0
           ? originalCurrentIndex + 1
-          : originalQueue.length;
+          : (() => {
+              const firstAutoplay = originalQueue.findIndex(
+                (song) => song.sourceAutoplay,
+              );
+              return firstAutoplay < 0 ? originalQueue.length : firstAutoplay;
+            })();
       originalQueue.splice(originalInsertionIndex, 0, ...queuedSongs);
 
       return {
@@ -491,9 +556,14 @@ export const usePlayerStore = create<PlayerState>((set) => ({
     set((state) => {
       // A Station is shuffled once, then consumed in order. This guarantees a
       // track cannot repeat until the listener explicitly starts the station again.
-      const seed = seedSongId ? songs.find((song) => song.id === seedSongId) : undefined;
+      const seed = seedSongId
+        ? songs.find((song) => song.id === seedSongId)
+        : undefined;
       const queue = seed
-        ? [seed, ...shuffleAllSongs(songs.filter((song) => song.id !== seedSongId))]
+        ? [
+            seed,
+            ...shuffleAllSongs(songs.filter((song) => song.id !== seedSongId)),
+          ]
         : shuffleAllSongs(songs);
       const currentIndex = findPlayableIndex(queue, 0, 1);
       const currentSong = currentIndex >= 0 ? queue[currentIndex] : null;
@@ -511,6 +581,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
         playing: Boolean(currentSong),
         shuffleEnabled: true,
         stationMode: true,
+        autoplayEnabled: false,
         repeatMode: 0,
       };
     }),
@@ -536,6 +607,30 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       return {
         queue: [...state.queue, ...additions],
         originalQueue: [...state.originalQueue, ...additions],
+      };
+    }),
+  appendAutoplayTracks: (songs) =>
+    set((state) => {
+      if (!state.autoplayEnabled || state.stationMode) return state;
+
+      const existingSongIds = new Set(state.queue.map((song) => song.id));
+      const additions = songs.filter(
+        (song) => Boolean(song.playbackUrl) && !existingSongIds.has(song.id),
+      );
+      if (!additions.length) return state;
+
+      const appendAutoplayTracksToQueue = (queue: PlayerSong[]) => {
+        // Manual additions are always inserted before this block. Therefore
+        // appending here preserves recommendation order and keeps Autoplay last.
+        return [
+          ...queue,
+          ...additions.map((song) => ({ ...song, sourceAutoplay: true })),
+        ];
+      };
+
+      return {
+        queue: appendAutoplayTracksToQueue(state.queue),
+        originalQueue: appendAutoplayTracksToQueue(state.originalQueue),
       };
     }),
   updateStationArtwork: (stationId, artwork) =>
@@ -574,31 +669,96 @@ export const usePlayerStore = create<PlayerState>((set) => ({
     }),
   toggleShuffle: () =>
     set((state) => {
-      if (state.stationMode) return state;
-      if (!state.currentSong || state.originalQueue.length < 2) return state;
+      if (state.stationMode || state.currentSong?.sourceAutoplay) return state;
+      if (
+        !state.currentSong ||
+        countShuffleableManualSongs(state.queue, state.currentIndex) < 2
+      ) {
+        return state;
+      }
+
+      const autoplaySongs = state.queue.filter((song) => song.sourceAutoplay);
+      const manualQueue = state.originalQueue.filter(
+        (song) => !song.sourceAutoplay,
+      );
 
       if (state.shuffleEnabled) {
-        const restoredIndex = state.originalQueue.findIndex(
+        const restoredIndex = manualQueue.findIndex(
           (song) => song.id === state.currentSong?.id,
         );
         return {
           shuffleEnabled: false,
-          queue: state.originalQueue,
+          queue: [...manualQueue, ...autoplaySongs],
           currentIndex: restoredIndex,
         };
       }
 
       return {
         shuffleEnabled: true,
-        queue: shuffleQueue(state.originalQueue, state.currentSong.id),
+        queue: [
+          ...shuffleQueue(manualQueue, state.currentSong.id),
+          ...autoplaySongs,
+        ],
         currentIndex: 0,
       };
     }),
   cycleRepeatMode: () =>
     set((state) => {
-      if (state.stationMode) return state;
+      if (state.stationMode || state.currentSong?.sourceAutoplay) return state;
+      const queue = state.autoplayEnabled
+        ? state.queue.filter(
+            (song) =>
+              !song.sourceAutoplay || samePlayback(song, state.currentSong),
+          )
+        : state.queue;
+      const originalQueue = state.autoplayEnabled
+        ? state.originalQueue.filter(
+            (song) =>
+              !song.sourceAutoplay || samePlayback(song, state.currentSong),
+          )
+        : state.originalQueue;
       return {
         repeatMode: state.repeatMode === 0 ? 2 : state.repeatMode === 2 ? 1 : 0,
+        autoplayEnabled: false,
+        queue,
+        originalQueue,
+        currentIndex: queue.findIndex((song) =>
+          samePlayback(song, state.currentSong),
+        ),
+      };
+    }),
+  toggleAutoplay: () =>
+    set((state) => {
+      if (state.stationMode || !state.currentSong) return state;
+      if (state.autoplayEnabled) {
+        const queue = state.queue.filter(
+          (song) =>
+            !song.sourceAutoplay || samePlayback(song, state.currentSong),
+        );
+        const originalQueue = state.originalQueue.filter(
+          (song) =>
+            !song.sourceAutoplay || samePlayback(song, state.currentSong),
+        );
+        return {
+          autoplayEnabled: false,
+          queue,
+          originalQueue,
+          currentIndex: queue.findIndex((song) =>
+            samePlayback(song, state.currentSong),
+          ),
+        };
+      }
+      // Autoplay begins after the manual queue in its original order. Do not
+      // carry an already-active Shuffle mode into that flow.
+      const queue = state.shuffleEnabled ? state.originalQueue : state.queue;
+      return {
+        autoplayEnabled: true,
+        shuffleEnabled: false,
+        repeatMode: 0,
+        queue,
+        currentIndex: queue.findIndex((song) =>
+          samePlayback(song, state.currentSong),
+        ),
       };
     }),
   pause: () => set({ playing: false }),
@@ -648,6 +808,12 @@ export const usePlayerStore = create<PlayerState>((set) => ({
         currentSong: state.queue[nextIndex],
         playbackTimeMs: 0,
         playing: true,
+        // Autoplay always owns its recommendation order. If the listener
+        // reaches this section from a shuffled manual queue, clear Shuffle
+        // before the Autoplay track begins (Repeat is reset defensively too).
+        ...(state.queue[nextIndex].sourceAutoplay
+          ? { shuffleEnabled: false, repeatMode: 0 as RepeatMode }
+          : {}),
         videoPlayerOpen:
           state.videoPlayerOpen &&
           state.currentSong?.playbackKind === "video" &&
@@ -708,6 +874,9 @@ export const usePlayerStore = create<PlayerState>((set) => ({
         currentSong: state.queue[previousIndex],
         playbackTimeMs: 0,
         playing: true,
+        ...(state.queue[previousIndex].sourceAutoplay
+          ? { shuffleEnabled: false, repeatMode: 0 as RepeatMode }
+          : {}),
         videoPlayerOpen:
           state.videoPlayerOpen &&
           state.currentSong?.playbackKind === "video" &&
@@ -728,7 +897,18 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       playing: false,
       shuffleEnabled: false,
       stationMode: false,
+      autoplayEnabled: false,
       repeatMode: 0,
       drawerOpen: false,
     }),
 }));
+
+// Persist only the listener's toggle. Queue entries and playback position stay
+// in memory, so enabling Autoplay always builds a fresh recommendation block.
+if (typeof window !== "undefined") {
+  usePlayerStore.subscribe((state, previousState) => {
+    if (state.autoplayEnabled !== previousState.autoplayEnabled) {
+      saveAutoplayPreference(state.autoplayEnabled);
+    }
+  });
+}

@@ -25,6 +25,7 @@ import {
 } from "@/lib/recommendations/listening-events";
 import { refillSongStation } from "@/lib/recommendations/song-station";
 import { refillArtistStation } from "@/lib/recommendations/artist-station";
+import { loadAutoplayTracks } from "@/lib/recommendations/autoplay";
 import type {
   MediaArtwork,
   MediaCardProps,
@@ -55,11 +56,59 @@ const LOCK_SCREEN_SEEK_SECONDS = 10;
 const END_SEEK_TOLERANCE_SECONDS = 3;
 const SONG_STATION_REFILL_THRESHOLD = 8;
 const SONG_STATION_REFILL_RETRY_DELAY_MS = 15_000;
+const AUTOPLAY_QUEUE_SIZE = 10;
+const AUTOPLAY_REFILL_RETRY_DELAY_MS = 15_000;
+const MEDIA_SESSION_POSITION_SYNC_INTERVAL_MS = 1_000;
 
 function resetAudioToStart(audio: HTMLAudioElement | null): void {
   if (audio) {
     audio.currentTime = 0;
   }
+}
+
+/**
+ * An MSE stream can still be at its terminal media timeline immediately after
+ * assigning `currentTime = 0`. Calling play in that small window is ignored by
+ * some browsers, leaving the UI at the start while the element remains ended.
+ * Wait for its seek to settle before resuming. A short fallback keeps ordinary
+ * media elements and browsers that omit `seeked` from getting stuck.
+ */
+function replayAudioFromStart(
+  audio: HTMLAudioElement,
+  vocal: HTMLAudioElement | null,
+  waitForSeek: boolean,
+  isCurrentPlayback: () => boolean,
+  onReadyToPlay: () => void,
+  onFailure: () => void,
+): void {
+  let started = false;
+  let fallbackTimer: number | null = null;
+
+  const startPlayback = () => {
+    if (started) return;
+    started = true;
+    if (fallbackTimer !== null) window.clearTimeout(fallbackTimer);
+    // A listener can skip to another track while the MSE seek is pending.
+    // Never let that old request start (or pause) the newly selected track.
+    if (!isCurrentPlayback()) return;
+
+    onReadyToPlay();
+    const plays = [audio.play()];
+    if (vocal) plays.push(vocal.play());
+    void Promise.all(plays).catch(onFailure);
+  };
+
+  if (waitForSeek) {
+    audio.addEventListener("seeked", startPlayback, { once: true });
+    fallbackTimer = window.setTimeout(startPlayback, 1_000);
+    audio.currentTime = 0;
+    resetAudioToStart(vocal);
+    return;
+  }
+
+  audio.currentTime = 0;
+  resetAudioToStart(vocal);
+  startPlayback();
 }
 
 function getAbsoluteArtworkUrl(artworkUrl: string): string {
@@ -197,6 +246,38 @@ function recentlyPlayedCard(song: PlayerSong): MediaCardProps {
   );
 }
 
+function syncMediaSessionPosition(
+  mediaSession: MediaSession,
+  audio: HTMLAudioElement | null,
+  fallbackDurationSeconds: number | undefined,
+  playbackRate: number,
+): void {
+  if (typeof mediaSession.setPositionState !== "function") return;
+
+  const elementDuration = audio?.duration;
+  const duration =
+    typeof elementDuration === "number" &&
+    Number.isFinite(elementDuration) &&
+    elementDuration > 0
+      ? elementDuration
+      : fallbackDurationSeconds;
+  if (!Number.isFinite(duration) || !duration || duration <= 0) return;
+
+  const position = Math.min(
+    Math.max(0, audio?.currentTime ?? 0),
+    duration,
+  );
+  try {
+    mediaSession.setPositionState({
+      duration,
+      position,
+      playbackRate: playbackRate > 0 ? playbackRate : 1,
+    });
+  } catch {
+    // A transient MSE duration can be invalid while its source is attaching.
+  }
+}
+
 function telemetryDurationSeconds(seconds: number | undefined): number {
   return Math.max(0, Math.floor(seconds ?? 0));
 }
@@ -221,6 +302,7 @@ export function AppPlayerBar() {
   const vocalGainRef = useRef<GainNode | null>(null);
   const audioContextCloseTimerRef = useRef<number | null>(null);
   const playbackTimeSessionRef = useRef<string | undefined>(undefined);
+  const lastMediaSessionPositionSyncRef = useRef(0);
   const {
     currentSong,
     queue,
@@ -228,10 +310,13 @@ export function AppPlayerBar() {
     playing,
     shuffleEnabled,
     stationMode,
+    autoplayEnabled,
     repeatMode,
     togglePlayback,
     toggleShuffle,
     cycleRepeatMode,
+    toggleAutoplay,
+    appendAutoplayTracks,
     pause,
     next,
     previous,
@@ -246,10 +331,13 @@ export function AppPlayerBar() {
       playing: state.playing,
       shuffleEnabled: state.shuffleEnabled,
       stationMode: state.stationMode,
+      autoplayEnabled: state.autoplayEnabled,
       repeatMode: state.repeatMode,
       togglePlayback: state.togglePlayback,
       toggleShuffle: state.toggleShuffle,
       cycleRepeatMode: state.cycleRepeatMode,
+      toggleAutoplay: state.toggleAutoplay,
+      appendAutoplayTracks: state.appendAutoplayTracks,
       pause: state.pause,
       next: state.next,
       previous: state.previous,
@@ -284,6 +372,8 @@ export function AppPlayerBar() {
   const [isProgressExpanded, setIsProgressExpanded] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [vocalVolume, setVocalVolume] = useState(1);
+  const [isVocalControlExpanded, setIsVocalControlExpanded] = useState(false);
+  const [autoplayRetryNonce, setAutoplayRetryNonce] = useState(0);
   const useCompactPlayer = useMediaQuery("(max-width: 739px)");
   const { volume, lastAudibleVolume, setVolume } = usePersistentVolume();
   const trackedSongRef = useRef<string | null>(null);
@@ -301,6 +391,9 @@ export function AppPlayerBar() {
     exhausted: boolean;
     retryAfter: number;
   } | null>(null);
+  const autoplayRefillKeysRef = useRef(new Set<string>());
+  const autoplayRetryTimerRef = useRef<number | null>(null);
+  const autoplayGenerationRef = useRef(0);
 
   const previewVocalVolume = useCallback((nextVolume: number) => {
     const vocalGain = vocalGainRef.current;
@@ -332,20 +425,28 @@ export function AppPlayerBar() {
     // MediaSource. A plain `play()` would therefore run with currentTime at
     // the end and immediately remain ended.
     if (hasReachedEnd && audio) {
-      // The completed SourceBuffer retains the full track, so replay stays in
-      // the existing MSE session and does not fetch its ranges again.
-      audio.currentTime = 0;
       setPlaybackTimeMs(0);
-      resetAudioToStart(isStemActive ? vocalAudioRef.current : null);
-      if (!playing) togglePlayback();
+      replayAudioFromStart(
+        audio,
+        isStemActive ? vocalAudioRef.current : null,
+        isMseActive,
+        () => playbackTimeSessionRef.current === currentPlaybackSessionKey,
+        () => {
+          if (!usePlayerStore.getState().playing) togglePlayback();
+        },
+        pause,
+      );
       return;
     }
 
     togglePlayback();
   }, [
     isStemActive,
+    isMseActive,
     isVideoPlayback,
+    pause,
     playing,
+    currentPlaybackSessionKey,
     setVideoPlayerOpen,
     setPlaybackTimeMs,
     togglePlayback,
@@ -364,11 +465,16 @@ export function AppPlayerBar() {
       if (eventType === "PLAY_START" && song.sourceStation?.artworkReady === false) {
         return;
       }
+      // Media clocks can run a fraction past the catalog duration (notably
+      // after MSE buffering or a delayed `ended` event). Keep telemetry within
+      // the server-side validity invariant instead of losing the whole event.
+      const totalSec = telemetryDurationSeconds(song.durationSec);
+      const durationSec = telemetryDurationSeconds(elapsed);
       const payload = {
         songId: song.id,
         eventType,
-        durationSec: telemetryDurationSeconds(elapsed),
-        totalSec: song.durationSec ?? 0,
+        durationSec: totalSec > 0 ? Math.min(durationSec, totalSec) : durationSec,
+        totalSec,
         songTitle: song.title,
         artistName: song.artist,
         albumName: song.album,
@@ -397,6 +503,41 @@ export function AppPlayerBar() {
   useEffect(() => {
     void flushQueuedListeningEvents();
   }, []);
+
+  const syncLockScreenPosition = useCallback(
+    (force = false) => {
+      if (
+        isVideoPlayback ||
+        !currentPlaybackSessionKey ||
+        !("mediaSession" in navigator)
+      ) {
+        return;
+      }
+
+      const now = Date.now();
+      if (
+        !force &&
+        now - lastMediaSessionPositionSyncRef.current <
+          MEDIA_SESSION_POSITION_SYNC_INTERVAL_MS
+      ) {
+        return;
+      }
+
+      syncMediaSessionPosition(
+        navigator.mediaSession,
+        audioRef.current,
+        currentSong?.durationSec,
+        playbackRate,
+      );
+      lastMediaSessionPositionSyncRef.current = now;
+    },
+    [
+      currentPlaybackSessionKey,
+      currentSong?.durationSec,
+      isVideoPlayback,
+      playbackRate,
+    ],
+  );
 
   useEffect(() => {
     const handlePageHide = (event: PageTransitionEvent) => {
@@ -551,8 +692,82 @@ export function AppPlayerBar() {
       });
   }, [currentIndex, currentSong?.sourceStation, queue, stationMode]);
 
+  useEffect(() => {
+    // A fresh toggle must never accept a response from an earlier Autoplay
+    // session. Requests are intentionally not cached or reused.
+    autoplayGenerationRef.current += 1;
+    autoplayRefillKeysRef.current.clear();
+    if (autoplayRetryTimerRef.current !== null) {
+      window.clearTimeout(autoplayRetryTimerRef.current);
+      autoplayRetryTimerRef.current = null;
+    }
+  }, [autoplayEnabled]);
+
+  useEffect(() => {
+    if (!autoplayEnabled || stationMode || !currentSong) return;
+
+    const queuedAutoplaySongs = queue.filter((song, index) =>
+      index > currentIndex && song.sourceAutoplay,
+    );
+    const needed = AUTOPLAY_QUEUE_SIZE - queuedAutoplaySongs.length;
+    const seedKey = playbackSessionKey(currentSong);
+    const generation = autoplayGenerationRef.current;
+    const requestKey = `${generation}:${seedKey}`;
+    if (needed <= 0 || autoplayRefillKeysRef.current.has(requestKey)) return;
+
+    autoplayRefillKeysRef.current.add(requestKey);
+    const excludedSongIds = [...new Set(queue.map((song) => song.id))];
+    const scheduleRetry = () => {
+      if (autoplayGenerationRef.current !== generation) return;
+      if (autoplayRetryTimerRef.current !== null) return;
+      autoplayRetryTimerRef.current = window.setTimeout(() => {
+        autoplayRetryTimerRef.current = null;
+        setAutoplayRetryNonce((value) => value + 1);
+      }, AUTOPLAY_REFILL_RETRY_DELAY_MS);
+    };
+    void loadAutoplayTracks(currentSong, excludedSongIds, needed)
+      .then((tracks) => {
+        const player = usePlayerStore.getState();
+        // Do not let a response seeded from a previously played song pollute
+        // the recommendation block after the listener changes context.
+        if (
+          player.autoplayEnabled &&
+          !player.stationMode &&
+          autoplayGenerationRef.current === generation &&
+          playbackSessionKey(player.currentSong ?? currentSong) === seedKey
+        ) {
+          appendAutoplayTracks(tracks);
+        }
+        if (!tracks.length) scheduleRetry();
+      })
+      // Autoplay is additive: a transient recommendation failure must never
+      // interrupt playback or mutate the listener's manual queue.
+      .catch(scheduleRetry)
+      .finally(() => {
+        autoplayRefillKeysRef.current.delete(requestKey);
+      });
+  }, [
+    appendAutoplayTracks,
+    autoplayEnabled,
+    currentIndex,
+    currentSong,
+    queue,
+    stationMode,
+    autoplayRetryNonce,
+  ]);
+
+  useEffect(
+    () => () => {
+      if (autoplayRetryTimerRef.current !== null) {
+        window.clearTimeout(autoplayRetryTimerRef.current);
+      }
+    },
+    [],
+  );
+
   useLayoutEffect(() => {
     playbackTimeSessionRef.current = currentPlaybackSessionKey;
+    lastMediaSessionPositionSyncRef.current = 0;
     setPlaybackTimeMs(0);
     resetAudioToStart(audioRef.current);
     resetAudioToStart(vocalAudioRef.current);
@@ -565,7 +780,8 @@ export function AppPlayerBar() {
     playbackTimeSessionRef.current = currentPlaybackSessionKey;
     lastObservedPlaybackTimeRef.current = audio.currentTime;
     syncPlaybackClock(audio, setPlaybackTimeMs);
-  }, [currentPlaybackSessionKey, setPlaybackTimeMs]);
+    syncLockScreenPosition(true);
+  }, [currentPlaybackSessionKey, setPlaybackTimeMs, syncLockScreenPosition]);
 
   const handleTimeUpdate = useCallback(() => {
     const audio = audioRef.current;
@@ -579,8 +795,15 @@ export function AppPlayerBar() {
     }
     lastObservedPlaybackTimeRef.current = audio.currentTime;
     syncPlaybackClock(audio, setPlaybackTimeMs);
+    syncLockScreenPosition();
     markQualifiedPlay();
-  }, [currentPlaybackSessionKey, markQualifiedPlay, playing, setPlaybackTimeMs]);
+  }, [
+    currentPlaybackSessionKey,
+    markQualifiedPlay,
+    playing,
+    setPlaybackTimeMs,
+    syncLockScreenPosition,
+  ]);
 
   const handleSeeking = useCallback(() => {
     const audio = audioRef.current;
@@ -606,7 +829,8 @@ export function AppPlayerBar() {
     // clock here so progress, lyrics, and the audio element stay aligned
     // throughout a seek instead of briefly showing the old lyric line.
     syncPlaybackClock(audio, setPlaybackTimeMs);
-  }, [currentPlaybackSessionKey, setPlaybackTimeMs]);
+    syncLockScreenPosition(true);
+  }, [currentPlaybackSessionKey, setPlaybackTimeMs, syncLockScreenPosition]);
 
   useEffect(() => {
     if (audioContextCloseTimerRef.current !== null) {
@@ -745,13 +969,19 @@ export function AppPlayerBar() {
       audio &&
       (repeatMode === 1 || (repeatMode === 2 && playableSongCount === 1))
     ) {
-      audio.currentTime = 0;
       setPlaybackTimeMs(0);
       const vocal = isStemActive ? vocalAudioRef.current : null;
-      resetAudioToStart(vocal);
-      const plays = [audio.play()];
-      if (vocal) plays.push(vocal.play());
-      void Promise.all(plays).catch(pause);
+      replayAudioFromStart(
+        audio,
+        vocal,
+        isMseActive,
+        () => playbackTimeSessionRef.current === currentPlaybackSessionKey,
+        () => {
+          const state = usePlayerStore.getState();
+          if (!state.playing) state.togglePlayback();
+        },
+        pause,
+      );
       return;
     }
     next(true);
@@ -793,31 +1023,39 @@ export function AppPlayerBar() {
 
     const mediaSession = navigator.mediaSession;
     const syncMediaSession = () => {
+      const mediaSessionArtworkUrl = isVideoPlayback
+        ? currentSong?.video?.poster ?? currentSong?.artworkUrl
+        : currentSong?.mediaSessionArtworkUrl ?? currentSong?.artworkUrl;
+      const isManagedArtwork = Boolean(
+        !isVideoPlayback && currentSong?.mediaSessionArtworkUrl,
+      );
       mediaSession.metadata = currentSong
         ? new MediaMetadata({
             title: currentSong.title,
             artist: currentSong.artist,
             album: currentSong.album,
-            artwork: (isVideoPlayback
-              ? currentSong.video?.poster ?? currentSong.artworkUrl
-              : currentSong.artworkUrl)
+            artwork: mediaSessionArtworkUrl
               ? [
                   {
-                    src: getAbsoluteArtworkUrl(
-                      isVideoPlayback
-                        ? currentSong.video?.poster ?? currentSong.artworkUrl
-                        : currentSong.artworkUrl,
-                    ),
+                    src: getAbsoluteArtworkUrl(mediaSessionArtworkUrl),
+                    // Desktop Chrome is more reliable when the rendition's
+                    // dimensions and MIME type are explicit. Only declare it
+                    // for our managed square WebP artwork, not video posters
+                    // or external/library originals whose format is unknown.
+                    ...(isManagedArtwork
+                      ? { sizes: "632x632", type: "image/webp" }
+                      : {}),
                   },
                 ]
               : [],
           })
         : null;
-      mediaSession.playbackState = isVideoPlayback
-        ? (playing ? "playing" : "paused")
-        : audioRef.current?.paused || audioRef.current?.ended
-          ? "paused"
-          : "playing";
+      // A SING pair pauses both native media elements briefly while it seeks
+      // or waits for one stem to buffer. Media Session must reflect the
+      // player's intent, not that transient implementation detail; otherwise
+      // the iPhone lock screen flickers from Pause to Play during recovery.
+      mediaSession.playbackState = playing ? "playing" : "paused";
+      syncLockScreenPosition(true);
     };
 
     syncMediaSession();
@@ -855,9 +1093,19 @@ export function AppPlayerBar() {
           audio.currentTime >= audio.duration);
 
       if (hasReachedEnd) {
-        audio.currentTime = 0;
         playerState.setPlaybackTimeMs(0);
-        resetAudioToStart(vocal);
+        replayAudioFromStart(
+          audio,
+          vocal,
+          isMseActive,
+          () => playbackTimeSessionRef.current === currentPlaybackSessionKey,
+          () => {
+            const state = usePlayerStore.getState();
+            if (!state.playing) state.togglePlayback();
+          },
+          () => usePlayerStore.getState().pause(),
+        );
+        return;
       }
 
       if (!playerState.playing) {
@@ -876,6 +1124,8 @@ export function AppPlayerBar() {
       if (isVideoPlayback) videoPlaybackController.pause();
       usePlayerStore.getState().pause();
     });
+    // iOS may choose either transport or seek icons on the lock screen. Keep
+    // both handlers registered so every control the system presents works.
     setAction("nexttrack", handleNext);
     setAction("previoustrack", handlePrevious);
     setAction("seekbackward", () => {
@@ -895,6 +1145,7 @@ export function AppPlayerBar() {
         );
         audio.currentTime = nextTime;
         syncPlaybackClock(audio, usePlayerStore.getState().setPlaybackTimeMs);
+        syncLockScreenPosition(true);
       }
     });
     setAction("seekforward", () => {
@@ -913,6 +1164,7 @@ export function AppPlayerBar() {
         );
         audio.currentTime = nextTime;
         syncPlaybackClock(audio, usePlayerStore.getState().setPlaybackTimeMs);
+        syncLockScreenPosition(true);
       }
     });
     setAction("seekto", (details) => {
@@ -924,6 +1176,7 @@ export function AppPlayerBar() {
       if (audio && typeof details.seekTime === "number") {
         audio.currentTime = details.seekTime;
         syncPlaybackClock(audio, usePlayerStore.getState().setPlaybackTimeMs);
+        syncLockScreenPosition(true);
       }
     });
 
@@ -953,12 +1206,16 @@ export function AppPlayerBar() {
       }
     };
   }, [
+    currentPlaybackSessionKey,
     currentSong,
     handleNext,
     handlePrevious,
     isStemActive,
+    isMseActive,
     isVideoPlayback,
+    playbackRate,
     playing,
+    syncLockScreenPosition,
   ]);
 
   const toggleMute = () => {
@@ -1014,8 +1271,8 @@ export function AppPlayerBar() {
           isPlaying={isPlaying}
           shuffleEnabled={shuffleEnabled}
           stationMode={stationMode}
+          autoplayEnabled={autoplayEnabled}
           repeatMode={repeatMode}
-          playableSongCount={playableSongCount}
           isCurrentSongFavorite={isCurrentSongFavorite}
           isExpanded={isExpanded}
           setIsExpanded={setIsExpanded}
@@ -1027,11 +1284,14 @@ export function AppPlayerBar() {
           onTogglePlayback={handleTogglePlayback}
           onToggleShuffle={toggleShuffle}
           onCycleRepeatMode={cycleRepeatMode}
+          onToggleAutoplay={toggleAutoplay}
           onNext={handleNext}
           onPrevious={handlePrevious}
           onDrawerOpenChange={setIsSidebarOpen}
           isStemActive={isStemActive}
           vocalVolume={vocalVolume}
+          isVocalControlExpanded={isVocalControlExpanded}
+          onVocalControlExpandedChange={setIsVocalControlExpanded}
           onSetVocalVolume={setVocalVolume}
           onPreviewVocalVolume={previewVocalVolume}
           isVideoPlayback={isVideoPlayback}

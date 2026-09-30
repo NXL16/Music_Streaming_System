@@ -19,10 +19,15 @@ function getRenditions(
     return [];
   }
 
+  const standardRenditions = (variants as { renditions?: unknown }).renditions;
+  // Video posters have responsive renditions but no separate `hero` branch.
+  // Prefer dedicated Hero crops when available; otherwise reuse the source's
+  // regular renditions rather than falling back to one full-size image.
   const renditions =
     variant === "hero"
-      ? (variants as { hero?: { renditions?: unknown } }).hero?.renditions
-      : (variants as { renditions?: unknown }).renditions;
+      ? ((variants as { hero?: { renditions?: unknown } }).hero?.renditions ??
+        standardRenditions)
+      : standardRenditions;
   if (!Array.isArray(renditions)) return [];
 
   return renditions

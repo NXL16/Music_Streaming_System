@@ -294,7 +294,18 @@ export default function AmpContextMenuButton({
             return;
           }
 
-          void openContextMenu(e.currentTarget);
+          // Opening the menu must never wait on optional state projections
+          // (Library, Favourite, Suggest Less, or a catalog lookup). Render
+          // the deterministic actions now, then replace them once those
+          // projections have settled.
+          openMenu(
+            {
+              id: menuId,
+              items: context ? getContextMenuItems(context) : items,
+            },
+            e.currentTarget,
+          );
+          void openContextMenu(e.currentTarget, true);
         }}
         className="contextual-menu__trigger"
       >

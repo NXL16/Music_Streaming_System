@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* App-level equivalent of the browser's Light / Dark / Device setting. */
+@custom-variant dark (&:where([data-app-theme="dark"], [data-app-theme="dark"] *));
+
 :root {
   --apple-music-font: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --default-font-family: var(--apple-music-font);
@@ -9,6 +12,7 @@
 :root {
   --background: hsl(0, 0%, 100%);
   --foreground: #1f1f1f;
+  --pageBG: #fff;
   --footerBg: #fbfbfb;
   --web-navigation-width: 164px;
   --bodyGutter: 25px;
@@ -20,12 +24,23 @@
 
   --systemPrimary: hsla(0, 0%, 0%, 0.88);
   --systemSecondary: hsla(240, 6%, 25%, 0.6);
+  --systemQuinary: rgba(0, 0, 0, .05);
   --systemQuaternary: hsla(0, 0%, 0%, 0.1);
+  --vibrantDivider: rgba(60, 60, 67, .29);
+
   --systemPrimary-onLight: rgba(0, 0, 0, .88);
+  --systemPrimary-onDark: hsla(0, 0%, 100%, .92);
   --systemSecondary-onLight: rgba(0, 0, 0, .56);
+  --systemSecondary-onDark: hsla(0, 0%, 100%, .64);
   --systemTertiary-onLight: rgba(0, 0, 0, .48);
+  --systemTertiary-onDark: hsla(0, 0%, 100%, .4);
   --systemQuaternary-onLight: rgba(0, 0, 0, .1);
+  --systemQuaternary-onDark: hsla(0, 0%, 100%, .1);
   --systemQuinary-onLight: rgba(0, 0, 0, .05);
+  --systemQuinary-onDark: hsla(0, 0%, 100%, .05);
+  --systemStandardThinMaterialSover: hsla(0, 0%, 96%, 0.48);
+  --systemStandardThickMaterialSover: hsla(0, 0%, 96%, 0.72);
+  --systemStandardThickMaterialSover-default_IC: #f0f0f0;
   --keyColor: #d82d41;
   --keyColorBG: #d80e22;
   --keyColor-rgb: 250, 88, 106;
@@ -34,8 +49,12 @@
   --statusPositiveBackground: rgba(36, 138, 61, 0.12);
   --statusNegativeBackground: rgba(241, 44, 67, 0.12);
   --genericJoeColor: #ebebeb;
-  --vibrantDivider: rgba(235, 235, 245, .19);
-  --dialogShadowColor: rgba(0, 0, 0, .55);
+  --skeleton-base: #d1d1d6;
+  --skeleton-mid: #c7c7cc;
+  --skeleton-highlight: #bcbcc0;
+  --dialogShadowColor: rgba(0, 0, 0, .25);
+  --opaqueShelfBG: hsl(0, 0%, 95%);
+  --selectionColor: #d60017;
 
   --mobileNavigationBG: rgba(255, 255, 255, 0.8);
   --navSidebarBG: rgba(242, 242, 247, 0.82);
@@ -53,13 +72,12 @@
   --navigation-shadow-color: rgba(0, 0, 0, .1);
   --navSidebarSelectedState: rgba(0, 0, 0, 0.08);
   --artworkShadowInset: inset 0 0 0 1px var(--containerInnerStroke);
-  --systemStandardThickMaterialSover: rgba(40, 40, 40, .7);
   --systemStandardUltrathickMaterialSover: #282828cc;
   --systemStandardThinMaterialSover-default_IC: #0a0a0a;
-  --systemStandardThickMaterialSover-default_IC: #1e1e1e;
   --modalScrimColor: rgba(0, 0, 0, .45);
   --nowPlayingBackdropBG: #878787;
   --lockupHoverBGColor: rgba(51, 51, 51, .3);
+  --tracklistHoverColor: hsla(0, 0%, 0%, 0.06);
 
   --global-transition-property: opacity;
   --global-transition-duration: .1s;
@@ -87,34 +105,116 @@
   --subhead: 400 11px/ 1.2727272727 var(--apple-music-font);
   --large-title-short: 400 26px/ 1.1538461538 var(--apple-music-font);
   --large-title-semibold: 600 26px/ 1.2307692308 var(--apple-music-font);
-  --large-title: 400 22px/ 1.2007692308 var(--apple-music-font);
+  --large-title: 400 26px/ 1.2007692308 var(--apple-music-font);
   --large-title-emphasized: 700 26px/ 1.2307692308 var(--apple-music-font);
   --large-title-emphasized-short: 700 26px/ 1.1538461538 var(--apple-music-font);
   --headline-emphasized: 800 13px/ 1.2307692308 var(--apple-music-font);
   --callout-tall: 400 12px/ 1.4166666667 var(--apple-music-font);
 }
 
+:root[data-app-theme="light"] {
+  color-scheme: light;
+  --systemSecondary-vibrantOnLight: rgba(0, 0, 0, .56);
+  --systemPrimary-vibrantOnLight: #1d1d1f;
+  --labelDivider-vibrantOnLight_IC: #000;
+  --labelDivider-vibrantOnLight: rgba(0, 0, 0, .11);
+  --systemTertiary-vibrantOnLight_IC: rgba(0, 0, 0, .56);
+  --systemSecondary-vibrantOnLight_IC: rgba(0, 0, 0, .76);
+  --systemTertiary-vibrantOnLight: rgba(0, 0, 0, .48);
+}
+
+:root[data-app-theme="dark"] {
+  color-scheme: dark;
+  --background: hsl(0, 0%, 12%);
+  --opaqueShelfBG: hsl(0, 0%, 17%);
+  --foreground: hsl(0, 0%, 100%);
+
+  --systemPrimary: hsla(0, 0%, 100%, .92);
+  --systemSecondary: hsla(0, 0%, 100%, .64);
+  --systemPrimary-vibrant: hsl(240, 11%, 96%);
+  --systemBlue: hsl(210, 100%, 52%);
+  --systemTertiary: hsla(0, 0%, 100%, 0.4);
+  --systemStandardThinMaterialSover: rgba(40, 40, 40, .5);
+  --systemStandardMediumMaterialSover: rgba(40, 40, 40, .6);
+  --systemQuaternary: hsla(0, 0%, 100%, .1);
+  --systemSecondary-vibrantOnDark: #a1a1a6;
+  --systemSecondary-vibrantOnDark_IC: hsla(0, 0%, 100%, .7);
+  --labelDivider-vibrantOnDark_IC: #fff;
+  --systemTertiary-vibrantOnDark: #6e6e73;
+  --systemTertiary-vibrantOnDark_IC: hsla(0, 0%, 100%, .5);
+  --systemStandardThickMaterialSover: rgba(40, 40, 40, .7);
+  --systemStandardThickMaterialSover-default_IC: #1e1e1e;
+  --dialogShadowColor: rgba(0, 0, 0, .55);
+  --vibrantDivider: rgba(235, 235, 245, .19);
+
+  --keyColor: hsl(353, 69%, 51%);
+  --keyColorText: hsl(0, 0%, 100%);
+  --statusPositive: hsl(135, 64%, 50%);
+  --statusPositiveBackground: rgba(48, 209, 88, 0.16);
+  --statusNegativeBackground: rgba(226, 65, 84, 0.16);
+  --pageBG: hsl(0, 0%, 12%);
+  --footerBg: hsl(0, 0%, 20%);
+
+  --containerInnerStroke: #fff;
+
+  --mobileNavigationBG: hsla(240, 5%, 13%, 0.8);
+  --navSidebarBG: rgba(38, 38, 41, 0.82);
+  --navSidebarSelectedState: hsla(0, 0%, 100%, .05);
+  --labelDivider: rgba(255, 255, 255, 0.12);
+  --labelDivider-vibrantOnDark: hsla(0, 0%, 100%, .13);
+
+  --glassMaterialBackground: rgba(38, 38, 40, 0.6);
+  --glassMaterialInnerStrokeCombined: hsla(0, 0%, 100%, .2);
+  --glassMaterialShadowColor: rgba(0, 0, 0, 0.2);
+  --glassMaterialInnerStroke: #fff;
+  --glassMaterialInnerStrokeAlpha: 0.2;
+  --glassMaterialBackground-onDark: rgba(38, 38, 40, .6);
+  --glassMaterialInnerStrokeCombined-onDark: hsla(0, 0%, 100%, .2);
+
+  --navigation-shadow-color: rgba(0, 0, 0, .2);
+  --radiosityShadowColor: rgba(0, 0, 0, .3);
+
+  --button-pill-background-color: #fff;
+  --button-pill-color: #000;
+  --button-circle-background-color: hsla(0, 0%, 100%, .04);
+  --button-circle-border-color: hsla(0, 0%, 100%, .08);
+  --add-to-library-bg-color: hsla(0, 0%, 100%, .04);
+  --add-to-library-border-color: hsla(0, 0%, 100%, .08);
+
+  --genericJoeColor: #323232;
+  --skeleton-base: #3a3a3a;
+  --skeleton-mid: #3f3f3f;
+  --skeleton-highlight: #4a4a4a;
+  --tracklistHoverColor: hsla(0, 0%, 100%, .06);
+  --dropdownLightGrayIcon: #999;
+  --selectionColor: #a50012;
+  --systemQuinary: hsla(0, 0%, 100%, .05);
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-app-theme]) {
     --background: hsl(0, 0%, 12%);
     --opaqueShelfBG: hsl(0, 0%, 17%);
     --foreground: hsl(0, 0%, 100%);
 
     --systemPrimary: hsla(0, 0%, 100%, .92);
     --systemSecondary: hsla(0, 0%, 100%, .64);
+    --systemTertiary: hsla(0, 0%, 100%, 0.4);
+    --systemQuaternary: hsla(0, 0%, 100%, .1);
     --systemPrimary-vibrant: hsl(240, 11%, 96%);
     --systemBlue: hsl(210, 100%, 52%);
-    --systemTertiary: hsla(0, 0%, 100%, 0.4);
     --systemStandardThinMaterialSover: rgba(40, 40, 40, .5);
     --systemStandardMediumMaterialSover: rgba(40, 40, 40, .6);
-    --systemQuaternary: hsla(0, 0%, 100%, .1);
-    --systemPrimary-onDark: hsla(0, 0%, 100%, .92);
-    --systemSecondary-onDark: hsla(0, 0%, 100%, .64);
-    --systemTertiary-onDark: hsla(0, 0%, 100%, .4);
-    --systemQuaternary-onDark: hsla(0, 0%, 100%, .1);
     --systemQuinary-onDark: hsla(0, 0%, 100%, .05);
-    --systemSecondary-vibrantOnDark: hsl(240, 3%, 64%);
-
+    --systemSecondary-vibrantOnDark: #a1a1a6;
+    --systemSecondary-vibrantOnDark_IC: hsla(0, 0%, 100%, .7);
+    --labelDivider-vibrantOnDark_IC: #fff;
+    --systemTertiary-vibrantOnDark: #6e6e73;
+    --systemTertiary-vibrantOnDark_IC: hsla(0, 0%, 100%, .5);
+    --systemStandardThickMaterialSover: rgba(40, 40, 40, .7);
+    --systemStandardThickMaterialSover-default_IC: #1e1e1e;
+    --dialogShadowColor: rgba(0, 0, 0, .55);
+    --vibrantDivider: rgba(235, 235, 245, .19);
 
     --keyColor: hsl(353, 69%, 51%);
     --keyColorText: hsl(0, 0%, 100%);
@@ -125,14 +225,12 @@
     --footerBg: hsl(0, 0%, 20%);
 
     --containerInnerStroke: #fff;
-    --metadata-color-override: #fff;
-    --artworkShadowInset: inset 0 0 0 1px var(--containerInnerStroke);
 
     --mobileNavigationBG: hsla(240, 5%, 13%, 0.8);
     --navSidebarBG: rgba(38, 38, 41, 0.82);
     --navSidebarSelectedState: hsla(0, 0%, 100%, .05);
-    --navigation-border-color: var(--glassMaterialInnerStrokeCombined);
     --labelDivider: rgba(255, 255, 255, 0.12);
+    --labelDivider-vibrantOnDark: hsla(0, 0%, 100%, .13);
 
     --glassMaterialBackground: rgba(38, 38, 40, 0.6);
     --glassMaterialInnerStrokeCombined: hsla(0, 0%, 100%, .2);
@@ -153,11 +251,13 @@
     --add-to-library-border-color: hsla(0, 0%, 100%, .08);
 
     --genericJoeColor: #323232;
+    --skeleton-base: #3a3a3a;
+    --skeleton-mid: #3f3f3f;
+    --skeleton-highlight: #4a4a4a;
     --tracklistHoverColor: hsla(0, 0%, 100%, .06);
     --dropdownLightGrayIcon: #999;
     --selectionColor: #a50012;
     --systemQuinary: hsla(0, 0%, 100%, .05);
-    --keyline-border-style: .5px solid var(--labelDivider);
   }
 }
 
@@ -706,6 +806,42 @@ html[dir=rtl] .chrome-volume__slider {
 }
 
 
+/* ============================== SKELETON SHELVES ============================== */
+@keyframes media-shelf-skeleton-shimmer {
+  0% {
+    background-position: 150% 150%;
+  }
+
+  100% {
+    background-position: -150% -150%;
+  }
+}
+
+.media-shelf-skeleton__shimmer {
+  background: var(--skeleton-base, #3a3a3a);
+  background-attachment: fixed;
+  background-image: linear-gradient(135deg,
+      var(--skeleton-base, #3a3a3a) 20%,
+      var(--skeleton-mid, #3f3f3f) 30%,
+      var(--skeleton-highlight, #4a4a4a) 40%,
+      var(--skeleton-mid, #3f3f3f) 50%,
+      var(--skeleton-base, #3a3a3a) 60%);
+  background-repeat: no-repeat;
+  background-size: 250% 250%;
+  animation: media-shelf-skeleton-shimmer 1.4s linear infinite;
+}
+
+.media-shelf-skeleton__hero-gradient {
+  background: linear-gradient(to top,
+      var(--skeleton-base, #3a3a3a),
+      color-mix(in srgb, var(--skeleton-base, #3a3a3a) 40%, transparent),
+      transparent);
+}
+
+.media-shelf-skeleton__highlight {
+  background: var(--skeleton-highlight, #4a4a4a);
+}
+
 /* ================================= GRID LIST =================================== */
 .shelf-grid__list {
   box-sizing: border-box;
@@ -1011,6 +1147,10 @@ html[dir=rtl] .chrome-volume__slider {
 .header--tall-artwork {
   --artworkShadowInset: none;
   --containerInnerStroke: none;
+}
+
+[data-app-scroll-container]:has(.catalog-page-loading) .app-footer {
+  display: none;
 }
 
 .playback-bars__bar {
@@ -1532,7 +1672,7 @@ m404-contextual-menu {
   line-height: 1.2307692308;
   font-weight: 400;
   letter-spacing: 0em;
-  font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "SF Pro Icons", "Helvetica Neue", "Helvetica", "Arial", sans-serif;
+  font-family: var(--apple-music-font);
   padding: 0 16px;
   width: 100%;
   height: 45px;
@@ -1795,8 +1935,14 @@ m404-contextual-menu-item:first-child>li>button {
 }
 
 @media (min-width: 1260px) and (max-width: 1579px) {
-  .app-container.is-drawer-open .shelf-grid__list--artist {
+  .app-container.is-drawer-open .top-song .shelf-grid__list--artist {
     grid-auto-columns: var(--grid-max-content-medium, calc((100% - (var(--grid-medium) - 2) * var(--grid-column-gap-medium)) / (var(--grid-medium) - 1)));
+  }
+}
+
+@media (min-width: 1560px) and (max-width: 1939px) {
+  .app-container.is-drawer-open .top-song .shelf-grid__list--artist {
+    grid-auto-columns: var(--grid-max-content-large, calc((100% - (var(--grid-large) - 2) * var(--grid-column-gap-large)) / (var(--grid-large) - 1)));
   }
 }
 
@@ -1820,7 +1966,19 @@ m404-contextual-menu-item:first-child>li>button {
   }
 }
 
-.shelf-grid__list-item {
+@media (min-width: 1260px) and (max-width: 1579px) {
+  .app-container.is-drawer-open .shelf-grid__list--artist {
+    grid-auto-columns: var(--grid-max-content-medium, calc((100% - (var(--grid-medium) - 4) * var(--grid-column-gap-medium)) / (var(--grid-medium) - 2)));
+  }
+}
+
+@media (min-width: 1580px) and (max-width: 1939px) {
+  .app-container.is-drawer-open .shelf-grid__list--artist {
+    grid-auto-columns: var(--grid-max-content-large, calc((100% - (var(--grid-large) - 4) * var(--grid-column-gap-large)) / (var(--grid-large) - 2)));
+  }
+}
+
+.shelf-grid__list--artist-item {
   contain: content;
   margin-top: calc(var(--override-shelf-overflow-bleed-top, var(--standard-lockup-shadow-offset, 15px)) * -1);
   margin-inline-end: calc(var(--standard-lockup-shadow-offset, 15px) * -1);
@@ -1831,4 +1989,493 @@ m404-contextual-menu-item:first-child>li>button {
   padding-top: var(--override-shelf-overflow-bleed-top, var(--standard-lockup-shadow-offset, 15px));
   padding-inline-start: var(--standard-lockup-shadow-offset, 15px);
   scroll-snap-align: start;
+}
+
+.selected,
+.songs-list-row--selected {
+  --rowBackgroundColor: var(--selectionColor);
+  --platterBorderColor: var(--selectionColor);
+  outline: 0;
+  --linkColor: #fff;
+  --explicitFillOverride: #fff;
+  --contextMenuEllipsisFillOverride: #fff;
+  --addToLibraryFillOverride: #fff;
+  color: #fff;
+}
+
+/* ============== LIGHT MODE =================== */
+.app-container.is-light-theme {
+  --systemPrimary: var(--systemPrimary-onLight);
+  --systemSecondary: var(--systemSecondary-onLight);
+  --systemTertiary: var(--systemTertiary-onLight);
+  --systemQuaternary: var(--systemQuaternary-onLight);
+  --systemQuinary: var(--systemQuinary-onLight);
+}
+
+.app-container.is-light-theme .section {
+  --systemPrimary: var(--systemPrimary-onLight);
+  --systemSecondary: var(--systemSecondary-vibrantOnLight-blended-plusD, var(--systemSecondary-vibrantOnLight));
+  --systemSecondary-default_IC: var(--systemSecondary-vibrantOnLight_IC-blended-plusD, var(--systemSecondary-vibrantOnLight_IC));
+  --systemTertiary: var(--systemTertiary-vibrantOnLight-blended-plusD, var(--systemTertiary-vibrantOnLight));
+  --systemTertiary-default_IC: var(--systemTertiary-vibrantOnLight_IC-blended-plusD, var(--systemTertiary-vibrantOnLight_IC));
+  --systemQuaternary: var(--systemQuaternary-onLight);
+  --keyColor: var(--systemPrimary-onLight);
+  --labelDivider: var(--labelDivider-vibrantOnLight-blended-plusD, var(--labelDivider-vibrantOnLight));
+  --labelDivider-default_IC: var(--labelDivider-vibrantOnLight_IC-blended-plusD, var(--labelDivider-vibrantOnLight_IC));
+  --tracklistHoverColor: rgba(0, 0, 0, .06);
+  --tracklistHoverColor-default_IC: rgba(0, 0, 0, .1);
+  --tracklistWorksTrackHoverColor: rgba(0, 0, 0, .1);
+  --tracklistWorksTrackHoverColor-default_IC: rgba(0, 0, 0, .18);
+  --trackLockupArtworkOverlay: rgba(51, 51, 51, .3);
+  --tracklistBadgeBorderColor: #fbfbfb;
+  --tracklistBadgeBackgroundColor: #e9e9ea;
+  --selectionColor: rgba(0, 0, 0, .12);
+  --iconEllipsisFill: var(--systemPrimary-vibrantOnLight);
+}
+
+.app-container.is-light-theme .headings,
+.app-container.is-light-theme .primary-actions__button--cta-button,
+.app-container.is-light-theme .primary-actions__button--play,
+.app-container.is-light-theme .truncate-wrapper {
+  --systemPrimary: var(--systemPrimary-onLight);
+  --systemSecondary: var(--systemSecondary-vibrantOnLight);
+  --systemTertiary: var(--systemTertiary-onLight);
+  --systemQuaternary: var(--systemQuaternary-onLight);
+  --systemQuinary: var(--systemQuinary-onLight);
+  --keyColor: var(--systemPrimary-onLight);
+  --button-pill-color: #fff;
+  --button-pill-background-color: #000;
+  --iconEllipsisFill: var(--systemPrimary-onLight);
+  --button-action-background-color: #000;
+  --button-action-color: #fff;
+  --explicitFillOverride: var(--systemSecondary-vibrantOnLight);
+  --favoriteBadgeColor: var(--systemSecondary-vibrantOnLight);
+}
+
+.app-container.is-light-theme .primary-actions__button--play {
+  mix-blend-mode: darken;
+}
+
+.app-container.is-light-theme .primary-actions__button--add-to-library,
+.app-container.is-light-theme .primary-actions__button--shuffle,
+.app-container.is-light-theme .secondary-actions {
+  --systemPrimary: var(--systemPrimary-onLight);
+  --keyColor: var(--systemPrimary-onLight);
+  --keyColor-default_IC: #fff;
+  --button-circle-background-color: rgba(0, 0, 0, .06);
+  --button-circle-background-color-default_IC: #000;
+  --button-circle-border-color: rgba(0, 0, 0, .04);
+  --button-circle-border-color-default_IC: #000;
+  --add-to-library-bg-color: rgba(0, 0, 0, .06);
+  --add-to-library-bg-color-default_IC: #000;
+  --add-to-library-border-color: rgba(0, 0, 0, .04);
+  --add-to-library-border-color-default_IC: #000;
+  --button-action-background-color: rgba(0, 0, 0, .06);
+  --button-action-background-color-default_IC: #000;
+  --button-action-color: rgba(0, 0, 0, .04);
+  --button-action-color-default_IC: #000;
+  --addToLibraryFillOverride: #000;
+  --addToLibraryFillOverride-default_IC: #fff;
+  --button-action-fill-overrride: #000;
+  --button-action-fill-overrride-default_IC: #fff;
+}
+
+.app-container.is-light-theme .headings,
+.app-container.is-light-theme .headings__badges,
+.app-container.is-light-theme .primary-actions__button--add-to-library,
+.app-container.is-light-theme .primary-actions__button--shuffle,
+.app-container.is-light-theme .truncate-wrapper {
+  mix-blend-mode: plus-darker;
+}
+
+.app-container.has-theme-override.is-light-theme .section--alternate {
+  --systemPrimary: var(--systemPrimary-onLight);
+  --systemSecondary: var(--systemSecondary-vibrantOnLight-blended-plusD, var(--systemSecondary-vibrantOnLight));
+  --systemSecondary-default_IC: var(--systemSecondary-vibrantOnLight_IC-blended-plusD, var(--systemSecondary-vibrantOnLight_IC));
+  --systemTertiary: var(--systemTertiary-vibrantOnLight-blended-plusD, var(--systemTertiary-vibrantOnLight));
+  --systemTertiary-default_IC: var(--systemTertiary-vibrantOnLight_IC-blended-plusD, var(--systemTertiary-vibrantOnLight_IC));
+  --labelDivider: var(--labelDivider-vibrantOnLight);
+  --favoriteBadgeColor: var(--systemSecondary);
+  --opaqueShelfBG: var(--opaqueShelfBG-blended-plusD);
+}
+
+.app-container.is-light-theme .selected {
+  --linkColor: hsla(0, 0%, 0%, 0.85);
+  --explicitFillOverride: hsla(0, 0%, 0%, 0.85);
+  --contextMenuEllipsisFillOverride: hsla(0, 0%, 0%, 0.85);
+  --addToLibraryFillOverride: hsla(0, 0%, 0%, 0.85);
+  color: hsla(0, 0%, 0%, 0.85);
+}
+
+/* ============== DARK MODE =================== */
+.app-container.is-dark-theme {
+  --systemPrimary: var(--systemPrimary-onDark);
+  --systemSecondary: var(--systemSecondary-onDark);
+  --systemTertiary: var(--systemTertiary-onDark);
+  --systemQuaternary: var(--systemQuaternary-onDark);
+  --systemQuinary: var(--systemQuinary-onDark);
+}
+
+.app-container.is-dark-theme .section {
+  --systemPrimary: var(--systemPrimary-onDark);
+  --systemSecondary: var(--systemSecondary-vibrantOnDark-blended-plusL, var(--systemSecondary-vibrantOnDark));
+  --systemSecondary-default_IC: var(--systemSecondary-vibrantOnDark_IC-blended-plusL, var(--systemSecondary-vibrantOnDark_IC));
+  --systemTertiary: var(--systemTertiary-vibrantOnDark-blended-plusL, var(--systemTertiary-vibrantOnDark));
+  --systemTertiary-default_IC: var(--systemTertiary-vibrantOnDark_IC-blended-plusL, var(--systemTertiary-vibrantOnDark_IC));
+  --systemQuaternary: var(--systemQuaternary-onDark);
+  --keyColor: var(--systemPrimary-onDark);
+  --labelDivider: var(--labelDivider-vibrantOnDark-blended-plusD, var(--labelDivider-vibrantOnDark));
+  --labelDivider-default_IC: var(--labelDivider-vibrantOnDark_IC-blended-plusD, var(--labelDivider-vibrantOnDark_IC));
+  --tracklistHoverColor: hsla(0, 0%, 100%, .06);
+  --tracklistHoverColor-default_IC: hsla(0, 0%, 100%, .1);
+  --tracklistWorksTrackHoverColor: hsla(0, 0%, 100%, .1);
+  --tracklistWorksTrackHoverColor-default_IC: hsla(0, 0%, 100%, .18);
+  --trackLockupArtworkOverlay: rgba(51, 51, 51, .3);
+  --tracklistBadgeBorderColor: #232323;
+  --tracklistBadgeBackgroundColor: #4d4d4d;
+  --selectionColor: hsla(0, 0%, 100%, .2);
+  --iconEllipsisFill: var(--systemPrimary-onDark);
+}
+
+.app-container.is-dark-theme .headings,
+.app-container.is-dark-theme .primary-actions__button--cta-button,
+.app-container.is-dark-theme .primary-actions__button--play,
+.app-container.is-dark-theme .truncate-wrapper {
+  --systemPrimary: var(--systemPrimary-onDark);
+  --systemSecondary: var(--systemSecondary-vibrantOnDark);
+  --systemTertiary: var(--systemTertiary-onDark);
+  --systemQuaternary: var(--systemQuaternary-onDark);
+  --systemQuinary: var(--systemQuinary-onDark);
+  --keyColor: var(--systemPrimary-onDark);
+  --button-pill-color: #000;
+  --button-pill-background-color: #fff;
+  --iconEllipsisFill: var(--systemPrimary-onDark);
+  --button-action-background-color: #fff;
+  --button-action-color: #000;
+  --explicitFillOverride: var(--systemSecondary-vibrantOnDark);
+  --favoriteBadgeColor: var(--systemSecondary-vibrantOnDark);
+}
+
+.app-container.is-dark-theme .primary-actions__button--play {
+  mix-blend-mode: lighten;
+}
+
+.app-container.is-dark-theme .primary-actions__button--add-to-library,
+.app-container.is-dark-theme .primary-actions__button--shuffle,
+.app-container.is-dark-theme .secondary-actions {
+  --systemPrimary: var(--systemPrimary-onDark);
+  --keyColor: var(--systemPrimary-onDark);
+  --button-circle-background-color: hsla(0, 0%, 100%, .04);
+  --button-circle-background-color-default_IC: #fff;
+  --button-circle-border-color: hsla(0, 0%, 100%, .08);
+  --button-circle-border-color-default_IC: #fff;
+  --add-to-library-bg-color: hsla(0, 0%, 100%, .04);
+  --add-to-library-bg-color-default_IC: #fff;
+  --add-to-library-border-color: hsla(0, 0%, 100%, .08);
+  --add-to-library-border-color-default_IC: #fff;
+  --button-action-background-color: hsla(0, 0%, 100%, .04);
+  --button-action-background-color-default_IC: #fff;
+  --button-action-color: hsla(0, 0%, 100%, .08);
+  --button-action-color-default_IC: #fff;
+  --addToLibraryFillOverride: #fff;
+  --addToLibraryFillOverride-default_IC: #000;
+  --button-action-fill-overrride: #fff;
+  --button-action-fill-overrride-default_IC: #000;
+}
+
+.app-container.is-dark-theme .headings,
+.app-container.is-dark-theme .headings__badges,
+.app-container.is-dark-theme .primary-actions__button--add-to-library,
+.app-container.is-dark-theme .primary-actions__button--shuffle,
+.app-container.is-dark-theme .truncate-wrapper {
+  mix-blend-mode: plus-lighter;
+}
+
+.app-container.has-theme-override .section--alternate {
+  --systemPrimary: var(--systemPrimary-onDark);
+  --systemSecondary: var(--systemSecondary-vibrantOnDark-blended-plusL, var(--systemSecondary-vibrantOnDark));
+  --systemSecondary-default_IC: var(--systemSecondary-vibrantOnDark_IC-blended-plusL, var(--systemSecondary-vibrantOnDark_IC));
+  --systemTertiary: var(--systemTertiary-vibrantOnDark-blended-plusL, var(--systemTertiary-vibrantOnDark));
+  --systemTertiary-default_IC: var(--systemTertiary-vibrantOnDark_IC-blended-plusL, var(--systemTertiary-vibrantOnDark_IC));
+  --labelDivider: var(--labelDivider-vibrantOnDark);
+  --favoriteBadgeColor: var(--systemSecondary);
+  --opaqueShelfBG: var(--opaqueShelfBG-blended-plusD);
+}
+
+.app-container.is-dark-theme .selected {
+  --linkColor: hsla(0, 0%, 100%, .85);
+  --explicitFillOverride: hsla(0, 0%, 100%, .85);
+  --contextMenuEllipsisFillOverride: hsla(0, 0%, 100%, .85);
+  --addToLibraryFillOverride: hsla(0, 0%, 100%, .85);
+  color: hsla(0, 0%, 100%, 0.85);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+.media-card-artwork {
+  border-radius: var(--global-border-radius-medium, 7px);
+  box-shadow: 0 1px 1px rgba(0, 0, 0, .01), 0 2px 2px rgba(0, 0, 0, .01), 0 4px 4px rgba(0, 0, 0, .02), 0 8px 8px rgba(0, 0, 0, .03), 0 14px 14px rgba(0, 0, 0, .03);
+  position: relative;
+  z-index: var(--z-default);
+}
+
+.media-card-artwork::after {
+  background-color: rgba(51, 51, 51, .3);
+  border-radius: inherit;
+  content: "";
+  height: 100%;
+  left: 0;
+  opacity: 0;
+  opacity: var(--scrimOpacity, 0);
+  position: absolute;
+  top: 0;
+  transition: opacity .1s ease-in;
+  width: 100%;
+  z-index: 1;
+}
+
+/* =========== Artist Detail ================== */
+.artist-expression-header {
+  --keyColor: var(--artist-key-color);
+  height: var(--artistHeaderHeightXs, 470px);
+  position: relative;
+  width: 100%;
+}
+
+@media (min-width: 1000px) {
+  .artist-expression-header {
+    height: 386px;
+  }
+}
+
+@supports (animation-timeline:scroll()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .artist-expression-header {
+      view-timeline: --artist-expression-header-artwork block;
+    }
+  }
+}
+
+@media (min-width: 1000px) {
+  .artist-expression-header--fixed {
+    height: calc(100vw / var(--fixed-artwork-ratio-sm, 2.119205298));
+    max-height: calc(1680px / var(--fixed-artwork-ratio-lg, 2.3841059603));
+    position: relative;
+    z-index: var(--z-default);
+  }
+}
+
+@media (min-width: 1260px) {
+  .artist-expression-header--fixed {
+    height: calc(100vw / var(--fixed-artwork-ratio-lg, 2.3841059603));
+  }
+}
+
+.artist-expression-header--video {
+  height: calc((100vw - var(--web-navigation-width)) / 2.11921);
+  min-height: 470px;
+}
+
+@media (min-width: 1260px) {
+  .artist-expression-header--video {
+    height: 41.94444vw;
+    max-height: 704.66667px;
+  }
+}
+
+@media (min-width: 484px) {
+  .artist-expression-header:not(:has(.artist-expression-header__circular-artwork-container)):before {
+    -webkit-backdrop-filter: blur(80px);
+    backdrop-filter: blur(80px);
+    content: "";
+    display: block;
+    height: 100vh;
+    inset-inline-start: var(--web-navigation-width);
+    -webkit-mask-composite: source-in, xor;
+    mask-composite: intersect;
+    -webkit-mask-image: linear-gradient(var(--side-blur-deg, 90deg), #000 0, #000 var(--web-navigation-width), transparent 100%);
+    mask-image: linear-gradient(var(--side-blur-deg, 90deg), #000 0, #000 var(--web-navigation-width), transparent 100%);
+    pointer-events: none;
+    position: fixed;
+    top: 0;
+    transform: translate(calc(var(--web-navigation-width) * var(--side-blur-transform-multiple, -1)));
+    width: calc(var(--web-navigation-width) + 60px);
+    z-index: calc(var(--z-default) + 1);
+  }
+}
+
+@media (min-width: 484px) {
+  @supports (animation-timeline:scroll()) {
+    @media (min-width: 484px) and (prefers-reduced-motion: no-preference) {
+      .artist-expression-header:not(:has(.artist-expression-header__circular-artwork-container)):before {
+        -webkit-animation: artist-expression-header-blur-scroll linear forwards;
+        animation: artist-expression-header-blur-scroll linear forwards;
+        animation-timeline: --artist-expression-header-artwork;
+        animation-range: exit;
+        will-change: transform, opacity, filter;
+      }
+    }
+  }
+}
+
+.artist-expression-header:after {
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  bottom: -400px;
+  content: "";
+  display: block;
+  height: 946px;
+  inset-inline-start: 0;
+  -webkit-mask-image: radial-gradient(ellipse 119% 74% at 50% -24%, transparent 0, transparent 67%, rgba(0, 0, 0, .1) 69%, #000 75%);
+  mask-image: radial-gradient(ellipse 119% 74% at 50% -24%, transparent 0, transparent 67%, rgba(0, 0, 0, .1) 69%, #000 75%);
+  pointer-events: none;
+  position: absolute;
+  transform: translateY(300px);
+  width: 100%;
+  z-index: var(--z-default);
+}
+
+@supports (animation-timeline:scroll()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .artist-expression-header:after {
+      -webkit-animation: artist-expression-header-blur-scroll linear forwards;
+      animation: artist-expression-header-blur-scroll linear forwards;
+      animation-timeline: --artist-expression-header-artwork;
+      animation-range: exit;
+      will-change: transform, opacity, filter;
+    }
+  }
+}
+
+.artist-expression-header__artwork-tint,
+.artist-expression-header__blur-frame {
+  height: 300%;
+  left: 0;
+  -webkit-mask-image: radial-gradient(var(--blur-frame-mask-shape, ellipse 80% 60% at calc(50% + var(--web-navigation-width) / 2) -13%), transparent 0, transparent 53%, rgba(0, 0, 0, .1) 61%, rgba(0, 0, 0, .92) 74%);
+  mask-image: radial-gradient(var(--blur-frame-mask-shape, ellipse 80% 60% at calc(50% + var(--web-navigation-width) / 2) -13%), transparent 0, transparent 53%, rgba(0, 0, 0, .1) 61%, rgba(0, 0, 0, .92) 74%);
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: var(--z-default);
+}
+
+.artist-expression-header__artwork-tint {
+  --blur-frame-mask-shape: ellipse 160% 65% at calc(50% + var(--web-navigation-width) / 2) -13%;
+  background-color: rgb(from var(--artist-joe-color) r g b / .95);
+}
+
+@media (min-width: 484px) {
+
+  .artist-expression-header__artwork-tint,
+  .artist-expression-header__blur-frame {
+    inset-inline-start: calc(var(--web-navigation-width) * -1);
+  }
+}
+
+@supports (animation-timeline:scroll()) {
+  @media (prefers-reduced-motion: no-preference) {
+
+    .artist-expression-header__artwork-tint,
+    .artist-expression-header__blur-frame {
+      -webkit-animation: artist-expression-header-blur-scroll linear forwards;
+      animation: artist-expression-header-blur-scroll linear forwards;
+      animation-timeline: --artist-expression-header-artwork;
+      animation-range: exit;
+      will-change: transform, opacity, filter;
+    }
+  }
+}
+
+.artist-expression-header__blur-frame {
+  -webkit-backdrop-filter: blur(30px);
+  backdrop-filter: blur(30px);
+}
+
+.artist-expression-header:not(:has(.artist-expression-header__circular-artwork-container)) .artist-expression-header__artwork {
+  inset: 0;
+  overflow-x: clip;
+  overflow-y: visible;
+  padding-bottom: 20px;
+  position: absolute;
+  z-index: var(--z-default);
+}
+
+.artist-expression-header:not(.artist-expression-header--no-artwork) .artist-expression-header__artwork {
+  -webkit-box-reflect: left 0;
+}
+
+.artist-expression-header--video .artist-expression-header__artwork .artwork-container {
+  min-height: 470px;
+}
+
+@supports (animation-timeline:scroll()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .artist-expression-header--fixed .artwork-container {
+      -webkit-animation: svelte-xqfvb5-artist-expression-header-artwork-scroll linear forwards;
+      animation: svelte-xqfvb5-artist-expression-header-artwork-scroll linear forwards;
+      animation-timeline: --artist-expression-header-artwork;
+      animation-range: exit;
+      will-change: transform, opacity, filter;
+    }
+  }
+}
+
+.artist-expression-header--fixed .artwork-container {
+  --artwork-override-max-height: 100%;
+  height: 100%;
+  -webkit-box-reflect: below 0 linear-gradient(180deg, hsla(0, 0%, 100%, .02) 0, hsla(0, 0%, 100%, .12) 94%, #fff);
+}
+
+.artist-expression-header__artwork .artwork-container,
+.artist-expression-header__static-artwork {
+  --artwork-override-width: 100%;
+  --artwork-override-height: 100%;
+  --artwork-override-object-fit: cover;
+  --artwork-override-object-position: center top;
+  height: 100%;
+  width: 100%;
+}
+
+.artwork-container {
+  border-radius: inherit;
+  position: relative;
+  z-index: var(--z-default);
+}
+
+@keyframes artist-expression-header-blur-scroll {
+  0% {
+    opacity: 1;
+  }
+
+  25% {
+    opacity: 1;
+  }
+
+  80% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 0;
+  }
 }

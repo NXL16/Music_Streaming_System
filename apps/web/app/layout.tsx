@@ -9,7 +9,7 @@ import { Toaster } from "sonner";
 import { DeleteLibraryConfirmationDialog } from "@/components/songs/delete-library-confirmation-dialog";
 
 export const metadata: Metadata = {
-  title: "Musical App",
+  title: "Music App",
   description: "Music streaming system",
 };
 

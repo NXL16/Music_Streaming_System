@@ -145,8 +145,6 @@ export default function AppSidebar() {
   const closeNavigation = () => {
     if (!isExpanded) return;
 
-    // Navigation should be immediate on mobile. The hamburger icon still
-    // animates from the `is-expanded` state, while the drawer closes at once.
     setIsAnimating(false);
     setIsExpanded(false);
   };
@@ -177,7 +175,7 @@ export default function AppSidebar() {
             setIsAnimating(false);
           }
         }}
-        className={`${isExpanded ? "is-expanded" : ""} flex flex-col w-full transform-gpu backface-hidden z-(--z-web-chrome) min-[484px]:[border-inline-end:1px_solid_var(--labelDivider)] min-[484px]:relative dark:[--navigation-shadow-color:rgba(0,0,0,.2)] in-[.app-container]:[--navigation-border-color:var(--glassMaterialInnerStrokeCombined)] in-[.app-container]:[--navigation-shadow-color:rgba(0,0,0,0.1)] in-[.app-container]:[backdrop-filter:saturate(220%)_blur(16px)] in-[.app-container]:bg-(--glassMaterialBackground) in-[.app-container]:[box-shadow:0_10px_40px_var(--glassMaterialShadowColor)] min-[484px]:in-[.app-container]:[border:.5px_solid_var(--navigation-border-color)] min-[484px]:in-[.app-container]:rounded-[20px] min-[484px]:in-[.app-container]:[box-shadow:0_10px_40px_var(--navigation-shadow-color)] min-[484px]:in-[.app-container]:h-[calc(100%-16px)] min-[484px]:in-[.app-container]:mbs-2 min-[484px]:in-[.app-container]:ms-2 min-[484px]:in-[.app-container]:w-[calc(100%-16px)] max-[483px]:h-13 max-[483px]:overflow-hidden max-[483px]:fixed max-[483px]:inset-x-0 max-[483px]:top-0 max-[483px]:in-[.app-container]:shadow-none max-[483px]:[.is-expanded]:h-dvh ${isAnimating ? "will-change-[height] [transition:height_.56s_cubic-bezier(.52,.16,.24,1)]" : ""} max-[483px]:in-[.app-container]:[border-bottom:0.5px_solid_var(--navigation-border-color)] dark:[--navigation-border-color:var(--glassMaterialInnerStrokeCombined-onDark)] dark:[--glassMaterialBackground:var(--glassMaterialBackground-onDark)]`}
+        className={`${isExpanded ? "is-expanded" : ""} [--navigation-border-color-onDark:var(--systemQuinary-onDark)] flex flex-col w-full transform-gpu backface-hidden z-(--z-web-chrome) min-[484px]:[border-inline-end:1px_solid_var(--labelDivider)] min-[484px]:relative dark:[--navigation-shadow-color:rgba(0,0,0,.2)] in-[.app-container]:[--navigation-border-color:var(--glassMaterialInnerStrokeCombined)] in-[.app-container]:[--navigation-shadow-color:rgba(0,0,0,0.1)] in-[.app-container]:[backdrop-filter:saturate(220%)_blur(16px)] in-[.app-container]:bg-(--glassMaterialBackground) in-[.app-container]:[box-shadow:0_10px_40px_var(--glassMaterialShadowColor)] min-[484px]:in-[.app-container]:[border:.5px_solid_var(--navigation-border-color)] min-[484px]:in-[.app-container]:rounded-[20px] min-[484px]:in-[.app-container]:[box-shadow:0_10px_40px_var(--navigation-shadow-color)] min-[484px]:in-[.app-container]:h-[calc(100%-16px)] min-[484px]:in-[.app-container]:mbs-2 min-[484px]:in-[.app-container]:ms-2 min-[484px]:in-[.app-container]:w-[calc(100%-16px)] max-[483px]:h-13 max-[483px]:overflow-hidden max-[483px]:fixed max-[483px]:inset-x-0 max-[483px]:top-0 max-[483px]:in-[.app-container]:shadow-none max-[483px]:[.is-expanded]:h-dvh ${isAnimating ? "will-change-[height] [transition:height_.56s_cubic-bezier(.52,.16,.24,1)]" : ""} max-[483px]:in-[.app-container]:[border-bottom:0.5px_solid_var(--navigation-border-color)] dark:[--navigation-border-color:var(--glassMaterialInnerStrokeCombined-onDark)]  max-[483px]:dark:[--navigation-border-color:var(--navigation-border-color-onDark)] dark:[--glassMaterialBackground:var(--glassMaterialBackground-onDark)]`}
       >
         <div className="grid max-[483px]:items-center max-[483px]:grid-cols-[repeat(3,1fr)] max-[483px]:h-13 max-[483px]:me-4 max-[483px]:ms-3.5 max-[483px]:py-1">
           <button
@@ -327,9 +325,9 @@ export default function AppSidebar() {
                         <Image
                           src={user?.avatarUrl || "/assets/avatar.webp"}
                           alt="avatar"
-                          height={36}
-                          width={36}
-                          className="size-8.5 rounded-full object-cover"
+                          height={32}
+                          width={32}
+                          className="size-8 rounded-full object-cover"
                         />
 
                         <div className="min-w-0 flex-1">

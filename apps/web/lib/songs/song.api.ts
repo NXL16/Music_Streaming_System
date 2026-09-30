@@ -1,5 +1,6 @@
 import { http } from "@/lib/api/http";
 import { getCachedQuery } from "@/lib/api/query-cache";
+import { notifyHomeRecommendationsStale } from "@/lib/recommendations/home-revalidation";
 import type {
   DeleteSongResponse,
   GetSongResponse,
@@ -120,6 +121,7 @@ export async function addFavoriteSong(songId: string, sourceAlbumId: string) {
     { sourceAlbumId },
   );
   invalidateFavoriteSongsCache();
+  notifyHomeRecommendationsStale();
   return response.data;
 }
 
@@ -128,6 +130,7 @@ export async function removeFavoriteSong(songId: string) {
     `/songs/${encodeURIComponent(songId)}/favorite`,
   );
   invalidateFavoriteSongsCache();
+  notifyHomeRecommendationsStale();
   return response.data;
 }
 

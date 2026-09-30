@@ -51,7 +51,7 @@ export function SidebarSection({
                   ? () => setIsPinsExpanded((expanded) => !expanded)
                   : undefined
               }
-              className={`[--linkHoverTextDecoration:none] rounded-md mb-0.5 p-1 relative in-[.app-container]:rounded-lg in-[.app-container]:mb-1 min-[484px]:in-[.app-container]:list-item ${isSelected ? "bg-(--navSidebarSelectedState)" : ""} ${isPin ? "h-auto" : "in-[.app-container]:h-(--navigation-item-height)"} ${isPin && isPinsExpanded ? "mb-0! pb-0!" : ""}`}
+              className={`[--linkHoverTextDecoration:none] rounded-md mb-0.5 p-1 relative in-[.app-container]:rounded-lg in-[.app-container]:mb-1 min-[484px]:in-[.app-container]:list-item ${isSelected ? "[--navigation-item-icon-color:var(--keyColor)] bg-(--navSidebarSelectedState) in-[.has-theme-override]:[--navigation-item-icon-color:var(--systemPrimary)] in-[.has-theme-override]:[--navigation-item-text-color:var(--systemPrimary)]" : ""} ${isPin ? "h-auto" : "in-[.app-container]:h-(--navigation-item-height)"} ${isPin && isPinsExpanded ? "mb-0! pb-0!" : ""}`}
             >
               {isPin ? (
                 <>

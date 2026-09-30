@@ -1,4 +1,5 @@
 import { http } from '@/lib/api/http';
+import { notifyHomeRecommendationsStale } from '@/lib/recommendations/home-revalidation';
 import { notifyArtistFollowChanged } from './artist-follow-events';
 
 type ArtistFollowResponse = {
@@ -28,6 +29,7 @@ export async function setArtistFollow(
     if (response.data.isFollowed !== isFollowed) {
       notifyArtistFollowChanged(artistId, response.data.isFollowed);
     }
+    notifyHomeRecommendationsStale();
     return response.data.isFollowed;
   } catch (error) {
     notifyArtistFollowChanged(artistId, !isFollowed);

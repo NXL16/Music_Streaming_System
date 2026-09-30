@@ -1,40 +1,128 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useLayoutEffect, useMemo, useState, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
+
+import { ProtectedOnly } from "@/components/auth/protected-only";
 import { AppPlayerBar } from "@/components/layout/app-player-bar";
 import AppSidebar from "@/components/layout/app-sidebar";
-import { ProtectedOnly } from "@/components/auth/protected-only";
-import { usePlayerStore } from "@/lib/player/use-player-store";
-import { AppFooter } from "./app-footer";
-import { usePathname } from "next/navigation";
 import MusicVideoPlayer from "../custom-elements/music-video/music-video-player";
+import { AppFooter } from "./app-footer";
+
+import { usePlayerStore } from "@/lib/player/use-player-store";
+import { usePageThemeStore } from "@/lib/layout/use-page-theme-store";
+
+import {
+  createPageThemeStyle,
+  isLightPageTheme,
+} from "@/lib/layout/page-theme-style";
+
+type ThemeMode = "light" | "dark";
 
 type AuthenticatedAppShellProps = {
   children?: ReactNode;
 };
 
+function artworkThemeSourceKey(pathname: string) {
+  const segments = pathname.split("/").filter(Boolean);
+  const resourceId = segments.at(-1);
+
+  if (!resourceId) return null;
+
+  if (
+    (segments[0] === "album" && segments.length >= 3) ||
+    (segments[0] === "library" && segments[1] === "albums")
+  ) {
+    return `album:${decodeURIComponent(resourceId)}`;
+  }
+
+  if (
+    (segments[0] === "playlist" && segments.length >= 3) ||
+    (segments[0] === "library" && segments[1] === "playlist")
+  ) {
+    return `playlist:${decodeURIComponent(resourceId)}`;
+  }
+
+  return null;
+}
+
 export function AuthenticatedAppShell({
   children,
 }: AuthenticatedAppShellProps) {
   const drawerOpen = usePlayerStore((state) => state.drawerOpen);
+
+  const pageThemeBaseColor = usePageThemeStore((state) => state.baseColor);
+  const pageThemeSourceKey = usePageThemeStore((state) => state.sourceKey);
+
   const pathname = usePathname();
 
-  const hasThemeOverride =
-    /^\/playlist\/[^/]+$/.test(pathname) ||
-    /^\/album\/[^/]+\/[^/]+$/.test(pathname);
+  const expectedArtworkThemeSourceKey = useMemo(
+    () => artworkThemeSourceKey(pathname),
+    [pathname],
+  );
+  const hasResolvedArtworkTheme =
+    expectedArtworkThemeSourceKey !== null &&
+    pageThemeSourceKey === expectedArtworkThemeSourceKey;
+
+  const artworkTheme: ThemeMode = isLightPageTheme(pageThemeBaseColor)
+    ? "light"
+    : "dark";
+
+  const [deviceTheme, setDeviceTheme] = useState<ThemeMode>("dark");
+
+  const resolvedTheme: ThemeMode = hasResolvedArtworkTheme
+    ? artworkTheme
+    : deviceTheme;
+
+  const pageThemeClass =
+    resolvedTheme === "light" ? "is-light-theme" : "is-dark-theme";
+
+  useLayoutEffect(() => {
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+
+    const syncDeviceTheme = () => {
+      setDeviceTheme(mediaQuery.matches ? "dark" : "light");
+    };
+    syncDeviceTheme();
+    mediaQuery.addEventListener("change", syncDeviceTheme);
+
+    return () => {
+      mediaQuery.removeEventListener("change", syncDeviceTheme);
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.dataset.appTheme = resolvedTheme;
+    root.dataset.appThemeSource = hasResolvedArtworkTheme
+      ? "artwork"
+      : "device";
+    return () => {
+      delete root.dataset.appThemeSource;
+    };
+  }, [resolvedTheme, hasResolvedArtworkTheme]);
 
   return (
     <ProtectedOnly>
       <div className="min-h-full">
         <div
-          className={`app-container ${hasThemeOverride ? "has-theme-override" : ""} grid gap-0 [grid-template-areas:'structure-header'_'structure-upsell'_'structure-main-section'_'structure-locale-switcher'] grid-cols-[minmax(0,1fr)] grid-rows-[52px_auto_1fr_auto] h-screen min-[484px]:[grid-template-areas:'structure-header_structure-main-section'_'structure-upsell_structure-upsell'_'structure-locale-switcher_structure-locale-switcher'] min-[484px]:grid-cols-[33.88vw_minmax(0,1fr)] min-[484px]:grid-rows-[minmax(0,1fr)_auto_auto] min-[767.32px]:grid-cols-[260px_minmax(0,1fr)] pointer-coarse:max-h-[stretch] ${drawerOpen ? "is-drawer-open" : ""}`}
+          className={`app-container ${pageThemeClass} ${
+            hasResolvedArtworkTheme ? "has-theme-override" : ""
+          } grid gap-0 [grid-template-areas:'structure-header'_'structure-upsell'_'structure-main-section'_'structure-locale-switcher'] grid-cols-[minmax(0,1fr)] grid-rows-[52px_auto_1fr_auto] h-screen max-[483px]:h-auto max-[483px]:min-h-dvh min-[484px]:[grid-template-areas:'structure-header_structure-main-section'_'structure-upsell_structure-upsell'_'structure-locale-switcher_structure-locale-switcher'] min-[484px]:grid-cols-[33.88vw_minmax(0,1fr)] min-[484px]:grid-rows-[minmax(0,1fr)_auto_auto] min-[767.32px]:grid-cols-[260px_minmax(0,1fr)] ${
+            drawerOpen ? "is-drawer-open" : ""
+          }`}
+          style={
+            hasResolvedArtworkTheme
+              ? createPageThemeStyle(pageThemeBaseColor)
+              : undefined
+          }
         >
           <AppSidebar />
           <AppPlayerBar />
 
           <div
             data-app-scroll-container
-            className="flex flex-col [grid-area:structure-main-section] h-auto overflow-x-hidden overflow-y-auto w-full will-change-scroll transition-[margin,width] duration-100 ease-linear z-(--z-default) min-[484px]:mt-0 min-[484px]:ps-(--web-navigation-width) min-[484px]:col-span-full in-[.has-theme-override]:bg-(--joe-color) max-[483px]:in-[.has-theme-override]:-mt-14 max-[483px]:in-[.has-theme-override]:pt-14"
+            className="flex flex-col [grid-area:structure-main-section] h-auto overflow-x-hidden overflow-y-auto w-full will-change-scroll transition-[margin,width] duration-100 ease-linear z-(--z-default) max-[483px]:overflow-y-visible min-[484px]:mt-0 min-[484px]:ps-(--web-navigation-width) min-[484px]:col-span-full in-[.has-theme-override]:bg-(--joe-color) max-[483px]:in-[.has-theme-override]:-mt-14 max-[483px]:in-[.has-theme-override]:pt-14"
           >
             <main className="grow">
               <div className="m-[0_auto] min-h-full relative w-full z-(--z-default)">

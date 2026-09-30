@@ -21,6 +21,16 @@ type SourceBufferOperation = {
   reject: (error: unknown) => void;
 };
 
+/**
+ * ManagedSourceBuffer's `bufferedchange` event carries the ranges reclaimed
+ * by the user agent. It is intentionally structural here so the regular MSE
+ * implementation stays compatible with browsers that do not expose the MMS
+ * event type in their TypeScript DOM declarations.
+ */
+type BufferedChangeEvent = Event & {
+  removedRanges?: TimeRanges;
+};
+
 function findSegmentIndex(segments: SegmentInfo[], timeSec: number): number {
   let lo = 0;
   let hi = segments.length - 1;
@@ -52,6 +62,23 @@ function getBatchSegmentCount(
   }
 
   return count;
+}
+
+function rangesOverlapSegment(
+  ranges: TimeRanges,
+  segmentStart: number,
+  segmentEnd: number,
+): boolean {
+  for (let index = 0; index < ranges.length; index += 1) {
+    if (
+      ranges.start(index) < segmentEnd &&
+      ranges.end(index) > segmentStart
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function waitForUpdateEnd(sourceBuffer: SourceBuffer): Promise<void> {
@@ -122,6 +149,7 @@ export abstract class SegmentedMediaPlayer {
   private disposed = false;
   private fillGeneration = 0;
   private needsUrgentFill = false;
+  private resumeAfterCurrentFill = false;
   private fillRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
   private sourceBufferQueue: SourceBufferOperation[] = [];
@@ -150,6 +178,10 @@ export abstract class SegmentedMediaPlayer {
 
     this.sourceBuffer = this.mediaSource.addSourceBuffer(MIME);
     this.sourceBuffer.mode = "segments";
+    // `bufferedchange` is emitted by ManagedSourceBuffer on Safari when the
+    // system reclaims buffered media. Standard SourceBuffer never emits it,
+    // so registering the listener here keeps both paths on one implementation.
+    this.sourceBuffer.addEventListener("bufferedchange", this.onBufferedChange);
 
     await this.appendBuffer(initialData.initSegment);
     if (this.disposed) return;
@@ -201,6 +233,11 @@ export abstract class SegmentedMediaPlayer {
       }
     }
 
+    this.sourceBuffer?.removeEventListener(
+      "bufferedchange",
+      this.onBufferedChange,
+    );
+
     if (this.mediaSource) this.onMediaSourceDetached(this.mediaSource);
     this.mediaSource = null;
     this.sourceBuffer = null;
@@ -211,6 +248,7 @@ export abstract class SegmentedMediaPlayer {
     this.appendedSegments.clear();
     this.requiredTailStartIndex = 0;
     this.needsUrgentFill = false;
+    this.resumeAfterCurrentFill = false;
     if (this.fillRetryTimer) clearTimeout(this.fillRetryTimer);
     this.fillRetryTimer = null;
     this.rejectQueuedSourceBufferOperations();
@@ -245,6 +283,10 @@ export abstract class SegmentedMediaPlayer {
     if (this.disposed) return;
     if (!this.abortController || this.abortController.signal.aborted) {
       this.abortController = new AbortController();
+    }
+    if (this.downloading) {
+      this.resumeAfterCurrentFill = true;
+      return;
     }
     this.fillBuffer();
   }
@@ -362,11 +404,44 @@ export abstract class SegmentedMediaPlayer {
     if (!this.downloading) this.fillBuffer();
   };
 
+  private onBufferedChange = (event: Event): void => {
+    if (this.disposed || !this.metadata) return;
+
+    const removedRanges = (event as BufferedChangeEvent).removedRanges;
+    if (!removedRanges || removedRanges.length === 0) return;
+
+    // Safari's ManagedMediaSource may evict media independently of this
+    // player. Without invalidating these indexes, a later `waiting` event
+    // sees a stale cache, skips the missing fragments, and playback remains
+    // stalled. Only invalidate fragments overlapping an actual reclaimed
+    // range; normal append operations leave the cache untouched.
+    for (const index of this.appendedSegments) {
+      const segment = this.metadata.segments[index];
+      if (!segment) continue;
+
+      if (
+        rangesOverlapSegment(
+          removedRanges,
+          segment.startTimeSec,
+          segment.startTimeSec + segment.duration,
+        )
+      ) {
+        this.appendedSegments.delete(index);
+      }
+    }
+
+    if (!this.downloading && this.getBufferAhead() < BUFFER_LOW_SEC) {
+      this.needsUrgentFill = true;
+      this.fillBuffer();
+    }
+  };
+
   private cancelFetching(): void {
     this.abortController?.abort();
     this.abortController = null;
     this.fillGeneration += 1;
     this.downloading = false;
+    this.resumeAfterCurrentFill = false;
   }
 
   private getBufferAhead(): number {
@@ -434,6 +509,7 @@ export abstract class SegmentedMediaPlayer {
       !this.canFetchSegments() ||
       !this.audio ||
       !this.metadata ||
+      !this.sourceBuffer ||
       !this.abortController
     ) {
       return;
@@ -445,7 +521,11 @@ export abstract class SegmentedMediaPlayer {
     const segments = this.metadata.segments;
 
     try {
-      while (!this.disposed && generation === this.fillGeneration) {
+      while (
+        !this.disposed &&
+        generation === this.fillGeneration &&
+        this.canFetchSegments()
+      ) {
         const targetIndex = Math.min(
           findSegmentIndex(segments, this.audio.currentTime + BUFFER_GOAL_SEC),
           segments.length - 1,
@@ -470,12 +550,24 @@ export abstract class SegmentedMediaPlayer {
       // Schedule a bounded delayed retry; fetchRange itself already rejects
       // stale/non-range CDN responses before they can corrupt MSE.
       if (!signal.aborted && generation === this.fillGeneration) {
+        // Do not immediately repeat a stalled multi-segment range. The next
+        // fill requests exactly one media segment, which is less susceptible
+        // to a slow CDN response and restores playback sooner.
+        this.needsUrgentFill = true;
         this.scheduleFillRetry();
       }
     } finally {
       if (generation === this.fillGeneration) {
         this.downloading = false;
         this.tryEndOfStream();
+        // `startstreaming` can arrive while the preceding batch is still
+        // settling. Defer its one pending resume until the lock is released;
+        // do not recursively refill merely because the buffer is below the
+        // low-water mark, as there may be no fragment left to fetch.
+        if (this.resumeAfterCurrentFill) {
+          this.resumeAfterCurrentFill = false;
+          queueMicrotask(() => this.fillBuffer());
+        }
       }
     }
   }

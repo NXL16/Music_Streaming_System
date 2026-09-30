@@ -26,12 +26,12 @@ export default function MusicVideoPlayer() {
     () =>
       playbackKind === "video" && videoId && playbackUrl && title && artist
         ? {
-          id: videoId,
-          src: playbackUrl,
-          title,
-          artist,
-          poster: videoPoster ?? artworkUrl,
-        }
+            id: videoId,
+            src: playbackUrl,
+            title,
+            artist,
+            poster: videoPoster ?? artworkUrl,
+          }
         : null,
     [
       artist,

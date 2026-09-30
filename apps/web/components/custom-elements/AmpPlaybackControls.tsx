@@ -1,6 +1,9 @@
 import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { usePlayerStore } from "@/lib/player/use-player-store";
+import {
+  countShuffleableManualSongs,
+  usePlayerStore,
+} from "@/lib/player/use-player-store";
 import AmpShuffleButton from "./AmpShuffleButton";
 import AmpRepeatButton from "./AmpRepeatButton";
 import AmpSkipButton from "./AmpSkipButton";
@@ -26,6 +29,7 @@ const AmpPlaybackControls = memo(function AmpPlaybackControls({
   const {
     currentSong,
     queue,
+    currentIndex,
     playing,
     shuffleEnabled,
     stationMode,
@@ -39,6 +43,7 @@ const AmpPlaybackControls = memo(function AmpPlaybackControls({
     useShallow((state) => ({
       currentSong: state.currentSong,
       queue: state.queue,
+      currentIndex: state.currentIndex,
       playing: state.playing,
       shuffleEnabled: state.shuffleEnabled,
       stationMode: state.stationMode,
@@ -52,9 +57,9 @@ const AmpPlaybackControls = memo(function AmpPlaybackControls({
   );
 
   const isPlaying = Boolean(currentSong && playing);
-  const playableSongCount = useMemo(
-    () => queue.filter((song) => song.playbackUrl).length,
-    [queue],
+  const shuffleableManualSongCount = useMemo(
+    () => countShuffleableManualSongs(queue, currentIndex),
+    [currentIndex, queue],
   );
 
   // ── 2. Slots state cho Portals ─────────────────────────────────────
@@ -127,8 +132,17 @@ const AmpPlaybackControls = memo(function AmpPlaybackControls({
       {slots.left &&
         createPortal(
           <AmpShuffleButton
-            shuffled={shuffleEnabled && !stationMode}
-            disabled={playableSongCount < 2 || stationMode}
+            shuffled={
+              shuffleEnabled &&
+              !stationMode &&
+              shuffleableManualSongCount >= 2
+            }
+            disabled={
+              !currentSong ||
+              shuffleableManualSongCount < 2 ||
+              stationMode ||
+              currentSong.sourceAutoplay
+            }
             onToggle={toggleShuffle}
           />,
           slots.left,
@@ -160,7 +174,7 @@ const AmpPlaybackControls = memo(function AmpPlaybackControls({
         createPortal(
           <AmpRepeatButton
             mode={stationMode ? 0 : repeatMode}
-            disabled={!currentSong || stationMode}
+            disabled={!currentSong || stationMode || currentSong.sourceAutoplay}
             onCycle={cycleRepeatMode}
           />,
           slots.right,

@@ -16,6 +16,7 @@ type MediaCardRendererProps = MediaCardProps & {
   priority?: boolean;
   keepVideoMountedHorizontally?: boolean;
   isShelfDetail?: boolean;
+  isArtistShelfItem?: boolean;
 };
 
 export default React.memo(function MediaCardRenderer(
@@ -49,6 +50,7 @@ export default React.memo(function MediaCardRenderer(
           {...card}
           cardType="circle"
           isShelfDetail={props.isShelfDetail}
+          isArtistShelfItem={props.isArtistShelfItem}
         />
       );
     case "collection":

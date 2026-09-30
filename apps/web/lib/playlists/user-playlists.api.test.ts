@@ -147,12 +147,13 @@ describe("user playlist API", () => {
     api.post.mockResolvedValue({ data: {} });
     api.delete.mockResolvedValue({ data: {} });
 
-    await addSongToUserPlaylist("p1", "s1", "u1");
+    await addSongToUserPlaylist("p1", "s1", "album-1", "u1");
     await addSourceToUserPlaylist("p1", {} as never, "u1");
     await removeSongFromUserPlaylist("p1", "s1", "u1");
 
     expect(api.post).toHaveBeenCalledWith("/playlists/p1/tracks", {
       songId: "s1",
+      sourceAlbumId: "album-1",
     });
     expect(api.post).toHaveBeenCalledWith("/playlists/p1/from-source", {
       source: {},

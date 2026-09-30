@@ -6,6 +6,11 @@ import {
   type AmbientHlsPlayer,
 } from "./ambient-hls-player";
 import { ambientVideoManager } from "./ambient-video-manager";
+import {
+  isAmbientScrollInProgress,
+  retainAmbientScrollState,
+  subscribeAmbientScrollState,
+} from "./ambient-scroll-state";
 
 const WARM_RETENTION_MS = 1_500;
 
@@ -32,6 +37,10 @@ export function useAmbientVideo({
 
   const shouldRenderMedia = keepAlive || shouldMountMedia;
   const isMediaReady = !keepAlive || readyMediaSrc === src;
+
+  // Track page scrolling as soon as the card exists, before its video is
+  // allowed to mount. This prevents the first HLS startup at a shelf edge.
+  useEffect(() => retainAmbientScrollState(), []);
 
   useEffect(() => {
     const ampElement = ampElementRef.current;
@@ -156,6 +165,10 @@ export function useAmbientVideo({
     player = createPlayer();
     const requestPlayback = (interactionPriority = 0) => {
       if (disposed) return;
+      // Starting an HLS session (and its decoder) while the page is moving is
+      // the expensive path that makes approaching a video shelf feel jerky.
+      // The shared scroll subscription below resumes it once scrolling settles.
+      if (isAmbientScrollInProgress()) return;
       if (keepAlive) {
         player.start();
         return;
@@ -200,8 +213,22 @@ export function useAmbientVideo({
     suspendPlaybackRef.current = suspendPlayback;
     if (keepAlive || isNearViewportRef.current) requestPlayback();
 
+    const unsubscribeScrollState = subscribeAmbientScrollState((scrolling) => {
+      if (disposed) return;
+      if (scrolling) {
+        if (video.paused) return;
+        playAttempt += 1;
+        video.pause();
+        markPaused();
+        return;
+      }
+
+      if (keepAlive || isNearViewportRef.current) requestPlayback();
+    });
+
     return () => {
       disposed = true;
+      unsubscribeScrollState();
       resumePlaybackRef.current = () => {};
       suspendPlaybackRef.current = () => {};
       if (!keepAlive) {

@@ -25,6 +25,7 @@ import { FavoriteSongButton } from "../songs/favorite-song-button";
 import { PlaybackWaveform } from "../songs/playback-waveform";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useAppScrollToTop } from "@/lib/layout/use-app-scroll-to-top";
+import { useArtworkPageTheme } from "@/lib/layout/use-artwork-page-theme";
 import { useTrackRowSelection } from "@/lib/player/use-track-row-selection";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
@@ -32,6 +33,7 @@ import { usePlaylistFavoriteStore } from "@/lib/favorites/use-playlist-favorite-
 import { withPlaylistPlaybackSource } from "@/lib/player/playlist-playback-source";
 import { playbackIntentProps } from "@/lib/player/playback-intent";
 import { ExplicitBadgeIcon } from "../icons/explicit-badge-icon";
+import CatalogPageLoading from "../loading/catalog-page-loading";
 import MediaShelf from "../media/media-shelf";
 import {
   ShelfDetailLoading,
@@ -70,6 +72,7 @@ export type GenericPlaylist = {
   curatorName: string;
   description?: string;
   artwork?: GenericArtwork;
+  editorialVideo?: Record<string, { video?: string }>;
   sourcePlaylistHref?: string;
   /** Separates visual/playback identity from mutation permissions. */
   playlistKind?: "catalog" | "favorite" | "user";
@@ -190,6 +193,10 @@ export default function PlaylistDetailView({
 
   useAppScrollToTop(playlist.id);
 
+  useAppScrollToTop(
+    isShowingAllFeaturedArtists ? `${playlist.id}:featured-artists` : null,
+  );
+
   const visibleSongRange = useVisibleSongRange(
     playlist.tracks.length,
     songTableElement,
@@ -199,19 +206,76 @@ export default function PlaylistDetailView({
     visibleSongRange.end,
   );
 
-  const artworkImageUrl = getArtworkRenditionUrl(playlist.artwork, 316);
+  const systemPlaylistMedia = (
+    playlist.artwork?.variants as
+      | {
+          systemPlaylistMedia?: {
+            detailSquareVideo?: {
+              video?: string;
+              previewFrame?: GenericArtwork;
+            };
+            detailMobileVideo?: {
+              video?: string;
+              previewFrame?: GenericArtwork;
+            };
+          };
+        }
+      | undefined
+  )?.systemPlaylistMedia;
+  const detailVideoSrc = maxWidth739
+    ? systemPlaylistMedia?.detailMobileVideo?.video
+    : systemPlaylistMedia?.detailSquareVideo?.video;
+  // The image below the video must come from the same media slot. Otherwise
+  // mobile briefly shows the desktop 1:1 poster while its 3:4 video loads.
+  const detailArtwork = maxWidth739
+    ? (systemPlaylistMedia?.detailMobileVideo?.previewFrame ?? playlist.artwork)
+    : (systemPlaylistMedia?.detailSquareVideo?.previewFrame ??
+      playlist.artwork);
+  const detailArtworkVariant =
+    detailArtwork === playlist.artwork && maxWidth739 ? "hero" : "default";
+  const artworkImageUrl = getArtworkRenditionUrl(detailArtwork, 316);
+  const pageThemeKey = `playlist:${playlist.id}`;
+  const { isLoading: isWaitingForPlaylistTheme } = useArtworkPageTheme({
+    sourceKey: pageThemeKey,
+    baseColor: playlist.artwork?.bgColor,
+    artworkUrl: artworkImageUrl,
+  });
+  const [revealedPlaylistThemeKey, setRevealedPlaylistThemeKey] = useState<
+    string | null
+  >(null);
+  const canRevealPlaylistLayout = !isWaitingForPlaylistTheme;
+
+  useEffect(() => {
+    if (!canRevealPlaylistLayout) return;
+
+    let secondFrame = 0;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => {
+        setRevealedPlaylistThemeKey(pageThemeKey);
+      });
+    });
+
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
+    };
+  }, [canRevealPlaylistLayout, pageThemeKey]);
+
+  const isPreparingPlaylistLayout =
+    canRevealPlaylistLayout && revealedPlaylistThemeKey !== pageThemeKey;
+
   const artworkProps = artworkImageUrl
     ? {
         title: playlist.title,
         altText: playlist.title,
         imageSrcSet: getArtworkSrcSet(
-          playlist.artwork,
+          detailArtwork,
           maxWidth739 ? [450, 600, 900, 1200] : [296, 316, 592, 632],
-          maxWidth739 ? "hero" : "default",
+          detailArtworkVariant,
         ),
         artworkColors: {
-          bg: `#${playlist.artwork?.bgColor?.replace(/^#/, "") || "2c2c2e"}`,
-          main: `#${playlist.artwork?.bgColor?.replace(/^#/, "") || "2c2c2e"}`,
+          bg: `#${detailArtwork?.bgColor?.replace(/^#/, "") || playlist.artwork?.bgColor?.replace(/^#/, "") || "2c2c2e"}`,
+          main: `#${detailArtwork?.bgColor?.replace(/^#/, "") || playlist.artwork?.bgColor?.replace(/^#/, "") || "2c2c2e"}`,
         },
       }
     : null;
@@ -266,6 +330,10 @@ export default function PlaylistDetailView({
     }
   };
 
+  if (isWaitingForPlaylistTheme || isPreparingPlaylistLayout) {
+    return <CatalogPageLoading />;
+  }
+
   if (isShowingAllFeaturedArtists) {
     if (featuredArtistsLoading || !featuredArtistsCatalog) {
       return <ShelfDetailLoading />;
@@ -283,7 +351,7 @@ export default function PlaylistDetailView({
     <>
       <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width)">
         <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
-          <div className="[view-timeline-name:--header-view] [view-timeline-axis:block] after:content-[''] after:bg-(--joe-color) after:block after:inset-0 after:absolute after:z-[calc(var(--z-default)-2)] min-[484px]:after:-inset-s-(--web-navigation-width)">
+          <div className="[view-timeline-name:--header-view] [view-timeline-axis:block] after:bg-(--joe-color) after:block after:inset-0 after:absolute after:z-[calc(var(--z-default)-2)] min-[484px]:after:-inset-s-(--web-navigation-width)">
             <div
               className={`group grid [grid-template-areas:var(--containerDetailHeaderGridAreas,'secondary-actions'_'artwork'_'headings'_'primary-actions'_'description')] [justify-items:var(--containerDetailHeaderAlign,center)] mx-(--bodyGutter) mb-(--containerDetailHeaderSpacer,32px) pt-3.75 min-[1000px]:grid-cols-[auto_1fr_auto] min-[1000px]:justify-items-start min-[1000px]:mb-(--containerDetailHeaderSpacer,40px) min-[1000px]:pt-2 ${playlist.description ? "min-[1000px]:[grid-template-areas:'secondary-actions_secondary-actions_secondary-actions'_'artwork_headings_headings'_'artwork_description_description'_'artwork_primary-actions_primary-actions'] min-[1000px]:grid-rows-[auto_1fr_auto_auto]" : "min-[1000px]:[grid-template-areas:'secondary-actions_secondary-actions_secondary-actions'_'artwork_headings_headings'_'artwork_headings_headings'_'artwork_primary-actions_primary-actions'] min-[1000px]:grid-rows-[auto_1fr_1fr_36px]"} ${maxWidth739 ? "header--tall-artwork" : ""}`}
             >
@@ -292,12 +360,12 @@ export default function PlaylistDetailView({
                 className={`${maxWidth739 ? "absolute top-0 inset-x-0 z-[calc(var(--z-default)-1)]" : "[--radiosity-effect-shadow-z:var(--z-gpu)] [align-self:start] rounded-(--global-border-radius-large,10px) [box-shadow:0_10px_20px_0_var(--radiosityShadowColor)] [grid-area:artwork] relative w-(--artworkSize,270px) z-(--radiosity-effect-shadow-z,var(--z-default))"} min-[1000px]:mt-0 min-[1000px]:me-8.5 max-[999px]:group-not-[.header--tall-artwork]:m-[15px_auto_0]`}
                 style={
                   {
-                    "--contrast-gradient-opacity": "0",
-                    "--shadow-opacity": "0",
-                    "--base-border-opacity": "0",
-                    "--base-border-color": "0, 0, 0",
-                    "--refraction-border-opacity": "0",
-                    "--sheen-overlay-opacity": "0",
+                    "--contrast-gradient-opacity": "0.05047625720155632",
+                    "--shadow-opacity": "0.40650137164544764",
+                    "--base-border-opacity": "0.09988",
+                    "--base-border-color": "255, 255, 255",
+                    "--refraction-border-opacity": "0.38044",
+                    "--sheen-overlay-opacity": "0.08012",
                   } as CSSProperties
                 }
               >
@@ -308,6 +376,7 @@ export default function PlaylistDetailView({
                         <div className="[--artwork-override-max-height:100%] filter-[blur(20px)_saturate(2)] size-full opacity-40 absolute transform-[scale(.88)] origin-[bottom_center] z-(--radiosity-effect-z,var(--z-default)) dark:opacity-30">
                           <CardArtwork variant="cover" {...artworkProps} />
                         </div>
+
                         <div className="[background:radial-gradient(circle_at_center,#fff_0,hsla(0,0%,100%,0)_70%)] rounded-[50%] inset-[-20%] opacity-(--contrast-gradient-opacity,0) pointer-events-none absolute z-0"></div>
                       </>
                     )}
@@ -319,7 +388,8 @@ export default function PlaylistDetailView({
                         <CardArtwork
                           variant={maxWidth739 ? "hero" : "cover"}
                           {...artworkProps}
-                          containerClassName={`${maxWidth739 ? "after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:content-[''] after:block after:h-0 after:max-h-full after:max-w-full after:min-h-full after:min-w-full after:opacity-(--containerInnerStrokeAlpha,0.1) after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)] dark:after:opacity-(--containerInnerStrokeAlpha,0.25)" : ""}`}
+                          videoSrc={detailVideoSrc}
+                          containerClassName={`${maxWidth739 ? "after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:block after:h-0 after:max-h-full after:max-w-full after:min-h-full after:min-w-full after:opacity-(--containerInnerStrokeAlpha,0.1) after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)] dark:after:opacity-(--containerInnerStrokeAlpha,0.25)" : "in-[.has-theme-override]:after:[box-shadow:inset_0_0_0_.5px_rgba(var(--base-border-color),var(--base-border-opacity,0))]"}`}
                         />
 
                         <div className="hidden"></div>
@@ -327,8 +397,11 @@ export default function PlaylistDetailView({
 
                       {!maxWidth739 && (
                         <>
-                          <div></div>
-                          <div className="[background:conic-gradient(from_calc(var(--pointer-light-angle,0)*1deg)_at_50%_50%,hsla(0,0%,100%,.6)_0deg,hsla(0,0%,100%,.15)_72deg,hsla(0,0%,100%,.05)_180deg,hsla(0,0%,100%,.15)_288deg,hsla(0,0%,100%,.6)_1turn)] rounded-[inherit] inset-0 [mask:linear-gradient(#fff_0_0)_content-box,linear-gradient(#fff_0_0)] mask-exclude mix-blend-plus-lighter opacity-(--refraction-border-opacity,0) p-px pointer-events-none absolute z-3"></div>
+                          <div
+                            className="[background:conic-gradient(from_calc(var(--pointer-light-angle,0)*1deg)_at_50%_50%,hsla(0,0%,100%,.6)_0deg,hsla(0,0%,100%,.15)_72deg,hsla(0,0%,100%,.05)_180deg,hsla(0,0%,100%,.15)_288deg,hsla(0,0%,100%,.6)_1turn)] rounded-[inherit] inset-0 [-webkit-mask:linear-gradient(#fff_0_0)_content-box,linear-gradient(#fff_0_0)] [mask:linear-gradient(#fff_0_0)_content-box,linear-gradient(#fff_0_0)] [-webkit-mask-composite:xor] mix-blend-plus-lighter opacity-(--refraction-border-opacity,0) p-px pointer-events-none absolute z-3"
+                            style={{ maskComposite: "exclude" }}
+                          ></div>
+
                           <div className="[--sheen-x:calc(50%+var(--pointer-roll,0)*50%)] [--sheen-y:calc(50%+var(--pointer-pitch,0)*50%)] [background:radial-gradient(ellipse_100%_100%_at_var(--sheen-x)_var(--sheen-y),hsla(0,0%,100%,.6)_0,hsla(0,0%,100%,.3)_20%,hsla(0,0%,100%,0)_50%)] rounded-[inherit] inset-0 mix-blend-plus-lighter opacity-(--sheen-overlay-opacity,0) pointer-events-none absolute z-4"></div>
                         </>
                       )}
@@ -338,7 +411,7 @@ export default function PlaylistDetailView({
               </div>
 
               <div
-                className={`max-[483px]:[--systemPrimary:var(--systemPrimary-onDark)] max-[483px]:[--systemSecondary:var(--systemSecondary-vibrantOnDark)] max-[483px]:[--systemTertiary:var(--systemTertiary-onDark)] max-[483px]:[--systemQuaternary:var(--systemQuaternary-onDark)] max-[483px]:[--systemQuinary:var(--systemQuinary-onDark)] max-[483px]:[--keyColor:var(--systemPrimary-onDark)] max-[483px]:[--button-pill-color:#000] max-[483px]:[--button-pill-background-color:#fff] max-[483px]:[--iconEllipsisFill:var(--systemPrimary-onDark)] max-[483px]:[--button-action-background-color:#fff] max-[483px]:[--button-action-color:#000] max-[483px]:[--explicitFillOverride:var(--systemSecondary-vibrantOnDark)] max-[483px]:[--favoriteBadgeColor:var(--systemSecondary-vibrantOnDark)] max-[483px]:mix-blend-plus-lighter [align-items:var(--containerDetailHeaderAlign,center)] flex flex-col [grid-area:headings] mt-4.5 min-w-0 relative w-full self-center min-[1000px]:items-start min-[1000px]:self-center min-[1000px]:-my-1.25 min-[1000px]:py-1.25 in-[.header--tall-artwork]:mt-[94vw] min-[484px]:in-[.header--tall-artwork]:mt-[62.9673356946vw]`}
+                className={`headings [align-items:var(--containerDetailHeaderAlign,center)] flex flex-col [grid-area:headings] mt-4.5 min-w-0 relative w-full self-center min-[1000px]:items-start min-[1000px]:self-center min-[1000px]:-my-1.25 min-[1000px]:py-1.25 in-[.header--tall-artwork]:mt-[94vw] min-[484px]:in-[.header--tall-artwork]:mt-[62.9673356946vw]`}
               >
                 <div className="empty:hidden text-(--systemSecondary) [font:var(--subhead-emphasized)] mt-2.25"></div>
                 <h1 className="text-(--systemPrimary) cursor-text [font:var(--large-title-emphasized-short)] mb-[0.5px] wrap-break-word [text-align:var(--containerDetailHeaderAlign,center)] text-balance select-text line-clamp-2 min-[1000px]:[text-align:unset] max-[999px]:[font:var(--title-1-emphasized)] max-[999px]:mb-1">
@@ -372,15 +445,26 @@ export default function PlaylistDetailView({
               </div>
 
               {playlist.description && (
-                <div className="[--truncate-font:var(--body-tall)] [grid-area:description] mt-4.5 max-w-110 min-[1000]:self-end min-[1000]:min-h-13.5 min-[1000]:mb-3.75 min-[1000]:mt-0">
-                  <div className="relative z-(--z-default) text-(--systemSecondary)">
-                    <p>{playlist.description}</p>
+                <div className="wrap-anywhere [--truncate-font:var(--body-tall)] [grid-area:description] mt-4.5 max-w-110 min-[1000]:self-end min-[1000]:min-h-13.5 min-[1000]:mb-3.75 min-[1000]:mt-0">
+                  <div className="relative z-(--z-default) text-(--systemSecondary) truncate-wrapper">
+                    <p
+                      className="line-clamp-(--lines) [font:var(--truncate-font,var(--body-tall))] whitespace-pre-wrap wrap-anywhere"
+                      style={
+                        {
+                          "--lines": "3",
+                          "--line-height": "var(--lineHeight, 16)",
+                          "--link-length": "4",
+                        } as CSSProperties
+                      }
+                    >
+                      {playlist.description}
+                    </p>
                   </div>
                 </div>
               )}
 
               <div className="[--addToLibraryMarginEnd:0] grid [grid-template-areas:'primary-start_primary-center_primary-end'] grid-cols-[1fr_auto_1fr] mt-3.5 gap-3 [grid-area:primary-actions] pointer-coarse:gap-3.5 relative z-(--z-default) min-[1000px]:self-end min-[1000px]:justify-start min-[1000px]:mt-0">
-                <div className="order-2 relative">
+                <div className="order-2 relative primary-actions__button--play">
                   <div className="w-full">
                     <button
                       type="button"
@@ -395,7 +479,10 @@ export default function PlaylistDetailView({
                           width="16"
                           viewBox="0 0 16 16"
                         >
-                          <path d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"></path>
+                          <path
+                            fill="currentColor"
+                            d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"
+                          ></path>
                         </svg>
                       </span>
                       <span className="contents">Play</span>
@@ -403,7 +490,7 @@ export default function PlaylistDetailView({
                   </div>
                 </div>
 
-                <div className="order-1">
+                <div className="order-1 primary-actions__button--shuffle">
                   <div className="w-full">
                     <button
                       disabled={playableTrackCount < 2}
@@ -431,7 +518,7 @@ export default function PlaylistDetailView({
                   </div>
                 </div>
 
-                <div className="order-3 [--addToLibraryFillOverride:var(--systemPrimary)]">
+                <div className="order-3 [--addToLibraryFillOverride:var(--systemPrimary)] primary-actions__button--add-to-library">
                   <div className="[--add-to-library-button-width:36px] [--add-to-library-icon-width:12px] pointer-coarse:[--add-to-library-button-width:48px] pointer-coarse:[--add-to-library-icon-width:16px]">
                     <AddToLibraryButton
                       resourceType="playlists"
@@ -450,7 +537,7 @@ export default function PlaylistDetailView({
                 </div>
               </div>
 
-              <div className="flex gap-2.5 [grid-area:secondary-actions] [justify-self:var(--containerDetailHeaderAlign,end)] relative min-[1000px]:[align-self:var(--containerDetailHeaderSecondaryActionsAlignSelf,end)]">
+              <div className="secondary-actions flex gap-2.5 [grid-area:secondary-actions] [justify-self:var(--containerDetailHeaderAlign,end)] relative min-[1000px]:[align-self:var(--containerDetailHeaderSecondaryActionsAlignSelf,end)]">
                 <div className="flex gap-2 me-[calc(var(--bodyGutter)*-1+15px)] min-[484px]:me-[calc(var(--bodyGutter)*-1+8px)]">
                   <div className="cloud-buttons cloud-buttons--with-platter">
                     <div>
@@ -541,7 +628,7 @@ export default function PlaylistDetailView({
 
       {playlist.tracks.length > 0 ? (
         <>
-          <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) [--songs-list-row-border-radius:12px] relative z-(--z-default) pt-0">
+          <div className="section -ms-(--web-navigation-width) ps-(--web-navigation-width) [--songs-list-row-border-radius:12px] relative z-(--z-default) pt-0">
             <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
               <div
                 ref={(node) => {
@@ -592,13 +679,13 @@ export default function PlaylistDetailView({
                     <div
                       key={track.id}
                       onClick={() => selectTrack(track.id)}
-                      className={`group ${selectedTrackId === track.id ? "selected" : ""} text-(--systemSecondary) table-row relative z-(--z-default) [--platterBorderColor:var(--pageBG)] bg-(--rowBackgroundColor,transparent) h-13.5 hover:[--playButtonOpacity:1] hover:[--addToLibraryOpacity:1] last:[&>div]:after:[border-bottom:.5px_solid_var(--labelDivider)] last:[&>div]:after:h-full last:[&>div]:after:pointer-events-none ${
+                      className={`group text-(--systemSecondary) table-row relative z-(--z-default) [--platterBorderColor:var(--pageBG)] bg-(--rowBackgroundColor,transparent) h-13.5 hover:[--playButtonOpacity:1] hover:[--addToLibraryOpacity:1] last:[&>div]:after:[border-bottom:.5px_solid_var(--labelDivider)] last:[&>div]:after:h-full last:[&>div]:after:pointer-events-none ${
                         selectedTrackId === track.id
-                          ? "[--rowBackgroundColor:var(--selectionColor)] [--platterBorderColor:var(--selectionColor)] [outline:0] [--linkColor:#fff] [--explicitFillOverride:#fff] [--contextMenuEllipsisFillOverride:#fff] [--addToLibraryFillOverride:#fff] text-white [&>div]:after:opacity-0 [&+_.group>div]:after:border-t-transparent"
+                          ? "selected [&>div]:after:opacity-0 [&+_.group>div]:after:border-t-transparent"
                           : "hover:[--rowBackgroundColor:var(--tracklistHoverColor)] hover:[--platterBorderColor:#f0f0f0] hover:[&+_.group>div]:after:border-t-transparent"
                       }`}
                     >
-                      <div className="table-cell [font:var(--body)] pb-0 pt-0 align-middle h-[inherit] inset-s-1.75 overflow-visible relative z-(--z-default) after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
+                      <div className="table-cell [font:var(--body)] pb-0 pt-0 align-middle h-[inherit] inset-s-1.75 overflow-visible relative z-(--z-default) after:[border-top:.5px_solid_var(--labelDivider)] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
                         <div className="grid [grid-template-areas:'favorite-or-popular'] h-full -inset-s-8.25 p-0 place-items-center absolute top-1/2 transform-[translateY(-50%)] w-6.5 z-(--z-default)">
                           <div className="[grid-area:favorite-or-popular] leading-0 place-self-stretch">
                             <FavoriteSongButton
@@ -617,7 +704,7 @@ export default function PlaylistDetailView({
                         </div>
                       </div>
 
-                      <div className="table-cell [font:var(--body)] pb-0 pt-0 align-middle ps-0 pe-0 text-(--systemPrimary) relative rounded-ee-none rounded-es-(--songs-list-row-border-radius,6px) rounded-se-none rounded-ss-(--songs-list-row-border-radius,6px) overflow-hidden text-ellipsis whitespace-nowrap after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
+                      <div className="table-cell [font:var(--body)] pb-0 pt-0 align-middle ps-0 pe-0 text-(--systemPrimary) relative rounded-ee-none rounded-es-(--songs-list-row-border-radius,6px) rounded-se-none rounded-ss-(--songs-list-row-border-radius,6px) overflow-hidden text-ellipsis whitespace-nowrap after:[border-top:.5px_solid_var(--labelDivider)] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
                         <div className="items-center grid [grid-template-areas:'song-artwork_song-rank_song-icon_song-name'] grid-cols-[auto_auto_auto_1fr] min-h-11.5 ps-1.75">
                           <div
                             className={`text-(--systemSecondary) grid relative me-3 ${
@@ -627,7 +714,7 @@ export default function PlaylistDetailView({
                             <div className="grid [grid-area:song-artwork] [grid-template-areas:'song-index']">
                               <div className="rounded-[5px] [grid-area:song-index] [--songsListArtworkHeight:40px] h-10">
                                 <div
-                                  className="bg-(--override-placeholder-bg-color,var(--placeholder-bg-color,var(--genericJoeColor))) rounded-[inherit] box-border contain-content h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0) min-w-(--artwork-override-min-width,0) overflow-hidden relative w-(--artwork-override-width,100%) z-(--z-default) [--artwork-override-width:calc(var(--songsListArtworkHeight)*var(--aspect-ratio))] [--artwork-override-height:var(--songsListArtworkHeight)] after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:content-[''] after:block after:h-0 after:max-h-full after:max-w-full after:min-h-full after:min-w-full after:opacity-(--containerInnerStrokeAlpha,.25) after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)]"
+                                  className="bg-(--override-placeholder-bg-color,var(--placeholder-bg-color,var(--genericJoeColor))) rounded-[inherit] box-border contain-content h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0) min-w-(--artwork-override-min-width,0) overflow-hidden relative w-(--artwork-override-width,100%) z-(--z-default) [--artwork-override-width:calc(var(--songsListArtworkHeight)*var(--aspect-ratio))] [--artwork-override-height:var(--songsListArtworkHeight)] after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:block after:h-0 after:max-h-full after:max-w-full after:min-h-full after:min-w-full after:opacity-(--containerInnerStrokeAlpha,.25) after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)]"
                                   style={
                                     {
                                       "--artwork-bg-color": "#0b0809",
@@ -733,48 +820,62 @@ export default function PlaylistDetailView({
 
                           <div className="items-center inline-flex [grid-area:song-name] leading-4 overflow-hidden w-full -my-1 -mx-1 py-1 px-1">
                             <div className="block cursor-default flex-1 overflow-hidden ps-1 pe-1 -me-1 pb-1 pt-1 -ms-1 -mb-1 -mt-1 text-left">
-                              {track.url ? (
-                                <Link
-                                  href={track.url}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                  }}
-                                  className="overflow-hidden [--linkColor:var(--systemPrimary)] hover:underline"
-                                >
+                              <div className="items-baseline max-w-full overflow-hidden text-ellipsis whitespace-nowrap">
+                                {track.url ? (
+                                  <Link
+                                    href={track.url}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                    }}
+                                    className="overflow-hidden [--linkColor:var(--systemPrimary)]"
+                                  >
+                                    <div className="overflow-hidden text-ellipsis inline text-pretty whitespace-normal text-left">
+                                      {track.title}
+                                    </div>
+                                  </Link>
+                                ) : (
                                   <div className="overflow-hidden text-ellipsis inline text-pretty whitespace-normal text-left">
                                     {track.title}
                                   </div>
-                                </Link>
-                              ) : (
-                                <div className="overflow-hidden text-ellipsis inline text-pretty whitespace-normal text-left">
-                                  {track.title}
-                                </div>
-                              )}
+                                )}
 
-                              {track.contentRating === "explicit" && (
-                                <span
-                                  className="ms-1 [--explicitBadgeSize:10px] relative top-[0.7px]"
-                                  aria-label="Explicit"
-                                >
-                                  <ExplicitBadgeIcon />
-                                </span>
-                              )}
+                                {track.contentRating === "explicit" && (
+                                  <span
+                                    className="ms-1 [--explicitBadgeSize:10px] relative top-[0.7px]"
+                                    aria-label="Explicit"
+                                  >
+                                    <ExplicitBadgeIcon />
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="-my-1 -mx-1 py-1 px-1 text-(--systemSecondary) col-span-2 row-start-2 overflow-hidden text-ellipsis whitespace-nowrap text-left min-[1000px]:hidden max-[999px]:-mt-0.5">
+                                <ArtistLinks
+                                  artists={track.artists}
+                                  fallbackText={track.artist}
+                                  linkClassName="overflow-hidden text-ellipsis whitespace-nowrap text-left"
+                                  onArtistClick={(event) =>
+                                    event.stopPropagation()
+                                  }
+                                />
+                              </div>
                             </div>
                           </div>
                         </div>
                       </div>
 
-                      <div className="hidden [font:var(--body)] pb-0 pt-0 align-middle pe-2.5 relative overflow-hidden text-ellipsis whitespace-nowrap min-[1000px]:table-cell after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
+                      <div className="hidden [font:var(--body)] pb-0 pt-0 align-middle pe-2.5 relative overflow-hidden text-ellipsis whitespace-nowrap min-[1000px]:table-cell after:[border-top:.5px_solid_var(--labelDivider)] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
                         <div className="overflow-hidden text-ellipsis whitespace-nowrap -mb-1 -mt-1 -ms-1 -me-1 pb-1 pt-1 pe-1 ps-1 text-left">
                           <ArtistLinks
                             artists={track.artists}
                             fallbackText={track.artist}
                             linkClassName="overflow-hidden text-ellipsis whitespace-nowrap text-left"
+                            onArtistClick={(event) => event.stopPropagation()}
                           />
                         </div>
                       </div>
 
-                      <div className="hidden [font:var(--body)] pb-0 pt-0 align-middle pe-4 relative overflow-hidden text-ellipsis whitespace-nowrap min-[1260px]:table-cell after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
+                      <div className="hidden [font:var(--body)] pb-0 pt-0 align-middle pe-4 relative overflow-hidden text-ellipsis whitespace-nowrap min-[1260px]:table-cell after:[border-top:.5px_solid_var(--labelDivider)] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
                         <div className="overflow-hidden text-ellipsis whitespace-nowrap -mb-1 -mt-1 -ms-1 -me-1 pb-1 pt-1 pe-1 ps-1 text-left">
                           <span className="overflow-hidden text-ellipsis whitespace-nowrap text-left">
                             {track.albumUrl ? (
@@ -792,7 +893,7 @@ export default function PlaylistDetailView({
                         </div>
                       </div>
 
-                      <div className="table-cell [font:var(--body)] pb-0 pt-0 align-middle overflow-visible relative text-end z-(--z-default) rounded-ee-(--songs-list-row-border-radius,6px) rounded-es-none rounded-se-(--songs-list-row-border-radius,6px) rounded-ss-none pe-4.5 after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
+                      <div className="table-cell [font:var(--body)] pb-0 pt-0 align-middle overflow-visible relative text-end z-(--z-default) rounded-ee-(--songs-list-row-border-radius,6px) rounded-es-none rounded-se-(--songs-list-row-border-radius,6px) rounded-ss-none pe-4.5 after:[border-top:.5px_solid_var(--labelDivider)] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
                         <div className="items-center inline-grid [grid-template-areas:'song-controls-add_song-controls-length_song-controls-context'] relative">
                           {!playlist.isLibraryView && (
                             <div className="pointer-coarse:hidden max-[578px]:hidden [grid-area:song-controls-add] opacity-(--addToLibraryOpacity,0) me-1.75">
@@ -814,7 +915,7 @@ export default function PlaylistDetailView({
                           </time>
 
                           <div
-                            className={`[grid-area:song-controls-context] ms-1.75 [--contextMenuButtonSize:28px] ${selectedTrackId === track.id ? "[--contextMenuEllipsisFillOverride:#fff]" : "[--contextMenuEllipsisFillOverride:var(--systemSecondary)] hover:[--contextMenuEllipsisFillOverride:var(--keyColor)]"}`}
+                            className={`[grid-area:song-controls-context] ms-1.75 [--contextMenuButtonSize:28px] ${selectedTrackId === track.id ? "dark:[--contextMenuEllipsisFillOverride:#fff] [--contextMenuEllipsisFillOverride:#000000d9]" : "[--contextMenuEllipsisFillOverride:var(--systemSecondary)] hover:[--contextMenuEllipsisFillOverride:var(--keyColor)]"}`}
                           >
                             <AmpContextMenuButton
                               id={`song-${track.id}`}
@@ -851,7 +952,7 @@ export default function PlaylistDetailView({
           {afterTracks}
 
           {showMetadata && (
-            <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) pt-3 [--songs-list-row-border-radius:12px] relative z-(--z-default)">
+            <div className="section -ms-(--web-navigation-width) ps-(--web-navigation-width) pt-3 [--songs-list-row-border-radius:12px] relative z-(--z-default)">
               <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
                 <div className="m-[0_var(--bodyGutter)] pb-10.75 ps-3 -mt-3 min-[1000px]:flex min-[1000px]:flex-row min-[1000px]:justify-between min-[1000px]:pb-13.25">
                   <div className="text-(--systemSecondary) max-w-110 relative [font:var(--body-tall)] mt-11 min-[1260px]:max-w-135 min-[1000px]:mt-8.5">
@@ -864,7 +965,7 @@ export default function PlaylistDetailView({
 
           {isPublicPlaylist && featuredArtistCards.length > 0 && (
             <>
-              <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) pt-3 [--songs-list-row-border-radius:12px] relative z-(--z-default) bg-(--opaqueShelfBG)">
+              <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) pt-3 [--songs-list-row-border-radius:12px] relative z-(--z-default) bg-(--opaqueShelfBG) section--alternate">
                 <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
                   <div className="pt-4 w-full"></div>
                 </div>
@@ -874,6 +975,7 @@ export default function PlaylistDetailView({
                 shelfId="playlist-featured-artists"
                 title="Featured Artists"
                 displayKind="MusicCircleCoverShelf"
+                contentType="artist"
                 containerClassName="bg-(--opaqueShelfBG)"
                 items={featuredArtistCards.slice(
                   0,

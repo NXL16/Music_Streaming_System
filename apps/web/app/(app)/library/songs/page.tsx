@@ -274,13 +274,13 @@ export default function SongsPage() {
                 <div
                   key={track.id}
                   onClick={() => selectTrack(track.id)}
-                  className={`group ${selectedTrackId === track.id ? "selected" : ""} text-(--systemSecondary) table-row relative z-(--z-default) [--platterBorderColor:var(--pageBG)] bg-(--rowBackgroundColor,transparent) h-13.5 hover:[--playButtonOpacity:1] hover:[--addToLibraryOpacity:1] last:[&>div]:after:[border-bottom:.5px_solid_var(--labelDivider)] last:[&>div]:after:h-full last:[&>div]:after:pointer-events-none ${
+                  className={`group text-(--systemSecondary) table-row relative z-(--z-default) [--platterBorderColor:var(--pageBG)] bg-(--rowBackgroundColor,transparent) h-13.5 hover:[--playButtonOpacity:1] hover:[--addToLibraryOpacity:1] last:[&>div]:after:[border-bottom:.5px_solid_var(--labelDivider)] last:[&>div]:after:h-full last:[&>div]:after:pointer-events-none ${
                     selectedTrackId === track.id
-                      ? "[--rowBackgroundColor:var(--selectionColor)] [--platterBorderColor:var(--selectionColor)] [outline:0] [--linkColor:#fff] [--explicitFillOverride:#fff] [--contextMenuEllipsisFillOverride:#fff] [--addToLibraryFillOverride:#fff] text-white [&>div]:after:opacity-0 [&+_.group>div]:after:border-t-transparent"
+                      ? "songs-list-row--selected [&>div]:after:opacity-0 [&+_.group>div]:after:border-t-transparent"
                       : "hover:[--rowBackgroundColor:var(--tracklistHoverColor)] hover:[--platterBorderColor:#f0f0f0] hover:[&+_.group>div]:after:border-t-transparent"
                   }`}
                 >
-                  <div className="table-cell [font:var(--body)] pb-0 pt-0 align-middle h-[inherit] inset-s-1.75 overflow-visible relative z-(--z-default) after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
+                  <div className="table-cell [font:var(--body)] pb-0 pt-0 align-middle h-[inherit] inset-s-1.75 overflow-visible relative z-(--z-default) after:[border-top:.5px_solid_var(--labelDivider)] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
                     <div className="grid [grid-template-areas:'favorite-or-popular'] h-full -inset-s-8.25 p-0 place-items-center absolute top-1/2 transform-[translateY(-50%)] w-6.5 z-(--z-default)">
                       <div className="[grid-area:favorite-or-popular] leading-0 place-self-stretch">
                         <FavoriteSongButton
@@ -299,7 +299,7 @@ export default function SongsPage() {
                     </div>
                   </div>
 
-                  <div className="table-cell [font:var(--body)] pb-0 pt-0 align-middle ps-0 pe-0 text-(--systemPrimary) relative rounded-ee-none rounded-es-(--songs-list-row-border-radius,6px) rounded-se-none rounded-ss-(--songs-list-row-border-radius,6px) overflow-hidden text-ellipsis whitespace-nowrap after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
+                  <div className="table-cell [font:var(--body)] pb-0 pt-0 align-middle ps-0 pe-0 text-(--systemPrimary) relative rounded-ee-none rounded-es-(--songs-list-row-border-radius,6px) rounded-se-none rounded-ss-(--songs-list-row-border-radius,6px) overflow-hidden text-ellipsis whitespace-nowrap after:[border-top:.5px_solid_var(--labelDivider)] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
                     <div className="items-center grid [grid-template-areas:'song-artwork_song-rank_song-icon_song-name'] grid-cols-[auto_auto_auto_1fr] min-h-11.5 ps-1.75">
                       <div
                         className={`text-(--systemSecondary) grid relative me-3 ${
@@ -309,7 +309,7 @@ export default function SongsPage() {
                         <div className="grid [grid-area:song-artwork] [grid-template-areas:'song-index']">
                           <div className="rounded-[5px] [grid-area:song-index] [--songsListArtworkHeight:40px] h-10">
                             <div
-                              className="bg-(--override-placeholder-bg-color,var(--placeholder-bg-color,var(--genericJoeColor))) rounded-[inherit] box-border contain-content h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0) min-w-(--artwork-override-min-width,0) overflow-hidden relative w-(--artwork-override-width,100%) z-(--z-default) [--artwork-override-width:calc(var(--songsListArtworkHeight)*var(--aspect-ratio))] [--artwork-override-height:var(--songsListArtworkHeight)] after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:content-[''] after:block after:h-0 after:max-h-full after:max-w-full after:min-h-full after:min-w-full after:opacity-(--containerInnerStrokeAlpha,.25) after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)]"
+                              className="bg-(--override-placeholder-bg-color,var(--placeholder-bg-color,var(--genericJoeColor))) rounded-[inherit] box-border contain-content h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0) min-w-(--artwork-override-min-width,0) overflow-hidden relative w-(--artwork-override-width,100%) z-(--z-default) [--artwork-override-width:calc(var(--songsListArtworkHeight)*var(--aspect-ratio))] [--artwork-override-height:var(--songsListArtworkHeight)] after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:block after:h-0 after:max-h-full after:max-w-full after:min-h-full after:min-w-full after:opacity-(--containerInnerStrokeAlpha,.25) after:pointer-events-none after:absolute after:top-0 after:w-full after:z-[calc(var(--z-default)+1)]"
                               style={
                                 {
                                   "--artwork-bg-color": "#0b0809",
@@ -338,7 +338,9 @@ export default function SongsPage() {
                           <div className="[--nonPlatterIconFill:var(--nonPlatterOverrideIconColor,var(--keyColor))] h-full align-top w-full">
                             <button
                               disabled={track.status !== 3}
-                              {...playbackIntentProps(projectSongSummary(track))}
+                              {...playbackIntentProps(
+                                projectSongSummary(track),
+                              )}
                               onClick={(event) => {
                                 if (selectedTrackId !== null) {
                                   activateTrack(track.id);
@@ -413,46 +415,60 @@ export default function SongsPage() {
 
                       <div className="items-center inline-flex [grid-area:song-name] leading-4 overflow-hidden w-full -my-1 -mx-1 py-1 px-1">
                         <div className="block cursor-default flex-1 overflow-hidden ps-1 pe-1 -me-1 pb-1 pt-1 -ms-1 -mb-1 -mt-1 text-left">
-                          {projectSongSummary(track).url ? (
-                            <Link
-                              href={projectSongSummary(track).url!}
-                              onClick={(e) => e.stopPropagation()}
-                              className="overflow-hidden [--linkColor:var(--systemPrimary)] hover:underline"
-                            >
+                          <div className="items-baseline max-w-full overflow-hidden text-ellipsis whitespace-nowrap">
+                            {projectSongSummary(track).url ? (
+                              <Link
+                                href={projectSongSummary(track).url!}
+                                onClick={(e) => e.stopPropagation()}
+                                className="overflow-hidden [--linkColor:var(--systemPrimary)] group-[.songs-list-row--selected]:[--linkColor:#fff]"
+                              >
+                                <div className="overflow-hidden text-ellipsis inline text-pretty whitespace-normal text-left">
+                                  {track.title}
+                                </div>
+                              </Link>
+                            ) : (
                               <div className="overflow-hidden text-ellipsis inline text-pretty whitespace-normal text-left">
                                 {track.title}
                               </div>
-                            </Link>
-                          ) : (
-                            <div className="overflow-hidden text-ellipsis inline text-pretty whitespace-normal text-left">
-                              {track.title}
-                            </div>
-                          )}
+                            )}
 
-                          {track.contentRating === "explicit" && (
-                            <span
-                              className="ms-1 [--explicitBadgeSize:10px] relative top-[0.7px]"
-                              aria-label="Explicit"
-                            >
-                              <ExplicitBadgeIcon />
-                            </span>
-                          )}
+                            {track.contentRating === "explicit" && (
+                              <span
+                                className="ms-1 [--explicitBadgeSize:10px] relative top-[0.7px]"
+                                aria-label="Explicit"
+                              >
+                                <ExplicitBadgeIcon />
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="-my-1 -mx-1 py-1 px-1 text-(--systemSecondary) col-span-2 row-start-2 overflow-hidden text-ellipsis whitespace-nowrap text-left min-[1000px]:hidden max-[999px]:-mt-0.5">
+                            <ArtistLinks
+                              artists={projectLinkedArtists(
+                                track.artists ?? [],
+                              )}
+                              fallbackText={track.artist}
+                              linkClassName="overflow-hidden text-ellipsis whitespace-nowrap text-left"
+                              onArtistClick={(event) => event.stopPropagation()}
+                            />
+                          </div>
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="hidden [font:var(--body)] pb-0 pt-0 align-middle pe-2.5 relative overflow-hidden text-ellipsis whitespace-nowrap min-[1000px]:table-cell after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
+                  <div className="hidden [font:var(--body)] pb-0 pt-0 align-middle pe-2.5 relative overflow-hidden text-ellipsis whitespace-nowrap min-[1000px]:table-cell after:[border-top:.5px_solid_var(--labelDivider)] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
                     <div className="overflow-hidden text-ellipsis whitespace-nowrap -mb-1 -mt-1 -ms-1 -me-1 pb-1 pt-1 pe-1 ps-1 text-left">
                       <ArtistLinks
                         artists={projectLinkedArtists(track.artists ?? [])}
                         fallbackText={track.artist}
-                        linkClassName="hover:underline"
+                        linkClassName="overflow-hidden text-ellipsis whitespace-nowrap text-left"
+                        onArtistClick={(event) => event.stopPropagation()}
                       />
                     </div>
                   </div>
 
-                  <div className="hidden [font:var(--body)] pb-0 pt-0 align-middle pe-4 relative overflow-hidden text-ellipsis whitespace-nowrap min-[1260px]:table-cell after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
+                  <div className="hidden [font:var(--body)] pb-0 pt-0 align-middle pe-4 relative overflow-hidden text-ellipsis whitespace-nowrap min-[1260px]:table-cell after:[border-top:.5px_solid_var(--labelDivider)] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
                     <div className="overflow-hidden text-ellipsis whitespace-nowrap -mb-1 -mt-1 -ms-1 -me-1 pb-1 pt-1 pe-1 ps-1 text-left">
                       <span className="overflow-hidden text-ellipsis whitespace-nowrap text-left">
                         {track.albumUrl && track.albumId ? (
@@ -469,7 +485,7 @@ export default function SongsPage() {
                     </div>
                   </div>
 
-                  <div className="table-cell [font:var(--body)] pb-0 pt-0 align-middle overflow-visible relative text-end z-(--z-default) rounded-ee-(--songs-list-row-border-radius,6px) rounded-es-none rounded-se-(--songs-list-row-border-radius,6px) rounded-ss-none pe-4.5 after:[border-top:.5px_solid_var(--labelDivider)] after:content-[''] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
+                  <div className="table-cell [font:var(--body)] pb-0 pt-0 align-middle overflow-visible relative text-end z-(--z-default) rounded-ee-(--songs-list-row-border-radius,6px) rounded-es-none rounded-se-(--songs-list-row-border-radius,6px) rounded-ss-none pe-4.5 after:[border-top:.5px_solid_var(--labelDivider)] after:block after:h-px after:inset-s-0 after:absolute after:top-0 after:w-full group-hover:after:opacity-0">
                     <div className="items-center inline-grid [grid-template-areas:'song-controls-add_song-controls-length_song-controls-context'] relative">
                       <time
                         className="max-[578px]:hidden [grid-area:song-controls-length] cursor-default inline-block leading-9.5 font-features-['tnum'] tabular-nums"

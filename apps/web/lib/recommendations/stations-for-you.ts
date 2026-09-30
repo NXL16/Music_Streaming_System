@@ -15,9 +15,14 @@ import { getHomeRecommendations } from "./recommendation.api";
 import type { CatalogResourceAttributes } from "./recommendation.types";
 
 const MOOD_STATION_ID_PATTERN = /^mood-station-[a-f0-9]{32}-\d+$/;
+const PERSONAL_STATION_ID_PATTERN = /^(your|discovery)-station-[a-f0-9]{32}$/;
 const SONG_STATION_ID_PATTERN = /^song-station-[a-f0-9]{32}$/;
 const ARTIST_STATION_ID_PATTERN = /^(artist|artist-play)-station-[a-f0-9]{32}$/;
-const PLAYABLE_PERSISTED_STATION_KINDS = new Set(["system-mood"]);
+const PLAYABLE_PERSISTED_STATION_KINDS = new Set([
+  "system-mood",
+  "personalized-user",
+  "personalized-discovery",
+]);
 
 export type SystemStationDetail = {
   id: string;
@@ -71,6 +76,7 @@ async function playContextStation<T extends ContextStationResponse>(
 export function isPlayableSystemStationId(stationId: string): boolean {
   return (
     MOOD_STATION_ID_PATTERN.test(stationId) ||
+    PERSONAL_STATION_ID_PATTERN.test(stationId) ||
     SONG_STATION_ID_PATTERN.test(stationId) ||
     ARTIST_STATION_ID_PATTERN.test(stationId)
   );

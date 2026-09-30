@@ -85,6 +85,7 @@ describe("mapCatalogTracks", () => {
     ]);
     expect(track.artworkSrcSet).toContain("296w");
     expect(track.thumbnailArtworkSrcSet).toContain("40w");
+    expect(track.mediaSessionArtworkUrl).toBe("https://image.example/632.jpg");
   });
 
   it("uses an explicit song-detail album context instead of the first relation", () => {

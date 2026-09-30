@@ -187,7 +187,7 @@ export function AlbumRelatedShelves({
       <MediaShelfSkeleton
         key={index}
         displayKind="MusicCoverShelf"
-        containerClassName="bg-(--opaqueShelfBG)"
+        containerClassName="bg-(--opaqueShelfBG) section--alternate"
       />
     ));
   }

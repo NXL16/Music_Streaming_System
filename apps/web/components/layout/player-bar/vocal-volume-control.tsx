@@ -8,18 +8,23 @@ import {
 
 type VocalVolumeControlProps = {
   value: number;
+  isExpanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
   onValueChange: (value: number) => void;
   onPreviewValueChange: (value: number) => void;
 };
 
-const OPEN_DURATION_MS = 280;
-const AUTO_REDUCE_DURATION_MS = 680;
-const AUTO_REDUCE_TARGET = 0.5;
-const MAX_STRETCH = 0.12;
+const OPEN_DURATION_MS = 161;
+const EXPAND_DURATION_MS = 320;
+const CLOSE_DURATION_MS = 400;
+const AUTO_REDUCE_DURATION_MS = 1000;
+const AUTO_REDUCE_TARGET = 0.1;
+const MAX_STRETCH = 0.07;
 const ACTIVE_ICON_COLOR = "var(--systemPrimary-onLight)";
 const INACTIVE_ICON_COLOR = "var(--systemPrimary-onDark)";
 
 const clamp = (value: number) => Math.min(1, Math.max(0, value));
+const isAtFullVolume = (value: number) => value >= 0.995;
 const easeOutCubic = (progress: number) => 1 - (1 - progress) ** 3;
 
 // Keep the stretch responsive near an edge, without letting it grow endlessly.
@@ -31,11 +36,11 @@ type SliderBounds = {
   height: number;
 };
 
-function VocalMark() {
+function VocalMark({ isOpen = false }) {
   return (
     <svg
       aria-hidden
-      fill="currentColor"
+      className={`fill-current ${isOpen ? "size-7" : ""}`}
       height="25"
       viewBox="0 0 512 512"
       width="25"
@@ -56,6 +61,8 @@ function VocalMark() {
 
 export function VocalVolumeControl({
   value,
+  isExpanded,
+  onExpandedChange,
   onValueChange,
   onPreviewValueChange,
 }: VocalVolumeControlProps) {
@@ -63,14 +70,28 @@ export function VocalVolumeControl({
   const rampFrameRef = useRef<number | null>(null);
   const previewFrameRef = useRef<number | null>(null);
   const dragValueRef = useRef<number | null>(null);
+  const isDraggingRef = useRef(false);
   const sliderBoundsRef = useRef<SliderBounds | null>(null);
   const openTimerRef = useRef<number | null>(null);
   const fillRef = useRef<HTMLSpanElement>(null);
   const iconRef = useRef<HTMLSpanElement>(null);
-  const [isExpanded, setIsExpanded] = useState(false);
   const [isOpening, setIsOpening] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
+  const valueRef = useRef(value);
   const percent = Math.round(clamp(value) * 100);
+  const iconColor =
+    percent >= 24 ? ACTIVE_ICON_COLOR : INACTIVE_ICON_COLOR;
   const previewValueChange = onPreviewValueChange;
+
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
+
+  useEffect(() => {
+    if (isExpanded || !isClosing) return;
+    const timer = window.setTimeout(() => setIsClosing(false), CLOSE_DURATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [isExpanded, isClosing]);
 
   const stopAutoReduce = () => {
     if (openTimerRef.current !== null) {
@@ -106,7 +127,7 @@ export function VocalVolumeControl({
     });
   };
 
-  const flushDragValue = () => {
+  const flushDragValue = (): number | null => {
     if (previewFrameRef.current !== null) {
       window.cancelAnimationFrame(previewFrameRef.current);
       previewFrameRef.current = null;
@@ -117,6 +138,19 @@ export function VocalVolumeControl({
       previewValueChange(nextValue);
       onValueChange(nextValue);
     }
+    return nextValue;
+  };
+
+  const collapseControl = () => {
+    stopAutoReduce();
+    setIsOpening(false);
+    setIsClosing(true);
+    controlRef.current?.style.setProperty(
+      "--vocal-volume-transition",
+      `${CLOSE_DURATION_MS}ms`,
+    );
+    controlRef.current?.style.setProperty("--vocal-volume-stretch", "1");
+    onExpandedChange(false);
   };
 
   const updateDragVisual = (nextValue: number) => {
@@ -127,7 +161,7 @@ export function VocalVolumeControl({
     );
     iconRef.current?.style.setProperty(
       "color",
-      nextPercent >= 38 ? ACTIVE_ICON_COLOR : INACTIVE_ICON_COLOR,
+      nextPercent >= 24 ? ACTIVE_ICON_COLOR : INACTIVE_ICON_COLOR,
     );
   };
 
@@ -153,13 +187,19 @@ export function VocalVolumeControl({
   };
 
   const releaseDrag = (event: PointerEvent<HTMLButtonElement>) => {
+    if (!isDraggingRef.current) return;
+    isDraggingRef.current = false;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     sliderBoundsRef.current = null;
-    flushDragValue();
-    controlRef.current?.style.setProperty("--vocal-volume-transition", "400ms");
+    const nextValue = flushDragValue();
+    controlRef.current?.style.setProperty(
+      "--vocal-volume-transition",
+      `${CLOSE_DURATION_MS}ms`,
+    );
     controlRef.current?.style.setProperty("--vocal-volume-stretch", "1");
+    if (nextValue !== null && isAtFullVolume(nextValue)) collapseControl();
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
@@ -177,15 +217,21 @@ export function VocalVolumeControl({
     if (nextValue === null) return;
     event.preventDefault();
     stopAutoReduce();
-    onValueChange(clamp(nextValue));
+    const clampedValue = clamp(nextValue);
+    onValueChange(clampedValue);
+    if (isAtFullVolume(clampedValue)) collapseControl();
   };
 
   const startAutoReduce = () => {
     setIsOpening(false);
+    const startValue = valueRef.current;
+    const targetValue = Math.min(startValue, AUTO_REDUCE_TARGET);
+    if (startValue <= targetValue) return;
     const startedAt = performance.now();
     const step = (now: number) => {
       const progress = Math.min(1, (now - startedAt) / AUTO_REDUCE_DURATION_MS);
-      const nextValue = 1 - (1 - AUTO_REDUCE_TARGET) * easeOutCubic(progress);
+      const nextValue =
+        startValue - (startValue - targetValue) * easeOutCubic(progress);
       updateDragVisual(nextValue);
       previewValueChange(nextValue);
       if (progress < 1) {
@@ -193,16 +239,19 @@ export function VocalVolumeControl({
         return;
       }
       rampFrameRef.current = null;
-      onValueChange(AUTO_REDUCE_TARGET);
+      onValueChange(targetValue);
     };
     rampFrameRef.current = window.requestAnimationFrame(step);
   };
 
   const openControl = () => {
-    if (isExpanded) return;
+    if (isExpanded || isClosing) return;
     stopAutoReduce();
-    onValueChange(1);
-    setIsExpanded(true);
+    controlRef.current?.style.setProperty(
+      "--vocal-volume-transition",
+      `${EXPAND_DURATION_MS}ms`,
+    );
+    onExpandedChange(true);
     setIsOpening(true);
     openTimerRef.current = window.setTimeout(() => {
       openTimerRef.current = null;
@@ -210,13 +259,15 @@ export function VocalVolumeControl({
     }, OPEN_DURATION_MS);
   };
 
+  const showSlider = isExpanded || isClosing;
+
   return (
     <div className="absolute inset-e-5 top-5 z-[calc(var(--z-default)+1)]">
       <div
         ref={controlRef}
-        className={`relative grid place-items-center overflow-hidden bg-(--systemQuaternary-onDark) text-(--systemPrimary-onDark) shadow-[0_8px_24px_var(--glassMaterialShadowColor)] backdrop-blur-[60px] backface-hidden will-change-transform transform-[translate3d(0,0,0)_scale3d(1,var(--vocal-volume-stretch,1),1)] origin-(--vocal-volume-stretch-origin,center) transition-[width,height,border-radius,transform] duration-(--vocal-volume-transition,200ms) ease-out ${isExpanded ? "h-28 w-11 rounded-[999px]" : "size-10 rounded-full hover:scale-105 hover:bg-(--systemTertiary-onDark)"}`}
+        className={`relative grid place-items-center overflow-hidden bg-(--systemQuaternary-onDark) text-(--systemPrimary-onDark) backdrop-blur-[60px] backface-hidden will-change-transform transform-[translate3d(0,0,0)_scale3d(1,var(--vocal-volume-stretch,1),1)] origin-(--vocal-volume-stretch-origin,center) transition-[width,height,border-radius,transform] duration-(--vocal-volume-transition,320ms) ease-out ${isExpanded ? "h-27.5 w-10.5 rounded-[999px]" : "size-10 rounded-full hover:scale-105 hover:bg-(--systemTertiary-onDark)"}`}
       >
-        {!isExpanded ? (
+        {!showSlider ? (
           <button
             aria-expanded={false}
             aria-label="Điều chỉnh giọng hát"
@@ -233,11 +284,12 @@ export function VocalVolumeControl({
             aria-valuemax={100}
             aria-valuemin={0}
             aria-valuenow={percent}
-            aria-valuetext={`${percent} phần trăm`}
-            className={`group relative z-10 size-full touch-none overflow-hidden outline-none transition-opacity duration-150 ring-offset-2 ring-offset-transparent focus-visible:ring-2 focus-visible:ring-(--systemPrimary-onDark) ${isOpening ? "pointer-events-none opacity-0" : "opacity-100"}`}
+            aria-valuetext={`${percent}%`}
+            className={`group relative z-10 size-full touch-none overflow-hidden outline-none transition-opacity duration-250 ring-offset-2 ring-offset-transparent focus-visible:ring-2 focus-visible:ring-(--systemPrimary-onDark) ${isOpening ? "pointer-events-none opacity-0" : isClosing ? "pointer-events-none opacity-100" : "opacity-100"}`}
             onKeyDown={handleKeyDown}
             onPointerDown={(event) => {
               stopAutoReduce();
+              isDraggingRef.current = true;
               const bounds = event.currentTarget.getBoundingClientRect();
               sliderBoundsRef.current = {
                 bottom: bounds.bottom,
@@ -263,7 +315,7 @@ export function VocalVolumeControl({
             <span
               ref={fillRef}
               aria-hidden
-              className="absolute inset-0 origin-bottom bg-[linear-gradient(180deg,var(--systemPrimary-onDark),var(--systemSecondary-onDark))] will-change-transform"
+              className={`absolute inset-0 origin-bottom bg-(--systemPrimary-onDark) transition-opacity duration-200 will-change-transform ${isClosing ? "delay-[140ms] opacity-0" : "opacity-100"}`}
               style={{
                 transform: `translate3d(0,0,0) scale3d(1,${percent / 100},1)`,
               }}
@@ -271,12 +323,12 @@ export function VocalVolumeControl({
             <span
               ref={iconRef}
               aria-hidden
-              className="absolute bottom-3 inset-s-1/2 z-10 -translate-x-1/2 transition-colors duration-100"
+              className={`absolute inset-s-1/2 z-10 -translate-x-1/2 transition-[bottom,color,transform] duration-[400ms] ease-out ${isClosing ? "bottom-1.5 scale-[0.892857] delay-[140ms]" : "bottom-3"}`}
               style={{
-                color: percent >= 38 ? ACTIVE_ICON_COLOR : INACTIVE_ICON_COLOR,
+                color: isClosing ? INACTIVE_ICON_COLOR : iconColor,
               }}
             >
-              <VocalMark />
+              <VocalMark isOpen />
             </span>
           </button>
         )}

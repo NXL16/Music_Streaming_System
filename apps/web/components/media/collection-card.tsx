@@ -53,9 +53,12 @@ export default function CollectionCard(props: CollectionCardProps) {
   useEffect(() => {
     if (props.resourceType !== "albums") return;
     const sync = () => setIsSuggestLess(isSuggestLessActive("albums", cardId));
-    void hydrateSuggestLess().then(sync).catch(() => undefined);
+    void hydrateSuggestLess()
+      .then(sync)
+      .catch(() => undefined);
     return subscribeSuggestLessChanges((detail) => {
-      if (detail.resourceType === "albums" && detail.resourceId === cardId) sync();
+      if (detail.resourceType === "albums" && detail.resourceId === cardId)
+        sync();
     });
   }, [cardId, props.resourceType]);
   const libraryResourceType =
@@ -105,7 +108,8 @@ export default function CollectionCard(props: CollectionCardProps) {
               href: props.slug,
               songIds: props.songIds,
               userId,
-              isLibraryView: props.slug?.startsWith("/library/albums/") ?? false,
+              isLibraryView:
+                props.slug?.startsWith("/library/albums/") ?? false,
               inLibrary: false,
             }
           : props.resourceType === "playlists"
@@ -133,7 +137,7 @@ export default function CollectionCard(props: CollectionCardProps) {
       onOpen={props.onOpen}
     >
       <>
-        <div className="media-card-artwork rounded-(--global-border-radius-medium,7px) shadow-[0_1px_1px_rgba(0,0,0,0.01),0_2px_2px_rgba(0,0,0,0.01),0_4px_4px_rgba(0,0,0,0.02),0_8px_8px_rgba(0,0,0,0.03),0_14px_14px_rgba(0,0,0,0.03)] relative z-(--z-default) after:content-[''] after:absolute after:inset-0 after:rounded-[inherit] after:bg-[#333333]/30 after:opacity-(--scrimOpacity,0) after:transition-opacity after:duration-100 after:ease-in after:z-1">
+        <div className="media-card-artwork">
           <CardArtwork
             variant="cover"
             title={props.title}
@@ -144,7 +148,7 @@ export default function CollectionCard(props: CollectionCardProps) {
             containerClassName="w-full [--override-placeholder-bg-color:var(--artwork-bg-color)] [anchor-name:--shelf-first-artwork]"
           />
 
-          <div className="media-card-interaction rounded-[inherit] size-full opacity-(--scrimOpacity,0) absolute top-0 transition-(--global-transition) z-[calc(var(--z-default)+1)]">
+          <div className="media-card-interaction rounded-[inherit] size-full opacity-(--scrimOpacity,0) absolute top-0 transition-(--global-transition) z-[calc(var(--z-default)+1)] pointer-coarse:invisible">
             {props.slug && (
               <Link
                 className="text-transparent block size-full absolute inset-0 z-(--z-default) wrap-break-word"
@@ -208,7 +212,9 @@ export default function CollectionCard(props: CollectionCardProps) {
               />
             )}
 
-            {(props.menuContext || collectionMenuContext || props.menuItems) && (
+            {(props.menuContext ||
+              collectionMenuContext ||
+              props.menuItems) && (
               <CardContextMenu
                 id={cardId}
                 context={props.menuContext ?? collectionMenuContext}
@@ -226,8 +232,7 @@ export default function CollectionCard(props: CollectionCardProps) {
               !isSuggestLess) ||
             (props.resourceType === "playlists" &&
               favoritePlaylistIds.has(props.resourceId)) ||
-            (props.resourceType === "music-videos" &&
-              isMusicVideoFavorite)
+            (props.resourceType === "music-videos" && isMusicVideoFavorite)
           }
         />
       </>

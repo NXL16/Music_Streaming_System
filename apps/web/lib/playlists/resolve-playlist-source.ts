@@ -1,4 +1,4 @@
-import { getCatalogPlaylistTracks } from "@/lib/catalog/catalog.api";
+import { getCatalogPlaylist } from "@/lib/catalog/catalog.api";
 import type { ContextMenuContext } from "@/lib/context-menu/types";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { getLibraryResources } from "@/lib/library/library-resources.api";
@@ -70,7 +70,7 @@ export async function resolvePlaylistSource(
     return source;
   }
 
-  const playlist = await getCatalogPlaylistTracks(source.resourceId);
+  const playlist = await getCatalogPlaylist(source.resourceId);
   const tracks = playlist.data.flatMap((item) => {
     if (item.type !== "songs") return [];
     const song = playlist.resources.songs[item.id];
