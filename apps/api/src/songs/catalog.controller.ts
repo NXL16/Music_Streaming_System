@@ -97,11 +97,25 @@ export class CatalogController {
   }
 
   @Get('albums/:albumId')
-  getAlbum(
+  @UseGuards(StrictJwtAuthGuard)
+  async getAlbum(
+    @Req() req: Request,
     @Param('storefront') storefront: string,
     @Param('albumId') albumId: string,
   ) {
-    return this.songsService.getCatalogAlbum({ storefront, albumId });
+    const user = req.user as JwtUser;
+    const recommendedAlbumIds = (
+      await this.recommendationsService.getAlbumRelatedRecommendations({
+        userId: user.userId,
+        albumId,
+        limit: 60,
+      })
+    ).albumIds;
+    return this.songsService.getCatalogAlbum({
+      storefront,
+      albumId,
+      recommendedAlbumIds,
+    });
   }
 
   @Get('release-tracks/:releaseTrackId')

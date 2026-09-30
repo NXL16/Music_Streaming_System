@@ -206,6 +206,7 @@ export class CatalogService {
     const relatedShelfHints = await this.albumRelatedShelfHints(
       album,
       storefront,
+      request.recommendedAlbumIds,
     );
 
     return this.albumResponse(album, storefront, relatedShelfHints);
@@ -410,7 +411,7 @@ export class CatalogService {
       storefront,
       isCatalog: true,
       artistCredits: {
-        some: { artistId },
+        some: { artistId, role: 'artist' },
       },
     } satisfies Prisma.SongWhereInput;
 
@@ -543,6 +544,9 @@ export class CatalogService {
             where: {
               storefront,
               isPublic: true,
+              // Get Up, Chill and New Music are fixed Home products, not
+              // editorial placements for an album detail page.
+              playlistType: { not: 'system-personalized' },
               tracks: { some: { songId: { in: albumSongIds } } },
             },
             include: playlistCatalogBrowseInclude,
@@ -705,6 +709,7 @@ export class CatalogService {
               where: {
                 storefront,
                 isPublic: true,
+                playlistType: { not: 'system-personalized' },
                 tracks: { some: { songId: { in: albumSongIds } } },
               },
               include: playlistCatalogBrowseInclude,
@@ -1888,6 +1893,27 @@ export class CatalogService {
     },
   ): CatalogAlbumResource {
     const tracks = album.tracks ?? [];
+    const analyzedTracks = tracks.filter(
+      ({ song }) =>
+        song.audioAnalysisStatus === 'READY' &&
+        typeof song.audioBpm === 'number' &&
+        Number.isFinite(song.audioBpm) &&
+        typeof song.audioEnergy === 'number' &&
+        Number.isFinite(song.audioEnergy),
+    );
+    const audioTags = [
+      ...new Set(analyzedTracks.flatMap(({ song }) => song.audioTags)),
+    ];
+    const audioBpm = analyzedTracks.length
+      ? analyzedTracks.reduce((sum, { song }) => sum + (song.audioBpm ?? 0), 0) /
+        analyzedTracks.length
+      : 0;
+    const audioEnergy = analyzedTracks.length
+      ? analyzedTracks.reduce(
+          (sum, { song }) => sum + (song.audioEnergy ?? 0),
+          0,
+        ) / analyzedTracks.length
+      : 0;
     const artistData = album.artistCredits.map(({ artist }) =>
       this.reference(artist.id, 'artists', storefront),
     );
@@ -1910,6 +1936,15 @@ export class CatalogService {
         editorialVideoAssetId: album.editorialVideoAssetId,
         artwork: this.artwork(album.artwork),
         audioTraits: album.audioTraits,
+        // Album cards are the main Home surface. Aggregate the AI features of
+        // their analysed tracks so album ranking can use the same sound
+        // signals as Daily Mix without storing a second source of truth.
+        audioAnalysisCoverage: tracks.length
+          ? analyzedTracks.length / tracks.length
+          : 0,
+        audioBpm,
+        audioEnergy,
+        audioTags,
         contentRating: album.contentRating,
         copyright: album.copyright,
         genreNames: album.genreNames,
@@ -1948,55 +1983,81 @@ export class CatalogService {
   private async albumRelatedShelfHints(
     album: CatalogAlbumEntity,
     storefront: string,
+    recommendedAlbumIds: string[] = [],
+  ) {
+    const primaryArtists = this.primaryAlbumArtists(album);
+    const primaryArtistIds = primaryArtists.map(({ id }) => id);
+    return this.albumRelatedShelfAvailability(
+      album,
+      storefront,
+      primaryArtistIds,
+      recommendedAlbumIds,
+    );
+  }
+
+  private async albumRelatedShelfAvailability(
+    album: CatalogAlbumEntity,
+    storefront: string,
+    moreByArtistIds: string[],
+    recommendedAlbumIds: string[],
   ) {
     const primaryArtists = this.primaryAlbumArtists(album);
     const primaryArtist = primaryArtists[0];
     const primaryArtistIds = primaryArtists.map(({ id }) => id);
     const albumSongIds = album.tracks.map(({ songId }) => songId);
     const excludedAlbumIds = [album.id];
-
-    const [moreBy, exactFeaturedOn, youMightAlsoLike] = await Promise.all([
-      primaryArtistIds.length
-        ? this.prisma.album.findFirst({
+    const personalizedYouMightAlsoLike = recommendedAlbumIds.length
+      ? this.recommendedAlbumBrowse(
+          recommendedAlbumIds,
+          excludedAlbumIds,
+          storefront,
+        )
+      : null;
+    const [moreBy, exactFeaturedOn, genericYouMightAlsoLike] =
+      await Promise.all([
+        primaryArtistIds.length || moreByArtistIds.length
+          ? this.prisma.album.findFirst({
+              where: {
+                storefront,
+                id: { notIn: excludedAlbumIds },
+                ...this.moreByAlbumWhere(primaryArtistIds, moreByArtistIds),
+              },
+              select: { id: true },
+            })
+          : null,
+        albumSongIds.length
+          ? this.prisma.playlist.findFirst({
+              where: {
+                storefront,
+                isPublic: true,
+                playlistType: { not: 'system-personalized' },
+                tracks: { some: { songId: { in: albumSongIds } } },
+              },
+              select: { id: true },
+            })
+          : null,
+        personalizedYouMightAlsoLike ??
+          this.prisma.album.findFirst({
             where: {
               storefront,
               id: { notIn: excludedAlbumIds },
-              ...this.moreByAlbumWhere(primaryArtistIds, primaryArtistIds),
+              ...(album.genreNames.length
+                ? { genreNames: { hasSome: album.genreNames } }
+                : {}),
+              ...(primaryArtistIds.length
+                ? {
+                    artistCredits: {
+                      none: {
+                        artistId: { in: primaryArtistIds },
+                        isPrimary: true,
+                      },
+                    },
+                  }
+                : {}),
             },
             select: { id: true },
-          })
-        : null,
-      albumSongIds.length
-        ? this.prisma.playlist.findFirst({
-            where: {
-              storefront,
-              isPublic: true,
-              tracks: { some: { songId: { in: albumSongIds } } },
-            },
-            select: { id: true },
-          })
-        : null,
-      this.prisma.album.findFirst({
-        where: {
-          storefront,
-          id: { notIn: excludedAlbumIds },
-          ...(album.genreNames.length
-            ? { genreNames: { hasSome: album.genreNames } }
-            : {}),
-          ...(primaryArtistIds.length
-            ? {
-                artistCredits: {
-                  none: {
-                    artistId: { in: primaryArtistIds },
-                    isPrimary: true,
-                  },
-                },
-              }
-            : {}),
-        },
-        select: { id: true },
-      }),
-    ]);
+          }),
+      ]);
     const featuredOn =
       exactFeaturedOn ??
       (primaryArtist
@@ -2010,11 +2071,14 @@ export class CatalogService {
             select: { id: true },
           })
         : null);
-
     return {
       moreBy: Boolean(moreBy),
       featuredOn: Boolean(featuredOn),
-      youMightAlsoLike: Boolean(youMightAlsoLike),
+      youMightAlsoLike: Boolean(
+        Array.isArray(genericYouMightAlsoLike)
+          ? genericYouMightAlsoLike.length
+          : genericYouMightAlsoLike,
+      ),
     };
   }
 
@@ -2098,6 +2162,14 @@ export class CatalogService {
         audioLocale: song.audioLocale,
         audioTraits: song.audioTraits,
         moodTags: song.moodTags,
+        // These values are produced once by the upload-time audio analysis.
+        // They travel with the catalog snapshot so Recommendation can build a
+        // listener's audio taste without ever calling the GPU service on Home.
+        audioAnalysisStatus: song.audioAnalysisStatus,
+        audioAnalysisVersion: song.audioAnalysisVersion,
+        audioBpm: song.audioBpm ?? 0,
+        audioEnergy: song.audioEnergy ?? 0,
+        audioTags: song.audioTags,
         composerName: song.composerName,
         credits: song.artistCredits.map((credit) => ({
           artistId: credit.artist.id,
@@ -2454,7 +2526,9 @@ export class CatalogService {
 
       const albums = await this.prisma.album.findMany({
         where: { storefront },
-        include: albumCatalogBrowseInclude,
+        // Recommendation's sync feed needs track-level AI metadata to derive
+        // a compact album audio profile. Public browse remains lightweight.
+        include: syncById ? albumCatalogInclude : albumCatalogBrowseInclude,
         orderBy: syncById ? { id: 'asc' } : albumOrderBy,
         cursor: syncById && request.cursor ? { id: request.cursor } : undefined,
         skip: syncById && request.cursor ? 1 : offset,
@@ -2467,7 +2541,10 @@ export class CatalogService {
         data: page.map((a) => this.reference(a.id, 'albums', storefront)),
         resources: {
           albums: Object.fromEntries(
-            page.map((a) => [a.id, this.albumResource(a, storefront)]),
+            page.map((a) => [
+              a.id,
+              this.albumResource(a as AlbumResourceInput, storefront),
+            ]),
           ),
           playlists: {},
           songs: {},
@@ -2565,7 +2642,7 @@ export class CatalogService {
 
     const requestedTypes = request.types?.length
       ? request.types
-      : ['songs', 'artists', 'albums'];
+      : ['songs', 'artists', 'albums', 'playlists'];
     const wanted = new Set(requestedTypes);
 
     // Short-circuit on an empty query: LIKE '%%' would scan every row and
@@ -2577,13 +2654,34 @@ export class CatalogService {
       };
     }
 
-    const [songs, artists, albums] = await Promise.all([
+    const [songs, artists, albums, playlists] = await Promise.all([
       wanted.has('songs')
         ? this.prisma.song.findMany({
             where: {
               storefront,
               isCatalog: true,
-              catalogTitle: { contains: query, mode: 'insensitive' },
+              OR: [
+                { catalogTitle: { contains: query, mode: 'insensitive' } },
+                {
+                  artistCredits: {
+                    some: {
+                      role: 'artist',
+                      artist: {
+                        name: { contains: query, mode: 'insensitive' },
+                      },
+                    },
+                  },
+                },
+                {
+                  albumTracks: {
+                    some: {
+                      album: {
+                        name: { contains: query, mode: 'insensitive' },
+                      },
+                    },
+                  },
+                },
+              ],
             },
             include: songCatalogInclude,
             orderBy: { catalogTitle: 'asc' },
@@ -2604,31 +2702,86 @@ export class CatalogService {
         ? this.prisma.album.findMany({
             where: {
               storefront,
-              name: { contains: query, mode: 'insensitive' },
+              OR: [
+                { name: { contains: query, mode: 'insensitive' } },
+                {
+                  artistName: { contains: query, mode: 'insensitive' },
+                },
+                {
+                  artistCredits: {
+                    some: {
+                      artist: {
+                        name: { contains: query, mode: 'insensitive' },
+                      },
+                    },
+                  },
+                },
+              ],
             },
             include: albumCatalogBrowseInclude,
             orderBy: { name: 'asc' },
             take: limit,
           })
         : Promise.resolve([] as CatalogAlbumBrowseEntity[]),
+      wanted.has('playlists')
+        ? this.prisma.playlist.findMany({
+            where: {
+              storefront,
+              isPublic: true,
+              name: { contains: query, mode: 'insensitive' },
+            },
+            include: playlistCatalogBrowseInclude,
+            orderBy: [{ name: 'asc' }, { id: 'asc' }],
+            take: limit,
+          })
+        : Promise.resolve([] as CatalogPlaylistBrowseEntity[]),
     ]);
+    // Search cards need linked artist resources even when the artist itself
+    // does not match the query. Without these, a song/album result loses its
+    // clickable artist metadata despite the relation already being loaded.
+    const searchArtists = new Map(
+      [
+        ...artists,
+        ...songs.flatMap((song) =>
+          song.artistCredits.map((credit) => credit.artist),
+        ),
+        ...albums.flatMap((album) =>
+          album.artistCredits.map((credit) => credit.artist),
+        ),
+      ].map((artist) => [artist.id, artist] as const),
+    );
 
     return {
       data: [
         ...songs.map((s) => this.reference(s.id, 'songs', storefront)),
         ...artists.map((a) => this.reference(a.id, 'artists', storefront)),
         ...albums.map((a) => this.reference(a.id, 'albums', storefront)),
+        ...playlists.map((p) => this.reference(p.id, 'playlists', storefront)),
       ],
       resources: {
         albums: Object.fromEntries(
           albums.map((a) => [a.id, this.albumResource(a, storefront)]),
         ),
-        playlists: {},
+        playlists: Object.fromEntries(
+          playlists.map((p) => [
+            p.id,
+            this.playlistResource(
+              p,
+              storefront,
+              p.tracks.map((track) =>
+                this.reference(track.songId, 'songs', storefront),
+              ),
+            ),
+          ]),
+        ),
         songs: Object.fromEntries(
           songs.map((s) => [s.id, this.songResource(s, storefront)]),
         ),
         artists: Object.fromEntries(
-          artists.map((a) => [a.id, this.artistResource(a, storefront)]),
+          [...searchArtists.values()].map((artist) => [
+            artist.id,
+            this.artistResource(artist, storefront),
+          ]),
         ),
       },
     };

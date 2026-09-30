@@ -137,9 +137,6 @@ model Song {
   audioLocale               String              @default("") @db.VarChar(32)
   audioTraits               String[]            @default([])
   moodTags                  String[]            @default([])
-  moodAnalysisVersion       String              @default("") @db.VarChar(128)
-  moodAnalysisScores        Json?
-  moodAnalyzedAt            DateTime?           @db.Timestamptz
   audioAnalysisStatus       AudioAnalysisStatus @default(PENDING)
   audioAnalysisVersion      String              @default("") @db.VarChar(128)
   audioBpm                  Float?
@@ -181,7 +178,6 @@ model Song {
   @@index([storefront, isCatalog, releaseDate(sort: Desc), id(sort: Desc)])
   @@index([catalogTitle])
   @@index([isrc])
-  @@index([moodAnalyzedAt])
   @@index([audioAnalysisStatus, audioAnalyzedAt])
   @@index([audioTags], type: Gin)
   @@index([moodTags], type: Gin)

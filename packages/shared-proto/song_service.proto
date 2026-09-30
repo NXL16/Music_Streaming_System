@@ -584,6 +584,7 @@ message PlaylistTrackResponse {
 message GetCatalogAlbumRequest {
   string storefront = 1;
   string album_id   = 2;
+  repeated string recommended_album_ids = 3;
 }
 
 message GetCatalogPlaylistRequest {
@@ -650,10 +651,10 @@ message GetCatalogArtistSongVideosRequest {
 }
 
 message CatalogSongVideo {
-  string id              = 1;
-  string song_id         = 2;
-  string video_asset_id  = 3;
-  string kind            = 4;
+  string id             = 1;
+  string song_id        = 2;
+  string video_asset_id = 3;
+  string kind           = 4;
   reserved 5; // Origin manifest URLs are never exposed to catalog clients.
   string poster_url      = 6;
   int32  duration_millis = 7;
@@ -723,6 +724,7 @@ message GetCatalogAlbumRelatedResponse {
   string          next_cursor                  = 8;
 }
 
+
 message CatalogResourceIdentifier {
   string type = 1;
   string id   = 2;
@@ -766,12 +768,12 @@ message SaveCatalogArtistDraftRequest {
 }
 
 message SaveCatalogSongDraftRequest {
-  string                              resource_id                  = 1;
-  string                              storefront                   = 2;
-  string                              actor_user_id                = 3;
-  string                              name                         = 4;
-  string                              album_name                   = 5;
-  string                              artist_name                  = 6;
+  string resource_id   = 1;
+  string storefront    = 2;
+  string actor_user_id = 3;
+  string name          = 4;
+  string album_name    = 5;
+  string artist_name   = 6;
   reserved 7, 23, 29, 30;
   string                              audio_locale                 = 8;
   repeated string                     audio_traits                 = 9;
@@ -1089,38 +1091,44 @@ message CatalogArtistAttributes {
 }
 
 message CatalogSongAttributes {
-  string                                album_name                   = 1;
-  string                                artist_name                  = 2;
-  // Resolved from the Album relationship selected for this presentation;
-  // reusable audio records do not own artwork.
-  CatalogArtwork                        artwork                      = 3;
-  string                                audio_locale                 = 4;
-  repeated string                       audio_traits                 = 5;
-  string                                composer_name                = 6;
-  string                                content_rating               = 7;
-  int32                                 disc_number                  = 8;
-  int32                                 duration_in_millis           = 9;
-  repeated string                       genre_names                  = 10;
-  bool                                  has_lyrics                   = 11;
-  bool                                  has_time_synced_lyrics       = 12;
-  string                                isrc                         = 13;
-  string                                name                         = 14;
-  CatalogPlayParams                     play_params                  = 15;
-  repeated CatalogPreview               previews                     = 16;
-  string                                release_date                 = 17;
-  int32                                 track_number                 = 18;
-  string                                url                          = 19;
-  google.protobuf.Struct                extended_asset_urls          = 21;
-  repeated google.protobuf.Struct       offers                       = 22;
-  bool                                  is_high_resolution_master    = 23;
-  bool                                  is_studio_mastered           = 24;
-  bool                                  is_vocal_attenuation_allowed = 25;
+  string album_name  = 1;
+  string artist_name = 2;
+
+  CatalogArtwork                  artwork                      = 3;
+  string                          audio_locale                 = 4;
+  repeated string                 audio_traits                 = 5;
+  string                          composer_name                = 6;
+  string                          content_rating               = 7;
+  int32                           disc_number                  = 8;
+  int32                           duration_in_millis           = 9;
+  repeated string                 genre_names                  = 10;
+  bool                            has_lyrics                   = 11;
+  bool                            has_time_synced_lyrics       = 12;
+  string                          isrc                         = 13;
+  string                          name                         = 14;
+  CatalogPlayParams               play_params                  = 15;
+  repeated CatalogPreview         previews                     = 16;
+  string                          release_date                 = 17;
+  int32                           track_number                 = 18;
+  string                          url                          = 19;
+  google.protobuf.Struct          extended_asset_urls          = 21;
+  repeated google.protobuf.Struct offers                       = 22;
+  bool                            is_high_resolution_master    = 23;
+  bool                            is_studio_mastered           = 24;
+  bool                            is_vocal_attenuation_allowed = 25;
   reserved 20, 26, 27;
-  repeated string                       mood_tags                    = 28;
-  repeated CatalogSongCredit            credits                      = 29;
-  repeated CatalogSongContributorCredit contributor_credits          = 30;
+  repeated string                       mood_tags           = 28;
+  repeated CatalogSongCredit            credits             = 29;
+  repeated CatalogSongContributorCredit contributor_credits = 30;
   // Denormalized billed artists for catalog/recommendation filtering.
-  repeated string                       artist_names                 = 31;
+  repeated string artist_names = 31;
+  // Upload-time audio intelligence. These are metadata only; Recommendation
+  // consumes them from catalog snapshots and never invokes analysis on reads.
+  string          audio_analysis_status  = 32;
+  string          audio_analysis_version = 33;
+  double          audio_bpm              = 34;
+  double          audio_energy           = 35;
+  repeated string audio_tags             = 36;
 }
 
 message CatalogSongCredit {
@@ -1167,6 +1175,11 @@ message CatalogAlbumAttributes {
   string                          canonical_release_id       = 26;
   CatalogAlbumRelatedShelfHints   related_shelf_hints        = 27;
   string                          release_type               = 28;
+  // Aggregate of READY song analyses for album-level Home ranking.
+  double          audio_analysis_coverage = 29;
+  double          audio_bpm               = 30;
+  double          audio_energy            = 31;
+  repeated string audio_tags              = 32;
 }
 
 message CatalogAlbumRelatedShelfHints {
@@ -1262,15 +1275,13 @@ message BrowseCatalogRequest {
 message SearchCatalogRequest {
   string storefront = 1;
   string query      = 2;
-  // Per-group result cap. Applied independently to songs, artists and albums.
+
   int32 limit = 3;
-  // Optional whitelist of resource types to search. Empty means search the
-  // default set (songs, artists, albums).
+
   repeated string types = 4;
 }
 
 message SearchCatalogResponse {
-  // References grouped by relevance, ordered songs → artists → albums.
   repeated CatalogReference data      = 1;
   CatalogResources          resources = 2;
 }

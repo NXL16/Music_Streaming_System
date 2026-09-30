@@ -632,8 +632,8 @@ export class SongsService {
             : undefined;
 
         // Catalog is authoritative for a saved public playlist. A seeded or
-        // generated UserPlaylist can share a human-readable id (for example
-        // "daily-mix-3"), but it must not turn a public Library entry into the
+        // generated UserPlaylist can share a human-readable id, but it must
+        // not turn a public Library entry into the
         // private `/library/playlist/:id` route.
         if (userPlaylist && !playlist) {
           return {
@@ -893,8 +893,9 @@ export class SongsService {
 
     if (source.resourceType === 'albums') {
       const catalog = await this.getCatalogAlbum({
-        storefront: 'vn',
-        albumId: source.resourceId,
+      storefront: 'vn',
+      albumId: source.resourceId,
+      recommendedAlbumIds: [],
       });
 
       return this.uniqueTrackSources((
@@ -1123,6 +1124,7 @@ export class SongsService {
       nextCursor: response.nextCursor,
     };
   }
+
 
   async getCatalogArtistSongs(
     data: GetCatalogArtistSongsRequest,

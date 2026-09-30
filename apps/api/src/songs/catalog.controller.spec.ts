@@ -7,6 +7,8 @@ describe('ArtistStudioCatalogController lyric drafts', () => {
     getSong: jest.fn(),
     getSongLyrics: jest.fn(),
     upsertSongLyrics: jest.fn(),
+    getCatalogResources: jest.fn(),
+    checkArtistPermission: jest.fn(),
   };
   const controller = new ArtistStudioCatalogController(songsService as never);
 
@@ -16,6 +18,16 @@ describe('ArtistStudioCatalogController lyric drafts', () => {
     songsService.getSong.mockResolvedValue({
       song: { id: 'song-1', uploaderId: 'owner-1' },
     });
+    songsService.getCatalogResources.mockResolvedValue({
+      resources: {
+        songs: {
+          'song-1': {
+            relationships: { artists: { data: [{ id: 'artist-1' }] } },
+          },
+        },
+      },
+    });
+    songsService.checkArtistPermission.mockResolvedValue({ allowed: false });
 
     await expect(
       controller.getSongLyrics(
