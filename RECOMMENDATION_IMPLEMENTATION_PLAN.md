@@ -114,7 +114,7 @@ Candidate gồm: artist/genre/mood/BPM affinity, nội dung Library/Favourite t�
 - [x] Nối Follow Artist (+5/-5): trạng thái bền vững, UI optimistic và chỉ ghi event khi trạng thái đổi thật.
 - [x] Nối Play Next / Play Last (+2): chỉ ghi sau khi queue cục bộ đã thêm thành công; lỗi telemetry không ảnh hưởng playback.
 - [x] Nối Hide / Undo Suggest Less: lưu trạng thái server-side, đồng bộ giữa thiết bị và loại nội dung đã ẩn trước khi publish Home cá nhân.
-- [ ] Outbox/retry cho cross-service delivery cần đảm bảo.
+- [x] Outbox/retry cho cross-service delivery: transactional preference outbox, idempotent event ID, lease, exponential retry và dead-letter.
 
 ### Phase 3.5 — Chuẩn hóa tín hiệu nghe
 
@@ -143,7 +143,7 @@ Candidate gồm: artist/genre/mood/BPM affinity, nội dung Library/Favourite t�
 
 - [ ] Two-Tower khi có đủ hành vi user thật.
 - [ ] Deep reranker khi evaluation chứng minh hiệu quả.
-- [ ] Không dùng LLM mỗi lần mở Home.
+- [x] Không dùng LLM mỗi lần mở Home.
 
 ## File đã thêm/sửa
 

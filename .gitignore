@@ -29,6 +29,9 @@ build/
 .seed-state/
 target/
 Cargo.lock
+# Tauri is an application (not a Rust library), so pin its native dependencies
+# for reproducible Windows installer builds.
+!apps/web/tauri/Cargo.lock
 
 # Environment
 .env

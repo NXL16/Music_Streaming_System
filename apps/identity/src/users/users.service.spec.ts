@@ -153,6 +153,7 @@ describe('UsersService.create provisioning outbox', () => {
         email: 'linh@example.com',
         password: 'hashed-password',
         displayName: 'Linh',
+        role: 'USER',
       },
     });
     expect(insertOutbox).toHaveBeenCalledTimes(1);
