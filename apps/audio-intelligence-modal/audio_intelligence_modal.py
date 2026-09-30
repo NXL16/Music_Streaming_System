@@ -29,8 +29,12 @@ TAGS = [
 
 app = modal.App(APP_NAME)
 model_cache = modal.Volume.from_name("clap-model-cache", create_if_missing=True)
-image = modal.Image.debian_slim(python_version="3.11").pip_install(
-    "boto3", "fastapi[standard]", "transformers>=4.51", "torch", "torchaudio", "librosa",
+image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .apt_install("ffmpeg")
+    .pip_install(
+        "boto3", "fastapi[standard]", "transformers>=4.51", "torch", "torchaudio", "librosa",
+    )
 )
 _model = None
 _processor = None

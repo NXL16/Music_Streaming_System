@@ -1,4 +1,4 @@
-import { Controller, UseGuards } from '@nestjs/common';
+import { Controller, UseGuards } from "@nestjs/common";
 import {
   AssetResponse,
   AssetServiceController,
@@ -17,9 +17,9 @@ import {
   RequestAssetUploadResponse,
   SyncAssetUsagesRequest,
   SyncAssetUsagesResponse,
-} from '@musical/shared-proto';
-import { AssetsService } from './assets.service';
-import { InternalGrpcGuard } from '../common/guards/internal-grpc.guard';
+} from "@musical/shared-proto";
+import { AssetsService } from "./assets.service";
+import { InternalGrpcGuard } from "../common/guards/internal-grpc.guard";
 
 @Controller()
 @AssetServiceControllerMethods()
@@ -69,9 +69,7 @@ export class AssetsController implements AssetServiceController {
     return this.assetsService.reconcileUsages(request);
   }
 
-  listAssetUsages(
-    request: GetAssetRequest,
-  ): Promise<ListAssetUsagesResponse> {
+  listAssetUsages(request: GetAssetRequest): Promise<ListAssetUsagesResponse> {
     return this.assetsService.listUsages(request);
   }
 }

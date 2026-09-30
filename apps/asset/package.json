@@ -14,6 +14,7 @@
     "lint": "eslint \"{src,test}/**/*.ts\"",
     "lint:fix": "eslint \"{src,test}/**/*.ts\" --fix",
     "test": "tsx --test src/assets/assets.service.spec.ts src/processing/asset-artifact-retention.service.spec.ts src/processing/asset-processing-worker.service.spec.ts src/processing/asset-processor.service.spec.ts src/storage/storage.service.spec.ts",
+    "artwork:theme:refresh": "tsx src/scripts/refresh-artwork-theme.ts",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
@@ -22,6 +23,7 @@
     "@grpc/grpc-js": "^1.14.4",
     "@musical/shared-constants": "workspace:*",
     "@musical/shared-proto": "workspace:*",
+    "@musical/shared-types": "workspace:*",
     "@nestjs/common": "^11.1.28",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.1.28",

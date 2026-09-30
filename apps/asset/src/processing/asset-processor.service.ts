@@ -15,6 +15,7 @@ import {
   parseVideoKeyEncryptionKey,
 } from "../common/crypto/video-key-encryption";
 import { AssetProcessingResult, MediaRendition } from "./asset-processor.types";
+import { deriveArtworkPalette } from "./artwork-theme";
 
 const NORMAL_ARTWORK_WIDTHS = [40, 80, 296, 316, 592, 632];
 const STATION_ARTWORK_WIDTHS = [296, 316, 592, 632];
@@ -30,37 +31,13 @@ const HERO_EXTENSION_STRIP = 48;
 const HERO_EXTENSION_BLUR_SIGMA = 28;
 const HERO_DARK_EDGE_MIN_LUMINANCE = 10;
 const HERO_DARK_EDGE_MEAN_LUMINANCE = 35;
+const HERO_NEUTRAL_BLACK_MAX_CHROMA = 7;
 const HERO_TEXT_REGION_START = 0.78;
-const HERO_TEXT_CONTRAST_PERCENTILE = 0.1;
-const MINIMUM_TEXT_CONTRAST = 4.5;
-const HERO_TEXT_PRIMARY = "ffffff";
-const HERO_TEXT_SECONDARY = "ebebf5";
-const HERO_TEXT_TERTIARY = "c7c7cc";
-const HERO_TEXT_QUATERNARY = "8e8e93";
-const HERO_DARK_TEXT_PRIMARY = "000000";
-const HERO_DARK_TEXT_SECONDARY = "3a3a3c";
-const HERO_DARK_TEXT_TERTIARY = "636366";
 const PROCESS_TIMEOUT_MS = 30 * 60 * 1000;
 const PERCEPTUAL_HASH_WIDTH = 9;
 const PERCEPTUAL_HASH_HEIGHT = 8;
-
-interface ArtworkPalette {
+interface HeroBackgroundPalette {
   bgColor: string;
-  textColor1: string;
-  textColor2: string;
-  textColor3: string;
-  textColor4: string;
-  hasP3: boolean;
-}
-
-interface HeroTextPalette {
-  bgColor: string;
-  textColor1: string;
-  textColor2: string;
-  textColor3: string;
-  textColor4: string;
-  scrimColor?: string;
-  scrimOpacity?: number;
 }
 
 interface ProbeResult {
@@ -256,7 +233,7 @@ export class AssetProcessorService implements OnModuleDestroy {
     if (width <= 0 || height <= 0) {
       throw new Error("ARTWORK_DIMENSIONS_INVALID");
     }
-    const palette = await this.artworkPalette(normalizedSource);
+    const palette = await deriveArtworkPalette(normalizedSource);
     const perceptualHash = await this.perceptualHash(normalizedSource);
 
     const normalMaximumWidth = Math.min(
@@ -303,21 +280,21 @@ export class AssetProcessorService implements OnModuleDestroy {
     const heroSource =
       extensionHeight === 0
         ? await sharp(normalizedSource)
-            .resize({
-              width,
-              height: heroHeight,
-              fit: "cover",
-              position: "centre",
-            })
-            .toBuffer()
-        : await this.createHeroArtworkSource(
-            normalizedSource,
+          .resize({
             width,
-            height,
-            heroHeight,
-            extensionHeight,
-          );
-    const heroPalette = await this.heroTextPalette(heroSource);
+            height: heroHeight,
+            fit: "cover",
+            position: "centre",
+          })
+          .toBuffer()
+        : await this.createHeroArtworkSource(
+          normalizedSource,
+          width,
+          height,
+          heroHeight,
+          extensionHeight,
+        );
+    const heroBackgroundPalette = await this.heroBackgroundPalette(heroSource);
     const heroMaximumWidth = Math.min(
       width,
       HERO_ARTWORK_WIDTHS.at(-1) ?? width,
@@ -365,7 +342,7 @@ export class AssetProcessorService implements OnModuleDestroy {
         hero: {
           width,
           height: heroHeight,
-          palette: heroPalette,
+          palette: heroBackgroundPalette,
           renditions: heroRenditions,
         },
       }),
@@ -424,13 +401,14 @@ export class AssetProcessorService implements OnModuleDestroy {
 
     const minLuminance = 0.299 * rMin + 0.587 * gMin + 0.114 * bMin;
     const meanLuminance = 0.299 * rMean + 0.587 * gMean + 0.114 * bMean;
+    const edgeChroma = Math.max(rMean, gMean, bMean) - Math.min(rMean, gMean, bMean);
 
-    // BRANCH 1: near-black bottom edge. Build a pure black block directly rather
-    // than stretching a razor-thin slice, which would smear grey/colour over any
-    // text. overlap = 0 so the fill starts right below the source's last row.
+    // BRANCH 1: neutral near-black bottom edge. Dark blue, red, and purple have
+    // similarly low luminance but need the blurred colour extension below.
     if (
       minLuminance < HERO_DARK_EDGE_MIN_LUMINANCE &&
-      meanLuminance < HERO_DARK_EDGE_MEAN_LUMINANCE
+      meanLuminance < HERO_DARK_EDGE_MEAN_LUMINANCE &&
+      edgeChroma <= HERO_NEUTRAL_BLACK_MAX_CHROMA
     ) {
       const blackExtension = await sharp({
         create: {
@@ -533,35 +511,6 @@ export class AssetProcessorService implements OnModuleDestroy {
     return { buffer, overlap };
   }
 
-  private async artworkPalette(source: Buffer): Promise<ArtworkPalette> {
-    const dominant = (await sharp(source).stats()).dominant;
-    const background = {
-      r: dominant.r,
-      g: dominant.g,
-      b: dominant.b,
-    };
-    const luminance =
-      (0.2126 * background.r + 0.7152 * background.g + 0.0722 * background.b) /
-      255;
-    const foreground =
-      luminance > 0.52 ? { r: 0, g: 0, b: 0 } : { r: 255, g: 255, b: 255 };
-    const textColor = (opacity: number) =>
-      this.hexColor({
-        r: Math.round(background.r * (1 - opacity) + foreground.r * opacity),
-        g: Math.round(background.g * (1 - opacity) + foreground.g * opacity),
-        b: Math.round(background.b * (1 - opacity) + foreground.b * opacity),
-      });
-
-    return {
-      bgColor: this.hexColor(background),
-      textColor1: textColor(1),
-      textColor2: textColor(0.82),
-      textColor3: textColor(0.64),
-      textColor4: textColor(0.46),
-      hasP3: false,
-    };
-  }
-
   /**
    * Difference hash (dHash) is deliberately computed from the normalized
    * source, so file format, compression and EXIF rotation do not affect the
@@ -585,19 +534,15 @@ export class AssetProcessorService implements OnModuleDestroy {
     ).join("");
   }
 
-  private async heroTextPalette(source: Buffer): Promise<HeroTextPalette> {
+  private async heroBackgroundPalette(
+    source: Buffer,
+  ): Promise<HeroBackgroundPalette> {
     const metadata = await sharp(source).metadata();
     const width = metadata.width ?? 0;
     const height = metadata.height ?? 0;
     if (width <= 0 || height <= 0) {
       return {
         bgColor: "2c2c2e",
-        textColor1: HERO_TEXT_PRIMARY,
-        textColor2: HERO_TEXT_SECONDARY,
-        textColor3: HERO_TEXT_TERTIARY,
-        textColor4: HERO_TEXT_QUATERNARY,
-        scrimColor: "000000",
-        scrimOpacity: 0.3,
       };
     }
 
@@ -612,7 +557,6 @@ export class AssetProcessorService implements OnModuleDestroy {
       .raw()
       .toBuffer({ resolveWithObject: true });
 
-    const luminances: number[] = [];
     let redTotal = 0;
     let greenTotal = 0;
     let blueTotal = 0;
@@ -623,74 +567,18 @@ export class AssetProcessorService implements OnModuleDestroy {
       redTotal += red;
       greenTotal += green;
       blueTotal += blue;
-      luminances.push(this.relativeLuminance(red, green, blue));
     }
-    luminances.sort((left, right) => left - right);
-
-    const brightest = this.percentile(
-      luminances,
-      1 - HERO_TEXT_CONTRAST_PERCENTILE,
-    );
-    const sampleCount = Math.max(1, luminances.length);
+    const sampleCount = Math.max(1, data.length / info.channels);
     const background = {
       r: Math.round(redTotal / sampleCount),
       g: Math.round(greenTotal / sampleCount),
       b: Math.round(blueTotal / sampleCount),
     };
-    const usesDarkText = this.isNearWhite(background);
-    if (usesDarkText) {
-      return {
-        bgColor: this.hexColor(background),
-        textColor1: HERO_DARK_TEXT_PRIMARY,
-        textColor2: HERO_DARK_TEXT_SECONDARY,
-        textColor3: HERO_DARK_TEXT_TERTIARY,
-        textColor4: HERO_TEXT_QUATERNARY,
-      };
-    }
-
-    const maximumReadableLuminance = 1.05 / MINIMUM_TEXT_CONTRAST - 0.05;
-    const requiredOpacity =
-      brightest <= maximumReadableLuminance
-        ? 0
-        : 1 - maximumReadableLuminance / brightest;
     return {
       bgColor: this.hexColor(background),
-      textColor1: HERO_TEXT_PRIMARY,
-      textColor2: HERO_TEXT_SECONDARY,
-      textColor3: HERO_TEXT_TERTIARY,
-      textColor4: HERO_TEXT_QUATERNARY,
-      scrimColor: "000000",
-      scrimOpacity: Math.max(0.24, Math.min(0.72, requiredOpacity + 0.08)),
     };
   }
 
-  private relativeLuminance(red: number, green: number, blue: number) {
-    const linear = (channel: number) => {
-      const value = channel / 255;
-      return value <= 0.04045
-        ? value / 12.92
-        : ((value + 0.055) / 1.055) ** 2.4;
-    };
-
-    return (
-      0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
-    );
-  }
-
-  private isNearWhite(color: { r: number; g: number; b: number }): boolean {
-    const maximum = Math.max(color.r, color.g, color.b);
-    const minimum = Math.min(color.r, color.g, color.b);
-    return maximum >= 238 && minimum >= 220 && maximum - minimum <= 28;
-  }
-
-  private percentile(values: number[], percentile: number) {
-    if (!values.length) return 0;
-    const index = Math.min(
-      values.length - 1,
-      Math.max(0, Math.floor((values.length - 1) * percentile)),
-    );
-    return values[index] ?? 0;
-  }
 
   private hexColor(color: { r: number; g: number; b: number }): string {
     return [color.r, color.g, color.b]
@@ -706,12 +594,6 @@ export class AssetProcessorService implements OnModuleDestroy {
     const sourcePath = join(workDirectory, `source${sourceExtension}`);
     const rawPosterPath = join(workDirectory, "poster-raw.png");
     const posterWidths = [320, 480, 640, 960, 1280, 1920, 2400];
-    const posterRenditions = posterWidths.map((width) => ({
-      width,
-      height: Math.round((width * 9) / 16),
-      filename: `poster-${width}w.webp`,
-      path: join(workDirectory, `poster-${width}w.webp`),
-    }));
 
     const TARGET_RESOLUTIONS = [
       { name: "720p", width: 1280, bitrate: "2800k", bandwidth: 2800000 },
@@ -739,6 +621,16 @@ export class AssetProcessorService implements OnModuleDestroy {
       ) {
         throw new Error("VIDEO_METADATA_INVALID");
       }
+
+      // A poster is also the visual fallback for the video. Preserve the
+      // source aspect ratio so square and portrait editorial media never
+      // becomes a cropped 16:9 image before it reaches the client.
+      const posterRenditions = posterWidths.map((width) => ({
+        width,
+        height: Math.round((width * sourceHeight) / sourceWidth),
+        filename: `poster-${width}w.webp`,
+        path: join(workDirectory, `poster-${width}w.webp`),
+      }));
 
       // Filter resolutions to only target widths <= sourceWidth
       const activeResolutions = TARGET_RESOLUTIONS.filter(
@@ -820,11 +712,12 @@ export class AssetProcessorService implements OnModuleDestroy {
         ]);
       }
 
-      // Extract raw poster frame
+      // Extract the first frame. The poster must match the initial visual
+      // state users see before an ambient video begins playing.
       await this.run(this.ffmpegPath, [
         "-y",
         "-ss",
-        String(Math.min(1, durationSeconds / 10)),
+        "0",
         "-i",
         sourcePath,
         "-frames:v",
@@ -832,8 +725,8 @@ export class AssetProcessorService implements OnModuleDestroy {
         rawPosterPath,
       ]);
 
-      // Responsive 16:9 WebP posters let shelf cards load a compact image,
-      // while the detail page can still use a high-density poster.
+      // Responsive WebP posters let cards load a compact image while keeping
+      // the source aspect ratio for square and portrait layouts.
       for (const poster of posterRenditions) {
         await sharp(rawPosterPath)
           .resize(poster.width, poster.height, { fit: "cover" })
@@ -994,12 +887,12 @@ export class AssetProcessorService implements OnModuleDestroy {
         }),
         ...(videoEncryption
           ? {
-              videoEncryption: {
-                ciphertext: videoEncryption.ciphertext,
-                iv: videoEncryption.encryptionIv,
-                authTag: videoEncryption.authTag,
-              },
-            }
+            videoEncryption: {
+              ciphertext: videoEncryption.ciphertext,
+              iv: videoEncryption.encryptionIv,
+              authTag: videoEncryption.authTag,
+            },
+          }
           : {}),
       };
     } finally {

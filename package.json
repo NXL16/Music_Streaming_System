@@ -9,6 +9,7 @@
     "dev:production": "node tools/scripts/dev.mjs production",
     "station-artwork:preview": "pnpm --dir tools/station-artwork-preview start",
     "artist-station-artwork:preview": "pnpm --dir tools/artist-station-artwork-preview start",
+    "artwork:theme:refresh": "pnpm --filter asset artwork:theme:refresh",
     "prebuild": "pnpm proto:gen",
     "build": "turbo run build",
     "test": "turbo run test -- --passWithNoTests",
