@@ -4,14 +4,9 @@ import { readFileSync, existsSync, mkdirSync, renameSync, writeFileSync } from '
 import { spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..', '..');
-const require = createRequire(import.meta.url);
-const { SONG_CREDIT_ROLE_GROUPS } = require(
-  join(root, 'packages', 'shared-constants', 'dist', 'index.js'),
-);
 const config = loadEnv(join(here, '.env'));
 const workerConfig = loadEnv(join(root, 'apps', 'worker', '.env'));
 const baseUrl = (config.BASE_URL || 'http://localhost:9999/v1').replace(/\/+$/, '');
@@ -30,6 +25,7 @@ const appleMusicHeaders = {
 };
 const appleMotionCache = new Map();
 const systemMediaUploads = new Map();
+const musicVideoPublishes = new Map();
 const EDITORIAL_VIDEO_TYPES = new Set([
   'video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska',
 ]);
@@ -45,13 +41,26 @@ const job = {
   activities: [],
   outputBuffers: { stdout: '', stderr: '' },
   cancelRequested: false,
-  creditReview: null,
   current: null,
   history: readHistory(),
 };
 const artworkThemeRefresh = { running: false };
 const MAX_JSON_BODY_BYTES = 25 * 1024 * 1024;
 const MAX_ARTWORK_IMAGE_FILE_BYTES = 8 * 1024 * 1024;
+const MAX_MUSIC_VIDEO_FILE_BYTES = 500 * 1024 * 1024;
+const UUID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+const assetReadyWaitTimeoutMs = positiveConfigInteger(
+  config.SEED_ASSET_READY_WAIT_TIMEOUT_MS,
+  30 * 60 * 1_000,
+);
+const assetReadyWaitPollMs = positiveConfigInteger(
+  config.SEED_ASSET_READY_WAIT_POLL_MS,
+  3_000,
+);
+const mediaTransferTimeoutMs = positiveConfigInteger(
+  config.SEED_MEDIA_TRANSFER_TIMEOUT_MS,
+  60 * 60 * 1_000,
+);
 
 class RequestError extends Error {
   constructor(statusCode, message) {
@@ -60,13 +69,20 @@ class RequestError extends Error {
   }
 }
 
+function positiveConfigInteger(value, fallback) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 function normalizeArtistName(value) {
   return String(value || '')
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/đ/g, 'd')
-    .replace(/[^a-z0-9]+/g, ' ')
+    // Preserve CJK and other Unicode letters so the release picker uses the
+    // same matching semantics as the seed process.
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim()
     .replace(/\s+/g, ' ');
 }
@@ -168,14 +184,6 @@ function validJobSecret(req) {
   );
 }
 
-function clearCreditReview(result = { credits: [] }) {
-  const pending = job.creditReview;
-  if (!pending) return;
-  job.creditReview = null;
-  pending.resolve(result);
-  publish('credit-review', null);
-}
-
 function readHistory() {
   try {
     const parsed = JSON.parse(readFileSync(historyPath, 'utf8'));
@@ -239,10 +247,10 @@ function publishProgress() {
   publish('progress', progressSnapshot());
 }
 
-function updateSong(title, status, detail = '', songId = '') {
+function updateSong(title, status, detail = '', songId = '', progressKey = '') {
   const current = job.current;
   if (!current || !title) return;
-  const key = title.trim().toLocaleLowerCase('vi');
+  const key = progressKey || title.trim().toLocaleLowerCase('vi');
   const previous = current.songs[key] || { title: title.trim(), status: 'queued' };
   current.songs[key] = {
     ...previous,
@@ -337,6 +345,7 @@ async function prepareSystemMediaUpload({
   contentType,
   checksum,
   sizeBytes,
+  posterTimestampMillis = 0,
   allowedContentTypes,
   maxBytes,
   label,
@@ -350,7 +359,7 @@ async function prepareSystemMediaUpload({
   const requested = await fetch(`${baseUrl}/admin/assets/uploads`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${await accessToken()}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ kind, purpose, filename, contentType, checksum, sizeBytes }),
+    body: JSON.stringify({ kind, purpose, filename, contentType, checksum, sizeBytes, posterTimestampMillis }),
   });
   const payload = await requested.json().catch(() => ({}));
   if (!requested.ok || !payload.asset?.id) {
@@ -365,7 +374,7 @@ async function prepareSystemMediaUpload({
       uploadUrl: payload.uploadUrl,
       contentType,
       maxBytes,
-      expiresAt: Date.now() + 15 * 60 * 1_000,
+      expiresAt: Date.now() + mediaTransferTimeoutMs,
     });
   }
   return { assetId: payload.asset.id, instant: Boolean(payload.instant) };
@@ -399,25 +408,110 @@ async function finalizeSystemMediaAssets(assetIds, label) {
       method: 'POST', headers: { Authorization: `Bearer ${token}` },
     });
     if (!finalized.ok) throw new RequestError(finalized.status, `Could not finalize ${label.toLowerCase()}`);
-    for (let attempt = 0; attempt < 180; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    const deadline = Date.now() + assetReadyWaitTimeoutMs;
+    let isReady = false;
+    while (Date.now() < deadline) {
+      const remainingMs = deadline - Date.now();
+      await new Promise((resolve) => setTimeout(resolve, Math.min(assetReadyWaitPollMs, remainingMs)));
       const current = await fetch(`${baseUrl}/admin/assets/${encodeURIComponent(assetId)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const assetPayload = await current.json().catch(() => ({}));
       const asset = assetPayload.asset ?? assetPayload;
-      if (asset?.status === 'READY' || asset?.status === 3) break;
+      if (asset?.status === 'READY' || asset?.status === 3) {
+        isReady = true;
+        break;
+      }
       if (asset?.status === 'FAILED' || asset?.status === 4) {
         throw new RequestError(422, `${label} processing failed`);
       }
-      if (attempt === 179) throw new RequestError(504, `${label} processing timed out`);
+    }
+    if (!isReady) {
+      throw new RequestError(504, `${label} processing timed out after ${Math.ceil(assetReadyWaitTimeoutMs / 60_000)} minutes`);
     }
   }
   return token;
 }
 
+function pruneExpiredMusicVideoPublishes() {
+  const now = Date.now();
+  for (const [assetId, job] of musicVideoPublishes) {
+    if (job.expiresAt <= now) musicVideoPublishes.delete(assetId);
+  }
+}
+
+async function resumeMusicVideoPublish(songId, assetId) {
+  pruneExpiredMusicVideoPublishes();
+  const existing = musicVideoPublishes.get(assetId);
+  if (existing?.songId === songId) return existing;
+  if (existing) throw new RequestError(409, 'This video asset is already assigned to another song');
+
+  const token = await accessToken();
+  const songResponse = await fetch(`${baseUrl}/songs/private/${encodeURIComponent(songId)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const songPayload = await songResponse.json().catch(() => ({}));
+  if (!songResponse.ok || !songPayload.song) {
+    throw new RequestError(songResponse.status, songPayload.message || 'Song not found or inaccessible');
+  }
+  const assetResponse = await fetch(`${baseUrl}/admin/assets/${encodeURIComponent(assetId)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const assetPayload = await assetResponse.json().catch(() => ({}));
+  if (!assetResponse.ok || !(assetPayload.asset ?? assetPayload)?.id) {
+    throw new RequestError(assetResponse.status, assetPayload.message || 'Video asset was not found');
+  }
+  const job = {
+    songId,
+    status: 'PROCESSING',
+    error: '',
+    draftId: '',
+    expiresAt: Date.now() + assetReadyWaitTimeoutMs + 5 * 60 * 1_000,
+  };
+  musicVideoPublishes.set(assetId, job);
+  return job;
+}
+
+async function publishMusicVideo(songId, assetId, token) {
+  const drafted = await fetch(`${baseUrl}/admin/catalog/song-videos/draft`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ storefront: 'vn', songId, videoAssetId: assetId, kind: 'official' }),
+  });
+  const draft = await drafted.json().catch(() => ({}));
+  if (!drafted.ok || !draft.id) throw new RequestError(drafted.status, draft.message || 'Could not create music video draft');
+  const submitted = await fetch(`${baseUrl}/admin/catalog/drafts/${encodeURIComponent(draft.id)}/submit`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!submitted.ok) {
+    const payload = await submitted.json().catch(() => ({}));
+    throw new RequestError(submitted.status, payload.message || 'Could not submit music video draft');
+  }
+  const published = await fetch(`${baseUrl}/admin/catalog/drafts/${encodeURIComponent(draft.id)}/publish`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!published.ok) {
+    const payload = await published.json().catch(() => ({}));
+    throw new RequestError(published.status, payload.message || 'Could not publish music video');
+  }
+  return draft.id;
+}
+
+async function publishedMusicVideoId(songId, assetId, token) {
+  const response = await fetch(
+    `${baseUrl}/catalog/vn/songs/${encodeURIComponent(songId)}/videos`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!response.ok) return '';
+  const payload = await response.json().catch(() => ({}));
+  const video = Array.isArray(payload.videos)
+    ? payload.videos.find((item) => item?.videoAssetId === assetId)
+    : null;
+  return typeof video?.id === 'string' ? video.id : '';
+}
+
 async function regenerateGlobalHome(token) {
-  await fetch(`${baseUrl}/admin/recommendations/home/generate`, {
+  const response = await fetch(`${baseUrl}/admin/recommendations/home/generate`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -427,7 +521,14 @@ async function regenerateGlobalHome(token) {
       timezone: '+07:00',
       platform: 'web',
     }),
-  }).catch(() => undefined);
+  });
+  if (response.ok) return;
+
+  const payload = await response.json().catch(() => ({}));
+  throw new RequestError(
+    response.status,
+    payload.message || payload.error || 'Could not regenerate Home after updating playlist media',
+  );
 }
 
 async function readJson(req) {
@@ -552,11 +653,6 @@ async function restoreSession(req) {
   }
 }
 
-function hasLocalStudioSession(req) {
-  const refreshToken = requestCookies(req)[localRefreshCookieName];
-  return Boolean(auth.refreshToken) && (!refreshToken || refreshToken === auth.refreshToken);
-}
-
 function publish(type, data) {
   const event = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const client of job.clients) client.write(event);
@@ -579,11 +675,35 @@ function captureLine(stream, line) {
   trackProgressLine(line);
 
   if (/audio mode:/i.test(line)) return publishActivity('info', 'Chế độ xử lý đã chọn', line.replace(/^.*audio mode:\s*/i, ''));
+  if (/static lyric collection:/i.test(line)) {
+    return publishActivity('info', 'Static lyric Apple Music', line.replace(/^.*static lyric collection:\s*/i, ''));
+  }
   if (/phase 1|searching apple music/i.test(line)) return publishActivity('working', 'Đang tìm metadata nghệ sĩ');
   if (/downloading audio/i.test(line)) return publishActivity('working', 'Đang tải audio nguồn');
   if (/uploading song/i.test(line)) return publishActivity('working', 'Đang upload bài hát', line.replace(/^.*Uploading song\s*/i, ''));
   if (/calling finalize/i.test(line)) return publishActivity('working', 'Đang đưa bài vào hàng đợi xử lý');
   if (/waiting for song/i.test(line)) return publishActivity('working', 'Worker đang xử lý bài hát');
+  if (/reading apple music static lyric/i.test(line)) {
+    return publishActivity('working', 'Đang lấy static lyric từ Apple Music', line);
+  }
+  if (/waiting 5s for apple music song controls/i.test(line)) {
+    return publishActivity('working', 'Đang chờ Apple Music tải trang bài hát', line);
+  }
+  if (/started apple music playback from the song page/i.test(line)) {
+    return publishActivity('working', 'Đã bấm Play trên trang bài hát', line);
+  }
+  if (/waiting 3s for playback before opening/i.test(line)) {
+    return publishActivity('working', 'Đang chờ player tải lyric', line);
+  }
+  if (/opened apple music player lyrics panel/i.test(line)) {
+    return publishActivity('working', 'Đã mở sidebar lyric Apple Music', line);
+  }
+  if (/apple music player provided \d+ lyric line/i.test(line)) {
+    return publishActivity('success', 'Đã lấy static lyric từ player', line);
+  }
+  if (/apple music has no static lyric|player lyrics control was not available|play control was not available/i.test(line)) {
+    return publishActivity('info', 'Apple Music không có static lyric khả dụng', line);
+  }
   if (/yt-dlp.*(?:HTTP Error 403|forbidden)/i.test(line)) {
     return publishActivity(
       'info',
@@ -716,15 +836,12 @@ async function startJob(options) {
       );
     }
 
-    const args = [
-      join(root, 'tools', 'scripts', 'seed-artist.mjs'),
-      options.artistQuery.trim(),
-    ];
+    const args = [join(root, 'tools', 'scripts', 'seed-artist.mjs'), options.artistQuery.trim()];
+    const audioMode = String(options.audioMode || 'STANDARD').toUpperCase();
     if (!options.artistId?.trim()) throw new Error('Select an artist first');
     if (!metadataOnly && (!Array.isArray(options.albumIds) || options.albumIds.length === 0)) {
       throw new Error('Select at least one album');
     }
-    const audioMode = String(options.audioMode || 'STANDARD').toUpperCase();
     if (!['STANDARD', 'SING'].includes(audioMode)) {
       throw new Error('Audio mode must be STANDARD or SING');
     }
@@ -743,7 +860,7 @@ async function startJob(options) {
     if (options.dryRun) args.push('--dry-run');
     if (options.noYoutube) args.push('--no-youtube');
     if (options.noSoundcloud) args.push('--no-soundcloud');
-
+    if (options.staticLyrics === false) args.push('--no-static-lyrics');
     if (!options.dryRun) await assertFinalizerReady();
 
     job.secret = randomUUID();
@@ -761,6 +878,7 @@ async function startJob(options) {
         dryRun: Boolean(options.dryRun),
         noYoutube: Boolean(options.noYoutube),
         noSoundcloud: Boolean(options.noSoundcloud),
+        staticLyrics: options.staticLyrics !== false,
       },
       expectedSongs: Number.isSafeInteger(options.expectedSongs) && options.expectedSongs > 0
         ? options.expectedSongs
@@ -771,7 +889,6 @@ async function startJob(options) {
     };
     job.activities = [];
     job.outputBuffers = { stdout: '', stderr: '' };
-    job.creditReview = null;
     publishActivity('working', 'Đang chuẩn bị job');
     publishProgress();
     const child = spawn(process.execPath, args, {
@@ -829,7 +946,6 @@ async function startJob(options) {
         saveHistory();
       }
       publishActivity(kind, title, detail);
-      clearCreditReview({ credits: [] });
       job.child = null;
       job.starting = false;
       job.secret = '';
@@ -977,7 +1093,6 @@ const server = createServer(async (req, res) => {
       for (const activity of job.activities) res.write(`event: activity\ndata: ${JSON.stringify(activity)}\n\n`);
       res.write(`event: status\ndata: ${JSON.stringify({ running: jobIsRunning() })}\n\n`);
       res.write(`event: progress\ndata: ${JSON.stringify(progressSnapshot())}\n\n`);
-      res.write(`event: credit-review\ndata: ${JSON.stringify(job.creditReview?.public || null)}\n\n`);
       req.on('close', () => job.clients.delete(res));
       return;
     }
@@ -991,14 +1106,10 @@ const server = createServer(async (req, res) => {
         baseUrl,
         progress: progressSnapshot(),
         history: job.history,
-        creditReview: job.creditReview?.public || null,
       }, session.cookie ? { 'Set-Cookie': session.cookie } : {});
     }
     if (req.method === 'GET' && url.pathname === '/api/health') {
       return sendJson(res, 200, await healthSnapshot());
-    }
-    if (req.method === 'GET' && url.pathname === '/api/song-credit-roles') {
-      return sendJson(res, 200, { groups: SONG_CREDIT_ROLE_GROUPS });
     }
     if (req.method === 'GET' && url.pathname === '/api/discover/artists') {
       const query = url.searchParams.get('query')?.trim();
@@ -1043,10 +1154,13 @@ const server = createServer(async (req, res) => {
       const payload = await response.json();
       const albums = (payload.results || [])
         .filter((item) => item.wrapperType === 'collection')
-        .filter((album) => collectionIncludesArtist(
-          album.artistName || album.collectionArtistName,
-          artistName,
-        ))
+        .filter((album) =>
+          String(album.artistId || '') === artistId
+          || collectionIncludesArtist(
+            album.artistName || album.collectionArtistName,
+            artistName,
+          ),
+        )
         .map((album) => ({
           id: String(album.collectionId), name: album.collectionName, trackCount: album.trackCount || 0, releaseDate: album.releaseDate?.slice(0, 10) || '', artworkUrl: album.artworkUrl100 || '',
         }));
@@ -1127,59 +1241,6 @@ const server = createServer(async (req, res) => {
         accessToken: await accessToken({ forceRefresh: url.searchParams.get('force') === '1' }),
       });
     }
-    if (req.method === 'POST' && url.pathname === '/api/job/credit-review') {
-      if (!validJobSecret(req)) return sendJson(res, 401, { error: 'unauthorized' });
-      if (job.creditReview) return sendJson(res, 409, { error: 'Một credit review khác đang chờ duyệt.' });
-      const body = await readJson(req);
-      const track = body?.track;
-      if (!track || typeof track.name !== 'string' || !track.name.trim()) {
-        return sendJson(res, 400, { error: 'Thông tin bài hát không hợp lệ.' });
-      }
-      const id = randomUUID();
-      const publicReview = {
-        id,
-        track: {
-          id: String(track.id || ''),
-          name: track.name.trim(),
-          artistName: String(track.artistName || ''),
-          albumName: String(track.albumName || ''),
-          artworkUrl: String(track.artworkUrl || ''),
-        },
-        suggestions: Array.isArray(body.suggestions) ? body.suggestions.slice(0, 30).map((credit) => ({
-          name: String(credit?.name || '').trim().slice(0, 255),
-          role: String(credit?.role || '').trim().slice(0, 32),
-          source: String(credit?.source || '').trim().slice(0, 64),
-        })).filter((credit) => credit.name && credit.role) : [],
-        lookup: {
-          source: 'MusicBrainz',
-          status: ['suggested', 'no_credits', 'not_found', 'unavailable'].includes(body.lookup?.status)
-            ? body.lookup.status
-            : 'unavailable',
-        },
-      };
-      const result = await new Promise((resolve) => {
-        job.creditReview = { public: publicReview, resolve };
-        publishActivity('info', 'Đang chờ duyệt credit', publicReview.track.name);
-        publish('credit-review', publicReview);
-      });
-      return sendJson(res, 200, result);
-    }
-    if (req.method === 'POST' && url.pathname.startsWith('/api/job/credit-review/')) {
-      // Releasing the local seed child does not require a network token refresh.
-      // A pending refresh here previously made this action look permanently stuck.
-      if (!hasLocalStudioSession(req)) return sendJson(res, 401, { error: 'Login required' });
-      const id = url.pathname.split('/').pop();
-      if (!job.creditReview || job.creditReview.public.id !== id) {
-        return sendJson(res, 404, { error: 'Credit review này không còn chờ duyệt.' });
-      }
-      const body = await readJson(req);
-      const credits = Array.isArray(body.credits) ? body.credits.slice(0, 30).map((credit) => ({
-        name: String(credit?.name || '').trim().slice(0, 255),
-        role: String(credit?.role || '').trim().slice(0, 32),
-      })) : [];
-      clearCreditReview({ credits });
-      return sendJson(res, 200, { ok: true });
-    }
     if (req.method === 'POST' && url.pathname === '/api/job/start') {
       const body = await readJson(req);
       const session = body.dryRun ? { authenticated: true } : await restoreSession(req);
@@ -1204,10 +1265,203 @@ const server = createServer(async (req, res) => {
       job.cancelRequested = true;
       if (job.current) job.current.stopRequested = true;
       publishActivity('info', 'Đang dừng job theo yêu cầu');
-      clearCreditReview({ credits: [] });
       publishProgress();
       job.child.kill('SIGTERM');
       return sendJson(res, 200, { ok: true, message: 'Đang dừng job; state đã lưu để có thể tiếp tục.' });
+    }
+    if (req.method === 'DELETE' && /^\/api\/music-videos\/[^/]+$/.test(url.pathname)) {
+      const session = await restoreSession(req);
+      if (session.error) throw session.error;
+      if (!session.authenticated) return sendJson(res, 401, { error: 'Login required' });
+      const songVideoId = decodeURIComponent(url.pathname.split('/')[3]);
+      if (!UUID_PATTERN.test(songVideoId)) throw new RequestError(400, 'Music video ID must be a UUID');
+      const { deleteAsset = false } = await readJson(req);
+      const token = await accessToken();
+      const unlinked = await fetch(`${baseUrl}/admin/catalog/song-videos/${encodeURIComponent(songVideoId)}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
+      });
+      const payload = await unlinked.json().catch(() => ({}));
+      if (!unlinked.ok) {
+        throw new RequestError(unlinked.status, payload.message || 'Could not unlink music video');
+      }
+      const assetId = String(payload.videoAssetId || '').trim();
+      if (!deleteAsset || !assetId || payload.assetUsagePending) {
+        return sendJson(res, 200, {
+          unlinked: true,
+          assetId,
+          assetDeleted: false,
+          assetUsagePending: Boolean(payload.assetUsagePending),
+        });
+      }
+      const deleted = await fetch(`${baseUrl}/admin/assets/${encodeURIComponent(assetId)}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
+      });
+      const deletedPayload = await deleted.json().catch(() => ({}));
+      // Unlinking has succeeded even if the asset is shared or its cleanup is
+      // still propagating. Keep that outcome visible instead of reporting a
+      // misleading failed removal.
+      return sendJson(res, 200, {
+        unlinked: true,
+        assetId,
+        assetDeleted: deleted.ok && deletedPayload.success !== false,
+        assetUsagePending: !deleted.ok,
+      });
+    }
+    if (req.method === 'POST' && /^\/api\/music-videos\/[^/]+\/poster$/.test(url.pathname)) {
+      const session = await restoreSession(req);
+      if (session.error) throw session.error;
+      if (!session.authenticated) return sendJson(res, 401, { error: 'Login required' });
+      const songVideoId = decodeURIComponent(url.pathname.split('/')[3]);
+      const { posterTimestampMillis } = await readJson(req);
+      if (!UUID_PATTERN.test(songVideoId)) {
+        throw new RequestError(400, 'Music video ID must be a UUID');
+      }
+      if (!Number.isSafeInteger(posterTimestampMillis) || posterTimestampMillis < 0) {
+        throw new RequestError(400, 'Poster timestamp must be a non-negative integer');
+      }
+      const token = await accessToken();
+      const videoResponse = await fetch(
+        `${baseUrl}/catalog/vn/music-videos/${encodeURIComponent(songVideoId)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      const video = await videoResponse.json().catch(() => ({}));
+      const assetId = String(video.videoAssetId || '').trim();
+      if (!videoResponse.ok || !UUID_PATTERN.test(assetId)) {
+        throw new RequestError(videoResponse.status, video.message || 'Music video not found');
+      }
+      const replaced = await fetch(
+        `${baseUrl}/admin/assets/${encodeURIComponent(assetId)}/poster`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ posterTimestampMillis }),
+        },
+      );
+      const replacement = await replaced.json().catch(() => ({}));
+      if (!replaced.ok) {
+        const message = [
+          replacement.message,
+          replacement.detail,
+          replacement.error?.message,
+          replacement.error,
+        ].find((value) => typeof value === 'string' && value.trim());
+        throw new RequestError(replaced.status, message || 'Could not replace music video poster');
+      }
+      return sendJson(res, 200, { assetId, asset: replacement.asset });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/music-videos/upload') {
+      const session = await restoreSession(req);
+      if (session.error) throw session.error;
+      if (!session.authenticated) return sendJson(res, 401, { error: 'Login required' });
+      const body = await readJson(req);
+      const width = Number(body.width || 0);
+      const height = Number(body.height || 0);
+      const posterTimestampMillis = Number(body.posterTimestampMillis || 0);
+      if (
+        !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0
+      ) {
+        throw new RequestError(400, 'Music video dimensions must be positive');
+      }
+      if (!Number.isSafeInteger(posterTimestampMillis) || posterTimestampMillis < 0) {
+        throw new RequestError(400, 'Poster timestamp must be a non-negative integer');
+      }
+      return sendJson(res, 200, await prepareSystemMediaUpload({
+        kind: 'VIDEO',
+        purpose: 'MUSIC_VIDEO',
+        filename: String(body.filename || 'music-video.mp4'),
+        contentType: String(body.contentType || ''),
+        checksum: String(body.checksum || ''),
+        sizeBytes: Number(body.sizeBytes || 0),
+        posterTimestampMillis,
+        allowedContentTypes: EDITORIAL_VIDEO_TYPES,
+        maxBytes: MAX_MUSIC_VIDEO_FILE_BYTES,
+        label: 'Music video',
+      }));
+    }
+    if (req.method === 'GET' && /^\/api\/music-videos\/[^/]+\/check$/.test(url.pathname)) {
+      const session = await restoreSession(req);
+      if (session.error) throw session.error;
+      if (!session.authenticated) return sendJson(res, 401, { error: 'Login required' });
+      const songId = decodeURIComponent(url.pathname.split('/')[3]);
+      if (!UUID_PATTERN.test(songId)) throw new RequestError(400, 'Song ID must be a UUID');
+      const response = await fetch(`${baseUrl}/songs/private/${encodeURIComponent(songId)}`, {
+        headers: { Authorization: `Bearer ${await accessToken()}` },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.song) {
+        throw new RequestError(response.status, payload.message || 'Song not found or inaccessible');
+      }
+      return sendJson(res, 200, { song: payload.song });
+    }
+    if (req.method === 'POST' && /^\/api\/music-videos\/[^/]+\/transfer$/.test(url.pathname)) {
+      const session = await restoreSession(req);
+      if (session.error) throw session.error;
+      if (!session.authenticated) return sendJson(res, 401, { error: 'Login required' });
+      const songId = decodeURIComponent(url.pathname.split('/')[3]);
+      if (!UUID_PATTERN.test(songId)) throw new RequestError(400, 'Song ID must be a UUID');
+      const assetId = String(url.searchParams.get('assetId') || '').trim();
+      await transferSystemMediaUpload(req, assetId, 'Music video');
+      return sendJson(res, 200, { ok: true });
+    }
+    if (req.method === 'POST' && /^\/api\/music-videos\/[^/]+\/bind$/.test(url.pathname)) {
+      const session = await restoreSession(req);
+      if (session.error) throw session.error;
+      if (!session.authenticated) return sendJson(res, 401, { error: 'Login required' });
+      const songId = decodeURIComponent(url.pathname.split('/')[3]);
+      if (!UUID_PATTERN.test(songId)) throw new RequestError(400, 'Song ID must be a UUID');
+      const { assetId } = await readJson(req);
+      if (!UUID_PATTERN.test(String(assetId || ''))) throw new RequestError(400, 'Video asset ID is invalid');
+      const finalized = await fetch(`${baseUrl}/admin/assets/${encodeURIComponent(assetId)}/finalize`, {
+        method: 'POST', headers: { Authorization: `Bearer ${await accessToken()}` },
+      });
+      if (!finalized.ok) throw new RequestError(finalized.status, 'Could not finalize music video');
+      await resumeMusicVideoPublish(songId, assetId);
+      return sendJson(res, 202, {
+        assetId,
+        status: 'PROCESSING',
+        pollIntervalMs: assetReadyWaitPollMs,
+        timeoutMs: assetReadyWaitTimeoutMs,
+      });
+    }
+    if (req.method === 'GET' && /^\/api\/music-videos\/[^/]+\/status$/.test(url.pathname)) {
+      const session = await restoreSession(req);
+      if (session.error) throw session.error;
+      if (!session.authenticated) return sendJson(res, 401, { error: 'Login required' });
+      const songId = decodeURIComponent(url.pathname.split('/')[3]);
+      const assetId = String(url.searchParams.get('assetId') || '').trim();
+      if (!UUID_PATTERN.test(songId) || !UUID_PATTERN.test(assetId)) {
+        throw new RequestError(400, 'Song ID and video asset ID must be UUIDs');
+      }
+      const job = await resumeMusicVideoPublish(songId, assetId);
+      if (job.status === 'READY' || job.status === 'FAILED') {
+        return sendJson(res, 200, { status: job.status, assetId, draftId: job.draftId, error: job.error });
+      }
+      if (job.status === 'PUBLISHING') return sendJson(res, 200, { status: 'PUBLISHING', assetId });
+      const token = await accessToken();
+      const current = await fetch(`${baseUrl}/admin/assets/${encodeURIComponent(assetId)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const payload = await current.json().catch(() => ({}));
+      const asset = payload.asset ?? payload;
+      if (!current.ok) throw new RequestError(current.status, payload.message || 'Could not check music video processing');
+      if (asset?.status === 'FAILED' || asset?.status === 4) {
+        job.status = 'FAILED';
+        job.error = 'Music video processing failed';
+        return sendJson(res, 200, { status: job.status, assetId, error: job.error });
+      }
+      if (asset?.status !== 'READY' && asset?.status !== 3) {
+        return sendJson(res, 200, { status: 'PROCESSING', assetId });
+      }
+      job.status = 'PUBLISHING';
+      try {
+        job.draftId = await publishedMusicVideoId(songId, assetId, token)
+          || await publishMusicVideo(songId, assetId, token);
+        job.status = 'READY';
+      } catch (error) {
+        job.status = 'FAILED';
+        job.error = error instanceof Error ? error.message : 'Could not publish music video';
+      }
+      return sendJson(res, 200, { status: job.status, assetId, draftId: job.draftId, error: job.error });
     }
     if (
       req.method === 'POST'
@@ -1227,7 +1481,7 @@ const server = createServer(async (req, res) => {
     }
     if (
       req.method === 'POST'
-      && /^\/api\/system-playlists\/(get-up|chill|new-music)\/video-upload$/.test(url.pathname)
+      && /^\/api\/system-playlists\/(get-up|chill|new-music|heavy-rotation)\/video-upload$/.test(url.pathname)
     ) {
       const session = await restoreSession(req);
       if (session.error) throw session.error;
@@ -1249,7 +1503,7 @@ const server = createServer(async (req, res) => {
     }
     if (
       req.method === 'POST'
-      && /^\/api\/system-playlists\/(get-up|chill|new-music)\/video-transfer$/.test(url.pathname)
+      && /^\/api\/system-playlists\/(get-up|chill|new-music|heavy-rotation)\/video-transfer$/.test(url.pathname)
     ) {
       const session = await restoreSession(req);
       if (session.error) throw session.error;
@@ -1260,7 +1514,7 @@ const server = createServer(async (req, res) => {
     }
     if (
       req.method === 'POST'
-      && /^\/api\/system-playlists\/(get-up|chill|new-music)\/video-bind$/.test(url.pathname)
+      && /^\/api\/system-playlists\/(get-up|chill|new-music|heavy-rotation)\/video-bind$/.test(url.pathname)
     ) {
       const session = await restoreSession(req);
       if (session.error) throw session.error;
@@ -1347,7 +1601,7 @@ const server = createServer(async (req, res) => {
     }
     if (
       req.method === 'PUT'
-      && /^\/api\/system-playlists\/(get-up|chill|new-music)\/artwork\/color$/.test(url.pathname)
+      && /^\/api\/system-playlists\/(get-up|chill|new-music|heavy-rotation)\/artwork\/color$/.test(url.pathname)
     ) {
       const session = await restoreSession(req);
       if (session.error) throw session.error;
@@ -1374,6 +1628,7 @@ const server = createServer(async (req, res) => {
           payload.message || payload.error || 'Could not update playlist color',
         );
       }
+      await regenerateGlobalHome(await accessToken());
       return sendJson(res, 200, payload);
     }
     return sendJson(res, 404, { error: 'Not found' });
@@ -1385,6 +1640,10 @@ const server = createServer(async (req, res) => {
     );
   }
 });
+
+// Large media is proxied through this local server. Node defaults to five
+// minutes, which is too short for a slow 120 MB+ upload.
+server.requestTimeout = mediaTransferTimeoutMs;
 
 server.listen(port, '127.0.0.1', () => {
   console.log(`Seed Studio running at http://127.0.0.1:${port}`);
