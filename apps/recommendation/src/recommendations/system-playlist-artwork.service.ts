@@ -14,7 +14,12 @@ import { firstValueFrom } from 'rxjs';
 import { PrismaService } from '../database/prisma.service';
 import { Prisma } from '../generated/prisma/client';
 
-const SYSTEM_PLAYLIST_KEYS = new Set(['get-up', 'chill', 'new-music']);
+const SYSTEM_PLAYLIST_KEYS = new Set([
+  'get-up',
+  'chill',
+  'new-music',
+  'heavy-rotation',
+]);
 const OWNER_SERVICE = 'recommendation';
 const OWNER_TYPE = 'system-playlist';
 const COVER_RATIO = 1;
@@ -38,6 +43,10 @@ export type SystemPlaylistArtworkPair = {
   detailSquareVideo?: JsonObject;
   detailMobileVideo?: JsonObject;
   homeHeroVideo?: JsonObject;
+};
+
+export type StoredSystemPlaylistArtworkPair = SystemPlaylistArtworkPair & {
+  updatedAt: Date;
 };
 
 @Injectable()
@@ -246,7 +255,7 @@ export class SystemPlaylistArtworkService implements OnModuleInit {
 
   async byKeys(
     keys: string[],
-  ): Promise<Map<string, SystemPlaylistArtworkPair>> {
+  ): Promise<Map<string, StoredSystemPlaylistArtworkPair>> {
     if (!keys.length) return new Map();
 
     const rows = await this.prisma.systemPlaylistArtwork.findMany({
@@ -258,6 +267,7 @@ export class SystemPlaylistArtworkService implements OnModuleInit {
         detailSquareVideo: true,
         detailMobileVideo: true,
         homeHeroVideo: true,
+        updatedAt: true,
       },
     });
     return new Map(
@@ -274,6 +284,7 @@ export class SystemPlaylistArtworkService implements OnModuleInit {
                   detailSquareVideo: this.object(row.detailSquareVideo),
                   detailMobileVideo: this.object(row.detailMobileVideo),
                   homeHeroVideo: this.object(row.homeHeroVideo),
+                  updatedAt: row.updatedAt,
                 },
               ] as const,
             ]
@@ -325,7 +336,6 @@ export class SystemPlaylistArtworkService implements OnModuleInit {
       updatedCover.bgColor,
       updatedHomeCard,
     );
-
     return { cover: updatedCover, homeCard: updatedHomeCard };
   }
 
@@ -566,6 +576,7 @@ export class SystemPlaylistArtworkService implements OnModuleInit {
         url: this.string(poster.url),
         width: this.number(poster.width),
         height: this.number(poster.height),
+        bgColor: this.string(poster.bgColor),
         variants: this.object(poster.variants),
       },
       variants,

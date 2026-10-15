@@ -5,12 +5,11 @@ import {
   GenerationService,
   isGenerationLeaseLostError,
 } from './generation.service';
+import { PRODUCTION_RECOMMENDATION_POLICY } from './production-recommendation-policy';
 
-jest.mock(
-  '@grpc/grpc-js',
-  () => ({ status: { ABORTED: 10 } }),
-  { virtual: true },
-);
+jest.mock('@grpc/grpc-js', () => ({ status: { ABORTED: 10 } }), {
+  virtual: true,
+});
 jest.mock('../database/prisma.service', () => ({
   PrismaService: class PrismaService {},
 }));
@@ -41,6 +40,128 @@ jest.mock('../stations/artist-station.service', () => ({
 }));
 
 const ABORTED_STATUS = 10;
+
+describe('GenerationService mood matching', () => {
+  const service = new GenerationService(
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
+  const internals = service as unknown as {
+    moodMatchScore: (song: unknown, mood: unknown) => number;
+  };
+  const heartbreak = PRODUCTION_RECOMMENDATION_POLICY.moodStations.find(
+    (station) => station.key === 'heartbreak',
+  );
+
+  it('maps the analyzed melancholic-music tag to Heartbreak', () => {
+    expect(heartbreak).toBeDefined();
+    expect(
+      internals.moodMatchScore(
+        {
+          genreNames: [],
+          audioTraits: [],
+          moodTags: [],
+          attributes: { audioTags: ['melancholic music'] },
+        },
+        heartbreak,
+      ),
+    ).toBeGreaterThan(0);
+  });
+
+  it('excludes an upbeat analyzed track from Heartbreak', () => {
+    expect(
+      internals.moodMatchScore(
+        {
+          genreNames: [],
+          audioTraits: [],
+          moodTags: [],
+          attributes: { audioTags: ['melancholic music', 'energetic music'] },
+        },
+        heartbreak,
+      ),
+    ).toBe(0);
+  });
+});
+
+describe('GenerationService Heavy Rotation ranking', () => {
+  const createService = (prisma: {
+    listeningEvent: { findMany: jest.Mock };
+    recommendationResourceSnapshot: { findMany: jest.Mock };
+  }) =>
+    new GenerationService(
+      prisma as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+  it('weights recent plays first and limits a performer to two tracks', async () => {
+    const now = new Date('2026-10-15T00:00:00.000Z');
+    const service = createService({
+      listeningEvent: {
+        findMany: jest.fn().mockResolvedValue([
+          { songId: 'artist-a-recent', createdAt: new Date('2026-10-14T00:00:00.000Z') },
+          { songId: 'artist-a-next', createdAt: new Date('2026-10-13T00:00:00.000Z') },
+          { songId: 'artist-a-third', createdAt: new Date('2026-10-12T00:00:00.000Z') },
+          { songId: 'artist-b-old', createdAt: new Date('2026-10-05T00:00:00.000Z') },
+        ]),
+      },
+      recommendationResourceSnapshot: {
+        findMany: jest.fn().mockResolvedValue([
+          { resourceId: 'artist-a-recent', resourceType: 'songs', artistName: 'Artist A' },
+          { resourceId: 'artist-a-next', resourceType: 'songs', artistName: 'Artist A' },
+          { resourceId: 'artist-a-third', resourceType: 'songs', artistName: 'Artist A' },
+          { resourceId: 'artist-b-old', resourceType: 'songs', artistName: 'Artist B' },
+        ]),
+      },
+    });
+    const internals = service as unknown as {
+      rankHeavyRotationTracks: (
+        userId: string,
+        currentTime: Date,
+      ) => Promise<{ ranked: Array<{ id: string }>; candidates: unknown[] }>;
+    };
+
+    const result = await internals.rankHeavyRotationTracks('user-1', now);
+
+    expect(result.ranked.map((track) => track.id)).toEqual([
+      'artist-a-recent',
+      'artist-a-next',
+      'artist-b-old',
+    ]);
+  });
+
+  it('does not query catalog snapshots when the listener has no recent plays', async () => {
+    const snapshots = { findMany: jest.fn() };
+    const service = createService({
+      listeningEvent: { findMany: jest.fn().mockResolvedValue([]) },
+      recommendationResourceSnapshot: snapshots,
+    });
+    const internals = service as unknown as {
+      rankHeavyRotationTracks: (
+        userId: string,
+        currentTime: Date,
+      ) => Promise<{ ranked: unknown[]; candidates: unknown[] }>;
+    };
+
+    await expect(
+      internals.rankHeavyRotationTracks('user-1', new Date('2026-10-15T00:00:00.000Z')),
+    ).resolves.toEqual({ ranked: [], candidates: [] });
+    expect(snapshots.findMany).not.toHaveBeenCalled();
+  });
+});
 
 describe('GenerationService lease cancellation', () => {
   afterEach(() => {
@@ -251,9 +372,9 @@ describe('GenerationService Top Picks ranking', () => {
           ]),
         },
         systemPlaylistRefreshState: {
-          findMany: jest.fn().mockResolvedValue([
-            { refreshedAt: new Date(now) },
-          ]),
+          findMany: jest
+            .fn()
+            .mockResolvedValue([{ refreshedAt: new Date(now) }]),
         },
       } as never,
       {} as never,

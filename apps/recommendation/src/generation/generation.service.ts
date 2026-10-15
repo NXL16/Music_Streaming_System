@@ -23,6 +23,7 @@ import {
 import {
   SystemPlaylistArtworkService,
   type SystemPlaylistArtworkPair,
+  type StoredSystemPlaylistArtworkPair,
 } from '../recommendations/system-playlist-artwork.service';
 import {
   GeneratedShelf,
@@ -42,6 +43,10 @@ import {
   GENERATION_LEASE_LOST_MESSAGE,
   type GenerationLease,
 } from './generation-lease.types';
+import {
+  SYSTEM_PLAYLIST_CURATOR_NAME,
+  SYSTEM_PLAYLIST_DESCRIPTIONS,
+} from '../recommendations/system-playlist-copy';
 import { systemPlaylistArtistPreview } from '../recommendations/system-playlist-artist-preview';
 import { systemPlaylistTrackIds } from '../recommendations/system-playlist-track-ids';
 import { chillIntentScore, hasAudioAnalysis } from '../common/chill-intent';
@@ -53,8 +58,14 @@ const NEW_MUSIC_MAX_TRACKS_PER_RELEASE = 1;
 const SYSTEM_PLAYLIST_SELECTION_VERSION = 2;
 const SYSTEM_PLAYLIST_TRACK_LIMIT = 25;
 const SYSTEM_PLAYLIST_MIN_TRACKS = 5;
+const HEAVY_ROTATION_MIN_TRACKS = 10;
+const HEAVY_ROTATION_WINDOW_MS = 30 * 86_400_000;
+const HEAVY_ROTATION_DECAY_DAYS = 14;
+// Fetch enough scored songs to absorb catalog removals and the per-artist cap
+// without expanding a user's entire listening history into a Home request.
+const HEAVY_ROTATION_CANDIDATE_LIMIT = 250;
 // Used only until an admin configures the two real artwork assets for a fixed
-// system playlist. It keeps the three catalog playlists publishable on a new
+// system playlist. It keeps the catalog playlists publishable on a new
 // environment without invoking the unrelated Hero-blur artwork flow.
 const SYSTEM_PLAYLIST_ARTWORK_URL = '/assets/artwork/1x1.gif';
 const STATION_TRACK_LIMIT = 80;
@@ -169,30 +180,47 @@ const VIETNAM_WEEKDAY = {
 } as const;
 
 type FixedSystemPlaylist = {
-  key: 'get-up' | 'chill' | 'new-music';
+  key: 'get-up' | 'chill' | 'new-music' | 'heavy-rotation';
   title: string;
+  description: string;
   artworkBgColor: string;
   refreshWeekday: (typeof VIETNAM_WEEKDAY)[keyof typeof VIETNAM_WEEKDAY];
+  minimumTracks?: number;
+  personalizedOnly?: boolean;
 };
 
 const FIXED_SYSTEM_PLAYLISTS: readonly FixedSystemPlaylist[] = [
   {
     key: 'get-up',
     title: 'Get Up',
+    description: SYSTEM_PLAYLIST_DESCRIPTIONS['get-up'],
     artworkBgColor: 'd41414',
     refreshWeekday: VIETNAM_WEEKDAY.MONDAY,
   },
   {
     key: 'chill',
     title: 'Chill',
+    description: SYSTEM_PLAYLIST_DESCRIPTIONS.chill,
     artworkBgColor: '22788a',
     refreshWeekday: VIETNAM_WEEKDAY.SUNDAY,
   },
   {
     key: 'new-music',
     title: 'New Music',
+    description: SYSTEM_PLAYLIST_DESCRIPTIONS['new-music'],
     artworkBgColor: 'e87c91',
     refreshWeekday: VIETNAM_WEEKDAY.FRIDAY,
+  },
+  {
+    key: 'heavy-rotation',
+    title: 'Heavy Rotation',
+    description: SYSTEM_PLAYLIST_DESCRIPTIONS['heavy-rotation'],
+    artworkBgColor: '5c3fba',
+    // The record is published globally so it has one stable URL, but its
+    // content is only surfaced once the current listener has ten qualifiers.
+    refreshWeekday: VIETNAM_WEEKDAY.MONDAY,
+    minimumTracks: HEAVY_ROTATION_MIN_TRACKS,
+    personalizedOnly: true,
   },
 ];
 
@@ -1422,6 +1450,11 @@ export class GenerationService {
     const refreshStateByKey = new Map(
       refreshStates.map((state) => [state.playlistKey, state]),
     );
+    const playlistArtwork = this.systemPlaylistArtworkService
+      ? await this.systemPlaylistArtworkService.byKeys(
+          FIXED_SYSTEM_PLAYLISTS.map(({ key }) => key),
+        )
+      : new Map<string, StoredSystemPlaylistArtworkPair>();
     const userTrackCacheByKey = new Map<
       string,
       { trackCount: number; updatedAt: Date }
@@ -1442,10 +1475,20 @@ export class GenerationService {
         userTrackCacheByKey.set(track.playlistKey, current);
       }
     }
+    const heavyRotationCache = userTrackCacheByKey.get('heavy-rotation');
+    const heavyRotationHasNewActivity =
+      Boolean(userId && heavyRotationCache) &&
+      (await this.hasHeavyRotationActivitySince(
+        userId,
+        heavyRotationCache!.updatedAt,
+      ));
     const definitionsToRefresh = FIXED_SYSTEM_PLAYLISTS.filter((definition) => {
       const state = refreshStateByKey.get(definition.key);
       if (userId) {
         const userCache = userTrackCacheByKey.get(definition.key);
+        if (definition.key === 'heavy-rotation') {
+          return !userCache || heavyRotationHasNewActivity;
+        }
         return (
           !state ||
           !userCache ||
@@ -1453,11 +1496,13 @@ export class GenerationService {
           userCache.updatedAt < state.refreshedAt
         );
       }
+      const artworkUpdatedAt = playlistArtwork.get(definition.key)?.updatedAt;
       return (
         forceRefresh ||
         !state ||
         state.selectionVersion < SYSTEM_PLAYLIST_SELECTION_VERSION ||
-        state.refreshedAt < systemPlaylistScheduledRefresh(definition, now)
+        state.refreshedAt < systemPlaylistScheduledRefresh(definition, now) ||
+        (artworkUpdatedAt !== undefined && artworkUpdatedAt > state.refreshedAt)
       );
     });
     const playlistIds = new Map(
@@ -1471,11 +1516,6 @@ export class GenerationService {
         ),
       ),
     );
-    const playlistArtwork = this.systemPlaylistArtworkService
-      ? await this.systemPlaylistArtworkService.byKeys(
-          FIXED_SYSTEM_PLAYLISTS.map(({ key }) => key),
-        )
-      : new Map<string, SystemPlaylistArtworkPair>();
     const songSelection = {
       resourceId: true,
       resourceType: true,
@@ -1510,39 +1550,84 @@ export class GenerationService {
       candidates.map((candidate) => [candidate.resourceId, candidate]),
     );
     if (!userId && definitionsToRefresh.length === 0) {
-      await this.syncSystemPlaylistDescriptions(playlistIds);
+      await this.syncSystemPlaylistArtistPreviews(playlistIds);
     }
     const selectedAcrossPlaylists = new Set<string>();
+    const visiblePersonalizedPlaylistKeys = new Set(
+      [...userTrackCacheByKey].flatMap(([key, cache]) =>
+        cache.trackCount >= HEAVY_ROTATION_MIN_TRACKS && key === 'heavy-rotation'
+          ? [key]
+          : [],
+      ),
+    );
     for (const definition of FIXED_SYSTEM_PLAYLISTS) {
       const playlistId = playlistIds.get(definition.key)!;
       if (!definitionsToRefresh.includes(definition)) continue;
-      const ranked = await this.rankFixedSystemPlaylistTracks(
-        userId,
-        candidates,
-        profile,
-        definition,
-      );
-      const selected = this.sequencePersonalizedTracks(
-        // Distinct programming is the default: a track belongs to at most one
-        // of Get Up, Chill and New Music. This avoids three renamed queues.
-        ranked
-          .filter((item) => !selectedAcrossPlaylists.has(item.id))
-          .slice(0, SYSTEM_PLAYLIST_TRACK_LIMIT)
-          .flatMap((item) => {
-            const candidate = candidatesById.get(item.id);
-            return candidate ? [candidate] : [];
-          }),
-      );
-      if (selected.length < SYSTEM_PLAYLIST_MIN_TRACKS) {
+      let ranked: ScoredItem[];
+      let candidatesForSelection = candidatesById;
+      if (definition.key === 'heavy-rotation' && userId) {
+        const heavyRotation = await this.rankHeavyRotationTracks(userId, now);
+        ranked = heavyRotation.ranked;
+        candidatesForSelection = new Map([
+          ...candidatesById,
+          ...heavyRotation.candidates.map((candidate) => [
+            candidate.resourceId,
+            candidate,
+          ] as const),
+        ]);
+      } else {
+        ranked = await this.rankFixedSystemPlaylistTracks(
+          userId,
+          candidates,
+          profile,
+          definition,
+        );
+      }
+      const selectedCandidates = ranked
+        .filter(
+          (item) =>
+            definition.key === 'heavy-rotation' ||
+            !selectedAcrossPlaylists.has(item.id),
+        )
+        .slice(0, SYSTEM_PLAYLIST_TRACK_LIMIT)
+        .flatMap((item) => {
+          const candidate = candidatesForSelection.get(item.id);
+          return candidate ? [candidate] : [];
+        });
+      // Heavy Rotation deliberately preserves score order. The other system
+      // playlists are sequenced for variety after their intent ranking.
+      const selected =
+        definition.key === 'heavy-rotation'
+          ? selectedCandidates
+          : this.sequencePersonalizedTracks(selectedCandidates);
+      const minimumTracks =
+        definition.minimumTracks ?? SYSTEM_PLAYLIST_MIN_TRACKS;
+      if (selected.length < minimumTracks) {
+        if (userId && definition.personalizedOnly) {
+          await this.prisma.$transaction([
+            this.prisma.userSystemPlaylistTrack.deleteMany({
+              where: { userId, playlistKey: definition.key },
+            }),
+            this.prisma.userSystemPlaylistMetadata.deleteMany({
+              where: { userId, playlistKey: definition.key },
+            }),
+          ]);
+          continue;
+        }
         this.logger.warn(
-          `[system-playlists] ${definition.key} skipped: only ${selected.length} qualified tracks (need ${SYSTEM_PLAYLIST_MIN_TRACKS})`,
+          `[system-playlists] ${definition.key} skipped: only ${selected.length} qualified tracks (need ${minimumTracks})`,
         );
         return null;
       }
-      selected.forEach((track) =>
-        selectedAcrossPlaylists.add(track.resourceId),
-      );
-      // Product playlists are a three-item global catalog. A listener gets a
+      if (definition.key !== 'heavy-rotation') {
+        selected.forEach((track) =>
+          selectedAcrossPlaylists.add(track.resourceId),
+        );
+      }
+      if (userId && definition.personalizedOnly) {
+        visiblePersonalizedPlaylistKeys.add(definition.key);
+      }
+      // Product playlists are global catalog entries. A listener gets a
       // private track selection for one of those playlists, never a private
       // Playlist record or URL.
       const configuredArtwork = playlistArtwork.get(definition.key);
@@ -1584,13 +1669,13 @@ export class GenerationService {
           }),
         ]);
       } else {
-        // The catalog has exactly these three physical playlists. Only Global
+        // The catalog has these physical playlists. Only Global
         // generation owns their default track list and shared metadata.
         await this.catalogService.upsertSystemPlaylist({
           playlistId,
           storefront: 'vn',
           name: definition.title,
-          description: artistPreview,
+          description: definition.description,
           url: definition.key,
           artworkUrl: cover?.url || SYSTEM_PLAYLIST_ARTWORK_URL,
           artworkBgColor: cover?.bgColor || definition.artworkBgColor,
@@ -1652,7 +1737,11 @@ export class GenerationService {
       }
     }
     const topPickDefinition = latestSystemPlaylistDefinition(now);
-    const playlistItems = FIXED_SYSTEM_PLAYLISTS.map((definition) => ({
+    const playlistItems = FIXED_SYSTEM_PLAYLISTS.filter(
+      (definition) =>
+        !definition.personalizedOnly ||
+        (Boolean(userId) && visiblePersonalizedPlaylistKeys.has(definition.key)),
+    ).map((definition) => ({
       id: playlistIds.get(definition.key)!,
       type: 'playlists' as const,
     }));
@@ -1676,7 +1765,7 @@ export class GenerationService {
   }
 
   /**
-   * User pages reference the three global catalog playlists. Generation may
+   * User pages reference global catalog playlists. Generation may
    * run before a Global Home refresh after a deployment, so verify their
    * catalog presence here instead of silently dropping the shelf later in
    * `excludeUnpublishedCatalogContent`.
@@ -1731,15 +1820,15 @@ export class GenerationService {
     playlistId: string,
     songIds: string[],
     configuredArtwork: SystemPlaylistArtworkPair | undefined,
-    description: string,
+    artistPreview: string,
   ) {
     const href = `/playlist/${definition.key}/${playlistId}`;
     const attributes = {
       name: definition.title,
-      curatorName: 'Musical',
+      curatorName: SYSTEM_PLAYLIST_CURATOR_NAME,
       description: {
-        short: description,
-        standard: description,
+        short: artistPreview,
+        standard: artistPreview,
       },
       artwork: {
         ...(configuredArtwork?.cover || {
@@ -1777,7 +1866,7 @@ export class GenerationService {
     return {
       name: definition.title,
       title: definition.title,
-      curatorName: 'Musical',
+      curatorName: SYSTEM_PLAYLIST_CURATOR_NAME,
       href,
       externalUrl: href,
       artworkUrl: configuredArtwork?.cover?.url || SYSTEM_PLAYLIST_ARTWORK_URL,
@@ -1785,11 +1874,10 @@ export class GenerationService {
         configuredArtwork?.cover?.bgColor || definition.artworkBgColor,
       artworkWidth: configuredArtwork?.cover?.width || 1,
       artworkHeight: configuredArtwork?.cover?.height || 1,
-      shortDescription: description,
-      standardDescription: description,
-      // System playlists have one description source: the artists selected
-      // for their current track list. Clear imported editorial copy so it
-      // cannot compete with that source on an older Home page.
+      shortDescription: artistPreview,
+      standardDescription: artistPreview,
+      // Home cards use the artists selected for their current track list.
+      // Clear imported editorial copy so it cannot compete with that source.
       editorialNotesName: '',
       editorialNotesShort: '',
       editorialNotes: '',
@@ -1810,7 +1898,7 @@ export class GenerationService {
     };
   }
 
-  private async syncSystemPlaylistDescriptions(
+  private async syncSystemPlaylistArtistPreviews(
     playlistIds: Map<FixedSystemPlaylist['key'], string>,
   ): Promise<void> {
     const playlists = await this.prisma.recommendationResourceSnapshot.findMany(
@@ -1859,7 +1947,7 @@ export class GenerationService {
       playlists.flatMap((playlist) => {
         const definition = definitionByPlaylistId.get(playlist.resourceId);
         if (!definition) return [];
-        const description = systemPlaylistArtistPreview(
+        const artistPreview = systemPlaylistArtistPreview(
           (trackIdsByPlaylist.get(playlist.resourceId) ?? []).map(
             (id) => artistByTrackId.get(id) ?? '',
           ),
@@ -1871,8 +1959,8 @@ export class GenerationService {
             playlist.editorialNotes,
           ) || playlist.plainEditorialNotes !== null;
         if (
-          playlist.shortDescription === description &&
-          playlist.standardDescription === description &&
+          playlist.shortDescription === artistPreview &&
+          playlist.standardDescription === artistPreview &&
           !hasLegacyEditorialCopy
         ) {
           return [];
@@ -1880,15 +1968,18 @@ export class GenerationService {
         const attributes = isRecord(playlist.attributes)
           ? {
               ...playlist.attributes,
-              description: { short: description, standard: description },
+              description: {
+                short: artistPreview,
+                standard: artistPreview,
+              },
             }
           : undefined;
         return [
           this.prisma.recommendationResourceSnapshot.update({
             where: { id: playlist.id },
             data: {
-              shortDescription: description,
-              standardDescription: description,
+              shortDescription: artistPreview,
+              standardDescription: artistPreview,
               editorialNotesName: '',
               editorialNotesShort: '',
               editorialNotes: '',
@@ -2013,6 +2104,100 @@ export class GenerationService {
         artistCounts.set(item.artistName, artistCount + 1);
         return true;
       });
+  }
+
+  private async hasHeavyRotationActivitySince(
+    userId: string,
+    cachedAt: Date,
+  ): Promise<boolean> {
+    return Boolean(
+      await this.prisma.listeningEvent.findFirst({
+        where: {
+          userId,
+          eventType: 'PLAY_START',
+          createdAt: { gt: cachedAt },
+        },
+        select: { id: true },
+      }),
+    );
+  }
+
+  /** Rank plays from the last 30 days, with each older play decaying smoothly. */
+  private async rankHeavyRotationTracks(
+    userId: string,
+    now: Date,
+  ): Promise<{ ranked: ScoredItem[]; candidates: SnapshotRow[] }> {
+    const events = await this.prisma.listeningEvent.findMany({
+      where: {
+        userId,
+        eventType: 'PLAY_START',
+        createdAt: { gte: new Date(now.getTime() - HEAVY_ROTATION_WINDOW_MS) },
+      },
+      select: { songId: true, createdAt: true },
+    });
+    const scores = new Map<string, number>();
+    for (const event of events) {
+      const ageDays = Math.max(0, now.getTime() - event.createdAt.getTime()) / 86_400_000;
+      scores.set(
+        event.songId,
+        (scores.get(event.songId) ?? 0) + Math.exp(-ageDays / HEAVY_ROTATION_DECAY_DAYS),
+      );
+    }
+    const scoredSongIds = [...scores]
+      .sort(
+        ([leftId, leftScore], [rightId, rightScore]) =>
+          rightScore - leftScore || leftId.localeCompare(rightId),
+      )
+      .slice(0, HEAVY_ROTATION_CANDIDATE_LIMIT)
+      .map(([songId]) => songId);
+    if (scoredSongIds.length === 0) return { ranked: [], candidates: [] };
+
+    // Heavy Rotation intentionally does not use the discovery candidate pool:
+    // that pool removes listened songs, while this playlist is defined by them.
+    const candidates = await this.prisma.recommendationResourceSnapshot.findMany({
+      where: {
+        resourceType: 'songs',
+        resourceId: { in: scoredSongIds },
+      },
+      select: {
+        resourceId: true,
+        resourceType: true,
+        artistName: true,
+        genreNames: true,
+        audioTraits: true,
+        moodTags: true,
+        attributes: true,
+        relationships: true,
+        releaseDate: true,
+        releaseType: true,
+      },
+    });
+    const candidateById = new Map(
+      candidates.map((candidate) => [candidate.resourceId, candidate]),
+    );
+    const artistCounts = new Map<string, number>();
+    const ranked = scoredSongIds
+      .flatMap((songId) => {
+        const candidate = candidateById.get(songId);
+        const score = scores.get(songId);
+        return candidate && score !== undefined
+          ? [
+              {
+                id: songId,
+                type: candidate.resourceType,
+                artistName: candidate.artistName,
+                score,
+              },
+            ]
+          : [];
+      })
+      .filter((item) => {
+        const count = artistCounts.get(item.artistName) ?? 0;
+        if (count >= SYSTEM_PLAYLIST_MAX_PER_ARTIST) return false;
+        artistCounts.set(item.artistName, count + 1);
+        return true;
+      });
+    return { ranked, candidates };
   }
 
   private systemPlaylistAlbumKey(track: SnapshotRow): string {

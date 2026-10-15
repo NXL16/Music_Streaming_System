@@ -448,6 +448,7 @@ model ListeningEvent {
 
   @@unique([userId, eventId])
   @@index([userId, createdAt])
+  @@index([userId, eventType, createdAt])
   @@index([songId, createdAt])
   @@index([albumId, createdAt])
   @@index([createdAt, eventType, albumId])
