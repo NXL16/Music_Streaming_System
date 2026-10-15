@@ -48,6 +48,15 @@ export class SsoService {
       });
     }
 
+    return this.fetchRoomProfile(userId);
+  }
+
+  async getRoomProfile(userId: string, clientSecret?: string) {
+    this.assertRoomClientSecret(clientSecret);
+    return this.fetchRoomProfile(userId);
+  }
+
+  private async fetchRoomProfile(userId: string) {
     const profile = await this.authService.getProfile({ userId });
 
     return {

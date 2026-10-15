@@ -35,6 +35,7 @@ export class AssetsController {
   requestUpload(@Req() req: Request, @Body() body: RequestAssetUploadRequest) {
     return this.assetsService.requestUpload({
       ...body,
+      posterTimestampMillis: Number(body.posterTimestampMillis ?? 0),
       actorUserId: (req.user as JwtUser).userId,
       kind: this.kind(body.kind),
       purpose: this.purpose(body.purpose),
@@ -46,6 +47,19 @@ export class AssetsController {
     return this.assetsService.finalizeUpload({
       assetId,
       actorUserId: (req.user as JwtUser).userId,
+    });
+  }
+
+  @Post(':assetId/poster')
+  replaceMusicVideoPoster(
+    @Req() req: Request,
+    @Param('assetId') assetId: string,
+    @Body() body: { posterTimestampMillis?: unknown },
+  ) {
+    return this.assetsService.replaceMusicVideoPoster({
+      assetId,
+      actorUserId: (req.user as JwtUser).userId,
+      posterTimestampMillis: Number(body.posterTimestampMillis),
     });
   }
 
@@ -144,10 +158,30 @@ export class AssetsController {
 export class ArtistStudioAssetsController {
   constructor(private readonly assetsService: AssetsService) {}
 
+  @Get()
+  listMine(
+    @Req() req: Request,
+    @Query('kind') kind?: string,
+    @Query('purpose') purpose?: string,
+    @Query('status') assetStatus?: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.assetsService.listAssets({
+      actorUserId: (req.user as JwtUser).userId,
+      kind: this.kind(kind),
+      purpose: this.purpose(purpose),
+      status: this.status(assetStatus),
+      cursor: cursor || '',
+      limit: limit ? Number(limit) : 50,
+    });
+  }
+
   @Post('uploads')
   requestUpload(@Req() req: Request, @Body() body: RequestAssetUploadRequest) {
     return this.assetsService.requestUpload({
       ...body,
+      posterTimestampMillis: Number(body.posterTimestampMillis ?? 0),
       actorUserId: (req.user as JwtUser).userId,
       // REST clients send the human-readable protobuf enum names, while
       // generated clients commonly send their numeric counterparts. Preserve
@@ -163,6 +197,19 @@ export class ArtistStudioAssetsController {
     return this.assetsService.finalizeUpload({
       assetId,
       actorUserId: (req.user as JwtUser).userId,
+    });
+  }
+
+  @Post(':assetId/poster')
+  replaceMusicVideoPoster(
+    @Req() req: Request,
+    @Param('assetId') assetId: string,
+    @Body() body: { posterTimestampMillis?: unknown },
+  ) {
+    return this.assetsService.replaceMusicVideoPoster({
+      assetId,
+      actorUserId: (req.user as JwtUser).userId,
+      posterTimestampMillis: Number(body.posterTimestampMillis),
     });
   }
 
@@ -211,5 +258,19 @@ export class ArtistStudioAssetsController {
       return AssetPurpose.ASSET_PURPOSE_MUSIC_VIDEO;
     }
     return AssetPurpose.ASSET_PURPOSE_UNSPECIFIED;
+  }
+
+  private status(value: string | undefined): AssetStatus {
+    const statuses: Record<string, AssetStatus> = {
+      PENDING_UPLOAD: AssetStatus.ASSET_STATUS_PENDING_UPLOAD,
+      PROCESSING: AssetStatus.ASSET_STATUS_PROCESSING,
+      READY: AssetStatus.ASSET_STATUS_READY,
+      FAILED: AssetStatus.ASSET_STATUS_FAILED,
+      DELETED: AssetStatus.ASSET_STATUS_DELETED,
+    };
+    return (
+      statuses[String(value).toUpperCase()] ??
+      AssetStatus.ASSET_STATUS_UNSPECIFIED
+    );
   }
 }

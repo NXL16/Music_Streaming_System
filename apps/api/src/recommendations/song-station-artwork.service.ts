@@ -59,6 +59,7 @@ export class SongStationArtworkService {
       actorUserId: input.actorUserId,
       kind: AssetKind.ASSET_KIND_IMAGE,
       purpose: AssetPurpose.ASSET_PURPOSE_STATION_ARTWORK,
+      posterTimestampMillis: 0,
       filename: `${input.stationId}.webp`,
       contentType: 'image/webp',
       checksum,

@@ -47,7 +47,9 @@ export class ArtistStationArtworkService {
     artworkUrls: string[];
     layout: 'composite' | 'portrait';
   }) {
-    const urls = input.artworkUrls.filter(Boolean).slice(0, input.layout === 'portrait' ? 1 : 3);
+    const urls = input.artworkUrls
+      .filter(Boolean)
+      .slice(0, input.layout === 'portrait' ? 1 : 3);
     if (urls.length !== (input.layout === 'portrait' ? 1 : 3))
       throw new BadGatewayException('ARTIST_STATION_ARTWORK_SOURCES_REQUIRED');
     const sources = await Promise.all(urls.map((url) => this.download(url)));
@@ -59,6 +61,7 @@ export class ArtistStationArtworkService {
       actorUserId: input.actorUserId,
       kind: AssetKind.ASSET_KIND_IMAGE,
       purpose: AssetPurpose.ASSET_PURPOSE_ARTWORK,
+      posterTimestampMillis: 0,
       filename: `${input.stationId}.webp`,
       contentType: 'image/webp',
       checksum: createHash('sha256').update(image).digest('hex'),
@@ -99,7 +102,11 @@ export class ArtistStationArtworkService {
     }
   }
 
-  private async render(sources: Buffer[], color: string, layout: 'composite' | 'portrait') {
+  private async render(
+    sources: Buffer[],
+    color: string,
+    layout: 'composite' | 'portrait',
+  ) {
     if (layout === 'portrait') return this.renderPortrait(sources[0], color);
     const placements = [
       { left: 69, top: 42, size: 620 },
@@ -146,7 +153,11 @@ export class ArtistStationArtworkService {
     })
       .composite([
         { input: Buffer.from(stationArtworkBackgroundSvg(color)) },
-        { input: Buffer.from(this.shadowSvg(left, top, size)), top: 0, left: 0 },
+        {
+          input: Buffer.from(this.shadowSvg(left, top, size)),
+          top: 0,
+          left: 0,
+        },
         { input: await this.circle(source, size), left, top },
       ])
       .webp({ quality: 90, effort: 4, smartSubsample: true })

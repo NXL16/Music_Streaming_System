@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Header,
   Headers,
   Param,
   Post,
@@ -38,6 +39,14 @@ export class RoomIntegrationController {
   async createPlaybackTicket(@Body() dto: CreateRoomPlaybackTicketDto) {
     const data = await this.roomIntegration.createPlaybackTicket(dto);
     return { success: true, code: 'ROOM_PLAYBACK_TICKET_CREATED', data };
+  }
+
+  @Post('room-playback')
+  @UseGuards(RoomClientAuthGuard)
+  @Header('Cache-Control', 'private, no-store')
+  async createRoomPlayback(@Body() dto: CreateRoomPlaybackTicketDto) {
+    const data = await this.roomIntegration.createRoomPlayback(dto);
+    return { success: true, code: 'ROOM_PLAYBACK_CREATED', data };
   }
 
   @Get('media/:ticket')

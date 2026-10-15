@@ -10,7 +10,10 @@ describe('ArtistStudioCatalogController lyric drafts', () => {
     getCatalogResources: jest.fn(),
     checkArtistPermission: jest.fn(),
   };
-  const controller = new ArtistStudioCatalogController(songsService as never);
+  const controller = new ArtistStudioCatalogController(
+    songsService as never,
+    {} as never,
+  );
 
   beforeEach(() => jest.clearAllMocks());
 
@@ -59,6 +62,30 @@ describe('ArtistStudioCatalogController lyric drafts', () => {
     expect(songsService.getSongLyrics).toHaveBeenCalledWith({
       songId: 'song-1',
       includeDraft: true,
+    });
+  });
+
+  it('allows a super admin to save lyrics without a song owner record', async () => {
+    songsService.getSong.mockResolvedValue({
+      song: { id: 'song-1', uploaderId: 'artist-1' },
+    });
+    songsService.upsertSongLyrics.mockResolvedValue({ songId: 'song-1' });
+
+    await expect(
+      controller.saveSongLyrics(
+        { user: { userId: 'admin-1', role: UserRole.SUPER_ADMIN } } as never,
+        'song-1',
+        { language: 'vi', sourceTtml: '<tt></tt>', publish: false },
+      ),
+    ).resolves.toEqual({ songId: 'song-1' });
+
+    expect(songsService.upsertSongLyrics).toHaveBeenCalledWith({
+      songId: 'song-1',
+      language: 'vi',
+      sourceTtml: '<tt></tt>',
+      publish: false,
+      actorUserId: 'admin-1',
+      canManageAllSongs: true,
     });
   });
 });

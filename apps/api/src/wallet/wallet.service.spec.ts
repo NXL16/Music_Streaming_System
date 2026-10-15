@@ -10,6 +10,7 @@ describe('WalletService', () => {
   it('attaches the internal token to every Wallet gRPC request', async () => {
     let getBalanceMetadata: Metadata | undefined;
     let depositMetadata: Metadata | undefined;
+    let debitMetadata: Metadata | undefined;
     const getBalance: UnaryMock<{ coinBalance: number; frozenBalance: number }> =
       jest.fn((request, metadata) => {
         void request;
@@ -23,8 +24,15 @@ describe('WalletService', () => {
         return of({ orderId: 'order-1' });
       },
     );
+    const debitWallet: UnaryMock<{ transactionId: string; status: string }> = jest.fn(
+      (request, metadata) => {
+        void request;
+        debitMetadata = metadata;
+        return of({ transactionId: 'TX-DEBIT-1', status: 'SUCCESS' });
+      },
+    );
     const client = {
-      getService: jest.fn(() => ({ getBalance, createDepositOrder })),
+      getService: jest.fn(() => ({ getBalance, createDepositOrder, debitWallet })),
     };
     const config = { getOrThrow: jest.fn(() => token) };
     const service = new WalletService(client as never, config as never);
@@ -36,8 +44,14 @@ describe('WalletService', () => {
       amountVnd: 10_000,
       paymentMethod: 'MOMO',
     });
+    await service.debit({
+      userId: 'user-1',
+      amount: 10,
+      idempotencyKey: 'room-gift:request-1',
+      description: 'Room gift rose x1 to user-2',
+    });
 
-    for (const metadata of [getBalanceMetadata, depositMetadata]) {
+    for (const metadata of [getBalanceMetadata, depositMetadata, debitMetadata]) {
       expect(metadata?.get('x-internal-token')).toEqual([token]);
     }
   });

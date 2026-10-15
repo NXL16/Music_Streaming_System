@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Header,
   Headers,
   Post,
   Req,
@@ -10,6 +11,7 @@ import type { Request } from 'express';
 import type { JwtUser } from '@musical/shared-types';
 import { StrictJwtAuthGuard } from '../common/guards/strict-jwt-auth.guard';
 import { ExchangeRoomCodeDto } from './dto/exchange-room-code.dto';
+import { GetRoomProfileDto } from './dto/get-room-profile.dto';
 import { SsoService } from './sso.service';
 
 @Controller('sso/room')
@@ -38,6 +40,21 @@ export class SsoController {
       success: true,
       code: 'ROOM_SSO_EXCHANGED',
       message: 'Đã xác thực người dùng cho Room',
+      data,
+    };
+  }
+
+  @Post('profile')
+  @Header('Cache-Control', 'private, no-store')
+  async getRoomProfile(
+    @Body() dto: GetRoomProfileDto,
+    @Headers('x-room-client-secret') clientSecret: string | undefined,
+  ) {
+    const data = await this.ssoService.getRoomProfile(dto.userId, clientSecret);
+    return {
+      success: true,
+      code: 'ROOM_SSO_PROFILE',
+      message: 'Đã đồng bộ hồ sơ người dùng cho Room',
       data,
     };
   }

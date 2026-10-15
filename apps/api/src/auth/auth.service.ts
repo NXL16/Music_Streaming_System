@@ -197,6 +197,7 @@ export class AuthService implements OnModuleInit {
       actorUserId: userId,
       kind: AssetKind.ASSET_KIND_IMAGE,
       purpose: AssetPurpose.ASSET_PURPOSE_PROFILE_AVATAR,
+      posterTimestampMillis: 0,
       ...input,
     });
   }

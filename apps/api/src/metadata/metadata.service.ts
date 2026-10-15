@@ -98,7 +98,7 @@ export class MetadataService implements OnModuleInit {
         startByte: segment.startByte,
         size: segment.size,
         duration: segment.durationTs,
-        startTimeSec: segment.startTimeSec,
+        startTimeSec: segment.startTimeSec ?? 0,
       })),
       encryptionStartOffset:
         data.encryptionStartOffset || data.mediaOffset || 0,

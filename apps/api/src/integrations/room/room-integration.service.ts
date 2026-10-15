@@ -16,7 +16,7 @@ import {
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Response } from 'express';
-import { SongStatus } from '@musical/shared-proto';
+import { AudioMode, SongStatus } from '@musical/shared-proto';
 import { SongsService } from '../../songs/songs.service';
 import { StreamService } from '../../stream/stream.service';
 import { CreateRoomPlaybackTicketDto } from './dto/create-room-playback-ticket.dto';
@@ -101,6 +101,47 @@ export class RoomIntegrationService {
       },
       mediaUrl: `${baseUrl}/integrations/room/media/${ticket}`,
       expiresAt: claims.exp,
+    };
+  }
+
+  async createRoomPlayback(dto: CreateRoomPlaybackTicketDto) {
+    const { song } = await this.songs.getSong({
+      songId: dto.songId,
+      requesterUserId: '',
+    });
+    if (
+      !song ||
+      !song.isPublic ||
+      song.status !== SongStatus.SONG_STATUS_READY
+    ) {
+      throw new NotFoundException({
+        code: 'ROOM_MEDIA_SONG_UNAVAILABLE',
+        message: 'Bài hát không khả dụng để phát trong Room',
+      });
+    }
+
+    if (song.audioMode !== AudioMode.AUDIO_MODE_SING) {
+      const ticket = await this.createPlaybackTicket(dto);
+      return { ...ticket, songId: dto.songId, mode: 'STANDARD' as const };
+    }
+
+    // The current Music API selects stems from the authoritative song mode,
+    // not from the absence of mixed-track metadata. Always pass SING explicitly.
+    const playback = await this.streams.getPlaybackManifest(dto.songId, 'SING');
+    if (playback.mode !== 'SING' || !playback.instrumental || !playback.vocal) {
+      throw new BadGatewayException({
+        code: 'ROOM_MEDIA_PLAYBACK_INVALID',
+        message: 'Không lấy được đầy đủ hai luồng của bài hát',
+      });
+    }
+
+    // Do not fall back to a mixed-stream ticket when a stem is unavailable.
+    // Only the authenticated Room backend receives these decryption materials.
+    return {
+      songId: dto.songId,
+      mode: 'SING' as const,
+      instrumental: playback.instrumental,
+      vocal: playback.vocal,
     };
   }
 

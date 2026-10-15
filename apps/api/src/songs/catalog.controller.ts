@@ -185,9 +185,8 @@ export class CatalogController {
     @Query('section') section?: string,
   ) {
     const parsedLimit = Number(limit);
-    const releaseTypes = (Array.isArray(releaseType)
-      ? releaseType
-      : releaseType?.split(',') ?? []
+    const releaseTypes = (
+      Array.isArray(releaseType) ? releaseType : (releaseType?.split(',') ?? [])
     )
       .map((value) => value.trim())
       .filter(Boolean);
@@ -313,10 +312,19 @@ export class CatalogController {
 @Controller('studio/catalog')
 @UseGuards(StrictJwtAuthGuard, ArtistOrAdminGuard)
 export class ArtistStudioCatalogController {
-  constructor(private readonly songsService: SongsService) {}
+  constructor(
+    private readonly songsService: SongsService,
+    private readonly recommendationsService: RecommendationsService,
+  ) {}
 
   private static readonly RELEASE_ROLES = ['OWNER', 'MANAGER', 'PRODUCTION'];
   private static readonly PROFILE_ROLES = ['OWNER', 'MANAGER', 'EDITOR'];
+  private static readonly ANALYTICS_ROLES = [
+    'OWNER',
+    'MANAGER',
+    'EDITOR',
+    'PRODUCTION',
+  ];
   private static readonly ADMIN_ROLES = new Set([
     'SUPER_ADMIN',
     'ADMIN_USER_OPS',
@@ -442,20 +450,8 @@ export class ArtistStudioCatalogController {
     @Body()
     body: {
       language?: string;
-      sourceLrc?: string;
+      sourceTtml?: string;
       publish?: boolean;
-      syncMode?: 'LINE' | 'WORD';
-      lines?: Array<{
-        startTimeMs: number;
-        endTimeMs: number;
-        text: string;
-        kind?: 'LYRIC' | 'INSTRUMENTAL';
-        words?: Array<{
-          startTimeMs: number;
-          endTimeMs: number;
-          text: string;
-        }>;
-      }>;
     },
   ) {
     const user = req.user as JwtUser;
@@ -469,20 +465,56 @@ export class ArtistStudioCatalogController {
     return this.songsService.upsertSongLyrics({
       songId,
       language: body.language?.trim() || 'vi',
-      sourceLrc: body.sourceLrc || '',
+      sourceTtml: body.sourceTtml || '',
       publish: Boolean(body.publish),
-      syncMode: body.syncMode === 'WORD' ? 'WORD' : 'LINE',
-      actorUserId: (req.user as JwtUser).userId,
-      canManageAllSongs: false,
-      lines: (body.lines || []).map((line, position) => ({
-        ...line,
-        kind: line.kind === 'INSTRUMENTAL' ? 'INSTRUMENTAL' : 'LYRIC',
-        position,
-        words: (line.words || []).map((word, wordPosition) => ({
-          ...word,
-          position: wordPosition,
-        })),
+      actorUserId: user.userId,
+      canManageAllSongs: ArtistStudioCatalogController.ADMIN_ROLES.has(
+        user.role,
+      ),
+    });
+  }
+
+  @Get('songs/:songId/static-lyrics')
+  async getSongStaticLyrics(
+    @Req() req: Request,
+    @Param('songId') songId: string,
+  ) {
+    const user = req.user as JwtUser;
+    const song = await this.songsService.getSong({
+      songId,
+      requesterUserId: user.userId,
+    });
+    if (!song.song || song.song.uploaderId !== user.userId) {
+      await this.assertCanEditSongArtists(req, songId);
+    }
+    return this.songsService.getSongStaticLyrics({ songId });
+  }
+
+  @Post('songs/:songId/static-lyrics')
+  async saveSongStaticLyrics(
+    @Req() req: Request,
+    @Param('songId') songId: string,
+    @Body()
+    body: { lines?: Array<{ text?: string; vocalistType?: string }> },
+  ) {
+    const user = req.user as JwtUser;
+    const song = await this.songsService.getSong({
+      songId,
+      requesterUserId: user.userId,
+    });
+    if (!song.song || song.song.uploaderId !== user.userId) {
+      await this.assertCanEditSongArtists(req, songId);
+    }
+    return this.songsService.upsertSongStaticLyrics({
+      songId,
+      lines: (body.lines || []).map((line) => ({
+        text: line.text || '',
+        vocalistType: line.vocalistType || 'PRIMARY',
       })),
+      actorUserId: user.userId,
+      canManageAllSongs: ArtistStudioCatalogController.ADMIN_ROLES.has(
+        user.role,
+      ),
     });
   }
 
@@ -499,6 +531,131 @@ export class ArtistStudioCatalogController {
     return this.songsService.submitCatalogDraft({
       draftId,
       actorUserId: user.userId,
+    });
+  }
+
+  @Get('drafts/mine')
+  async listMyDrafts(
+    @Req() req: Request,
+    @Query('resourceType') resourceType?: string,
+    @Query('status') draftStatus?: string,
+  ) {
+    const user = req.user as JwtUser;
+    // CatalogAuthoring exposes a generic internal list used by admin. Filter
+    // it inside this Studio boundary before returning anything to the artist.
+    const result = await this.songsService.listCatalogDrafts({
+      storefront: 'vn',
+      resourceType: resourceType || '',
+      resourceId: '',
+      status: this.draftStatus(draftStatus),
+      cursor: '',
+      limit: 100,
+    });
+    return {
+      drafts: result.drafts.filter((draft) => draft.createdBy === user.userId),
+      hasMore: false,
+      nextCursor: '',
+    };
+  }
+
+  @Get('artists/:artistId/releases')
+  async listArtistWorkspaceReleases(
+    @Req() req: Request,
+    @Param('artistId') artistId: string,
+  ) {
+    await this.assertCanAccessArtists(
+      req,
+      [artistId],
+      ArtistStudioCatalogController.ANALYTICS_ROLES,
+    );
+    const [catalog, draftPage] = await Promise.all([
+      this.songsService.getCatalogArtistSongs({
+        storefront: 'vn',
+        artistId,
+        limit: 100,
+        cursor: '',
+      }),
+      this.songsService.listCatalogDrafts({
+        storefront: 'vn',
+        resourceType: '',
+        resourceId: '',
+        status: CatalogDraftStatus.CATALOG_DRAFT_STATUS_UNSPECIFIED,
+        cursor: '',
+        limit: 100,
+      }),
+    ]);
+    const draftDetails = await Promise.all(
+      draftPage.drafts.map((draft) => this.songsService.getCatalogDraft({ draftId: draft.id })),
+    );
+    const drafts = draftDetails
+      .filter(
+        (detail) =>
+          ['songs', 'albums'].includes(detail.draft?.resourceType || '') &&
+          this.draftBelongsToArtist(detail, artistId),
+      )
+      .map((detail) => ({ ...detail.draft, name: String(detail.payload?.name || '') }));
+    const songs = catalog.data
+      .filter((resource) => resource.type === 'songs')
+      .map((resource) => {
+        const attributes = catalog.resources?.songs?.[resource.id]?.attributes;
+        return {
+          id: resource.id,
+          title: attributes?.name || resource.id,
+          artist: attributes?.artistName || '',
+          album: attributes?.albumName || '',
+          status: 'PUBLISHED',
+          createdAt: attributes?.releaseDate || '',
+        };
+      });
+    return { songs, drafts };
+  }
+
+  @Get('artists/:artistId/drafts/:draftId')
+  async getArtistWorkspaceDraft(
+    @Req() req: Request,
+    @Param('artistId') artistId: string,
+    @Param('draftId') draftId: string,
+  ) {
+    await this.assertCanAccessArtists(
+      req,
+      [artistId],
+      ArtistStudioCatalogController.ANALYTICS_ROLES,
+    );
+    const detail = await this.songsService.getCatalogDraft({ draftId });
+    if (!this.draftBelongsToArtist(detail, artistId)) {
+      throw new ForbiddenException({ code: 'ARTIST_WORKSPACE_ACCESS_DENIED' });
+    }
+    return detail;
+  }
+
+  @Get('artists/:artistId/analytics')
+  async getArtistListeningAnalytics(
+    @Req() req: Request,
+    @Param('artistId') artistId: string,
+    @Query('days') days?: string,
+  ) {
+    await this.assertCanAccessArtists(
+      req,
+      [artistId],
+      ArtistStudioCatalogController.ANALYTICS_ROLES,
+    );
+
+    // Only published catalog songs can have listening events. Resolving their
+    // ids here keeps analytics isolated to the selected Artist workspace.
+    const catalog = await this.songsService.getCatalogArtistSongs({
+      storefront: 'vn',
+      artistId,
+      limit: 100,
+      cursor: '',
+    });
+    const songIds = catalog.data
+      .filter((resource) => resource.type === 'songs')
+      .map((resource) => resource.id)
+      .filter(Boolean);
+
+    return this.recommendationsService.getListeningAnalytics({
+      songIds,
+      days: Math.min(90, Math.max(1, Number(days) || 28)),
     });
   }
 
@@ -524,6 +681,36 @@ export class ArtistStudioCatalogController {
     );
   }
 
+  private draftStatus(value?: string): CatalogDraftStatus {
+    switch (value?.toUpperCase()) {
+      case 'DRAFT':
+        return CatalogDraftStatus.CATALOG_DRAFT_STATUS_DRAFT;
+      case 'PUBLISHED':
+        return CatalogDraftStatus.CATALOG_DRAFT_STATUS_PUBLISHED;
+      case 'SUBMITTED':
+        return CatalogDraftStatus.CATALOG_DRAFT_STATUS_SUBMITTED;
+      case 'CHANGES_REQUESTED':
+        return CatalogDraftStatus.CATALOG_DRAFT_STATUS_CHANGES_REQUESTED;
+      default:
+        return CatalogDraftStatus.CATALOG_DRAFT_STATUS_UNSPECIFIED;
+    }
+  }
+
+  private draftBelongsToArtist(
+    detail: Awaited<ReturnType<SongsService['getCatalogDraft']>>,
+    artistId: string,
+  ) {
+    if (detail.draft?.resourceType === 'artists') {
+      return detail.draft.resourceId === artistId;
+    }
+    const payload = detail.payload ?? {};
+    const artistIds = Array.isArray(payload.artistIds) ? payload.artistIds : [];
+    const credits = Array.isArray(payload.credits) ? payload.credits : [];
+    return artistIds.includes(artistId) || credits.some(
+      (credit) => typeof credit === 'object' && credit !== null && (credit as { artistId?: unknown }).artistId === artistId,
+    );
+  }
+
   private async assertCanAccessArtists(
     req: Request,
     artistIds: string[],
@@ -532,9 +719,9 @@ export class ArtistStudioCatalogController {
   ) {
     const user = req.user as JwtUser;
     if (ArtistStudioCatalogController.ADMIN_ROLES.has(user.role)) return;
-    const uniqueArtistIds = [...new Set(artistIds.map((id) => id.trim()))].filter(
-      Boolean,
-    );
+    const uniqueArtistIds = [
+      ...new Set(artistIds.map((id) => id.trim())),
+    ].filter(Boolean);
     if (!uniqueArtistIds.length) {
       throw new ForbiddenException({
         code: 'ARTIST_WORKSPACE_REQUIRED',
@@ -590,6 +777,11 @@ export class CatalogAdminController {
     });
   }
 
+  @Get('songs/:songId/lyrics')
+  getSongLyrics(@Param('songId') songId: string) {
+    return this.songsService.getSongLyrics({ songId, includeDraft: true });
+  }
+
   @Post('songs/:songId/lyrics')
   saveSongLyrics(
     @Req() req: Request,
@@ -597,20 +789,40 @@ export class CatalogAdminController {
     @Body()
     body: {
       language?: string;
-      sourceLrc: string;
+      sourceTtml?: string;
       publish?: boolean;
-      syncMode?: 'LINE' | 'WORD';
     },
   ) {
     return this.songsService.upsertSongLyrics({
       songId,
       language: body.language?.trim() || 'vi',
-      sourceLrc: body.sourceLrc,
+      sourceTtml: body.sourceTtml || '',
       publish: Boolean(body.publish),
-      syncMode: body.syncMode === 'WORD' ? 'WORD' : 'LINE',
       actorUserId: (req.user as JwtUser).userId,
       canManageAllSongs: true,
-      lines: [],
+    });
+  }
+
+  @Get('songs/:songId/static-lyrics')
+  getSongStaticLyrics(@Param('songId') songId: string) {
+    return this.songsService.getSongStaticLyrics({ songId });
+  }
+
+  @Post('songs/:songId/static-lyrics')
+  saveSongStaticLyrics(
+    @Req() req: Request,
+    @Param('songId') songId: string,
+    @Body()
+    body: { lines?: Array<{ text?: string; vocalistType?: string }> },
+  ) {
+    return this.songsService.upsertSongStaticLyrics({
+      songId,
+      lines: (body.lines || []).map((line) => ({
+        text: line.text || '',
+        vocalistType: line.vocalistType || 'PRIMARY',
+      })),
+      actorUserId: (req.user as JwtUser).userId,
+      canManageAllSongs: true,
     });
   }
 
@@ -643,6 +855,17 @@ export class CatalogAdminController {
   ) {
     return this.songsService.saveCatalogSongVideoDraft({
       ...body,
+      actorUserId: (req.user as JwtUser).userId,
+    });
+  }
+
+  @Delete('song-videos/:songVideoId')
+  deleteSongVideo(
+    @Req() req: Request,
+    @Param('songVideoId') songVideoId: string,
+  ) {
+    return this.songsService.deleteCatalogSongVideo({
+      songVideoId,
       actorUserId: (req.user as JwtUser).userId,
     });
   }

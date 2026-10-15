@@ -13,6 +13,7 @@ import {
   UseGuards,
   Headers,
   UnauthorizedException,
+  BadRequestException,
 } from '@nestjs/common';
 import { SongsService } from './songs.service';
 import { RecommendationsService } from '../recommendations/recommendations.service';
@@ -85,6 +86,32 @@ export class SongsController {
     }
 
     return await this.songsService.finalizeUpload(finalizeDto);
+  }
+
+  @Get('internal/by-checksum')
+  async findByChecksumInternal(
+    @Headers('x-internal-token') token: string | undefined,
+    @Query('checksum') checksum: string | undefined,
+  ) {
+    const expectedToken = this.configService.get<string>(
+      'FINALIZER_INTERNAL_TOKEN',
+    );
+    if (!expectedToken || token !== expectedToken) {
+      throw new UnauthorizedException('INVALID_INTERNAL_TOKEN');
+    }
+
+    const normalizedChecksum = checksum?.trim().toLowerCase();
+    if (!normalizedChecksum || !/^[a-f0-9]{64}$/.test(normalizedChecksum)) {
+      throw new BadRequestException('INVALID_CHECKSUM');
+    }
+
+    const result = await this.songsService.getSongByChecksum({
+      checksum: normalizedChecksum,
+    });
+    return {
+      found: Boolean(result.song?.id),
+      songId: result.song?.id ?? '',
+    };
   }
 
   @Get()
@@ -302,7 +329,30 @@ export class SongsController {
     // through the public visibility policy first so a private owner's lyrics
     // cannot be enumerated through this otherwise public endpoint.
     await this.songsService.getSong({ songId, requesterUserId: '' });
-    return this.songsService.getSongLyrics({ songId, includeDraft: false });
+    const lyrics = await this.songsService.getSongLyrics({
+      songId,
+      includeDraft: false,
+    });
+    return {
+      data: [
+        {
+          id: songId,
+          type: 'syllable-lyrics',
+          attributes: {
+            language: lyrics.language,
+            ttmlLocalizations: lyrics.sourceTtml,
+          },
+        },
+      ],
+    };
+  }
+
+  @Get(':songId/static-lyrics')
+  async getStaticLyrics(@Param('songId') songId: string) {
+    // This route is intentionally separate from the TTML endpoint above:
+    // detail-page static lyrics must never be mistaken for synced lyrics.
+    await this.songsService.getSong({ songId, requesterUserId: '' });
+    return this.songsService.getSongStaticLyrics({ songId });
   }
 
   @Delete('library/resources/:resourceType/:resourceId')

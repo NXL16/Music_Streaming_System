@@ -14,12 +14,17 @@ import {
   ListAssetUsagesResponse,
   RequestAssetUploadRequest,
   RequestAssetUploadResponse,
+  ReplaceMusicVideoPosterRequest,
   SyncAssetUsagesRequest,
   SyncAssetUsagesResponse,
 } from '@musical/shared-proto';
 import { ConfigService } from '@nestjs/config';
 import { Metadata } from '@grpc/grpc-js';
 import { grpcFirstValueFrom } from '../common/utils/grpc-timeout';
+
+// Poster replacement downloads the source video and can include a Modal cold start.
+// Keep the longer deadline local to this operation; ordinary Asset RPCs stay at 10s.
+const MUSIC_VIDEO_POSTER_REPLACEMENT_TIMEOUT_MS = 2 * 60 * 1000;
 
 @Injectable()
 export class AssetsService implements OnModuleInit {
@@ -84,6 +89,15 @@ export class AssetsService implements OnModuleInit {
   deleteAsset(request: DeleteAssetRequest): Promise<DeleteAssetResponse> {
     return grpcFirstValueFrom(
       this.client.deleteAsset(request, this.metadata()),
+    );
+  }
+
+  replaceMusicVideoPoster(
+    request: ReplaceMusicVideoPosterRequest,
+  ): Promise<AssetResponse> {
+    return grpcFirstValueFrom(
+      this.client.replaceMusicVideoPoster(request, this.metadata()),
+      MUSIC_VIDEO_POSTER_REPLACEMENT_TIMEOUT_MS,
     );
   }
 
