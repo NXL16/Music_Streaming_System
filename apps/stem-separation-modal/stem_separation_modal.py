@@ -19,6 +19,8 @@ from fastapi import Header, HTTPException
 
 app = modal.App("music-stem-separation")
 model_cache = modal.Volume.from_name("bs-roformer-model-cache", create_if_missing=True)
+r2_secret = modal.Secret.from_name("music-r2")
+service_secret = modal.Secret.from_name("music-stem-separation")
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("ffmpeg")
@@ -153,7 +155,7 @@ def separate_to_output(source_path: Path, output_dir: Path, output_format: str) 
 @app.function(
     image=image,
     timeout=30,
-    secrets=[modal.Secret.from_name("music-r2")],
+    secrets=[r2_secret, service_secret],
 )
 @modal.fastapi_endpoint(method="GET", docs=True)
 def health(authorization: Annotated[str | None, Header()] = None) -> dict:
@@ -176,7 +178,7 @@ def health(authorization: Annotated[str | None, Header()] = None) -> dict:
     gpu="L4",
     timeout=20 * 60,
     volumes={"/models": model_cache},
-    secrets=[modal.Secret.from_name("music-r2")],
+    secrets=[r2_secret, service_secret],
 )
 @modal.fastapi_endpoint(method="POST", docs=True)
 def separate(

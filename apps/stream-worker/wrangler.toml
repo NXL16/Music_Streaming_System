@@ -8,5 +8,5 @@ routes = [
 ]
 
 [vars]
-ALLOWED_ORIGINS = "http://localhost:3000,https://music.404hz.me"
+ALLOWED_ORIGINS = "http://localhost:3000,https://music.404hz.me,https://room.phuc.food"
 AUDIO_ORIGIN_URL = "https://r2.404hz.me"
