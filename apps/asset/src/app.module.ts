@@ -1,22 +1,20 @@
-import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
-import { validateEnv } from './common/configs/env.validation';
-import { DatabaseModule } from './database/database.module';
-import { StorageModule } from './storage/storage.module';
-import { AssetsModule } from './assets/assets.module';
-import { ProcessingModule } from './processing/processing.module';
+import { Module } from "@nestjs/common";
+import { ConfigModule } from "@nestjs/config";
+import { validateEnv } from "./common/configs/env.validation";
+import { DatabaseModule } from "./database/database.module";
+import { StorageModule } from "./storage/storage.module";
+import { AssetsModule } from "./assets/assets.module";
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: [`.env.${process.env.APP_ENV ?? 'development'}`, '.env'],
+      envFilePath: [`.env.${process.env.APP_ENV ?? "development"}`, ".env"],
       validate: validateEnv,
     }),
     DatabaseModule,
     StorageModule,
     AssetsModule,
-    ProcessingModule,
   ],
 })
 export class AppModule {}

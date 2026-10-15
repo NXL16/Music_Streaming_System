@@ -1,8 +1,8 @@
-import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { createHash } from 'node:crypto';
-import { status } from '@grpc/grpc-js';
-import { RpcException } from '@nestjs/microservices';
+import { Injectable } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { createHash } from "node:crypto";
+import { status } from "@grpc/grpc-js";
+import { RpcException } from "@nestjs/microservices";
 import {
   Asset as AssetMessage,
   AssetKind,
@@ -19,42 +19,41 @@ import {
   GetMusicVideoKeyRequest,
   GetMusicVideoKeyResponse,
   RegisterAssetUsagesResponse,
+  ReplaceMusicVideoPosterRequest,
   RequestAssetUploadRequest,
   RequestAssetUploadResponse,
   SyncAssetUsagesRequest,
   SyncAssetUsagesResponse,
-} from '@musical/shared-proto';
-import { PrismaService } from '../database/prisma.service';
+} from "@musical/shared-proto";
+import { PrismaService } from "../database/prisma.service";
 import {
   Asset,
   AssetKind as PrismaAssetKind,
   AssetPurpose as PrismaAssetPurpose,
   AssetStatus as PrismaAssetStatus,
   Prisma,
-} from '../generated/prisma/client';
-import { StorageService } from '../storage/storage.service';
+} from "../generated/prisma/client";
+import { StorageService } from "../storage/storage.service";
+import { AssetProcessorService } from "../processing/asset-processor.service";
 import {
   decryptVideoKey,
   parseVideoKeyEncryptionKey,
-} from '../common/crypto/video-key-encryption';
+} from "../common/crypto/video-key-encryption";
 
 const MAX_LIST_LIMIT = 100;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
+const VIDEO_UPLOAD_URL_EXPIRES_IN_SECONDS = 60 * 60;
 const DEFAULT_ARTIFACT_CLEANUP_LOCK_TTL_MS = 10 * 60 * 1000;
 const DEFAULT_FAILED_ARTIFACT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const IMAGE_TYPES = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'image/avif',
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/avif",
 ]);
-const VIDEO_TYPES = new Set([
-  'video/mp4',
-  'video/quicktime',
-  'video/webm',
-]);
+const VIDEO_TYPES = new Set(["video/mp4", "video/quicktime", "video/webm"]);
 
 @Injectable()
 export class AssetsService {
@@ -65,18 +64,19 @@ export class AssetsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly processor: AssetProcessorService,
     config: ConfigService,
   ) {
     this.artifactCleanupLockTtlMs = this.positiveInteger(
-      config.get<string>('ASSET_ARTIFACT_CLEANUP_LOCK_TTL_MS'),
+      config.get<string>("ASSET_ARTIFACT_CLEANUP_LOCK_TTL_MS"),
       DEFAULT_ARTIFACT_CLEANUP_LOCK_TTL_MS,
     );
     this.failedArtifactRetentionMs = this.positiveInteger(
-      config.get<string>('ASSET_FAILED_ARTIFACT_RETENTION_MS'),
+      config.get<string>("ASSET_FAILED_ARTIFACT_RETENTION_MS"),
       DEFAULT_FAILED_ARTIFACT_RETENTION_MS,
     );
     this.videoKeyEncryptionKey = parseVideoKeyEncryptionKey(
-      config.get<string>('ASSET_VIDEO_KEY_ENCRYPTION_KEY'),
+      config.get<string>("ASSET_VIDEO_KEY_ENCRYPTION_KEY"),
     );
   }
 
@@ -89,16 +89,22 @@ export class AssetsService {
     const contentType = request.contentType.trim().toLowerCase();
     const checksum = request.checksum.trim().toLowerCase();
     const sizeBytes = Number(request.sizeBytes);
+    const posterTimestampMillis = this.posterTimestampMillis(
+      kind,
+      purpose,
+      request.posterTimestampMillis,
+    );
 
-    this.requireText(request.actorUserId, 'actor_user_id', 128);
+    this.requireText(request.actorUserId, "actor_user_id", 128);
     this.validateUpload(kind, purpose, contentType, checksum, sizeBytes);
 
     const existing = await this.prisma.asset.findUnique({
       where: {
-        kind_purpose_checksum_createdBy: {
+        kind_purpose_checksum_posterTimestampMillis_createdBy: {
           kind,
           purpose,
           checksum,
+          posterTimestampMillis,
           createdBy: request.actorUserId,
         },
       },
@@ -125,7 +131,7 @@ export class AssetsService {
           const current = await tx.asset.findUnique({
             where: { id: existing.id },
           });
-          if (!current) this.notFound('ASSET_NOT_FOUND');
+          if (!current) this.notFound("ASSET_NOT_FOUND");
           if (
             current.status !== PrismaAssetStatus.FAILED &&
             current.status !== PrismaAssetStatus.DELETED
@@ -142,12 +148,13 @@ export class AssetsService {
               contentType,
               sizeBytes: BigInt(sizeBytes),
               sourceObjectKey: objectKey,
-              publicUrl: '',
+              publicUrl: "",
               width: 0,
               height: 0,
               durationMillis: 0,
+              posterTimestampMillis,
               variants: Prisma.DbNull,
-              errorMessage: '',
+              errorMessage: "",
               createdBy: request.actorUserId,
             },
           });
@@ -157,6 +164,7 @@ export class AssetsService {
             kind,
             purpose,
             checksum,
+            posterTimestampMillis,
             createdBy: request.actorUserId,
           },
           {
@@ -166,6 +174,7 @@ export class AssetsService {
             contentType,
             checksum,
             sizeBytes: BigInt(sizeBytes),
+            posterTimestampMillis,
             sourceObjectKey: objectKey,
             createdBy: request.actorUserId,
           },
@@ -177,10 +186,10 @@ export class AssetsService {
   async finalizeUpload(
     request: FinalizeAssetUploadRequest,
   ): Promise<AssetResponse> {
-    this.requireText(request.actorUserId, 'actor_user_id', 128);
+    this.requireText(request.actorUserId, "actor_user_id", 128);
     const asset = await this.findAsset(request.assetId, true);
     if (asset.createdBy !== request.actorUserId) {
-      this.forbidden('ASSET_ACCESS_DENIED');
+      this.forbidden("ASSET_ACCESS_DENIED");
     }
     if (asset.status === PrismaAssetStatus.READY) {
       return { asset: this.assetMessage(asset) };
@@ -191,13 +200,13 @@ export class AssetsService {
 
     const object = await this.storage.head(asset.sourceObjectKey);
     if (object.contentLength !== Number(asset.sizeBytes)) {
-      this.failedPrecondition('ASSET_UPLOAD_SIZE_MISMATCH');
+      this.failedPrecondition("ASSET_UPLOAD_SIZE_MISMATCH");
     }
     if (
       object.contentType &&
       object.contentType.toLowerCase() !== asset.contentType
     ) {
-      this.failedPrecondition('ASSET_UPLOAD_CONTENT_TYPE_MISMATCH');
+      this.failedPrecondition("ASSET_UPLOAD_CONTENT_TYPE_MISMATCH");
     }
 
     const processing = await this.prisma.$transaction(async (tx) => {
@@ -206,7 +215,7 @@ export class AssetsService {
         where: { id: asset.id },
       });
       if (!current || current.status === PrismaAssetStatus.DELETED) {
-        this.failedPrecondition('ASSET_NOT_FINALIZABLE');
+        this.failedPrecondition("ASSET_NOT_FINALIZABLE");
       }
       if (
         current.status === PrismaAssetStatus.READY ||
@@ -219,7 +228,7 @@ export class AssetsService {
         where: { id: asset.id },
         data: {
           status: PrismaAssetStatus.PROCESSING,
-          errorMessage: '',
+          errorMessage: "",
         },
       });
       await tx.assetProcessingJob.upsert({
@@ -229,7 +238,7 @@ export class AssetsService {
           availableAt: new Date(),
           lockedAt: null,
           leaseToken: null,
-          lastError: '',
+          lastError: "",
         },
       });
       return updated;
@@ -242,11 +251,52 @@ export class AssetsService {
     return { asset: this.assetMessage(await this.findAsset(request.assetId)) };
   }
 
+  async replaceMusicVideoPoster(
+    request: ReplaceMusicVideoPosterRequest,
+  ): Promise<AssetResponse> {
+    this.requireText(request.actorUserId, "actor_user_id", 128);
+    const posterTimestampMillis = this.posterTimestampMillis(
+      PrismaAssetKind.VIDEO,
+      PrismaAssetPurpose.MUSIC_VIDEO,
+      request.posterTimestampMillis,
+    );
+    const asset = await this.findAsset(request.assetId, true);
+    if (asset.createdBy !== request.actorUserId) {
+      this.forbidden("ASSET_ACCESS_DENIED");
+    }
+    if (
+      asset.kind !== PrismaAssetKind.VIDEO ||
+      asset.purpose !== PrismaAssetPurpose.MUSIC_VIDEO ||
+      asset.status !== PrismaAssetStatus.READY
+    ) {
+      this.failedPrecondition("MUSIC_VIDEO_POSTER_NOT_REPLACEABLE");
+    }
+
+    const poster = await this.processor.replaceMusicVideoPoster(
+      asset,
+      posterTimestampMillis,
+    );
+    const updated = await this.prisma.asset.updateMany({
+      where: {
+        id: asset.id,
+        status: PrismaAssetStatus.READY,
+        updatedAt: asset.updatedAt,
+      },
+      data: {
+        variants: this.withPoster(asset.variants, poster),
+      },
+    });
+    if (updated.count !== 1) {
+      this.failedPrecondition("MUSIC_VIDEO_POSTER_REPLACED_CONCURRENTLY");
+    }
+    return { asset: this.assetMessage(await this.findAsset(asset.id)) };
+  }
+
   async getMusicVideoKey(
     request: GetMusicVideoKeyRequest,
   ): Promise<GetMusicVideoKeyResponse> {
     if (!this.videoKeyEncryptionKey) {
-      throw new Error('MUSIC_VIDEO_ENCRYPTION_NOT_CONFIGURED');
+      throw new Error("MUSIC_VIDEO_ENCRYPTION_NOT_CONFIGURED");
     }
     const asset = await this.findAsset(request.assetId);
     if (
@@ -254,22 +304,22 @@ export class AssetsService {
       asset.purpose !== PrismaAssetPurpose.MUSIC_VIDEO ||
       asset.status !== PrismaAssetStatus.READY
     ) {
-      this.failedPrecondition('MUSIC_VIDEO_KEY_UNAVAILABLE');
+      this.failedPrecondition("MUSIC_VIDEO_KEY_UNAVAILABLE");
     }
     const encrypted = await this.prisma.assetVideoEncryptionKey.findUnique({
       where: { assetId: asset.id },
     });
-    if (!encrypted) this.failedPrecondition('MUSIC_VIDEO_KEY_UNAVAILABLE');
+    if (!encrypted) this.failedPrecondition("MUSIC_VIDEO_KEY_UNAVAILABLE");
     try {
       const key = decryptVideoKey(this.videoKeyEncryptionKey, encrypted);
       return { key };
     } catch {
-      this.failedPrecondition('MUSIC_VIDEO_KEY_UNAVAILABLE');
+      this.failedPrecondition("MUSIC_VIDEO_KEY_UNAVAILABLE");
     }
   }
 
   async listAssets(request: ListAssetsRequest): Promise<ListAssetsResponse> {
-    this.requireText(request.actorUserId, 'actor_user_id', 128);
+    this.requireText(request.actorUserId, "actor_user_id", 128);
     const limit = Math.min(Math.max(request.limit || 20, 1), MAX_LIST_LIMIT);
     const assets = await this.prisma.asset.findMany({
       where: {
@@ -277,7 +327,7 @@ export class AssetsService {
         purpose: this.optionalPurpose(request.purpose),
         status: this.optionalStatus(request.status),
       },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       cursor: request.cursor ? { id: request.cursor } : undefined,
       skip: request.cursor ? 1 : 0,
       take: limit + 1,
@@ -287,14 +337,12 @@ export class AssetsService {
     return {
       assets: page.map((asset) => this.assetMessage(asset)),
       hasMore,
-      nextCursor: hasMore ? page.at(-1)?.id ?? '' : '',
+      nextCursor: hasMore ? (page.at(-1)?.id ?? "") : "",
     };
   }
 
-  async deleteAsset(
-    request: DeleteAssetRequest,
-  ): Promise<DeleteAssetResponse> {
-    this.requireText(request.actorUserId, 'actor_user_id', 128);
+  async deleteAsset(request: DeleteAssetRequest): Promise<DeleteAssetResponse> {
+    this.requireText(request.actorUserId, "actor_user_id", 128);
     const asset = await this.findAsset(request.assetId, true);
 
     await this.prisma.$transaction(async (tx) => {
@@ -303,22 +351,22 @@ export class AssetsService {
         where: { id: asset.id },
         select: { status: true, sourceObjectKey: true },
       });
-      if (!current) this.notFound('ASSET_NOT_FOUND');
+      if (!current) this.notFound("ASSET_NOT_FOUND");
       if (current.status === PrismaAssetStatus.PROCESSING) {
-        this.failedPrecondition('ASSET_PROCESSING_IN_PROGRESS');
+        this.failedPrecondition("ASSET_PROCESSING_IN_PROGRESS");
       }
       const usageCount = await tx.assetUsage.count({
         where: { assetId: asset.id },
       });
       if (usageCount > 0) {
-        this.failedPrecondition('ASSET_IN_USE');
+        this.failedPrecondition("ASSET_IN_USE");
       }
       if (current.status === PrismaAssetStatus.DELETED) return;
       await tx.asset.update({
         where: { id: asset.id },
         data: {
           status: PrismaAssetStatus.DELETED,
-          publicUrl: '',
+          publicUrl: "",
           variants: Prisma.DbNull,
         },
       });
@@ -409,17 +457,15 @@ export class AssetsService {
     return { success: true };
   }
 
-  async listUsages(
-    request: GetAssetRequest,
-  ): Promise<ListAssetUsagesResponse> {
+  async listUsages(request: GetAssetRequest): Promise<ListAssetUsagesResponse> {
     const asset = await this.findAsset(request.assetId, true);
     const usages = await this.prisma.assetUsage.findMany({
       where: { assetId: asset.id },
       orderBy: [
-        { ownerService: 'asc' },
-        { ownerType: 'asc' },
-        { ownerId: 'asc' },
-        { slot: 'asc' },
+        { ownerService: "asc" },
+        { ownerType: "asc" },
+        { ownerId: "asc" },
+        { slot: "asc" },
       ],
     });
     return {
@@ -444,12 +490,12 @@ export class AssetsService {
     sizeBytes: number,
   ): void {
     if (!/^[a-f0-9]{64}$/.test(checksum)) {
-      this.invalidArgument('checksum must be a SHA-256 hex string');
+      this.invalidArgument("checksum must be a SHA-256 hex string");
     }
     const allowedTypes =
       kind === PrismaAssetKind.IMAGE ? IMAGE_TYPES : VIDEO_TYPES;
     if (!allowedTypes.has(contentType)) {
-      this.invalidArgument('content_type is not supported for asset kind');
+      this.invalidArgument("content_type is not supported for asset kind");
     }
     if (
       (kind === PrismaAssetKind.IMAGE &&
@@ -460,7 +506,7 @@ export class AssetsService {
         purpose !== PrismaAssetPurpose.EDITORIAL_VIDEO &&
         purpose !== PrismaAssetPurpose.MUSIC_VIDEO)
     ) {
-      this.invalidArgument('asset kind and purpose are incompatible');
+      this.invalidArgument("asset kind and purpose are incompatible");
     }
     const maxBytes =
       purpose === PrismaAssetPurpose.PROFILE_AVATAR
@@ -477,6 +523,45 @@ export class AssetsService {
     }
   }
 
+  private posterTimestampMillis(
+    kind: PrismaAssetKind,
+    purpose: PrismaAssetPurpose,
+    value: unknown,
+  ): number {
+    const timestamp = Number(value || 0);
+    if (!Number.isSafeInteger(timestamp) || timestamp < 0) {
+      this.invalidArgument(
+        "poster_timestamp_millis must be a non-negative integer",
+      );
+    }
+    if (
+      timestamp > 0 &&
+      (kind !== PrismaAssetKind.VIDEO ||
+        purpose !== PrismaAssetPurpose.MUSIC_VIDEO)
+    ) {
+      this.invalidArgument(
+        "poster_timestamp_millis is only supported for music videos",
+      );
+    }
+    return timestamp;
+  }
+
+  private withPoster(
+    variants: Prisma.JsonValue | null,
+    poster: Prisma.InputJsonObject,
+  ): Prisma.InputJsonObject {
+    const source =
+      typeof variants === "object" &&
+      variants !== null &&
+      !Array.isArray(variants)
+        ? variants
+        : {};
+    return {
+      ...(JSON.parse(JSON.stringify(source)) as Prisma.InputJsonObject),
+      poster,
+    };
+  }
+
   private async uploadResponse(
     asset: Asset,
   ): Promise<RequestAssetUploadResponse> {
@@ -487,8 +572,11 @@ export class AssetsService {
         ? await this.storage.createUploadUrl(
             asset.sourceObjectKey,
             asset.contentType,
+            asset.kind === PrismaAssetKind.VIDEO
+              ? VIDEO_UPLOAD_URL_EXPIRES_IN_SECONDS
+              : undefined,
           )
-        : '',
+        : "",
       instant: !needsUpload,
     };
   }
@@ -498,6 +586,7 @@ export class AssetsService {
       kind: PrismaAssetKind;
       purpose: PrismaAssetPurpose;
       checksum: string;
+      posterTimestampMillis: number;
       createdBy: string;
     },
     data: Prisma.AssetCreateInput,
@@ -508,7 +597,9 @@ export class AssetsService {
       if (!this.isUniqueConstraintViolation(error)) throw error;
 
       const concurrentAsset = await this.prisma.asset.findUnique({
-        where: { kind_purpose_checksum_createdBy: unique },
+        where: {
+          kind_purpose_checksum_posterTimestampMillis_createdBy: unique,
+        },
       });
       if (concurrentAsset) return concurrentAsset;
       throw error;
@@ -517,10 +608,10 @@ export class AssetsService {
 
   private isUniqueConstraintViolation(error: unknown): boolean {
     return (
-      typeof error === 'object' &&
+      typeof error === "object" &&
       error !== null &&
-      'code' in error &&
-      error.code === 'P2002'
+      "code" in error &&
+      error.code === "P2002"
     );
   }
 
@@ -533,22 +624,22 @@ export class AssetsService {
     expectedKind: PrismaAssetKind;
     expectedPurpose: PrismaAssetPurpose;
   }> {
-    this.requireText(request.ownerService, 'owner_service', 64);
-    this.requireText(request.ownerType, 'owner_type', 64);
-    this.requireText(request.ownerId, 'owner_id', 128);
+    this.requireText(request.ownerService, "owner_service", 64);
+    this.requireText(request.ownerType, "owner_type", 64);
+    this.requireText(request.ownerId, "owner_id", 128);
     const usages = request.usages ?? [];
     if ((!allowEmpty && usages.length === 0) || usages.length > 20) {
-      this.invalidArgument('usages must contain between 1 and 20 entries');
+      this.invalidArgument("usages must contain between 1 and 20 entries");
     }
 
     const slots = new Set<string>();
     return usages.map((usage) => {
       const slot = usage.slot.trim();
       const assetId = usage.assetId.trim();
-      this.requireText(slot, 'usages.slot', 64);
-      this.requireText(assetId, 'usages.asset_id', 128);
+      this.requireText(slot, "usages.slot", 64);
+      this.requireText(assetId, "usages.asset_id", 128);
       if (slots.has(slot)) {
-        this.invalidArgument('usages must have unique slots');
+        this.invalidArgument("usages must have unique slots");
       }
       slots.add(slot);
       return {
@@ -570,7 +661,7 @@ export class AssetsService {
   ): void {
     const byId = new Map(assets.map((asset) => [asset.id, asset]));
     if (byId.size !== new Set(usages.map(({ assetId }) => assetId)).size) {
-      this.failedPrecondition('ASSET_USAGE_REQUIRES_READY_ASSETS');
+      this.failedPrecondition("ASSET_USAGE_REQUIRES_READY_ASSETS");
     }
     for (const usage of usages) {
       const asset = byId.get(usage.assetId);
@@ -580,7 +671,7 @@ export class AssetsService {
         asset.kind !== usage.expectedKind ||
         asset.purpose !== usage.expectedPurpose
       ) {
-        this.failedPrecondition('ASSET_USAGE_TYPE_OR_STATUS_MISMATCH');
+        this.failedPrecondition("ASSET_USAGE_TYPE_OR_STATUS_MISMATCH");
       }
     }
   }
@@ -596,7 +687,7 @@ export class AssetsService {
   ): Promise<void> {
     const cleanup = await this.lockArtifactCleanupJob(tx, assetId);
     if (cleanup?.active) {
-      this.failedPrecondition('ASSET_ARTIFACT_CLEANUP_IN_PROGRESS');
+      this.failedPrecondition("ASSET_ARTIFACT_CLEANUP_IN_PROGRESS");
     }
     if (cleanup) {
       await tx.assetArtifactCleanupJob.deleteMany({ where: { assetId } });
@@ -617,7 +708,7 @@ export class AssetsService {
         availableAt,
         lockedAt: null,
         leaseToken: null,
-        lastError: '',
+        lastError: "",
       },
     });
   }
@@ -658,13 +749,15 @@ export class AssetsService {
     assetId: string,
     includeDeleted = false,
   ): Promise<Asset> {
-    this.requireText(assetId, 'asset_id', 128);
-    const asset = await this.prisma.asset.findUnique({ where: { id: assetId } });
+    this.requireText(assetId, "asset_id", 128);
+    const asset = await this.prisma.asset.findUnique({
+      where: { id: assetId },
+    });
     if (
       !asset ||
       (!includeDeleted && asset.status === PrismaAssetStatus.DELETED)
     ) {
-      this.notFound('ASSET_NOT_FOUND');
+      this.notFound("ASSET_NOT_FOUND");
     }
     return asset;
   }
@@ -681,11 +774,11 @@ export class AssetsService {
           ? AssetPurpose.ASSET_PURPOSE_ARTWORK
           : asset.purpose === PrismaAssetPurpose.STATION_ARTWORK
             ? AssetPurpose.ASSET_PURPOSE_STATION_ARTWORK
-          : asset.purpose === PrismaAssetPurpose.PROFILE_AVATAR
-            ? AssetPurpose.ASSET_PURPOSE_PROFILE_AVATAR
-          : asset.purpose === PrismaAssetPurpose.MUSIC_VIDEO
-            ? AssetPurpose.ASSET_PURPOSE_MUSIC_VIDEO
-            : AssetPurpose.ASSET_PURPOSE_EDITORIAL_VIDEO,
+            : asset.purpose === PrismaAssetPurpose.PROFILE_AVATAR
+              ? AssetPurpose.ASSET_PURPOSE_PROFILE_AVATAR
+              : asset.purpose === PrismaAssetPurpose.MUSIC_VIDEO
+                ? AssetPurpose.ASSET_PURPOSE_MUSIC_VIDEO
+                : AssetPurpose.ASSET_PURPOSE_EDITORIAL_VIDEO,
       status: this.status(asset.status),
       filename: asset.filename,
       contentType: asset.contentType,
@@ -706,7 +799,7 @@ export class AssetsService {
 
   private kind(value: AssetKind): PrismaAssetKind {
     const result = this.optionalKind(value);
-    if (!result) this.invalidArgument('kind is required');
+    if (!result) this.invalidArgument("kind is required");
     return result;
   }
 
@@ -718,13 +811,11 @@ export class AssetsService {
 
   private purpose(value: AssetPurpose): PrismaAssetPurpose {
     const result = this.optionalPurpose(value);
-    if (!result) this.invalidArgument('purpose is required');
+    if (!result) this.invalidArgument("purpose is required");
     return result;
   }
 
-  private optionalPurpose(
-    value: AssetPurpose,
-  ): PrismaAssetPurpose | undefined {
+  private optionalPurpose(value: AssetPurpose): PrismaAssetPurpose | undefined {
     if (value === AssetPurpose.ASSET_PURPOSE_ARTWORK) {
       return PrismaAssetPurpose.ARTWORK;
     }
@@ -768,8 +859,8 @@ export class AssetsService {
 
   private filename(value: string): string {
     const filename = value.trim();
-    this.requireText(filename, 'filename', 255);
-    return filename.replace(/[^a-zA-Z0-9._-]+/g, '-');
+    this.requireText(filename, "filename", 255);
+    return filename.replace(/[^a-zA-Z0-9._-]+/g, "-");
   }
 
   private objectKey(
@@ -779,14 +870,17 @@ export class AssetsService {
     checksum: string,
     filename: string,
   ): string {
-    const ownerKey = createHash('sha256').update(createdBy).digest('hex').slice(0, 16);
+    const ownerKey = createHash("sha256")
+      .update(createdBy)
+      .digest("hex")
+      .slice(0, 16);
     return `assets/${kind.toLowerCase()}/${purpose.toLowerCase()}/${ownerKey}/${checksum.slice(0, 2)}/${checksum}/${filename}`;
   }
 
   private wrapStruct(
     value: Prisma.JsonValue | null,
   ): Record<string, unknown> | undefined {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
       return undefined;
     }
     return value;
@@ -819,5 +913,4 @@ export class AssetsService {
     const parsed = Number(value);
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
   }
-
 }

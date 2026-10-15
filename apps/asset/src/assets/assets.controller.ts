@@ -13,6 +13,7 @@ import {
   ListAssetsResponse,
   ListAssetUsagesResponse,
   RegisterAssetUsagesResponse,
+  ReplaceMusicVideoPosterRequest,
   RequestAssetUploadRequest,
   RequestAssetUploadResponse,
   SyncAssetUsagesRequest,
@@ -55,6 +56,12 @@ export class AssetsController implements AssetServiceController {
 
   deleteAsset(request: DeleteAssetRequest): Promise<DeleteAssetResponse> {
     return this.assetsService.deleteAsset(request);
+  }
+
+  replaceMusicVideoPoster(
+    request: ReplaceMusicVideoPosterRequest,
+  ): Promise<AssetResponse> {
+    return this.assetsService.replaceMusicVideoPoster(request);
   }
 
   registerAssetUsages(

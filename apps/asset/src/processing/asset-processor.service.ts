@@ -1,19 +1,14 @@
-import { Injectable, OnModuleDestroy } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { execFile, type ChildProcess } from "node:child_process";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { extname, join } from "node:path";
-import { pipeline } from "node:stream/promises";
+import { createHash } from "node:crypto";
 import sharp from "sharp";
-import { Asset, AssetKind, AssetPurpose, Prisma } from "../generated/prisma/client";
-import { StorageService } from "../storage/storage.service";
 import {
-  encryptVideoKey,
-  parseVideoKeyEncryptionKey,
-} from "../common/crypto/video-key-encryption";
+  Asset,
+  AssetKind,
+  AssetPurpose,
+  Prisma,
+} from "../generated/prisma/client";
+import { StorageService } from "../storage/storage.service";
 import { AssetProcessingResult, MediaRendition } from "./asset-processor.types";
 import { deriveArtworkPalette } from "./artwork-theme";
 
@@ -23,8 +18,6 @@ const AVATAR_SIZES = [40, 80, 256];
 const AVATAR_MAX_INPUT_PIXELS = 25_000_000;
 const DEFAULT_ARTWORK_MAX_INPUT_PIXELS = 30_000_000;
 const DEFAULT_IMAGE_RENDITION_CONCURRENCY = 2;
-const DEFAULT_VIDEO_UPLOAD_CONCURRENCY = 4;
-const DEFAULT_VIDEO_HLS_SEGMENT_DURATION_SECONDS = 3;
 const HERO_ARTWORK_WIDTHS = [450, 600, 900, 1200];
 const HERO_ASPECT_RATIO = 3 / 4;
 const HERO_EXTENSION_STRIP = 48;
@@ -33,42 +26,26 @@ const HERO_DARK_EDGE_MIN_LUMINANCE = 10;
 const HERO_DARK_EDGE_MEAN_LUMINANCE = 35;
 const HERO_NEUTRAL_BLACK_MAX_CHROMA = 7;
 const HERO_TEXT_REGION_START = 0.78;
-const PROCESS_TIMEOUT_MS = 30 * 60 * 1000;
 const PERCEPTUAL_HASH_WIDTH = 9;
 const PERCEPTUAL_HASH_HEIGHT = 8;
+const VIDEO_TRANSCODE_STATUS_POLL_MS = 5_000;
 interface HeroBackgroundPalette {
   bgColor: string;
 }
 
-interface ProbeResult {
-  streams?: Array<{
-    codec_type?: string;
-    width?: number;
-    height?: number;
-  }>;
-  format?: {
-    duration?: string;
-  };
-}
-
 @Injectable()
-export class AssetProcessorService implements OnModuleDestroy {
-  private readonly ffmpegPath: string;
-  private readonly ffprobePath: string;
+export class AssetProcessorService {
   private readonly artworkMaxInputPixels: number;
   private readonly imageRenditionConcurrency: number;
-  private readonly videoUploadConcurrency: number;
-  private readonly videoHlsSegmentDurationSeconds: number;
-  private readonly videoKeyUriBase: string;
-  private readonly videoKeyEncryptionKey: Buffer | undefined;
-  private activeChild?: ChildProcess;
+  private readonly videoTranscodeUrl: string;
+  private readonly videoTranscodeStatusUrl: string;
+  private readonly videoTranscodeSharedSecret: string;
+  private readonly videoTranscodeTimeoutMs: number;
 
   constructor(
     private readonly storage: StorageService,
     config: ConfigService,
   ) {
-    this.ffmpegPath = config.get<string>("FFMPEG_PATH") || "ffmpeg";
-    this.ffprobePath = config.get<string>("FFPROBE_PATH") || "ffprobe";
     this.artworkMaxInputPixels = this.positiveInteger(
       config.get<string>("ASSET_ARTWORK_MAX_INPUT_PIXELS"),
       DEFAULT_ARTWORK_MAX_INPUT_PIXELS,
@@ -77,23 +54,29 @@ export class AssetProcessorService implements OnModuleDestroy {
       config.get<string>("ASSET_IMAGE_RENDITION_CONCURRENCY"),
       DEFAULT_IMAGE_RENDITION_CONCURRENCY,
     );
-    this.videoUploadConcurrency = this.positiveInteger(
-      config.get<string>("ASSET_VIDEO_UPLOAD_CONCURRENCY"),
-      DEFAULT_VIDEO_UPLOAD_CONCURRENCY,
-    );
-    this.videoHlsSegmentDurationSeconds = this.positiveInteger(
-      config.get<string>("ASSET_VIDEO_HLS_SEGMENT_DURATION_SECONDS"),
-      DEFAULT_VIDEO_HLS_SEGMENT_DURATION_SECONDS,
-    );
-    this.videoKeyUriBase =
-      config.get<string>("ASSET_VIDEO_KEY_URI_BASE")?.replace(/\/+$/, "") ??
-      "";
-    this.videoKeyEncryptionKey = parseVideoKeyEncryptionKey(
-      config.get<string>("ASSET_VIDEO_KEY_ENCRYPTION_KEY"),
+    this.videoTranscodeUrl =
+      config.get<string>("VIDEO_TRANSCODE_URL")?.replace(/\/+$/, "") ?? "";
+    this.videoTranscodeStatusUrl =
+      config
+        .get<string>("VIDEO_TRANSCODE_STATUS_URL")
+        ?.replace(/\/+$/, "") ??
+      this.videoTranscodeUrl.replace(
+        /-transcode\.modal\.run$/,
+        "-status.modal.run",
+      );
+    this.videoTranscodeSharedSecret =
+      config.get<string>("VIDEO_TRANSCODE_SHARED_SECRET")?.trim() ?? "";
+    this.videoTranscodeTimeoutMs = this.positiveInteger(
+      config.get<string>("VIDEO_TRANSCODE_TIMEOUT_MS"),
+      90 * 60 * 1000,
     );
   }
 
-  process(asset: Asset): Promise<AssetProcessingResult> {
+  process(
+    asset: Asset,
+    operationId?: string,
+    signal?: AbortSignal,
+  ): Promise<AssetProcessingResult> {
     if (asset.kind === AssetKind.IMAGE) {
       if (asset.purpose === AssetPurpose.PROFILE_AVATAR) {
         return this.processAvatar(asset);
@@ -103,7 +86,167 @@ export class AssetProcessorService implements OnModuleDestroy {
       }
       return this.processArtwork(asset);
     }
-    return this.processVideo(asset);
+    return this.processVideoOnModal(asset, operationId, signal);
+  }
+
+  async replaceMusicVideoPoster(
+    asset: Asset,
+    posterTimestampMillis: number,
+  ): Promise<Prisma.InputJsonObject> {
+    if (asset.purpose !== AssetPurpose.MUSIC_VIDEO) {
+      throw new Error("MUSIC_VIDEO_POSTER_NOT_REPLACEABLE");
+    }
+    const generation = this.string(this.object(asset.variants).generation);
+    if (!generation) throw new Error("MUSIC_VIDEO_GENERATION_MISSING");
+
+    const payload = await this.callVideoTranscodeModal({
+      operation: "replace_poster",
+      assetId: asset.id,
+      sourceKey: asset.sourceObjectKey,
+      filename: asset.filename,
+      checksum: asset.checksum,
+      contentType: asset.contentType,
+      purpose: asset.purpose,
+      generation,
+      posterTimestampMillis,
+    });
+    const poster = this.object(payload.poster);
+    const resolvedTimestamp = Number(poster.timestampMillis);
+    if (
+      !this.string(poster.url) ||
+      !Number.isFinite(resolvedTimestamp) ||
+      resolvedTimestamp < 0
+    ) {
+      throw new Error("VIDEO_TRANSCODE_MODAL_INVALID_POSTER_RESPONSE");
+    }
+    return this.json(poster);
+  }
+
+  private async processVideoOnModal(
+    asset: Asset,
+    operationId?: string,
+    signal?: AbortSignal,
+  ): Promise<AssetProcessingResult> {
+    if (!operationId) {
+      throw new Error("VIDEO_TRANSCODE_OPERATION_ID_MISSING");
+    }
+    const payload = await this.waitForVideoTranscodeModal({
+      operation: "transcode",
+      operationId,
+      assetId: asset.id,
+      sourceKey: asset.sourceObjectKey,
+      filename: asset.filename,
+      checksum: asset.checksum,
+      contentType: asset.contentType,
+      purpose: asset.purpose,
+      posterTimestampMillis: asset.posterTimestampMillis,
+    }, signal);
+    const encryption = payload.videoEncryption as
+      | Record<string, unknown>
+      | undefined;
+    const requiresEncryption = asset.purpose === AssetPurpose.MUSIC_VIDEO;
+    if (
+      typeof payload.publicUrl !== "string" ||
+      !Number.isFinite(payload.width) ||
+      !Number.isFinite(payload.height) ||
+      !Number.isFinite(payload.durationMillis) ||
+      !payload.variants ||
+      (requiresEncryption &&
+        (typeof encryption?.ciphertext !== "string" ||
+          typeof encryption.iv !== "string" ||
+          typeof encryption.authTag !== "string"))
+    ) {
+      throw new Error("VIDEO_TRANSCODE_MODAL_INVALID_RESPONSE");
+    }
+    return {
+      publicUrl: payload.publicUrl,
+      width: Number(payload.width),
+      height: Number(payload.height),
+      durationMillis: Number(payload.durationMillis),
+      variants: payload.variants,
+      ...(requiresEncryption
+        ? {
+            videoEncryption: {
+              ciphertext: Buffer.from(
+                encryption!.ciphertext as string,
+                "base64",
+              ),
+              iv: Buffer.from(encryption!.iv as string, "base64"),
+              authTag: Buffer.from(encryption!.authTag as string, "base64"),
+            },
+          }
+        : {}),
+    };
+  }
+
+  private async callVideoTranscodeModal(
+    body: Record<string, unknown>,
+    signal?: AbortSignal,
+    endpoint = this.videoTranscodeUrl,
+  ): Promise<Record<string, unknown>> {
+    if (!endpoint || !this.videoTranscodeSharedSecret) {
+      throw new Error("VIDEO_TRANSCODE_MODAL_NOT_CONFIGURED");
+    }
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.videoTranscodeSharedSecret}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: signal
+        ? AbortSignal.any([
+            signal,
+            AbortSignal.timeout(this.videoTranscodeTimeoutMs),
+          ])
+        : AbortSignal.timeout(this.videoTranscodeTimeoutMs),
+    });
+    const payload = (await response.json().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >;
+    if (!response.ok) {
+      throw new Error(
+        typeof payload.detail === "string"
+          ? payload.detail
+          : "VIDEO_TRANSCODE_MODAL_FAILED",
+      );
+    }
+    return payload;
+  }
+
+  private async waitForVideoTranscodeModal(
+    request: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>> {
+    const assetId = this.string(request.assetId);
+    const operationId = this.string(request.operationId);
+    const deadline = Date.now() + this.videoTranscodeTimeoutMs;
+    let payload = await this.callVideoTranscodeModal(request, signal);
+
+    while (payload.status === "PROCESSING") {
+      if (Date.now() >= deadline) {
+        throw new Error("VIDEO_TRANSCODE_MODAL_STATUS_TIMEOUT");
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, VIDEO_TRANSCODE_STATUS_POLL_MS),
+      );
+      if (signal?.aborted) {
+        throw new Error("VIDEO_TRANSCODE_OPERATION_ABORTED");
+      }
+      payload = await this.callVideoTranscodeModal({
+        operation: "status",
+        operationId,
+        assetId,
+      }, signal, this.videoTranscodeStatusUrl);
+    }
+
+    if (payload.status === "FAILED") {
+      throw new Error(
+        this.string(payload.error) || "VIDEO_TRANSCODE_MODAL_FAILED",
+      );
+    }
+    return payload;
   }
 
   private async processAvatar(asset: Asset): Promise<AssetProcessingResult> {
@@ -280,20 +423,20 @@ export class AssetProcessorService implements OnModuleDestroy {
     const heroSource =
       extensionHeight === 0
         ? await sharp(normalizedSource)
-          .resize({
-            width,
-            height: heroHeight,
-            fit: "cover",
-            position: "centre",
-          })
-          .toBuffer()
+            .resize({
+              width,
+              height: heroHeight,
+              fit: "cover",
+              position: "centre",
+            })
+            .toBuffer()
         : await this.createHeroArtworkSource(
-          normalizedSource,
-          width,
-          height,
-          heroHeight,
-          extensionHeight,
-        );
+            normalizedSource,
+            width,
+            height,
+            heroHeight,
+            extensionHeight,
+          );
     const heroBackgroundPalette = await this.heroBackgroundPalette(heroSource);
     const heroMaximumWidth = Math.min(
       width,
@@ -401,7 +544,8 @@ export class AssetProcessorService implements OnModuleDestroy {
 
     const minLuminance = 0.299 * rMin + 0.587 * gMin + 0.114 * bMin;
     const meanLuminance = 0.299 * rMean + 0.587 * gMean + 0.114 * bMean;
-    const edgeChroma = Math.max(rMean, gMean, bMean) - Math.min(rMean, gMean, bMean);
+    const edgeChroma =
+      Math.max(rMean, gMean, bMean) - Math.min(rMean, gMean, bMean);
 
     // BRANCH 1: neutral near-black bottom edge. Dark blue, red, and purple have
     // similarly low luminance but need the blurred colour extension below.
@@ -579,7 +723,6 @@ export class AssetProcessorService implements OnModuleDestroy {
     };
   }
 
-
   private hexColor(color: { r: number; g: number; b: number }): string {
     return [color.r, color.g, color.b]
       .map((channel) =>
@@ -588,413 +731,22 @@ export class AssetProcessorService implements OnModuleDestroy {
       .join("");
   }
 
-  private async processVideo(asset: Asset): Promise<AssetProcessingResult> {
-    const workDirectory = await mkdtemp(join(tmpdir(), "musical-asset-"));
-    const sourceExtension = extname(asset.filename) || ".video";
-    const sourcePath = join(workDirectory, `source${sourceExtension}`);
-    const rawPosterPath = join(workDirectory, "poster-raw.png");
-    const posterWidths = [320, 480, 640, 960, 1280, 1920, 2400];
-
-    const TARGET_RESOLUTIONS = [
-      { name: "720p", width: 1280, bitrate: "2800k", bandwidth: 2800000 },
-      { name: "1080p", width: 1920, bitrate: "5000k", bandwidth: 5000000 },
-      { name: "1440p", width: 2560, bitrate: "9000k", bandwidth: 9000000 },
-      { name: "2160p", width: 3840, bitrate: "14000k", bandwidth: 14000000 },
-    ];
-    const keepAudio = asset.purpose === AssetPurpose.MUSIC_VIDEO;
-
-    try {
-      await this.storage.downloadToFile(asset.sourceObjectKey, sourcePath);
-      this.verifyChecksum(asset, await this.fileChecksum(sourcePath));
-      const sourceProbe = await this.probe(sourcePath);
-      const sourceVideo = sourceProbe.streams?.find(
-        (stream) => stream.codec_type === "video",
-      );
-      const sourceWidth = sourceVideo?.width ?? 0;
-      const sourceHeight = sourceVideo?.height ?? 0;
-      const durationSeconds = Number(sourceProbe.format?.duration ?? 0);
-      if (
-        sourceWidth <= 0 ||
-        sourceHeight <= 0 ||
-        !Number.isFinite(durationSeconds) ||
-        durationSeconds <= 0
-      ) {
-        throw new Error("VIDEO_METADATA_INVALID");
-      }
-
-      // A poster is also the visual fallback for the video. Preserve the
-      // source aspect ratio so square and portrait editorial media never
-      // becomes a cropped 16:9 image before it reaches the client.
-      const posterRenditions = posterWidths.map((width) => ({
-        width,
-        height: Math.round((width * sourceHeight) / sourceWidth),
-        filename: `poster-${width}w.webp`,
-        path: join(workDirectory, `poster-${width}w.webp`),
-      }));
-
-      // Filter resolutions to only target widths <= sourceWidth
-      const activeResolutions = TARGET_RESOLUTIONS.filter(
-        (res) => res.width <= sourceWidth,
-      );
-      if (activeResolutions.length === 0) {
-        activeResolutions.push(TARGET_RESOLUTIONS[0]);
-      }
-
-      // Short, fixed segments keep adaptive bitrate switching and seeking
-      // responsive regardless of the source video duration.
-      const hlsTime = this.videoHlsSegmentDurationSeconds;
-      const videoEncryption = keepAudio
-        ? await this.prepareMusicVideoEncryption(asset.id, workDirectory)
-        : undefined;
-      // This prefix is never overwritten. If a job retries, CDN-cached objects
-      // from an earlier attempt cannot be paired with the new AES key.
-      const videoOutputPrefix = `processed/${asset.id}/video/${randomUUID()}`;
-      const hlsRenditions = activeResolutions.map((resolution) => ({
-        ...resolution,
-        // Playlist and segment object names are opaque implementation details.
-        // AES encryption protects content; unguessable names prevent casual URL
-        // enumeration and keep storage layout independent from presentation.
-        playlistFile: `${randomBytes(12).toString('hex')}.m3u8`,
-        segmentPrefix: randomBytes(18).toString('base64url'),
-      }));
-
-      // Transcode each resolution
-      for (const rendition of hlsRenditions) {
-        const playlistPath = join(workDirectory, rendition.playlistFile);
-        const segmentPattern = join(
-          workDirectory,
-          `${rendition.segmentPrefix}_%013d.ts`,
-        );
-
-        await this.run(this.ffmpegPath, [
-          "-y",
-          "-i",
-          sourcePath,
-          "-map",
-          "0:v:0",
-          ...(keepAudio
-            ? ["-map", "0:a:0?", "-c:a", "aac", "-b:a", "160k"]
-            : ["-an"]),
-          "-vf",
-          `scale=w='min(${rendition.width},iw)':h=-2`,
-          "-c:v",
-          "libx264",
-          "-preset",
-          "medium",
-          "-crf",
-          "23",
-          "-b:v",
-          rendition.bitrate,
-          "-maxrate",
-          rendition.bitrate,
-          "-bufsize",
-          `${parseInt(rendition.bitrate) * 2}k`,
-          "-pix_fmt",
-          "yuv420p",
-          "-force_key_frames",
-          `expr:gte(t,n_forced*${hlsTime})`,
-          "-sc_threshold",
-          "0",
-          "-hls_time",
-          String(hlsTime),
-          "-hls_playlist_type",
-          "vod",
-          "-hls_flags",
-          "independent_segments",
-          "-hls_start_number_source",
-          "epoch_us",
-          "-hls_segment_filename",
-          segmentPattern,
-          ...(videoEncryption
-            ? ["-hls_key_info_file", videoEncryption.keyInfoPath]
-            : []),
-          playlistPath,
-        ]);
-      }
-
-      // Extract the first frame. The poster must match the initial visual
-      // state users see before an ambient video begins playing.
-      await this.run(this.ffmpegPath, [
-        "-y",
-        "-ss",
-        "0",
-        "-i",
-        sourcePath,
-        "-frames:v",
-        "1",
-        rawPosterPath,
-      ]);
-
-      // Responsive WebP posters let cards load a compact image while keeping
-      // the source aspect ratio for square and portrait layouts.
-      for (const poster of posterRenditions) {
-        await sharp(rawPosterPath)
-          .resize(poster.width, poster.height, { fit: "cover" })
-          .webp({ quality: 85 })
-          .toFile(poster.path);
-      }
-
-      // Write master default.m3u8 playlist file
-      let masterPlaylistContent = "#EXTM3U\n#EXT-X-VERSION:3\n";
-      const parsedRenditions: Array<{
-        name: string;
-        width: number;
-        height: number;
-        playlistFile: string;
-      }> = [];
-
-      for (const rendition of hlsRenditions) {
-        const subPlaylistName = rendition.playlistFile;
-
-        // Find actual resolution of transcoded segments
-        const allFiles = await readdir(workDirectory);
-        const resSegments = allFiles.filter(
-          (file) =>
-            file.startsWith(`${rendition.segmentPrefix}_`) &&
-            file.endsWith(".ts"),
-        );
-        let actualWidth = rendition.width;
-        let actualHeight = Math.round(
-          (rendition.width * sourceHeight) / sourceWidth,
-        );
-
-        if (resSegments[0]) {
-          try {
-            const probeResult = await this.probe(
-              join(workDirectory, resSegments[0]),
-            );
-            const videoStream = probeResult.streams?.find(
-              (stream) => stream.codec_type === "video",
-            );
-            if (videoStream?.width && videoStream?.height) {
-              actualWidth = videoStream.width;
-              actualHeight = videoStream.height;
-            }
-          } catch {
-            // keep default calculation
-          }
-        }
-
-        masterPlaylistContent += `#EXT-X-STREAM-INF:BANDWIDTH=${rendition.bandwidth},RESOLUTION=${actualWidth}x${actualHeight}\n`;
-        masterPlaylistContent += `${subPlaylistName}\n`;
-
-        parsedRenditions.push({
-          name: rendition.name,
-          width: actualWidth,
-          height: actualHeight,
-          playlistFile: subPlaylistName,
-        });
-      }
-
-      const masterPlaylistPath = join(workDirectory, "default.m3u8");
-      await writeFile(masterPlaylistPath, masterPlaylistContent, "utf8");
-
-      // Upload all segments, sub-playlists, master playlist and WebP poster variants to S3/R2 storage
-      const finalFiles = await readdir(workDirectory);
-      await this.mapWithConcurrency(
-        finalFiles,
-        this.videoUploadConcurrency,
-        async (file) => {
-          const filePath = join(workDirectory, file);
-          const objectKey = `${videoOutputPrefix}/${file}`;
-
-          if (file.endsWith(".ts")) {
-            await this.storage.uploadFile(objectKey, filePath, "video/MP2T");
-          } else if (file.endsWith(".m3u8")) {
-            await this.storage.uploadFile(
-              objectKey,
-              filePath,
-              "application/x-mpegURL",
-            );
-          } else if (file.startsWith("poster-") && file.endsWith(".webp")) {
-            await this.storage.uploadFile(objectKey, filePath, "image/webp");
-          }
-        },
-      );
-
-      const masterPlaylistObjectKey = `${videoOutputPrefix}/default.m3u8`;
-      const resolvedPosterRenditions = await Promise.all(
-        posterRenditions.map(async (poster) => ({
-          ...poster,
-          objectKey: `${videoOutputPrefix}/${poster.filename}`,
-          url: this.storage.publicUrl(
-            `${videoOutputPrefix}/${poster.filename}`,
-          ),
-          contentType: "image/webp",
-          sizeBytes: (await stat(poster.path)).size,
-        })),
-      );
-      const primaryPoster = resolvedPosterRenditions.at(-1)!;
-
-      const masterFileStats = await stat(masterPlaylistPath);
-      const masterPlaylistUrl = this.storage.publicUrl(masterPlaylistObjectKey);
-
-      const renditions = [
-        {
-          objectKey: masterPlaylistObjectKey,
-          url: masterPlaylistUrl,
-          contentType: "application/x-mpegURL",
-          width: sourceWidth,
-          height: sourceHeight,
-          sizeBytes: masterFileStats.size,
-        },
-        ...parsedRenditions.map((item) => ({
-          objectKey: `${videoOutputPrefix}/${item.playlistFile}`,
-          url: this.storage.publicUrl(
-            `${videoOutputPrefix}/${item.playlistFile}`,
-          ),
-          contentType: "application/x-mpegURL",
-          width: item.width,
-          height: item.height,
-          sizeBytes: 0,
-        })),
-      ];
-
-      return {
-        publicUrl: masterPlaylistUrl,
-        width: sourceWidth,
-        height: sourceHeight,
-        durationMillis: Math.round(durationSeconds * 1000),
-        variants: this.json({
-          original: {
-            width: sourceWidth,
-            height: sourceHeight,
-            durationMillis: Math.round(durationSeconds * 1000),
-            contentType: asset.contentType,
-          },
-          generation: videoOutputPrefix,
-          renditions,
-          poster: {
-            objectKey: primaryPoster.objectKey,
-            url: primaryPoster.url,
-            contentType: primaryPoster.contentType,
-            width: primaryPoster.width,
-            height: primaryPoster.height,
-            sizeBytes: primaryPoster.sizeBytes,
-            variants: {
-              renditions: resolvedPosterRenditions.map(
-                ({ objectKey, url, contentType, width, height, sizeBytes }) => ({
-                  objectKey,
-                  url,
-                  contentType,
-                  width,
-                  height,
-                  sizeBytes,
-                }),
-              ),
-            },
-          },
-        }),
-        ...(videoEncryption
-          ? {
-            videoEncryption: {
-              ciphertext: videoEncryption.ciphertext,
-              iv: videoEncryption.encryptionIv,
-              authTag: videoEncryption.authTag,
-            },
-          }
-          : {}),
-      };
-    } finally {
-      await rm(workDirectory, { recursive: true, force: true });
-    }
-  }
-
-  private async probe(filePath: string): Promise<ProbeResult> {
-    const { stdout } = await this.run(this.ffprobePath, [
-      "-v",
-      "error",
-      "-show_streams",
-      "-show_format",
-      "-of",
-      "json",
-      filePath,
-    ]);
-    return JSON.parse(stdout) as ProbeResult;
-  }
-
-  private async prepareMusicVideoEncryption(
-    assetId: string,
-    workDirectory: string,
-  ): Promise<{
-    keyInfoPath: string;
-    ciphertext: Buffer;
-    encryptionIv: Buffer;
-    authTag: Buffer;
-  }> {
-    if (!this.videoKeyUriBase || !this.videoKeyEncryptionKey) {
-      throw new Error("MUSIC_VIDEO_ENCRYPTION_NOT_CONFIGURED");
-    }
-
-    const hlsKey = randomBytes(16);
-    const encryptedKey = encryptVideoKey(this.videoKeyEncryptionKey, hlsKey);
-    const keyPath = join(workDirectory, "hls.key");
-    const keyInfoPath = join(workDirectory, "hls-key-info.txt");
-    await writeFile(keyPath, hlsKey, { mode: 0o600 });
-    await writeFile(
-      keyInfoPath,
-      `${this.videoKeyUriBase}/${encodeURIComponent(assetId)}/key\n${keyPath}\n`,
-      { mode: 0o600 },
-    );
-    return {
-      keyInfoPath,
-      ciphertext: Buffer.from(encryptedKey.ciphertext),
-      encryptionIv: Buffer.from(encryptedKey.iv),
-      authTag: Buffer.from(encryptedKey.authTag),
-    };
-  }
-
-  private run(
-    executable: string,
-    args: string[],
-  ): Promise<{ stdout: string; stderr: string }> {
-    return new Promise((resolve, reject) => {
-      const child = execFile(
-        executable,
-        args,
-        {
-          encoding: "utf8",
-          maxBuffer: 4 * 1024 * 1024,
-          timeout: PROCESS_TIMEOUT_MS,
-          windowsHide: true,
-        },
-        (error, stdout, stderr) => {
-          this.activeChild = undefined;
-          if (error) {
-            reject(
-              error instanceof Error
-                ? error
-                : new Error("ASSET_PROCESS_COMMAND_FAILED"),
-            );
-            return;
-          }
-          resolve({ stdout, stderr });
-        },
-      );
-      this.activeChild = child;
-    });
-  }
-
-  onModuleDestroy(): void {
-    this.abort();
-  }
-
-  abort(): void {
-    this.activeChild?.kill("SIGTERM");
-  }
-
   private json(value: object): Prisma.InputJsonObject {
     return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonObject;
   }
 
-  private bufferChecksum(value: Buffer): string {
-    return createHash("sha256").update(value).digest("hex");
+  private object(value: unknown): Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
   }
 
-  private async fileChecksum(filePath: string): Promise<string> {
-    const hash = createHash("sha256");
-    await pipeline(createReadStream(filePath), hash);
-    return hash.digest("hex");
+  private string(value: unknown): string {
+    return typeof value === "string" ? value.trim() : "";
+  }
+
+  private bufferChecksum(value: Buffer): string {
+    return createHash("sha256").update(value).digest("hex");
   }
 
   private verifyChecksum(asset: Asset, checksum: string): void {
@@ -1024,9 +776,8 @@ export class AssetProcessorService implements OnModuleDestroy {
     };
 
     await Promise.all(
-      Array.from(
-        { length: Math.min(maxConcurrency, inputs.length) },
-        () => worker(),
+      Array.from({ length: Math.min(maxConcurrency, inputs.length) }, () =>
+        worker(),
       ),
     );
     return outputs;

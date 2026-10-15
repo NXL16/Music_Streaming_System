@@ -3,12 +3,12 @@ import {
   Logger,
   OnModuleDestroy,
   OnModuleInit,
-} from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { randomUUID } from 'node:crypto';
-import { Asset, AssetStatus, Prisma } from '../generated/prisma/client';
-import { PrismaService } from '../database/prisma.service';
-import { AssetProcessorService } from './asset-processor.service';
+} from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { randomUUID } from "node:crypto";
+import { Asset, AssetKind, AssetStatus, Prisma } from "../generated/prisma/client";
+import { PrismaService } from "../database/prisma.service";
+import { AssetProcessorService } from "./asset-processor.service";
 
 interface ClaimedJob {
   id: string;
@@ -26,13 +26,13 @@ interface LeaseState {
 const DEFAULT_FAILED_ARTIFACT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 type MetricName =
-  | 'jobsStarted'
-  | 'jobsSucceeded'
-  | 'jobsFailed'
-  | 'jobsRetried'
-  | 'jobsReclaimed'
-  | 'jobsDeadLettered'
-  | 'leasesLost';
+  | "jobsStarted"
+  | "jobsSucceeded"
+  | "jobsFailed"
+  | "jobsRetried"
+  | "jobsReclaimed"
+  | "jobsDeadLettered"
+  | "leasesLost";
 
 type WorkerMetrics = Record<MetricName, number>;
 
@@ -44,13 +44,16 @@ export class AssetProcessingWorkerService
   private readonly enabled: boolean;
   private readonly pollIntervalMs: number;
   private readonly lockTtlMs: number;
+  private readonly videoLockTtlMs: number;
   private readonly maxAttempts: number;
   private readonly metricsIntervalMs: number;
   private readonly failedArtifactRetentionMs: number;
   private timer?: NodeJS.Timeout;
   private metricsTimer?: NodeJS.Timeout;
   private activeJob?: ClaimedJob;
+  private activeAsset?: Asset;
   private activeLease?: LeaseState;
+  private activeAbortController?: AbortController;
   private stopped = false;
   private readonly metrics: WorkerMetrics = {
     jobsStarted: 0,
@@ -68,37 +71,41 @@ export class AssetProcessingWorkerService
     config: ConfigService,
   ) {
     this.enabled = this.boolean(
-      config.get<string>('ASSET_WORKER_ENABLED'),
+      config.get<string>("ASSET_WORKER_ENABLED"),
       true,
     );
     this.pollIntervalMs = this.integer(
-      config.get<string>('ASSET_WORKER_POLL_INTERVAL_MS'),
+      config.get<string>("ASSET_WORKER_POLL_INTERVAL_MS"),
       2000,
     );
     this.lockTtlMs = this.integer(
-      config.get<string>('ASSET_WORKER_LOCK_TTL_MS'),
+      config.get<string>("ASSET_WORKER_LOCK_TTL_MS"),
       30 * 60 * 1000,
     );
+    this.videoLockTtlMs = this.integer(
+      config.get<string>("ASSET_VIDEO_WORKER_LOCK_TTL_MS"),
+      2 * 60 * 1000,
+    );
     this.maxAttempts = this.integer(
-      config.get<string>('ASSET_WORKER_MAX_ATTEMPTS'),
+      config.get<string>("ASSET_WORKER_MAX_ATTEMPTS"),
       5,
     );
     this.metricsIntervalMs = this.integer(
-      config.get<string>('ASSET_WORKER_METRICS_INTERVAL_MS'),
+      config.get<string>("ASSET_WORKER_METRICS_INTERVAL_MS"),
       60_000,
     );
     this.failedArtifactRetentionMs = this.integer(
-      config.get<string>('ASSET_FAILED_ARTIFACT_RETENTION_MS'),
+      config.get<string>("ASSET_FAILED_ARTIFACT_RETENTION_MS"),
       DEFAULT_FAILED_ARTIFACT_RETENTION_MS,
     );
   }
 
   onModuleInit(): void {
     if (!this.enabled) {
-      this.logger.log('Asset processing worker is disabled');
+      this.logger.log("Asset processing worker is disabled");
       return;
     }
-    this.logger.log('Asset processing worker started');
+    this.logger.log("Asset processing worker started");
     this.metricsTimer = setInterval(
       () => this.logMetrics(),
       this.metricsIntervalMs,
@@ -107,7 +114,7 @@ export class AssetProcessingWorkerService
     this.schedule(0);
   }
 
-  onModuleDestroy(): void {
+  async onModuleDestroy(): Promise<void> {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     if (this.metricsTimer) clearInterval(this.metricsTimer);
@@ -115,14 +122,32 @@ export class AssetProcessingWorkerService
       this.activeLease.active = false;
       this.activeLease.lost = true;
     }
-    this.processor.abort();
-    if (this.activeJob) {
-      // Object-store writes cannot be fenced by the database token. Releasing
-      // the lease immediately would let another worker start while this
-      // process may still be uploading an image or waiting for ffmpeg to exit.
-      // Let the normal TTL recovery path reclaim it instead.
+    this.activeAbortController?.abort();
+    const activeJob = this.activeJob;
+    if (activeJob && this.activeAsset?.kind === AssetKind.VIDEO) {
+      // A video operation is keyed by this durable job id. Modal records its
+      // state under that id, so another worker can observe the same remote
+      // operation after a graceful restart without launching a second GPU job.
+      const released = await this.prisma.assetProcessingJob.updateMany({
+        where: { id: activeJob.id, leaseToken: activeJob.leaseToken },
+        data: {
+          lockedAt: null,
+          leaseToken: null,
+          availableAt: new Date(),
+        },
+      });
+      if (released.count === 1) {
+        this.logger.log(
+          `Released asset job ${activeJob.id} for durable recovery during shutdown`,
+        );
+      } else {
+        this.logger.warn(
+          `Asset job ${activeJob.id} could not be released during shutdown`,
+        );
+      }
+    } else if (activeJob) {
       this.logger.warn(
-        `Leaving asset job ${this.activeJob.id} leased until expiry during shutdown`,
+        `Leaving non-video asset job ${activeJob.id} leased until expiry during shutdown`,
       );
     }
     this.logMetrics();
@@ -141,12 +166,12 @@ export class AssetProcessingWorkerService
         this.schedule(this.pollIntervalMs);
         return;
       }
-      this.increment('jobsStarted');
-      if (job.reclaimed) this.increment('jobsReclaimed');
+      this.increment("jobsStarted");
+      if (job.reclaimed) this.increment("jobsReclaimed");
       await this.process(job);
       this.schedule(0);
     } catch (error) {
-      this.logger.error('Asset worker tick failed', error);
+      this.logger.error("Asset worker tick failed", error);
       this.schedule(this.pollIntervalMs);
     }
   }
@@ -155,14 +180,19 @@ export class AssetProcessingWorkerService
     const leaseToken = randomUUID();
     const jobs = await this.prisma.$queryRaw<ClaimedJob[]>(Prisma.sql`
       WITH candidate AS (
-        SELECT "id", "lockedAt"
-        FROM "asset_processing_jobs"
-        WHERE "availableAt" <= NOW()
+        SELECT job."id", job."lockedAt"
+        FROM "asset_processing_jobs" AS job
+        INNER JOIN "assets" AS asset ON asset."id" = job."assetId"
+        WHERE job."availableAt" <= NOW()
           AND (
-            "lockedAt" IS NULL
-            OR "lockedAt" < NOW() - (${this.lockTtlMs} * INTERVAL '1 millisecond')
+            job."lockedAt" IS NULL
+            OR job."lockedAt" < NOW() - CASE
+              WHEN asset."kind" = 'VIDEO'::"AssetKind"
+                THEN (${this.videoLockTtlMs}::double precision * INTERVAL '1 millisecond')
+              ELSE (${this.lockTtlMs}::double precision * INTERVAL '1 millisecond')
+            END
           )
-        ORDER BY "availableAt" ASC, "createdAt" ASC
+        ORDER BY job."availableAt" ASC, job."createdAt" ASC
         FOR UPDATE SKIP LOCKED
         LIMIT 1
       )
@@ -198,32 +228,41 @@ export class AssetProcessingWorkerService
         }
         return;
       }
+      this.activeAsset = asset;
       if (job.attempts > this.maxAttempts) {
         await this.deadLetter(
           job,
           asset,
-          'ASSET_PROCESSING_ATTEMPT_LIMIT_EXCEEDED',
+          "ASSET_PROCESSING_ATTEMPT_LIMIT_EXCEEDED",
         );
         return;
       }
 
       const lease: LeaseState = { active: true, lost: false };
+      const abortController = new AbortController();
       this.activeLease = lease;
+      this.activeAbortController = abortController;
+      const leaseTtlMs =
+        asset.kind === AssetKind.VIDEO ? this.videoLockTtlMs : this.lockTtlMs;
       const heartbeat = setInterval(
         () => void this.heartbeat(job, lease),
-        Math.max(5000, Math.floor(this.lockTtlMs / 3)),
+        Math.max(5000, Math.floor(leaseTtlMs / 3)),
       );
       heartbeat.unref();
 
       try {
-        const result = await this.processor.process(asset);
+        const result = await this.processor.process(
+          asset,
+          job.id,
+          abortController.signal,
+        );
         lease.active = false;
         if (lease.lost) return;
         if (!(await this.complete(job, asset, result))) {
-          this.loseLease(job, lease, 'completion');
+          this.loseLease(job, lease, "completion");
           return;
         }
-        this.increment('jobsSucceeded');
+        this.increment("jobsSucceeded");
         this.logger.log(`Asset ${asset.id} is ready`);
       } catch (error) {
         lease.active = false;
@@ -232,16 +271,22 @@ export class AssetProcessingWorkerService
         lease.active = false;
         clearInterval(heartbeat);
         if (this.activeLease === lease) this.activeLease = undefined;
+        if (this.activeAbortController === abortController) {
+          this.activeAbortController = undefined;
+        }
       }
     } finally {
-      if (this.activeJob === job) this.activeJob = undefined;
+      if (this.activeJob === job) {
+        this.activeJob = undefined;
+        this.activeAsset = undefined;
+      }
     }
   }
 
   private async complete(
     job: ClaimedJob,
     asset: Asset,
-    result: Awaited<ReturnType<AssetProcessorService['process']>>,
+    result: Awaited<ReturnType<AssetProcessorService["process"]>>,
   ): Promise<boolean> {
     return this.prisma.$transaction(async (tx) => {
       if (!(await this.lockJob(tx, job))) return false;
@@ -255,7 +300,7 @@ export class AssetProcessingWorkerService
           height: result.height,
           durationMillis: result.durationMillis,
           variants: result.variants,
-          errorMessage: '',
+          errorMessage: "",
         },
       });
       if (updated.count !== 1) {
@@ -280,7 +325,7 @@ export class AssetProcessingWorkerService
             authTag: Uint8Array.from(result.videoEncryption.authTag),
           },
         });
-      } else if (asset.purpose === 'MUSIC_VIDEO') {
+      } else if (asset.purpose === "MUSIC_VIDEO") {
         await tx.assetVideoEncryptionKey.deleteMany({
           where: { assetId: asset.id },
         });
@@ -297,7 +342,7 @@ export class AssetProcessingWorkerService
         where: { id: job.id, leaseToken: job.leaseToken },
       });
       if (deleted.count !== 1) {
-        throw new Error('ASSET_PROCESSING_LEASE_DELETE_FAILED');
+        throw new Error("ASSET_PROCESSING_LEASE_DELETE_FAILED");
       }
       return true;
     });
@@ -335,8 +380,8 @@ export class AssetProcessingWorkerService
       this.logger.warn(`Asset job ${job.id} lost its lease before retry`);
       return;
     }
-    this.increment('jobsFailed');
-    this.increment('jobsRetried');
+    this.increment("jobsFailed");
+    this.increment("jobsRetried");
   }
 
   private async heartbeat(job: ClaimedJob, lease: LeaseState): Promise<void> {
@@ -347,12 +392,12 @@ export class AssetProcessingWorkerService
         data: { lockedAt: new Date() },
       });
       if (heartbeat.count !== 1 && lease.active) {
-        this.loseLease(job, lease, 'heartbeat');
+        this.loseLease(job, lease, "heartbeat");
       }
     } catch (error) {
       if (lease.active) {
         this.logger.warn(`Asset job ${job.id} heartbeat failed`, error);
-        this.loseLease(job, lease, 'heartbeat_error');
+        this.loseLease(job, lease, "heartbeat_error");
       }
     }
   }
@@ -369,9 +414,7 @@ export class AssetProcessingWorkerService
     asset: Asset,
     message: string,
   ): Promise<boolean> {
-    const availableAt = new Date(
-      Date.now() + this.failedArtifactRetentionMs,
-    );
+    const availableAt = new Date(Date.now() + this.failedArtifactRetentionMs);
     const deadLettered = await this.prisma.$transaction(async (tx) => {
       if (!(await this.lockJob(tx, job))) return false;
 
@@ -415,14 +458,14 @@ export class AssetProcessingWorkerService
           availableAt,
           lockedAt: null,
           leaseToken: null,
-          lastError: '',
+          lastError: "",
         },
       });
       const deleted = await tx.assetProcessingJob.deleteMany({
         where: { id: job.id, leaseToken: job.leaseToken },
       });
       if (deleted.count !== 1) {
-        throw new Error('ASSET_PROCESSING_LEASE_DELETE_FAILED');
+        throw new Error("ASSET_PROCESSING_LEASE_DELETE_FAILED");
       }
       return true;
     });
@@ -435,8 +478,8 @@ export class AssetProcessingWorkerService
     // processed/{assetId} here: a timed-out worker may have been reclaimed and
     // could otherwise erase the replacement worker's output. Unreferenced
     // partial files are retained for a separately fenced retention sweep.
-    this.increment('jobsFailed');
-    this.increment('jobsDeadLettered');
+    this.increment("jobsFailed");
+    this.increment("jobsDeadLettered");
     this.logger.error(
       `Asset ${asset.id} moved to processing DLQ after ${job.attempts} attempt(s): ${message}`,
     );
@@ -464,11 +507,11 @@ export class AssetProcessingWorkerService
   ): void {
     if (lease.lost) return;
     lease.lost = true;
-    this.increment('leasesLost');
+    if (this.activeJob?.id === job.id) this.activeAbortController?.abort();
+    this.increment("leasesLost");
     this.logger.warn(
       `Asset job ${job.id} lost its lease during ${operation}; refusing stale state changes`,
     );
-    this.processor.abort();
   }
 
   private increment(name: MetricName): void {
@@ -478,8 +521,8 @@ export class AssetProcessingWorkerService
   private logMetrics(): void {
     this.logger.log(
       JSON.stringify({
-        level: 'info',
-        event: 'asset_processing_worker_metrics',
+        level: "info",
+        event: "asset_processing_worker_metrics",
         jobs_started: this.metrics.jobsStarted,
         jobs_succeeded: this.metrics.jobsSucceeded,
         jobs_failed: this.metrics.jobsFailed,
@@ -493,12 +536,12 @@ export class AssetProcessingWorkerService
 
   private errorMessage(error: unknown): string {
     const message = error instanceof Error ? error.message : String(error);
-    return message.slice(0, 2000) || 'ASSET_PROCESSING_FAILED';
+    return message.slice(0, 2000) || "ASSET_PROCESSING_FAILED";
   }
 
   private boolean(value: string | undefined, fallback: boolean): boolean {
     if (value === undefined) return fallback;
-    return value.trim().toLowerCase() === 'true';
+    return value.trim().toLowerCase() === "true";
   }
 
   private integer(value: string | undefined, fallback: number): number {

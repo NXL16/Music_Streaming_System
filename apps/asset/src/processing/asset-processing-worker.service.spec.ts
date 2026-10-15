@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AssetStatus } from "../generated/prisma/client";
+import { AssetKind, AssetStatus } from "../generated/prisma/client";
 import { AssetProcessingWorkerService } from "./asset-processing-worker.service";
 
 type ClaimedJob = {
@@ -22,8 +22,9 @@ type WorkerInternals = {
     job: ClaimedJob,
     lease: { active: boolean; lost: boolean },
   ) => Promise<void>;
-  onModuleDestroy: () => void;
+  onModuleDestroy: () => Promise<void>;
   activeJob?: ClaimedJob;
+  activeAsset?: unknown;
   activeLease?: { active: boolean; lost: boolean };
   metrics: {
     jobsFailed: number;
@@ -48,6 +49,7 @@ const job: ClaimedJob = {
 
 const asset = {
   id: "asset-1",
+  kind: AssetKind.VIDEO,
   status: AssetStatus.PROCESSING,
   sourceObjectKey: "uploads/asset-1/source.webp",
 };
@@ -62,7 +64,7 @@ const processingResult = {
 
 function workerWith(
   prisma: unknown,
-  processor: { abort: () => void } = { abort: () => undefined },
+  processor: object = {},
 ): WorkerInternals {
   const worker = new AssetProcessingWorkerService(
     prisma as never,
@@ -146,15 +148,13 @@ void test("a stale lease token cannot schedule a retry", async () => {
   assert.equal(worker.metrics.jobsRetried, 0);
 });
 
-void test("a heartbeat database error loses the lease and aborts processing", async () => {
-  let aborts = 0;
+void test("a heartbeat database error loses the lease and fences processing", async () => {
   const worker = workerWith(
     {
       assetProcessingJob: {
         updateMany: () => Promise.reject(new Error("database unavailable")),
       },
     },
-    { abort: () => (aborts += 1) },
   );
   const lease = { active: true, lost: false };
 
@@ -162,7 +162,6 @@ void test("a heartbeat database error loses the lease and aborts processing", as
 
   assert.deepEqual(lease, { active: true, lost: true });
   assert.equal(worker.metrics.leasesLost, 1);
-  assert.equal(aborts, 1);
 });
 
 void test("a terminal processing failure writes a DLQ intent before deleting the fenced job", async () => {
@@ -288,28 +287,31 @@ void test("a successful completion cancels an obsolete artifact cleanup intent",
   assert.deepEqual(sequence, ["asset-ready", "cleanup-delete", "job-delete"]);
 });
 
-void test('shutdown leaves an active lease for TTL-based recovery', () => {
-  let jobUpdates = 0;
-  let aborts = 0;
+void test('shutdown releases an active lease for durable operation recovery', async () => {
+  const updates: unknown[] = [];
   const prisma = {
     assetProcessingJob: {
-      updateMany: () => {
-        jobUpdates += 1;
+      updateMany: (input: unknown) => {
+        updates.push(input);
         return Promise.resolve({ count: 1 });
       },
     },
   };
-  const worker = workerWith(prisma, {
-    abort: () => {
-      aborts += 1;
-    },
-  });
+  const worker = workerWith(prisma);
   worker.activeJob = job;
+  worker.activeAsset = asset;
   worker.activeLease = { active: true, lost: false };
 
-  worker.onModuleDestroy();
+  await worker.onModuleDestroy();
 
-  assert.equal(aborts, 1);
-  assert.equal(jobUpdates, 0);
+  assert.equal(updates.length, 1);
+  const update = updates[0] as {
+    where: { id: string; leaseToken: string };
+    data: { lockedAt: null; leaseToken: null; availableAt: Date };
+  };
+  assert.deepEqual(update.where, { id: job.id, leaseToken: job.leaseToken });
+  assert.equal(update.data.lockedAt, null);
+  assert.equal(update.data.leaseToken, null);
+  assert.ok(update.data.availableAt instanceof Date);
   assert.deepEqual(worker.activeLease, { active: false, lost: true });
 });
