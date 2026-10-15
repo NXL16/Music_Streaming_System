@@ -12,6 +12,9 @@ service AssetService {
   rpc GetAsset(GetAssetRequest) returns (AssetResponse);
   rpc ListAssets(ListAssetsRequest) returns (ListAssetsResponse);
   rpc DeleteAsset(DeleteAssetRequest) returns (DeleteAssetResponse);
+  // Rebuild only the poster renditions for an existing READY music video.
+  // The HLS playlists, encryption key and asset identity remain unchanged.
+  rpc ReplaceMusicVideoPoster(ReplaceMusicVideoPosterRequest) returns (AssetResponse);
   rpc RegisterAssetUsages(SyncAssetUsagesRequest) returns (RegisterAssetUsagesResponse);
   rpc ReconcileAssetUsages(SyncAssetUsagesRequest) returns (SyncAssetUsagesResponse);
   rpc ListAssetUsages(GetAssetRequest) returns (ListAssetUsagesResponse);
@@ -52,6 +55,8 @@ message RequestAssetUploadRequest {
   string       content_type  = 5;
   string       checksum      = 6;
   int64        size_bytes    = 7;
+  // MUSIC_VIDEO only. The frame selected in Seed Studio for poster extraction.
+  int64        poster_timestamp_millis = 8;
 }
 
 message RequestAssetUploadResponse {
@@ -91,6 +96,12 @@ message DeleteAssetRequest {
 
 message DeleteAssetResponse {
   bool success = 1;
+}
+
+message ReplaceMusicVideoPosterRequest {
+  string asset_id                = 1;
+  string actor_user_id           = 2;
+  int64  poster_timestamp_millis = 3;
 }
 
 message AssetResponse {
