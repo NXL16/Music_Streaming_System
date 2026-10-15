@@ -105,8 +105,8 @@ export const OutlinePanel = memo(() => {
 
 									<div
 										className={`
-										${styles.textContent} 
-										${line.isBG ? styles.isBG : ""} 
+										${styles.textContent}
+										${line.isBG ? styles.isBG : ""}
 										${line.isDuet ? styles.isDuet : ""}
 									`}
 									>
