@@ -1,5 +1,8 @@
 import type { TasteProfile } from '../listening/listening.service';
 import {
+  isAudioMoodCompatible,
+  isAudioTempoCompatible,
+  isSongStationCandidateEligible,
   isStationCandidateEligible,
   rankStationCandidatesForProfile,
 } from './station-personalization';
@@ -22,6 +25,46 @@ const profile = (hidden = new Map<string, Set<string>>()): TasteProfile => ({
 });
 
 describe('station personalization', () => {
+  it('excludes melancholic candidates for a clearly happy seed', () => {
+    expect(
+      isAudioMoodCompatible(
+        { audioTags: ['happy music', 'pop music'] },
+        { audioTags: ['melancholic music', 'pop music'] },
+      ),
+    ).toBe(false);
+    expect(
+      isAudioMoodCompatible(
+        { audioTags: ['happy music', 'pop music'] },
+        { audioTags: ['energetic music', 'pop music'] },
+      ),
+    ).toBe(true);
+  });
+
+  it('keeps Song Station candidates within a five-percent BPM window', () => {
+    expect(
+      isAudioTempoCompatible({ audioBpm: 119.68 }, { audioBpm: 113.7 }),
+    ).toBe(true);
+    expect(
+      isAudioTempoCompatible({ audioBpm: 119.68 }, { audioBpm: 125.66 }),
+    ).toBe(true);
+    expect(
+      isAudioTempoCompatible({ audioBpm: 119.68 }, { audioBpm: 106.13 }),
+    ).toBe(false);
+    expect(
+      isAudioTempoCompatible({ audioBpm: 119.68 }, { audioBpm: 126 }),
+    ).toBe(false);
+    expect(
+      isSongStationCandidateEligible(
+        {
+          resourceId: 'slow-song',
+          relationships: {},
+          attributes: { audioBpm: 92, audioTags: ['happy music'] },
+        },
+        { audioBpm: 119.68, audioTags: ['happy music'] },
+      ),
+    ).toBe(false);
+  });
+
   it('filters hidden songs, albums and artists', () => {
     const relationships = {
       albums: { data: [{ id: 'album-hidden' }] },
@@ -55,7 +98,11 @@ describe('station personalization', () => {
           resourceId: 'matched',
           artistName: 'Preferred Artist',
           genreNames: ['Pop'],
-          attributes: { audioBpm: 120, audioEnergy: 0.8, audioTags: ['upbeat'] },
+          attributes: {
+            audioBpm: 120,
+            audioEnergy: 0.8,
+            audioTags: ['upbeat'],
+          },
           relationships: null,
         },
       ],

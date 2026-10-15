@@ -6,7 +6,7 @@ export type StationTrackCandidate = {
   artistIds: string[];
 };
 
-export const STATION_TRACK_SELECTION_VERSION = 'v3';
+export const STATION_TRACK_SELECTION_VERSION = 'v6';
 
 type SelectStationTracksInput = {
   initialTrackIds?: readonly string[];
@@ -39,11 +39,13 @@ export class StationTrackSelectionService {
 
     const candidates = new Map<string, StationTrackCandidate>();
     for (const candidate of initialCandidates) {
-      if (!excludedSongIds.has(candidate.id)) candidates.set(candidate.id, candidate);
+      if (!excludedSongIds.has(candidate.id))
+        candidates.set(candidate.id, candidate);
     }
     for (const tier of candidateTiers) {
       for (const candidate of tier) {
-        if (!excludedSongIds.has(candidate.id)) candidates.set(candidate.id, candidate);
+        if (!excludedSongIds.has(candidate.id))
+          candidates.set(candidate.id, candidate);
       }
     }
 
@@ -74,7 +76,9 @@ export class StationTrackSelectionService {
     for (const id of initialTrackIds) add(id, false);
 
     const orderedIds = [
-      ...candidateTiers.flatMap((tier) => tier.map((candidate) => candidate.id)),
+      ...candidateTiers.flatMap((tier) =>
+        tier.map((candidate) => candidate.id),
+      ),
     ];
     for (const id of orderedIds) add(id, true);
     // In a small catalog, complete the Station rather than returning a short
@@ -94,7 +98,10 @@ export class StationTrackSelectionService {
       for (const neighbour of neighbours) {
         const score = Math.max(0, Math.min(1, neighbour.score));
         if (score < 0.2) continue;
-        scores.set(neighbour.songId, Math.max(scores.get(neighbour.songId) ?? 0, score));
+        scores.set(
+          neighbour.songId,
+          Math.max(scores.get(neighbour.songId) ?? 0, score),
+        );
       }
       return [...scores]
         .sort(

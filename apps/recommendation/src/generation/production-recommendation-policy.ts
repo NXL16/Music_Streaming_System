@@ -141,9 +141,18 @@ export const PRODUCTION_RECOMMENDATION_POLICY = {
       key: 'heartbreak',
       title: 'Heartbreak',
       subtitle: 'Get over it, one tear-jerking anthem at a time.',
-      traits: ['heartbreak', 'breakup', 'sad', 'melancholy', 'emotional'],
+      // Audio analysis labels this mood as "melancholic music". Include its
+      // normalized stem so these tracks qualify without manual curation.
+      traits: [
+        'heartbreak',
+        'breakup',
+        'sad',
+        'melancholy',
+        'melancholic',
+        'emotional',
+      ],
       genres: ['Ballad', 'R&B', 'Soul'],
-      avoidTraits: ['party', 'feel-good'],
+      avoidTraits: ['party', 'feel-good', 'happy', 'energetic', 'upbeat'],
       allowGenreFallback: false,
     },
     {

@@ -1369,7 +1369,6 @@ export class RecommendationsService {
     }
   }
 
-
   private async userSystemPlaylistDescriptionByKey(
     playlists: Array<{ playlistId: string; playlistKey: string }>,
     userId: string,
@@ -2481,8 +2480,8 @@ export class RecommendationsService {
       );
     }
 
-    const systemGeneratedRefs = missing.filter((ref) =>
-      this.isSystemGeneratedRef(ref),
+    const systemGeneratedRefs = missing.filter(
+      (ref) => this.isSystemGeneratedRef(ref),
     );
     const catalogRefs = missing.filter(
       (ref) =>

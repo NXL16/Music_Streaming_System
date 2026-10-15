@@ -4,6 +4,21 @@ import type { TasteProfile } from '../listening/listening.service';
 
 type JsonObject = Record<string, unknown>;
 
+const POSITIVE_MOOD_TAGS = new Set([
+  'happy music',
+  'energetic music',
+  'upbeat music',
+  'party music',
+  'feel-good music',
+]);
+const NEGATIVE_MOOD_TAGS = new Set([
+  'melancholic music',
+  'sad music',
+  'heartbreak music',
+  'breakup music',
+]);
+const STRICT_TEMPO_TOLERANCE = 0.05;
+
 export type StationProfileCandidate = {
   resourceId: string;
   artistName?: string;
@@ -47,6 +62,71 @@ export function isStationCandidateEligible(
   return (
     !hasHiddenRelationship('albums', 'albums') &&
     !hasHiddenRelationship('artists', 'artists')
+  );
+}
+
+/** Keeps clearly opposing analyzed moods out of Song Station candidates. */
+export function isAudioMoodCompatible(
+  seedAttributes: unknown,
+  candidateAttributes: unknown,
+): boolean {
+  const seedTags = audioFeaturesFromAttributes(seedAttributes).tags;
+  const candidateTags = audioFeaturesFromAttributes(candidateAttributes).tags;
+  const hasTag = (tags: string[], moods: ReadonlySet<string>) =>
+    tags.some((tag) => moods.has(tag));
+  const seedIsPositive = hasTag(seedTags, POSITIVE_MOOD_TAGS);
+  const seedIsNegative = hasTag(seedTags, NEGATIVE_MOOD_TAGS);
+  const candidateIsPositive = hasTag(candidateTags, POSITIVE_MOOD_TAGS);
+  const candidateIsNegative = hasTag(candidateTags, NEGATIVE_MOOD_TAGS);
+
+  // Mixed-mood seed tracks do not provide a reliable direction, so preserve
+  // vector similarity rather than guessing which half of the mood to favor.
+  if (seedIsPositive === seedIsNegative) return true;
+  return seedIsPositive ? !candidateIsNegative : !candidateIsPositive;
+}
+
+/** Keeps candidates in a symmetric BPM window around the seed track. */
+export function isAudioTempoCompatible(
+  seedAttributes: unknown,
+  candidateAttributes: unknown,
+  tolerance = STRICT_TEMPO_TOLERANCE,
+): boolean {
+  const seedBpm = audioFeaturesFromAttributes(seedAttributes).bpm;
+  const candidateBpm = audioFeaturesFromAttributes(candidateAttributes).bpm;
+  if (!seedBpm || !candidateBpm) {
+    return true;
+  }
+  return Math.abs(candidateBpm - seedBpm) <= seedBpm * tolerance;
+}
+
+export function isSongStationAudioCompatible(
+  seedAttributes: unknown,
+  candidateAttributes: unknown,
+  tempoTolerance = STRICT_TEMPO_TOLERANCE,
+): boolean {
+  return (
+    isAudioMoodCompatible(seedAttributes, candidateAttributes) &&
+    isAudioTempoCompatible(seedAttributes, candidateAttributes, tempoTolerance)
+  );
+}
+
+/** Shared eligibility gate for every Song Station candidate tier. */
+export function isSongStationCandidateEligible(
+  song: Pick<
+    StationProfileCandidate,
+    'resourceId' | 'relationships' | 'attributes'
+  >,
+  seedAttributes: unknown,
+  profile?: TasteProfile,
+  tempoTolerance = STRICT_TEMPO_TOLERANCE,
+): boolean {
+  return (
+    isStationCandidateEligible(song, profile) &&
+    isSongStationAudioCompatible(
+      seedAttributes,
+      song.attributes,
+      tempoTolerance,
+    )
   );
 }
 

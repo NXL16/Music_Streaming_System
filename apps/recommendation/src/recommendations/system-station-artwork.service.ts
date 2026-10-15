@@ -276,6 +276,7 @@ export class SystemStationArtworkService implements OnModuleInit {
         url: this.string(poster.url),
         width: this.number(poster.width),
         height: this.number(poster.height),
+        bgColor: this.string(poster.bgColor),
         variants: this.object(poster.variants),
       },
       variants,
