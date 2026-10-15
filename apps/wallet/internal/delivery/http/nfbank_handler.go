@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -15,8 +16,12 @@ import (
 )
 
 type NFBankHandler struct {
-	walletService *service.WalletService
+	walletService nfBankDepositService
 	cfg           *config.Config
+}
+
+type nfBankDepositService interface {
+	ProcessNFBankDepositWebhook(context.Context, string, int64, int) error
 }
 
 func NewNFBankHandler(ws *service.WalletService, cfg *config.Config) *NFBankHandler {

@@ -420,12 +420,14 @@ type MomoRequest struct {
 	ExtraData   string `json:"extraData"`
 	Signature   string `json:"signature"`
 	Lang        string `json:"lang"`
+	AutoCapture bool   `json:"autoCapture,omitempty"`
 }
 
 type MomoResponse struct {
 	PayUrl     string `json:"payUrl"`
 	ResultCode int    `json:"resultCode"`
 	Message    string `json:"message"`
+	QRCodeURL  string `json:"qrCodeUrl"`
 }
 
 func (s *WalletService) createMomoDepositOrder(ctx context.Context, req *walletpb.DepositOrderRequest) (*walletpb.DepositOrderResponse, error) {

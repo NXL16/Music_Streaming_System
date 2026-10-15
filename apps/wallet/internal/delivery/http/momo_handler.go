@@ -1,7 +1,9 @@
 package http
 
 import (
+	"Music_Streaming_System/apps/wallet/internal/config"
 	"Music_Streaming_System/apps/wallet/internal/service"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -12,7 +14,12 @@ import (
 )
 
 type MomoHTTPHandler struct {
-	walletService *service.WalletService
+	walletService momoDepositService
+}
+
+type momoDepositService interface {
+	GetConfig() *config.Config
+	ProcessDepositWebhook(context.Context, string, int64, int) error
 }
 
 func NewMomoHTTPHandler(walletService *service.WalletService) *MomoHTTPHandler {
@@ -44,7 +51,6 @@ func (h *MomoHTTPHandler) HandleWebhook(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Payload không hợp lệ"})
 		return
 	}
-
 	// 1. Xác thực chữ ký số (Signature Verification) ngăn chặn giả mạo dữ liệu
 	if !h.verifyMomoSignature(payload) {
 		fmt.Printf("[WARNING] Phát hiện Webhook giả mạo hoặc chữ ký không hợp lệ! OrderId: %s\n", payload.OrderId)
@@ -59,7 +65,6 @@ func (h *MomoHTTPHandler) HandleWebhook(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
 	if payload.ResultCode == 0 {
 		fmt.Printf("[SUCCESS] Đã xử lý nạp tiền thành công cho đơn hàng MoMo: %s\n", payload.OrderId)
 	} else {
