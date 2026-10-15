@@ -29,6 +29,7 @@ export interface ResolvedCatalogAssets {
 export interface CatalogMusicVideoAsset {
   posterUrl: string;
   posterSrcSet: string;
+  posterBgColor: string;
   durationMillis: number;
   width: number;
   height: number;
@@ -272,6 +273,7 @@ export class CatalogAssetsService implements OnModuleInit {
     return {
       posterUrl: this.string(poster.url),
       posterSrcSet: this.posterSrcSet(poster),
+      posterBgColor: this.string(poster.bgColor),
       durationMillis: musicVideo.durationMillis,
       width: musicVideo.width,
       height: musicVideo.height,

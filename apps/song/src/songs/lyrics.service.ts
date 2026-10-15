@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
 import { status } from '@grpc/grpc-js';
 import { RpcException } from '@nestjs/microservices';
 import {
@@ -7,43 +6,10 @@ import {
   SongLyricsResponse,
   UpsertSongLyricsRequest,
 } from '@musical/shared-proto';
-import {
-  SongLyricLineKind,
-  SongLyricStatus,
-  SongLyricSyncMode,
-} from '../generated/prisma/client';
-import type { Prisma } from '../generated/prisma/client';
+import { SongLyricStatus } from '../generated/prisma/client';
 import { PrismaService } from '../database/prisma.service';
 
-const TIMESTAMP = /\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
-const MAX_LINES = 2_000;
-const MAX_WORDS_PER_LINE = 100;
-const MAX_SOURCE_LENGTH = 200_000;
-const MAX_LINE_TEXT_LENGTH = 4_000;
-const MAX_WORD_TEXT_LENGTH = 500;
-const WORD_INSERT_BATCH_SIZE = 5_000;
-
-type PreparedWord = {
-  position: number;
-  startTimeMs: number;
-  endTimeMs: number;
-  text: string;
-};
-
-type PreparedLine = {
-  position: number;
-  startTimeMs: number;
-  endTimeMs: number;
-  text: string;
-  kind: SongLyricLineKind;
-  words: PreparedWord[];
-};
-
-type PersistedLine = Omit<PreparedLine, 'words'> & {
-  id: string;
-  lyricId: string;
-  words: PreparedWord[];
-};
+const MAX_TTML_SOURCE_LENGTH = 2_000_000;
 
 @Injectable()
 export class LyricsService {
@@ -58,9 +24,7 @@ export class LyricsService {
         return this.response({
           songId: draft.songId,
           language: draft.language,
-          plainText: draft.plainText,
-          syncMode: draft.syncMode,
-          lines: draft.lines as unknown as PreparedLine[],
+          sourceTtml: draft.sourceTtml,
           published: false,
         });
       }
@@ -68,12 +32,6 @@ export class LyricsService {
 
     const lyric = await this.prisma.songLyric.findUnique({
       where: { songId: request.songId },
-      include: {
-        lines: {
-          orderBy: { position: 'asc' },
-          include: { words: { orderBy: { position: 'asc' } } },
-        },
-      },
     });
     if (!lyric || lyric.status !== SongLyricStatus.PUBLISHED) {
       throw this.notFound('LYRICS_NOT_FOUND');
@@ -81,94 +39,42 @@ export class LyricsService {
     return this.response({
       songId: lyric.songId,
       language: lyric.language,
-      plainText: lyric.plainText,
-      syncMode: lyric.syncMode,
+      sourceTtml: lyric.sourceTtml,
       published: true,
-      lines: lyric.lines.map((line) => ({
-        position: line.position,
-        startTimeMs: line.startTimeMs,
-        endTimeMs: line.endTimeMs,
-        text: line.text,
-        kind: line.kind,
-        words: line.words.map((word) => ({
-          position: word.position,
-          startTimeMs: word.startTimeMs,
-          endTimeMs: word.endTimeMs,
-          text: word.text,
-        })),
-      })),
     });
   }
 
   async upsert(request: UpsertSongLyricsRequest): Promise<SongLyricsResponse> {
     const song = await this.prisma.song.findUnique({
       where: { id: request.songId },
-      select: { id: true, durationInMillis: true },
+      select: { id: true },
     });
     if (!song) throw this.notFound('SONG_NOT_FOUND');
     await this.requirePermission(request, song.id);
 
     const language = this.language(request.language);
-    const sourceLrc = this.source(request.sourceLrc);
-    const syncMode =
-      request.syncMode === SongLyricSyncMode.WORD
-        ? SongLyricSyncMode.WORD
-        : SongLyricSyncMode.LINE;
-    const lines = request.lines.length
-      ? this.validateLines(
-          request.lines,
-          song.durationInMillis,
-          syncMode,
-          !request.publish,
-        )
-      : this.parse(sourceLrc, song.durationInMillis);
-    const plainText = lines
-      .filter((line) => line.kind === SongLyricLineKind.LYRIC)
-      .map((line) => line.text)
-      .join('\n');
+    const sourceTtml = this.ttmlSource(request.sourceTtml);
 
     if (!request.publish) {
       await this.prisma.songLyricDraft.upsert({
         where: { songId: song.id },
-        create: {
-          songId: song.id,
-          language,
-          sourceLrc,
-          plainText,
-          syncMode,
-          lines: lines,
-        },
-        update: {
-          language,
-          sourceLrc,
-          plainText,
-          syncMode,
-          lines: lines,
-        },
+        create: { songId: song.id, language, sourceTtml },
+        update: { language, sourceTtml },
       });
       return this.get({ songId: song.id, includeDraft: true });
     }
 
     await this.prisma.$transaction(async (tx) => {
-      const lyric = await tx.songLyric.upsert({
+      await tx.songLyric.upsert({
         where: { songId: song.id },
         create: {
           songId: song.id,
           language,
-          sourceLrc,
-          plainText,
-          syncMode,
+          sourceTtml,
           status: SongLyricStatus.PUBLISHED,
         },
-        update: {
-          language,
-          sourceLrc,
-          plainText,
-          syncMode,
-          status: SongLyricStatus.PUBLISHED,
-        },
+        update: { language, sourceTtml, status: SongLyricStatus.PUBLISHED },
       });
-      await this.replacePublishedLines(tx, lyric.id, lines);
       await tx.song.update({
         where: { id: song.id },
         data: { hasLyrics: true, hasTimeSyncedLyrics: true },
@@ -199,201 +105,13 @@ export class LyricsService {
     }
   }
 
-  private async replacePublishedLines(
-    tx: Prisma.TransactionClient,
-    lyricId: string,
-    lines: PreparedLine[],
-  ): Promise<void> {
-    await tx.songLyricLine.deleteMany({ where: { lyricId } });
-    if (!lines.length) return;
-
-    const persistedLines: PersistedLine[] = lines.map((line) => ({
-      ...line,
-      id: randomUUID(),
-      lyricId,
-    }));
-    await tx.songLyricLine.createMany({
-      data: persistedLines.map((line) => ({
-        id: line.id,
-        lyricId: line.lyricId,
-        position: line.position,
-        startTimeMs: line.startTimeMs,
-        endTimeMs: line.endTimeMs,
-        text: line.text,
-        kind: line.kind,
-      })),
-    });
-
-    let wordBatch: Prisma.SongLyricWordCreateManyInput[] = [];
-    for (const line of persistedLines) {
-      for (const word of line.words) {
-        wordBatch.push({ lineId: line.id, ...word });
-        if (wordBatch.length === WORD_INSERT_BATCH_SIZE) {
-          await tx.songLyricWord.createMany({ data: wordBatch });
-          wordBatch = [];
-        }
-      }
-    }
-    if (wordBatch.length) {
-      await tx.songLyricWord.createMany({ data: wordBatch });
-    }
-  }
-
   private response(data: {
     songId: string;
     language: string;
-    plainText: string;
-    syncMode: SongLyricSyncMode;
-    lines: PreparedLine[];
+    sourceTtml: string;
     published: boolean;
   }): SongLyricsResponse {
-    return {
-      songId: data.songId,
-      language: data.language,
-      plainText: data.plainText,
-      isTimeSynced: data.lines.length > 0,
-      published: data.published,
-      syncMode: data.syncMode,
-      lines: data.lines.map((line) => ({
-        ...line,
-        kind: line.kind ?? SongLyricLineKind.LYRIC,
-      })),
-    };
-  }
-
-  private parse(source: string, durationMs: number): PreparedLine[] {
-    const entries: PreparedLine[] = [];
-    for (const rawLine of source.replace(/^\uFEFF/, '').split(/\r?\n/)) {
-      const timestamps = [...rawLine.matchAll(TIMESTAMP)];
-      const text = rawLine.replace(TIMESTAMP, '').trim();
-      if (!timestamps.length || !text) continue;
-      for (const match of timestamps) {
-        if (Number(match[2]) >= 60)
-          throw this.invalid('LRC_TIMESTAMPS_INVALID');
-        const fraction = (match[3] || '').padEnd(3, '0').slice(0, 3);
-        entries.push({
-          position: 0,
-          startTimeMs:
-            (Number(match[1]) * 60 + Number(match[2])) * 1000 +
-            Number(fraction || 0),
-          endTimeMs: 0,
-          text,
-          kind: SongLyricLineKind.LYRIC,
-          words: [],
-        });
-      }
-    }
-    entries.sort((left, right) => left.startTimeMs - right.startTimeMs);
-    if (
-      !entries.length ||
-      entries.length > MAX_LINES ||
-      entries.some(
-        (line, index) =>
-          index > 0 && line.startTimeMs === entries[index - 1].startTimeMs,
-      )
-    ) {
-      throw this.invalid('LRC_TIMESTAMPS_INVALID');
-    }
-    if (
-      durationMs > 0 &&
-      entries.some((line) => line.startTimeMs >= durationMs)
-    ) {
-      throw this.invalid('LRC_TIMESTAMP_EXCEEDS_DURATION');
-    }
-    return entries.map((line, index) => ({
-      ...line,
-      position: index,
-      endTimeMs:
-        (entries[index + 1]?.startTimeMs ?? durationMs) ||
-        line.startTimeMs + 10_000,
-    }));
-  }
-
-  private validateLines(
-    lines: UpsertSongLyricsRequest['lines'],
-    durationMs: number,
-    syncMode: SongLyricSyncMode,
-    allowIncompleteTiming: boolean,
-  ): PreparedLine[] {
-    if (!lines.length || lines.length > MAX_LINES)
-      throw this.invalid('LYRIC_LINES_INVALID');
-    const normalized = lines.map((line, position) => ({
-      position,
-      startTimeMs: line.startTimeMs,
-      endTimeMs: line.endTimeMs,
-      kind: this.lineKind(line.kind),
-      text: line.text.trim(),
-      words: line.words.map((word, wordPosition) => ({
-        position: wordPosition,
-        startTimeMs: word.startTimeMs,
-        endTimeMs: word.endTimeMs,
-        text: word.text.trim(),
-      })),
-    }));
-    const hasCompleteTiming = (line: PreparedLine | undefined) =>
-      line !== undefined &&
-      line.startTimeMs >= 0 &&
-      line.endTimeMs > line.startTimeMs;
-    const invalidLine = normalized.some((line, index) => {
-      const previous = normalized[index - 1];
-      const hasPartialTiming =
-        line.startTimeMs >= 0 || line.endTimeMs >= 0;
-
-      return (
-        !Number.isSafeInteger(line.startTimeMs) ||
-        !Number.isSafeInteger(line.endTimeMs) ||
-        (line.kind === SongLyricLineKind.LYRIC && !line.text) ||
-        line.text.length > MAX_LINE_TEXT_LENGTH ||
-        (line.kind === SongLyricLineKind.INSTRUMENTAL &&
-          (line.text.length > 0 || line.words.length > 0)) ||
-        (!allowIncompleteTiming &&
-          (line.startTimeMs < 0 || line.endTimeMs <= line.startTimeMs)) ||
-        (allowIncompleteTiming &&
-          hasPartialTiming &&
-          !hasCompleteTiming(line)) ||
-        (index > 0 &&
-          hasCompleteTiming(line) &&
-          hasCompleteTiming(previous) &&
-          line.startTimeMs < previous.endTimeMs) ||
-        (durationMs > 0 &&
-          hasCompleteTiming(line) &&
-          line.endTimeMs > durationMs)
-      );
-    });
-    const invalidWords = normalized.some(
-      (line) =>
-        line.words.length > MAX_WORDS_PER_LINE ||
-        (allowIncompleteTiming &&
-          !hasCompleteTiming(line) &&
-          line.words.length > 0) ||
-        line.words.some(
-          (word, index) =>
-            !Number.isSafeInteger(word.startTimeMs) ||
-            !Number.isSafeInteger(word.endTimeMs) ||
-            !word.text ||
-            word.text.length > MAX_WORD_TEXT_LENGTH ||
-            word.startTimeMs < line.startTimeMs ||
-            word.endTimeMs <= word.startTimeMs ||
-            word.endTimeMs > line.endTimeMs ||
-            (index > 0 && word.startTimeMs < line.words[index - 1].endTimeMs),
-        ),
-    );
-    if (
-      invalidLine ||
-      invalidWords ||
-      (syncMode === SongLyricSyncMode.WORD &&
-        normalized.some(
-          (line) =>
-            line.kind === SongLyricLineKind.INSTRUMENTAL ||
-            (!allowIncompleteTiming && !line.words.length) ||
-            (allowIncompleteTiming &&
-              hasCompleteTiming(line) &&
-              !line.words.length),
-        ))
-    ) {
-      throw this.invalid('LYRIC_TIMINGS_INVALID');
-    }
-    return normalized;
+    return data;
   }
 
   private language(value: string): string {
@@ -407,18 +125,15 @@ export class LyricsService {
     return language;
   }
 
-  private lineKind(value: string): SongLyricLineKind {
-    const kind = value.trim().toUpperCase() || SongLyricLineKind.LYRIC;
-    if (kind === SongLyricLineKind.LYRIC) return SongLyricLineKind.LYRIC;
-    if (kind === SongLyricLineKind.INSTRUMENTAL)
-      return SongLyricLineKind.INSTRUMENTAL;
-    throw this.invalid('LYRIC_LINE_KIND_INVALID');
-  }
-
-  private source(value: string): string {
-    const source = value.trim();
-    if (source.length > MAX_SOURCE_LENGTH)
-      throw this.invalid('LYRIC_SOURCE_TOO_LARGE');
+  private ttmlSource(value: string): string {
+    const source = value ?? '';
+    if (
+      source.length > MAX_TTML_SOURCE_LENGTH ||
+      !/^\s*<tt(?:\s|>)/.test(source) ||
+      !/<\/tt>\s*$/.test(source)
+    ) {
+      throw this.invalid('LYRIC_TTML_INVALID');
+    }
     return source;
   }
 

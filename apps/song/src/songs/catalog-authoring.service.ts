@@ -6,6 +6,8 @@ import {
   CatalogDraftInfo,
   CatalogDraftStatus,
   CatalogResponse,
+  DeleteCatalogSongVideoRequest,
+  DeleteCatalogSongVideoResponse,
   DeleteCatalogDraftRequest,
   DeleteCatalogDraftResponse,
   GetCatalogDraftRequest,
@@ -330,6 +332,72 @@ export class CatalogAuthoringService {
         kind: this.songVideoKind(request.kind),
       }),
     );
+  }
+
+  async deleteSongVideo(
+    request: DeleteCatalogSongVideoRequest,
+  ): Promise<DeleteCatalogSongVideoResponse> {
+    this.requireText(request.actorUserId, 'actor_user_id', 128);
+    this.requireUuid(request.songVideoId, 'song_video_id');
+
+    const removed = await this.prisma.$transaction(async (tx) => {
+      const songVideo = await tx.songVideo.findUnique({
+        where: { id: request.songVideoId },
+        select: {
+          id: true,
+          videoAssetId: true,
+          song: { select: { storefront: true } },
+        },
+      });
+      if (!songVideo) this.notFound('CATALOG_SONG_VIDEO_NOT_FOUND');
+
+      await tx.songVideo.delete({ where: { id: songVideo.id } });
+      await tx.catalogAssetUsageOutbox.upsert({
+        where: {
+          resourceType_resourceId_storefront: {
+            resourceType: RESOURCE_TYPES.SONG_VIDEO,
+            resourceId: songVideo.id,
+            storefront: songVideo.song.storefront,
+          },
+        },
+        create: {
+          resourceType: RESOURCE_TYPES.SONG_VIDEO,
+          resourceId: songVideo.id,
+          storefront: songVideo.song.storefront,
+          usages: this.json([]),
+        },
+        update: {
+          usages: this.json([]),
+          attempts: 0,
+          availableAt: new Date(),
+          lockedAt: null,
+          lastError: '',
+        },
+      });
+
+      return songVideo;
+    });
+
+    try {
+      await this.catalogAssetsService.reconcileUsages(
+        RESOURCE_TYPES.SONG_VIDEO,
+        removed.id,
+        [],
+      );
+      await this.prisma.catalogAssetUsageOutbox.deleteMany({
+        where: {
+          resourceType: RESOURCE_TYPES.SONG_VIDEO,
+          resourceId: removed.id,
+          storefront: removed.song.storefront,
+        },
+      });
+      return { videoAssetId: removed.videoAssetId, assetUsagePending: false };
+    } catch {
+      // The outbox created in the transaction retries the usage cleanup. The
+      // caller can still report a successful unlink without risking deletion
+      // of an asset that Asset service considers in use.
+      return { videoAssetId: removed.videoAssetId, assetUsagePending: true };
+    }
   }
 
   async getDraft(request: GetCatalogDraftRequest): Promise<CatalogDraftDetail> {

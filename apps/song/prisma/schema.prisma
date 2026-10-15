@@ -20,16 +20,6 @@ enum SongLyricStatus {
   PUBLISHED
 }
 
-enum SongLyricSyncMode {
-  LINE
-  WORD
-}
-
-enum SongLyricLineKind {
-  LYRIC
-  INSTRUMENTAL
-}
-
 enum SongAudioMode {
   STANDARD
   SING
@@ -92,76 +82,76 @@ model CatalogAssetUsageOutbox {
 }
 
 model PreferenceOutbox {
-  id           String   @id @default(uuid())
-  eventId      String   @unique @db.VarChar(128)
-  userId       String   @db.VarChar(128)
-  eventType    Int
-  resourceType String   @db.VarChar(64)
-  resourceId   String   @db.VarChar(128)
-  weight       Float
-  attempts     Int      @default(0)
-  availableAt  DateTime @default(now()) @db.Timestamptz
-  lockedAt     DateTime? @db.Timestamptz
-  lockedBy     String   @default("") @db.VarChar(128)
+  id             String    @id @default(uuid())
+  eventId        String    @unique @db.VarChar(128)
+  userId         String    @db.VarChar(128)
+  eventType      Int
+  resourceType   String    @db.VarChar(64)
+  resourceId     String    @db.VarChar(128)
+  weight         Float
+  attempts       Int       @default(0)
+  availableAt    DateTime  @default(now()) @db.Timestamptz
+  lockedAt       DateTime? @db.Timestamptz
+  lockedBy       String    @default("") @db.VarChar(128)
   deadLetteredAt DateTime? @db.Timestamptz
-  lastError    String   @default("") @db.VarChar(2000)
-  createdAt    DateTime @default(now()) @db.Timestamptz
-  updatedAt    DateTime @updatedAt @db.Timestamptz
+  lastError      String    @default("") @db.VarChar(2000)
+  createdAt      DateTime  @default(now()) @db.Timestamptz
+  updatedAt      DateTime  @updatedAt @db.Timestamptz
 
   @@index([availableAt, lockedAt, deadLetteredAt])
   @@map("preference_outbox")
 }
 
 model Song {
-  id                        String              @id @default(uuid())
-  status                    Int                 @default(1)
-  sourceObjectPath          String              @default("") @db.VarChar(500)
-  audioMode                 SongAudioMode       @default(STANDARD)
+  id                        String                  @id @default(uuid())
+  status                    Int                     @default(1)
+  sourceObjectPath          String                  @default("") @db.VarChar(500)
+  audioMode                 SongAudioMode           @default(STANDARD)
   // Monotonic per-song generation assigned whenever processing is requested.
   // It fences late worker completions and metadata writes from an older source.
-  transcodeVersion          BigInt              @default(0)
-  checksum                  String?             @unique @db.VarChar(64)
-  fileSizeBytes             BigInt              @default(0)
-  encryptedFilePath         String              @default("") @db.VarChar(500)
-  durationSec               Int                 @default(0)
-  bitrateKbps               Int                 @default(0)
-  codec                     String              @default("") @db.VarChar(32)
-  format                    String              @default("fmp4") @db.VarChar(32)
-  isCatalog                 Boolean             @default(false)
-  storefront                String              @default("vn") @db.VarChar(8)
-  catalogTitle              String              @default("") @db.VarChar(255)
-  albumName                 String              @default("") @db.VarChar(255)
-  artistName                String              @default("") @db.VarChar(500)
+  transcodeVersion          BigInt                  @default(0)
+  checksum                  String?                 @unique @db.VarChar(64)
+  fileSizeBytes             BigInt                  @default(0)
+  encryptedFilePath         String                  @default("") @db.VarChar(500)
+  durationSec               Int                     @default(0)
+  bitrateKbps               Int                     @default(0)
+  codec                     String                  @default("") @db.VarChar(32)
+  format                    String                  @default("fmp4") @db.VarChar(32)
+  isCatalog                 Boolean                 @default(false)
+  storefront                String                  @default("vn") @db.VarChar(8)
+  catalogTitle              String                  @default("") @db.VarChar(255)
+  albumName                 String                  @default("") @db.VarChar(255)
+  artistName                String                  @default("") @db.VarChar(500)
   extendedAssetUrls         Json?
   offers                    Json?
-  audioLocale               String              @default("") @db.VarChar(32)
-  audioTraits               String[]            @default([])
-  moodTags                  String[]            @default([])
-  audioAnalysisStatus       AudioAnalysisStatus @default(PENDING)
-  audioAnalysisVersion      String              @default("") @db.VarChar(128)
+  audioLocale               String                  @default("") @db.VarChar(32)
+  audioTraits               String[]                @default([])
+  moodTags                  String[]                @default([])
+  audioAnalysisStatus       AudioAnalysisStatus     @default(PENDING)
+  audioAnalysisVersion      String                  @default("") @db.VarChar(128)
   audioBpm                  Float?
   audioEnergy               Float?
-  audioTags                 String[]            @default([])
-  audioEmbedding            Float[]             @default([])
-  audioAnalysisError        String              @default("") @db.VarChar(2000)
-  audioAnalyzedAt           DateTime?           @db.Timestamptz
-  composerName              String              @default("") @db.VarChar(1000)
-  discNumber                Int                 @default(1)
-  durationInMillis          Int                 @default(0)
-  genreNames                String[]            @default([])
-  hasLyrics                 Boolean             @default(false)
-  hasTimeSyncedLyrics       Boolean             @default(false)
-  isHighResolutionMaster    Boolean             @default(false)
-  isStudioMastered          Boolean             @default(false)
-  isVocalAttenuationAllowed Boolean             @default(false)
-  isrc                      String?             @db.VarChar(32)
-  previewUrl                String              @default("") @db.VarChar(1000)
-  releaseDate               DateTime?           @db.Date
-  trackNumber               Int                 @default(0)
-  catalogUrl                String              @default("") @db.VarChar(1000)
-  contentRating             String              @default("") @db.VarChar(32)
-  createdAt                 DateTime            @default(now()) @db.Timestamptz
-  updatedAt                 DateTime            @updatedAt @db.Timestamptz
+  audioTags                 String[]                @default([])
+  audioEmbedding            Float[]                 @default([])
+  audioAnalysisError        String                  @default("") @db.VarChar(2000)
+  audioAnalyzedAt           DateTime?               @db.Timestamptz
+  composerName              String                  @default("") @db.VarChar(1000)
+  discNumber                Int                     @default(1)
+  durationInMillis          Int                     @default(0)
+  genreNames                String[]                @default([])
+  hasLyrics                 Boolean                 @default(false)
+  hasTimeSyncedLyrics       Boolean                 @default(false)
+  isHighResolutionMaster    Boolean                 @default(false)
+  isStudioMastered          Boolean                 @default(false)
+  isVocalAttenuationAllowed Boolean                 @default(false)
+  isrc                      String?                 @db.VarChar(32)
+  previewUrl                String                  @default("") @db.VarChar(1000)
+  releaseDate               DateTime?               @db.Date
+  trackNumber               Int                     @default(0)
+  catalogUrl                String                  @default("") @db.VarChar(1000)
+  contentRating             String                  @default("") @db.VarChar(32)
+  createdAt                 DateTime                @default(now()) @db.Timestamptz
+  updatedAt                 DateTime                @updatedAt @db.Timestamptz
   owners                    SongOwner[]
   albumTracks               AlbumTrack[]
   playlistTracks            PlaylistTrack[]
@@ -171,6 +161,7 @@ model Song {
   userPlaylistTracks        UserPlaylistTrack[]
   lyric                     SongLyric?
   lyricDraft                SongLyricDraft?
+  staticLyricLines          SongStaticLyricLine[]
   videos                    SongVideo[]
 
   @@index([status, createdAt])
@@ -209,69 +200,45 @@ model SongVideo {
 }
 
 model SongLyric {
-  id        String            @id @default(uuid())
-  songId    String            @unique @db.VarChar(128)
-  language  String            @default("vi") @db.VarChar(16)
-  sourceLrc String            @db.Text
-  plainText String            @db.Text
-  status    SongLyricStatus   @default(DRAFT)
-  syncMode  SongLyricSyncMode @default(LINE)
-  createdAt DateTime          @default(now()) @db.Timestamptz
-  updatedAt DateTime          @updatedAt @db.Timestamptz
+  id         String          @id @default(uuid())
+  songId     String          @unique @db.VarChar(128)
+  language   String          @default("vi") @db.VarChar(16)
+  sourceTtml String          @db.Text
+  status     SongLyricStatus @default(DRAFT)
+  createdAt  DateTime        @default(now()) @db.Timestamptz
+  updatedAt  DateTime        @updatedAt @db.Timestamptz
 
-  song  Song            @relation(fields: [songId], references: [id], onDelete: Cascade)
-  lines SongLyricLine[]
+  song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
 
   @@index([status])
   @@map("song_lyrics")
 }
 
 model SongLyricDraft {
-  id        String            @id @default(uuid())
-  songId    String            @unique @db.VarChar(128)
-  language  String            @default("vi") @db.VarChar(16)
-  sourceLrc String            @db.Text
-  plainText String            @db.Text
-  syncMode  SongLyricSyncMode @default(LINE)
-  lines     Json              @db.JsonB
-  createdAt DateTime          @default(now()) @db.Timestamptz
-  updatedAt DateTime          @updatedAt @db.Timestamptz
+  id         String   @id @default(uuid())
+  songId     String   @unique @db.VarChar(128)
+  language   String   @default("vi") @db.VarChar(16)
+  sourceTtml String   @db.Text
+  createdAt  DateTime @default(now()) @db.Timestamptz
+  updatedAt  DateTime @updatedAt @db.Timestamptz
 
   song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
 
   @@map("song_lyric_drafts")
 }
 
-model SongLyricLine {
-  id          String            @id @default(uuid())
-  lyricId     String
-  position    Int
-  startTimeMs Int
-  endTimeMs   Int
-  text        String            @db.Text
-  kind        SongLyricLineKind @default(LYRIC)
+// Static lyrics are only for the catalog song-detail view.  They deliberately
+// stay separate from TTML lyrics used by the synced player and Lyrics Studio.
+model SongStaticLyricLine {
+  songId       String @db.VarChar(128)
+  position     Int
+  text         String @db.Text
+  vocalistType String @default("PRIMARY") @db.VarChar(16)
 
-  lyric SongLyric       @relation(fields: [lyricId], references: [id], onDelete: Cascade)
-  words SongLyricWord[]
+  song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
 
-  @@unique([lyricId, position])
-  @@index([lyricId, startTimeMs])
-  @@map("song_lyric_lines")
-}
-
-model SongLyricWord {
-  id          String @id @default(uuid())
-  lineId      String
-  position    Int
-  startTimeMs Int
-  endTimeMs   Int
-  text        String @db.VarChar(500)
-
-  line SongLyricLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
-
-  @@unique([lineId, position])
-  @@index([lineId, startTimeMs])
-  @@map("song_lyric_words")
+  @@id([songId, position])
+  @@map("song_static_lyric_lines")
 }
 
 model Artist {
@@ -353,11 +320,11 @@ model Album {
   createdAt               DateTime  @default(now()) @db.Timestamptz
   updatedAt               DateTime  @updatedAt @db.Timestamptz
 
-  tracks        AlbumTrack[]
-  artistCredits AlbumArtistCredit[]
-  sourceFavorites Favorite[] @relation("FavoriteSourceAlbum")
-  favorites       AlbumFavorite[]
-  sourcePlaylistTracks UserPlaylistTrack[] @relation("UserPlaylistTrackSourceAlbum")
+  tracks                 AlbumTrack[]
+  artistCredits          AlbumArtistCredit[]
+  sourceFavorites        Favorite[]            @relation("FavoriteSourceAlbum")
+  favorites              AlbumFavorite[]
+  sourcePlaylistTracks   UserPlaylistTrack[]   @relation("UserPlaylistTrackSourceAlbum")
   sourceLibraryResources UserLibraryResource[] @relation("LibraryResourceSourceAlbum")
 
   @@unique([ingestionSource, ingestionKey])
@@ -472,7 +439,7 @@ model Playlist {
   createdAt               DateTime  @default(now()) @db.Timestamptz
   updatedAt               DateTime  @updatedAt @db.Timestamptz
 
-  tracks PlaylistTrack[]
+  tracks    PlaylistTrack[]
   favorites PlaylistFavorite[]
 
   @@index([storefront, name])
@@ -556,13 +523,13 @@ model TranscodeOutbox {
 }
 
 model Favorite {
-  id        String   @id @default(uuid())
-  userId    String   @db.VarChar(128)
-  songId    String   @db.VarChar(128)
-  sourceAlbumId String? @db.VarChar(128)
-  createdAt DateTime @default(now()) @db.Timestamptz
+  id            String   @id @default(uuid())
+  userId        String   @db.VarChar(128)
+  songId        String   @db.VarChar(128)
+  sourceAlbumId String?  @db.VarChar(128)
+  createdAt     DateTime @default(now()) @db.Timestamptz
 
-  song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+  song        Song   @relation(fields: [songId], references: [id], onDelete: Cascade)
   sourceAlbum Album? @relation("FavoriteSourceAlbum", fields: [sourceAlbumId], references: [id], onDelete: SetNull)
 
   @@unique([userId, songId])
@@ -608,7 +575,7 @@ model UserPlaylist {
   createdAt   DateTime @default(now()) @db.Timestamptz
   updatedAt   DateTime @updatedAt @db.Timestamptz
 
-  tracks UserPlaylistTrack[]
+  tracks    UserPlaylistTrack[]
   favorites UserPlaylistFavorite[]
 
   @@index([userId, createdAt])
@@ -633,15 +600,15 @@ model UserPlaylistFavorite {
 }
 
 model UserPlaylistTrack {
-  playlistId String
-  songId     String
-  sourceAlbumId String? @db.VarChar(128)
-  position   Int
-  addedAt    DateTime @default(now()) @db.Timestamptz
+  playlistId    String
+  songId        String
+  sourceAlbumId String?  @db.VarChar(128)
+  position      Int
+  addedAt       DateTime @default(now()) @db.Timestamptz
 
-  playlist UserPlaylist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
-  song     Song         @relation(fields: [songId], references: [id], onDelete: Cascade)
-  sourceAlbum Album?    @relation("UserPlaylistTrackSourceAlbum", fields: [sourceAlbumId], references: [id], onDelete: SetNull)
+  playlist    UserPlaylist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  song        Song         @relation(fields: [songId], references: [id], onDelete: Cascade)
+  sourceAlbum Album?       @relation("UserPlaylistTrackSourceAlbum", fields: [sourceAlbumId], references: [id], onDelete: SetNull)
 
   @@id([playlistId, songId])
   @@unique([playlistId, position])
@@ -678,17 +645,17 @@ model SystemPlaylistFavorite {
 }
 
 model UserLibraryResource {
-  id           String    @id @default(uuid())
-  userId       String    @db.VarChar(128)
-  resourceType String    @db.VarChar(32)
-  resourceId   String    @db.VarChar(128)
-  sourceAlbumId String?  @db.VarChar(128)
-  title        String    @default("") @db.VarChar(255)
-  subtitle     String    @default("") @db.VarChar(255)
-  artworkUrl   String    @default("") @db.VarChar(1000)
-  isPinned     Boolean   @default(false)
-  pinnedAt     DateTime? @db.Timestamptz
-  createdAt    DateTime  @default(now()) @db.Timestamptz
+  id            String    @id @default(uuid())
+  userId        String    @db.VarChar(128)
+  resourceType  String    @db.VarChar(32)
+  resourceId    String    @db.VarChar(128)
+  sourceAlbumId String?   @db.VarChar(128)
+  title         String    @default("") @db.VarChar(255)
+  subtitle      String    @default("") @db.VarChar(255)
+  artworkUrl    String    @default("") @db.VarChar(1000)
+  isPinned      Boolean   @default(false)
+  pinnedAt      DateTime? @db.Timestamptz
+  createdAt     DateTime  @default(now()) @db.Timestamptz
 
   sourceAlbum Album? @relation("LibraryResourceSourceAlbum", fields: [sourceAlbumId], references: [id], onDelete: SetNull)
 

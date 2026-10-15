@@ -290,7 +290,7 @@ export class CatalogService {
           id: playlistId,
           storefront,
           name,
-          curatorName: 'Musical',
+          curatorName: '404Hz',
           descriptionShort: request.description || '',
           descriptionStandard: request.description || '',
           artwork,
@@ -302,7 +302,7 @@ export class CatalogService {
         update: {
           storefront,
           name,
-          curatorName: 'Musical',
+          curatorName: '404Hz',
           descriptionShort: request.description || '',
           descriptionStandard: request.description || '',
           artwork,
@@ -1321,6 +1321,7 @@ export class CatalogService {
       kind: video.kind.toLowerCase(),
       posterUrl: asset.posterUrl,
       posterSrcSet: asset.posterSrcSet,
+      posterBgColor: asset.posterBgColor,
       durationMillis: asset.durationMillis,
       width: asset.width,
       height: asset.height,
@@ -1905,8 +1906,10 @@ export class CatalogService {
       ...new Set(analyzedTracks.flatMap(({ song }) => song.audioTags)),
     ];
     const audioBpm = analyzedTracks.length
-      ? analyzedTracks.reduce((sum, { song }) => sum + (song.audioBpm ?? 0), 0) /
-        analyzedTracks.length
+      ? analyzedTracks.reduce(
+          (sum, { song }) => sum + (song.audioBpm ?? 0),
+          0,
+        ) / analyzedTracks.length
       : 0;
     const audioEnergy = analyzedTracks.length
       ? analyzedTracks.reduce(

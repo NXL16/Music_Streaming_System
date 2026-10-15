@@ -19,6 +19,7 @@ import { CatalogAuthoringService } from './catalog-authoring.service';
 import { CatalogAssetsService } from './catalog-assets.service';
 import { CatalogAssetUsageOutboxService } from './catalog-asset-usage-outbox.service';
 import { LyricsService } from './lyrics.service';
+import { StaticLyricsService } from './static-lyrics.service';
 import { ArtistWorkspaceService } from './artist-workspace.service';
 import { TranscodeOutboxService } from './transcode-outbox.service';
 import { StreamRetentionService } from './stream-retention.service';
@@ -70,6 +71,7 @@ import { PreferenceOutboxService } from './preference-outbox.service';
     CatalogAssetsService,
     CatalogAssetUsageOutboxService,
     LyricsService,
+    StaticLyricsService,
     ArtistWorkspaceService,
     TranscodeOutboxService,
     StreamRetentionService,

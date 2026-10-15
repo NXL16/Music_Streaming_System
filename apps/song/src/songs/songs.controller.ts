@@ -68,6 +68,8 @@ import {
   SaveCatalogAlbumDraftRequest,
   SaveCatalogPlaylistDraftRequest,
   SaveCatalogSongVideoDraftRequest,
+  DeleteCatalogSongVideoRequest,
+  DeleteCatalogSongVideoResponse,
   CatalogDraftInfo,
   GetCatalogDraftRequest,
   CatalogDraftDetail,
@@ -96,6 +98,9 @@ import {
   GetSongLyricsRequest,
   SongLyricsResponse,
   UpsertSongLyricsRequest,
+  GetSongStaticLyricsRequest,
+  SongStaticLyricsResponse,
+  UpsertSongStaticLyricsRequest,
   ListArtistWorkspacesRequest,
   ListArtistWorkspacesResponse,
   ListArtistMembersRequest,
@@ -110,6 +115,7 @@ import {
 import { CatalogService } from './catalog.service';
 import { CatalogAuthoringService } from './catalog-authoring.service';
 import { LyricsService } from './lyrics.service';
+import { StaticLyricsService } from './static-lyrics.service';
 import { ArtistWorkspaceService } from './artist-workspace.service';
 
 @Controller()
@@ -120,6 +126,7 @@ export class SongsController implements SongServiceController {
     private readonly catalogService: CatalogService,
     private readonly catalogAuthoringService: CatalogAuthoringService,
     private readonly lyricsService: LyricsService,
+    private readonly staticLyricsService: StaticLyricsService,
     private readonly artistWorkspaceService: ArtistWorkspaceService,
   ) {}
 
@@ -141,6 +148,18 @@ export class SongsController implements SongServiceController {
     request: UpsertSongLyricsRequest,
   ): Promise<SongLyricsResponse> {
     return this.lyricsService.upsert(request);
+  }
+
+  getSongStaticLyrics(
+    request: GetSongStaticLyricsRequest,
+  ): Promise<SongStaticLyricsResponse> {
+    return this.staticLyricsService.get(request);
+  }
+
+  upsertSongStaticLyrics(
+    request: UpsertSongStaticLyricsRequest,
+  ): Promise<SongStaticLyricsResponse> {
+    return this.staticLyricsService.upsert(request);
   }
 
   async getSongIngestInfo(
@@ -179,15 +198,21 @@ export class SongsController implements SongServiceController {
     return this.songsService.removeFavorite(request);
   }
 
-  addAlbumFavorite(request: AlbumFavoriteRequest): Promise<AlbumFavoriteResponse> {
+  addAlbumFavorite(
+    request: AlbumFavoriteRequest,
+  ): Promise<AlbumFavoriteResponse> {
     return this.songsService.addAlbumFavorite(request);
   }
 
-  removeAlbumFavorite(request: AlbumFavoriteRequest): Promise<AlbumFavoriteResponse> {
+  removeAlbumFavorite(
+    request: AlbumFavoriteRequest,
+  ): Promise<AlbumFavoriteResponse> {
     return this.songsService.removeAlbumFavorite(request);
   }
 
-  getAlbumFavorite(request: AlbumFavoriteRequest): Promise<AlbumFavoriteResponse> {
+  getAlbumFavorite(
+    request: AlbumFavoriteRequest,
+  ): Promise<AlbumFavoriteResponse> {
     return this.songsService.getAlbumFavorite(request);
   }
 
@@ -455,7 +480,6 @@ export class SongsController implements SongServiceController {
     return this.catalogService.getAlbumRelated(request);
   }
 
-
   saveCatalogArtistDraft(
     request: SaveCatalogArtistDraftRequest,
   ): Promise<CatalogDraftInfo> {
@@ -484,6 +508,12 @@ export class SongsController implements SongServiceController {
     request: SaveCatalogSongVideoDraftRequest,
   ): Promise<CatalogDraftInfo> {
     return this.catalogAuthoringService.saveSongVideoDraft(request);
+  }
+
+  deleteCatalogSongVideo(
+    request: DeleteCatalogSongVideoRequest,
+  ): Promise<DeleteCatalogSongVideoResponse> {
+    return this.catalogAuthoringService.deleteSongVideo(request);
   }
 
   getCatalogDraft(
