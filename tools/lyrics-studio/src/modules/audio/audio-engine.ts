@@ -262,7 +262,7 @@ class AudioEngineWrapper extends EventTarget {
 	}
 
 	/**
- 	 * Previews an audio segment.
+	 * Previews an audio segment.
 	 *
 	 * @param startTimeInSeconds Segment start time.
 	 * @param endTimeInSeconds Segment end time.

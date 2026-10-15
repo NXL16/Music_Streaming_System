@@ -23,7 +23,7 @@ export interface TimelineBoundary {
 	timeMs: number;
 
 	/**
- 	 * Index in the source segments array.
+	 * Index in the source segments array.
 	 *
 	 * -1 denotes the line-start boundary. */
 	segmentIndex: number;

@@ -31,7 +31,7 @@ function fillRubyTimingFromWord(word: Draft<LyricWord>) {
 export function getUpdatedLineForDivider(
 	originalLine: ProcessedLyricLine,
 	/**
- 	 * Index of the segment to the left of the divider.
+	 * Index of the segment to the left of the divider.
 	 *
 	 * -1 denotes the start of the line.
 	 */
