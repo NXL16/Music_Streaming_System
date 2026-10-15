@@ -14,7 +14,7 @@ import { projectMediaCardArtwork } from "@/lib/media/project-media-card-artwork"
 
 type MediaCardRendererProps = MediaCardProps & {
   priority?: boolean;
-  keepVideoMountedHorizontally?: boolean;
+  preloadVideo?: boolean;
   isShelfDetail?: boolean;
   isArtistShelfItem?: boolean;
 };
@@ -36,11 +36,7 @@ export default React.memo(function MediaCardRenderer(
   switch (card.cardType) {
     case "hero":
       return (
-        <HeroCard
-          {...card}
-          cardType="hero"
-          keepVideoMountedHorizontally={props.keepVideoMountedHorizontally}
-        />
+        <HeroCard {...card} cardType="hero" preloadVideo={props.preloadVideo} />
       );
     case "station":
       return <StationCard {...card} cardType="station" />;

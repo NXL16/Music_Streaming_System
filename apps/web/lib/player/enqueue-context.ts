@@ -4,7 +4,6 @@ import {
   mapCatalogTracks,
 } from "@/lib/catalog/catalog.mapper";
 import {
-  getCatalogAlbum,
   getCatalogPlaylist,
   getCatalogResources,
 } from "@/lib/catalog/catalog.api";
@@ -33,7 +32,7 @@ async function resolveCatalogCollectionTracks(
 ) {
   const response =
     resourceType === "albums"
-      ? await getCatalogAlbum(resourceId)
+      ? await getCatalogResources([{ id: resourceId, type: "albums" }])
       : await getCatalogPlaylist(resourceId);
   let tracks = mapCatalogTracks(response);
 

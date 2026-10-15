@@ -207,10 +207,18 @@ export default function AmpPlaybackControlsProgress({
       if (videoSource && Number.isFinite(nextTime)) {
         videoPlaybackController.seek(nextTime);
       } else if (audio && Number.isFinite(nextTime)) {
-        audio.currentTime = Math.min(
+        const duration = audio.duration;
+        const clampedTime = Math.min(
           Math.max(nextTime, 0),
-          Number.isFinite(audio.duration) ? audio.duration : nextTime,
+          Number.isFinite(duration) ? duration : nextTime,
         );
+        // Setting currentTime to the exact duration does not consistently
+        // dispatch `ended` across browsers. Leave one rendered frame so the
+        // normal media-ended path advances the queue exactly once.
+        audio.currentTime =
+          Number.isFinite(duration) && clampedTime >= duration
+            ? Math.max(0, duration - 0.05)
+            : clampedTime;
       }
       isScrubbingRef.current = false;
       syncFromAudio();

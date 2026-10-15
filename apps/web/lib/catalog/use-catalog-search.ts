@@ -98,7 +98,7 @@ export function useCatalogSearch(
           setState({
             key: searchKey,
             results: EMPTY_RESULTS,
-            error: "KhÃ´ng thá»ƒ tÃ¬m kiáº¿m. Vui lÃ²ng thá»­ láº¡i.",
+            error: "Không thấy tìm kiếm. Vui lòng thử lại.",
           });
         })
         .finally(() => {

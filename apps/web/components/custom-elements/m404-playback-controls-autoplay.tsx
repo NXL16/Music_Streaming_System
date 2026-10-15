@@ -4,7 +4,7 @@ import { ElementType, useLayoutEffect, useRef } from "react";
 
 const CustomAutoplayTag = "m404-playback-controls-autoplay" as ElementType;
 
-const M404_CSS = `:host { width: 20px; height: 20px; display: flex; flex: 0 0 auto; align-items: stretch; justify-content: stretch; } button { width: 100%; height: 100%; } button:focus-visible { --sk-focus-offset: 2px; outline: 4px solid var(--sk-focus-color, var(--keyColor-focus-color, var(--keyColor, #0071e3))); outline-offset: var(--sk-focus-offset, 1px); } .autoplay { margin: 0px; padding: 0px; display: inline-block; border: 0px; background-color: transparent; outline: none; cursor: pointer; appearance: none; font-family: inherit; line-height: inherit; font-size: 0px; color: var(--systemSecondary); } .autoplay:enabled { cursor: pointer; } .autoplay:disabled { opacity: 0.4; cursor: default; } .autoplay:enabled:active, .autoplay:enabled.autoplay__active { color: var(--keyColor, var(--musicKeyColor, var(--systemBlue))); } .autoplay amp-icon { width: 100%; height: 100%; } .autoplay__button-label { position: absolute; clip: rect(1px, 1px, 1px, 1px); clip-path: inset(0px 0px 99.9% 99.9%); overflow: hidden; height: 1px; width: 1px; padding: 0px; border: 0px; }`;
+const M404_CSS = `:host { width: 20px; height: 20px; display: flex; flex: 0 0 auto; align-items: stretch; justify-content: stretch; } button { width: 100%; height: 100%; } button:focus-visible { --sk-focus-offset: 2px; outline: 4px solid var(--sk-focus-color, var(--keyColor-focus-color, var(--keyColor, #0071e3))); outline-offset: var(--sk-focus-offset, 1px); } .autoplay { margin: 0px; padding: 0px; display: inline-block; border: 0px; background-color: transparent; outline: none; cursor: pointer; appearance: none; font-family: inherit; line-height: inherit; font-size: 0px; color: var(--systemSecondary); } .autoplay:enabled { cursor: pointer; } .autoplay:disabled { opacity: 0.4; cursor: default; } .autoplay:enabled:active, .autoplay:enabled.autoplay__active { color: var(--keyColor, var(--musicKeyColor, var(--systemBlue))); } .autoplay m404-icon { width: 100%; height: 100%; } .autoplay__button-label { position: absolute; clip: rect(1px, 1px, 1px, 1px); clip-path: inset(0px 0px 99.9% 99.9%); overflow: hidden; height: 1px; width: 1px; padding: 0px; border: 0px; }`;
 const AUTOPLAY_PATH =
   "M14.596 15C17.1 15 19 13.075 19 10.522c0-2.552-1.89-4.488-4.383-4.488-1.709 0-3.078.906-4.617 3.056C8.323 6.84 7.07 6 5.404 6 2.9 6 1 7.925 1 10.478c0 2.552 1.89 4.488 4.383 4.488 1.709 0 3.078-.906 4.617-3.056 1.677 2.25 2.93 3.09 4.596 3.09zm-.011-1.802c-1.157 0-1.995-.638-3.545-2.687 1.348-1.97 2.324-2.72 3.556-2.72 1.507 0 2.6 1.142 2.6 2.698 0 1.567-1.104 2.709-2.611 2.709zm-9.18.011c-1.508 0-2.6-1.142-2.6-2.698 0-1.567 1.103-2.709 2.61-2.709 1.157 0 1.995.638 3.545 2.687-1.348 1.97-2.324 2.72-3.556 2.72z";
 const ICON_STYLE = `.icon{display:block}.icon svg{width:inherit;height:inherit;display:block;color:currentColor;pointer-events:none}.icon svg *{fill:currentColor}`;
@@ -54,11 +54,11 @@ export default function M404AutoPlay({
 
       button.innerHTML = `
         <span class="autoplay__button-label">Auto Play</span>
-        <amp-icon class="icon" role="presentation" aria-hidden="true" innerhtml="${encodedSVG}" name="player-autoplay" hydrated="">
+        <m404-icon class="icon" role="presentation" aria-hidden="true" innerhtml="${encodedSVG}" name="player-autoplay" hydrated="">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
             <path d="${AUTOPLAY_PATH}" fill="#000" fill-rule="nonzero"></path>
           </svg>
-        </amp-icon>
+        </m404-icon>
       `;
 
       const inlineStyle = document.createElement("style");

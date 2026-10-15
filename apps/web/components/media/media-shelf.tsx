@@ -27,8 +27,6 @@ export type MediaShelfProps = {
   prioritizeFirstCard?: boolean;
   /** Reset the horizontal viewport when a newly-prepended item becomes first. */
   scrollToStartKey?: string;
-  /** Keeps hero video mounted while this shelf scrolls horizontally. */
-  keepHeroVideoMountedHorizontally?: boolean;
   onSelect?: (shelfId: string) => void;
   /** @deprecated Use shelfId + onSelect instead */
   onTitleClick?: () => void;
@@ -234,7 +232,6 @@ function MediaShelf({
   gridStyle,
   shelfId,
   prioritizeFirstCard = false,
-  keepHeroVideoMountedHorizontally = false,
   scrollToStartKey,
   onSelect,
   onTitleClick,
@@ -757,9 +754,7 @@ function MediaShelf({
                         priority={
                           (prioritizeFirstCard || isHeroShelf) && index === 0
                         }
-                        keepVideoMountedHorizontally={
-                          keepHeroVideoMountedHorizontally
-                        }
+                        preloadVideo={isHeroShelf}
                         onOpen={() => {
                           card.onOpen?.();
                           onCardInteraction?.("open", card, index);

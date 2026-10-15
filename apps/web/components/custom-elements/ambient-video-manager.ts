@@ -1,25 +1,58 @@
-// Keep several visible hero cards animated, while retaining a bounded decoder
-// and buffer budget for the whole page.
+// One scheduler owns the browser's bounded ambient-video decoder budget.
+// Cards declare intent; they never race each other to start a decoder.
 const MAX_CONCURRENT_VIDEOS = 10;
 const MAX_WARM_VIDEOS = 4;
 
-type WarmVideoEntry = { destroy: () => void; priority: number };
-type ActiveVideoEntry = {
+type VideoRequest = {
+  activate: () => void;
   evict: () => void;
-  priority: number;
   interactionPriority: number;
+  sequence: number;
 };
 
-const warmVideos = new Map<symbol, WarmVideoEntry>();
-const activeVideos = new Map<symbol, ActiveVideoEntry>();
-let prioritySequence = 0;
+type WarmVideoEntry = { destroy: () => void; sequence: number };
 
-function evictOldestWarmVideo() {
+const activeVideos = new Map<symbol, VideoRequest>();
+const pendingVideos = new Map<symbol, VideoRequest>();
+const warmVideos = new Map<symbol, WarmVideoEntry>();
+let sequence = 0;
+
+function takeNextPendingVideo() {
+  let next: [symbol, VideoRequest] | undefined;
+  for (const entry of pendingVideos) {
+    if (
+      !next ||
+      entry[1].interactionPriority > next[1].interactionPriority ||
+      (entry[1].interactionPriority === next[1].interactionPriority &&
+        entry[1].sequence < next[1].sequence)
+    ) {
+      next = entry;
+    }
+  }
+  return next;
+}
+
+function findLowestPriorityActiveVideo() {
+  let lowest: [symbol, VideoRequest] | undefined;
+  for (const entry of activeVideos) {
+    if (
+      !lowest ||
+      entry[1].interactionPriority < lowest[1].interactionPriority ||
+      (entry[1].interactionPriority === lowest[1].interactionPriority &&
+        entry[1].sequence < lowest[1].sequence)
+    ) {
+      lowest = entry;
+    }
+  }
+  return lowest;
+}
+
+function removeOldestWarmVideo() {
   if (warmVideos.size <= MAX_WARM_VIDEOS) return;
 
   let oldest: [symbol, WarmVideoEntry] | undefined;
   for (const entry of warmVideos) {
-    if (!oldest || entry[1].priority < oldest[1].priority) oldest = entry;
+    if (!oldest || entry[1].sequence < oldest[1].sequence) oldest = entry;
   }
   if (!oldest) return;
 
@@ -27,7 +60,48 @@ function evictOldestWarmVideo() {
   oldest[1].destroy();
 }
 
-/** Limits active decoders and keeps recently suspended card videos warm. */
+function promotePendingVideos() {
+  while (activeVideos.size < MAX_CONCURRENT_VIDEOS && pendingVideos.size > 0) {
+    const next = takeNextPendingVideo();
+    if (!next) return;
+
+    const [id, request] = next;
+    pendingVideos.delete(id);
+    activeVideos.set(id, request);
+    request.activate();
+  }
+}
+
+function requestSlot(id: symbol, request: VideoRequest) {
+  warmVideos.delete(id);
+  const active = activeVideos.get(id);
+  if (active) {
+    active.activate = request.activate;
+    active.evict = request.evict;
+    active.interactionPriority = request.interactionPriority;
+    active.sequence = request.sequence;
+    active.activate();
+    return;
+  }
+
+  pendingVideos.set(id, request);
+  if (activeVideos.size < MAX_CONCURRENT_VIDEOS) {
+    promotePendingVideos();
+    return;
+  }
+
+  const lowestPriorityActive = findLowestPriorityActiveVideo();
+  if (!lowestPriorityActive) return;
+
+  const [activeId, activeRequest] = lowestPriorityActive;
+  if (request.interactionPriority <= activeRequest.interactionPriority) return;
+
+  activeVideos.delete(activeId);
+  activeRequest.evict();
+  promotePendingVideos();
+}
+
+/** Schedules ambient cards without decoder-start races or stranded requests. */
 export const ambientVideoManager = {
   request(
     id: symbol,
@@ -35,69 +109,43 @@ export const ambientVideoManager = {
     evict: () => void,
     interactionPriority = 0,
   ) {
-    warmVideos.delete(id);
-    const current = activeVideos.get(id);
-    if (current) {
-      current.priority = ++prioritySequence;
-      current.interactionPriority = interactionPriority;
-      activate();
-      return true;
-    }
-
-    if (activeVideos.size >= MAX_CONCURRENT_VIDEOS) {
-      let candidate: [symbol, ActiveVideoEntry] | undefined;
-      for (const entry of activeVideos) {
-        if (
-          !candidate ||
-          entry[1].interactionPriority < candidate[1].interactionPriority ||
-          (entry[1].interactionPriority === candidate[1].interactionPriority &&
-            entry[1].priority < candidate[1].priority)
-        ) {
-          candidate = entry;
-        }
-      }
-      if (candidate) {
-        const [candidateId, candidateVideo] = candidate;
-        // Automatic viewport requests must never churn the active MSE player.
-        // A hero shelf can make several cards intersect at once; replacing the
-        // current player for each of them repeatedly destroys and recreates
-        // video buffers while the user is scrolling. Only an explicitly more
-        // important interaction (such as hovering a card) may take over.
-        if (candidateVideo.interactionPriority >= interactionPriority) {
-          return false;
-        }
-        candidateVideo.evict();
-        activeVideos.delete(candidateId);
-      }
-    }
-
-    activeVideos.set(id, {
+    requestSlot(id, {
+      activate,
       evict,
-      priority: ++prioritySequence,
       interactionPriority,
+      sequence: ++sequence,
     });
-    activate();
-    return true;
   },
 
   suspend(id: symbol, destroy: () => void) {
+    pendingVideos.delete(id);
     activeVideos.delete(id);
-    warmVideos.delete(id);
-    warmVideos.set(id, { destroy, priority: ++prioritySequence });
-    evictOldestWarmVideo();
+    warmVideos.set(id, { destroy, sequence: ++sequence });
+    removeOldestWarmVideo();
+    promotePendingVideos();
   },
 
   release(id: symbol) {
+    pendingVideos.delete(id);
     activeVideos.delete(id);
     warmVideos.delete(id);
-    if (activeVideos.size === 0 && warmVideos.size === 0) prioritySequence = 0;
+    promotePendingVideos();
+    if (
+      activeVideos.size === 0 &&
+      pendingVideos.size === 0 &&
+      warmVideos.size === 0
+    ) {
+      sequence = 0;
+    }
   },
 
   updateInteractionPriority(id: symbol, interactionPriority: number) {
-    const entry = activeVideos.get(id);
-    if (!entry) return;
-    entry.interactionPriority = interactionPriority;
-    entry.priority = ++prioritySequence;
+    const request = activeVideos.get(id) ?? pendingVideos.get(id);
+    if (!request) return;
+
+    request.interactionPriority = interactionPriority;
+    request.sequence = ++sequence;
+    if (!activeVideos.has(id)) promotePendingVideos();
   },
 
   isActive(id: symbol) {

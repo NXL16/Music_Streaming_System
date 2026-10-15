@@ -18,7 +18,7 @@ import {
 import AmpContextMenuButton from "../custom-elements/AmpContextMenuButton";
 import { ExplicitBadgeIcon } from "../icons/explicit-badge-icon";
 import CardArtwork from "../media/common/card-artwork";
-import { CSSProperties, useCallback, useState } from "react";
+import { CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { AlbumRelatedShelves } from "./album-related-shelves";
 import type { MediaCardProps } from "../media/media-card.types";
 import {
@@ -33,6 +33,11 @@ import {
 import { useAlbumRelatedShelfState } from "@/lib/catalog/use-album-related-shelf-state";
 import { CatalogMusicVideosShelf } from "../music-videos/catalog-music-videos-shelf";
 import { FavoriteSongButton } from "../songs/favorite-song-button";
+import {
+  getSongStaticLyrics,
+  type StaticLyricLine,
+} from "@/lib/lyrics/static-lyrics.api";
+import AmpLyrics from "../custom-elements/AmpLyrics";
 
 type SongDetailPageProps = {
   releaseTrackId: string;
@@ -84,6 +89,28 @@ function artistInitial(name: string) {
   return name.trim().charAt(0).toLocaleUpperCase() || "?";
 }
 
+function SongDetailSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) in-[.has-theme-override]:[--header-title-chevron-color:var(--systemSecondary)]">
+      <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
+        <section className="[--linkHoverTextDecoration:none] mx-(--bodyGutter) pb-9 min-[1000px]:[border-top:var(--keyline-border-style)] min-[1000px]:grid min-[1000px]:gap-(--song-detail-grid-gap,34px) min-[1000px]:grid-cols-[216px_3fr] min-[1000px]:pb-18 min-[1260px]:grid-cols-[296px_3fr]">
+          <h2 className="text-(--systemSecondary) [font:var(--title-2-emphasized)] min-[1000px]:pt-3 max-[999px]:[border-bottom:var(--keyline-border-style)] max-[999px]:pb-3">
+            {title}
+          </h2>
+
+          {children}
+        </section>
+      </div>
+    </div>
+  );
+}
+
 export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
   const { song, loading, error, reload } = useCatalogSong(releaseTrackId);
   const showLoading = useMinimumLoadingDuration(loading);
@@ -106,6 +133,45 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
     nextCursor: string;
     loadingMore: boolean;
   } | null>(null);
+  const [staticLyricsResult, setStaticLyricsResult] = useState<{
+    songId: string;
+    lines: StaticLyricLine[];
+  } | null>(null);
+  const [isStaticLyricsDialogOpen, setStaticLyricsDialogOpen] = useState(false);
+  const staticLyricsDialogRef = useRef<HTMLDialogElement>(null);
+  const staticLyricsSongId = song?.id;
+  const staticLyrics =
+    staticLyricsResult && staticLyricsResult.songId === staticLyricsSongId
+      ? staticLyricsResult.lines
+      : [];
+
+  useEffect(() => {
+    if (!staticLyricsSongId) return;
+
+    let cancelled = false;
+    void getSongStaticLyrics(staticLyricsSongId)
+      .then((lines) => {
+        if (!cancelled) {
+          setStaticLyricsResult({ songId: staticLyricsSongId, lines });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStaticLyricsResult({ songId: staticLyricsSongId, lines: [] });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [staticLyricsSongId]);
+
+  useEffect(() => {
+    const dialog = staticLyricsDialogRef.current;
+    if (!dialog) return;
+    if (isStaticLyricsDialogOpen && !dialog.open) dialog.showModal();
+    if (!isStaticLyricsDialogOpen && dialog.open) dialog.close();
+  }, [isStaticLyricsDialogOpen, staticLyrics.length, staticLyricsSongId]);
   const loadMoreRelatedShelf = useCallback(async () => {
     if (
       !selectedRelatedShelf?.items ||
@@ -432,67 +498,142 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
         </div>
       </div>
 
-      {sections.map((section) => (
-        <div
-          key={section.title}
-          className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) in-[.has-theme-override]:[--header-title-chevron-color:var(--systemSecondary)]"
-        >
-          <>
-            <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
-              <section className="[--linkHoverTextDecoration:none] mx-(--bodyGutter) pb-9 min-[1000px]:[border-top:var(--keyline-border-style)] min-[1000px]:grid min-[1000px]:gap-(--song-detail-grid-gap,34px) min-[1000px]:grid-cols-[216px_3fr] min-[1000px]:pb-18 min-[1260px]:grid-cols-[296px_3fr]">
-                <h2 className="text-(--systemSecondary) [font:var(--title-2-emphasized)] min-[1000px]:pt-3 max-[999px]:[border-bottom:var(--keyline-border-style)] max-[999px]:pb-3">
-                  {section.title}
-                </h2>
+      {staticLyrics.length > 0 && (
+        <SongDetailSection title="Lyrics">
+          <div>
+            <div className="[--buttonWidth:auto] [--buttonHeight:19px] [font:var(--title-1-emphasized)] pt-3">
+              {staticLyrics.slice(0, 3).map((line, index) => (
+                <p
+                  key={`${index}:${line.text}`}
+                  dir="auto"
+                  data-vocalist-type={line.vocalistType}
+                  className="text-(--systemPrimary) m-0 pb-2.5"
+                >
+                  {line.text}
+                </p>
+              ))}
 
-                <div className="">
-                  <ul className="grid items-center gap-[0_34px] grid-cols-[1fr] m-0 min-[1000px]:grid-cols-[repeat(2,1fr)] min-[1260px]:grid-cols-[repeat(3,1fr)]">
-                    {section.people.map(({ artist, roles }) => (
-                      <li
-                        key={artist.id || artist.name}
-                        className="h-full relative z-(--z-default) max-[999px]:not-last:after:[border-bottom:var(--keyline-border-style)] max-[999px]:not-last:after:bottom-0 max-[999px]:not-last:after:block max-[999px]:not-last:after:inset-e-0 max-[999px]:not-last:after:absolute max-[999px]:not-last:after:w-[calc(100%-57px)] max-[999px]:not-last:after:z-(--z-default) min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:[border-bottom:var(--keyline-border-style)] min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:bottom-0 min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:block min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:inset-e-0 min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:absolute min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:w-[calc(100%-57px)] min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:z-(--z-default) min-[1260px]:not-nth-last-[-n+3]:after:[border-bottom:var(--keyline-border-style)] min-[1260px]:not-nth-last-[-n+3]:after:bottom-0 min-[1260px]:not-nth-last-[-n+3]:after:block min-[1260px]:not-nth-last-[-n+3]:after:inset-e-0 min-[1260px]:not-nth-last-[-n+3]:after:absolute min-[1260px]:not-nth-last-[-n+3]:after:w-[calc(100%-57px)] min-[1260px]:not-nth-last-[-n+3]:after:z-(--z-default)"
-                      >
-                        <div className="flex p-[15px_0]">
-                          <div className="[--artwork-override-width:46px] [--artwork-override-height:46px] rounded-[50%] h-11.5 mr-2.5 min-w-11.5">
-                            {artist.artworkUrl ? (
-                              <CardArtwork
-                                variant="cover"
-                                title={artist.name}
-                                altText={artist.name}
-                                imageSrcSet={artist.artworkUrl}
-                                artworkColors={{
-                                  bg: "#2c2c2e",
-                                  main: "#2c2c2e",
-                                }}
-                                sizes="46px"
-                              />
-                            ) : (
-                              <div
-                                aria-label={artist.name}
-                                className="bg-(--systemQuaternary) flex h-full items-center justify-center rounded-[inherit] text-(--systemPrimary) [font:var(--title-3-emphasized)] w-full"
-                              >
-                                {artistInitial(artist.name)}
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="flex flex-col justify-center">
-                            <div className="[font:var(--body) mb-0.5">
-                              {artist.name}
-                            </div>
-
-                            <div className="text-(--systemSecondary) [font:var(--callout)]">
-                              {roles.join(", ")}
-                            </div>
-                          </div>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </section>
+              <div className="[--buttonBackgroundColor:transparent] [--buttonTextColor:var(--keyColor)] [--linkHoverTextDecoration:none] w-(--buttonWrapperWidth,100%) min-[1260px]:w-(--buttonWrapperWidth,auto)">
+                <button
+                  type="button"
+                  onClick={() => setStaticLyricsDialogOpen(true)}
+                  className="items-center bg-(--buttonBackgroundColor,var(--keyColorBG,var(--systemBlue))) rounded-(--buttonRadius,3px) text-(--buttonTextColor,#fff) [display:var(--buttonDisplay,flex)] [font:var(--buttonFont,var(--body))] h-(--buttonHeight,36px) [justify-content:var(--buttonJustifyContent,center)] w-(--buttonWidth,100%) whitespace-nowrap min-[1260px]:h-(--buttonHeight,28px) min-[1260px]:min-w-25 min-[1260px]:w-(--buttonWidth,auto)"
+                >
+                  View Full Lyrics
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 64 64"
+                    className="h-2.5 m-[0_5px] fill-(--buttonTextColor)"
+                    aria-hidden="true"
+                  >
+                    <path d="M19.817 61.863c1.48 0 2.672-.515 3.702-1.546l24.243-23.63c1.352-1.385 1.996-2.737 2.028-4.443 0-1.674-.644-3.09-2.028-4.443L23.519 4.138c-1.03-.998-2.253-1.513-3.702-1.513-2.994 0-5.409 2.382-5.409 5.344 0 1.481.612 2.833 1.739 3.96l20.99 20.347-20.99 20.283c-1.127 1.126-1.739 2.478-1.739 3.96 0 2.93 2.415 5.344 5.409 5.344"></path>
+                  </svg>
+                </button>
+              </div>
             </div>
-          </>
-        </div>
+
+            <div className="credits__lyrics-modal">
+              <dialog
+                ref={staticLyricsDialogRef}
+                className="lyrics-box"
+                aria-labelledby="static-lyrics-dialog-title"
+                onCancel={(event) => {
+                  event.preventDefault();
+                  setStaticLyricsDialogOpen(false);
+                }}
+                onClose={() => setStaticLyricsDialogOpen(false)}
+              >
+                <div className="content-modal-container">
+                  <div className="button-container">
+                    <button
+                      type="button"
+                      className="close-button"
+                      aria-label="Close"
+                      onClick={() => setStaticLyricsDialogOpen(false)}
+                    >
+                      <svg
+                        width="18"
+                        height="18"
+                        aria-hidden="true"
+                        viewBox="0 0 18 18"
+                      >
+                        <path d="M1.2 18C.6 18 0 17.5 0 16.8c0-.4.1-.6.4-.8l7-7-7-7c-.3-.2-.4-.5-.4-.8C0 .5.6 0 1.2 0c.3 0 .6.1.8.3l7 7 7-7c.2-.2.5-.3.8-.3.6 0 1.2.5 1.2 1.2 0 .3-.1.6-.4.8l-7 7 7 7c.2.2.4.5.4.8 0 .7-.6 1.2-1.2 1.2-.3 0-.6-.1-.8-.3l-7-7-7 7c-.2.1-.5.3-.8.3"></path>
+                      </svg>
+                    </button>
+                  </div>
+
+                  <div className="header-container">
+                    <h1
+                      id="static-lyrics-dialog-title"
+                      className="text-(--systemPrimary) [font:var(--title-1-emphasized)] p-[0_30px] min-[1000px]:[font:var(--large-title-emphasized)]"
+                    >
+                      {title}
+                    </h1>
+                    <h2 className="text-(--systemSecondary) [font:var(--body)] p-[0_30px]">
+                      {detailLine}
+                    </h2>
+                  </div>
+
+                  <div className="content-container">
+                    <div slot="content">
+                      <AmpLyrics staticOnly staticLines={staticLyrics} />
+                    </div>
+                  </div>
+                </div>
+              </dialog>
+            </div>
+          </div>
+        </SongDetailSection>
+      )}
+
+      {sections.map((section) => (
+        <SongDetailSection key={section.title} title={section.title}>
+          <div className="">
+            <ul className="grid items-center gap-[0_34px] grid-cols-[1fr] m-0 min-[1000px]:grid-cols-[repeat(2,1fr)] min-[1260px]:grid-cols-[repeat(3,1fr)]">
+              {section.people.map(({ artist, roles }) => (
+                <li
+                  key={artist.id || artist.name}
+                  className="h-full relative z-(--z-default) max-[999px]:not-last:after:[border-bottom:var(--keyline-border-style)] max-[999px]:not-last:after:bottom-0 max-[999px]:not-last:after:block max-[999px]:not-last:after:inset-e-0 max-[999px]:not-last:after:absolute max-[999px]:not-last:after:w-[calc(100%-57px)] max-[999px]:not-last:after:z-(--z-default) min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:[border-bottom:var(--keyline-border-style)] min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:bottom-0 min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:block min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:inset-e-0 min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:absolute min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:w-[calc(100%-57px)] min-[1000px]:max-[1259px]:not-nth-last-[-n+2]:after:z-(--z-default) min-[1260px]:not-nth-last-[-n+3]:after:[border-bottom:var(--keyline-border-style)] min-[1260px]:not-nth-last-[-n+3]:after:bottom-0 min-[1260px]:not-nth-last-[-n+3]:after:block min-[1260px]:not-nth-last-[-n+3]:after:inset-e-0 min-[1260px]:not-nth-last-[-n+3]:after:absolute min-[1260px]:not-nth-last-[-n+3]:after:w-[calc(100%-57px)] min-[1260px]:not-nth-last-[-n+3]:after:z-(--z-default)"
+                >
+                  <div className="flex p-[15px_0]">
+                    <div className="[--artwork-override-width:46px] [--artwork-override-height:46px] rounded-[50%] h-11.5 mr-2.5 min-w-11.5">
+                      {artist.artworkUrl ? (
+                        <CardArtwork
+                          variant="cover"
+                          title={artist.name}
+                          altText={artist.name}
+                          imageSrcSet={artist.artworkUrl}
+                          artworkColors={{
+                            bg: "#2c2c2e",
+                            main: "#2c2c2e",
+                          }}
+                          sizes="46px"
+                        />
+                      ) : (
+                        <div
+                          aria-label={artist.name}
+                          className="bg-(--systemQuaternary) flex h-full items-center justify-center rounded-[inherit] text-(--systemPrimary) [font:var(--title-3-emphasized)] w-full"
+                        >
+                          {artistInitial(artist.name)}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col justify-center">
+                      <div className="[font:var(--body) mb-0.5">
+                        {artist.name}
+                      </div>
+
+                      <div className="text-(--systemSecondary) [font:var(--callout)]">
+                        {roles.join(", ")}
+                      </div>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </SongDetailSection>
       ))}
 
       {showRelatedShelfSpacer && (

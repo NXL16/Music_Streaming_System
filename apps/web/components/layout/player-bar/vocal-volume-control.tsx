@@ -79,8 +79,7 @@ export function VocalVolumeControl({
   const [isClosing, setIsClosing] = useState(false);
   const valueRef = useRef(value);
   const percent = Math.round(clamp(value) * 100);
-  const iconColor =
-    percent >= 24 ? ACTIVE_ICON_COLOR : INACTIVE_ICON_COLOR;
+  const iconColor = percent >= 24 ? ACTIVE_ICON_COLOR : INACTIVE_ICON_COLOR;
   const previewValueChange = onPreviewValueChange;
 
   useEffect(() => {
@@ -89,7 +88,10 @@ export function VocalVolumeControl({
 
   useEffect(() => {
     if (isExpanded || !isClosing) return;
-    const timer = window.setTimeout(() => setIsClosing(false), CLOSE_DURATION_MS);
+    const timer = window.setTimeout(
+      () => setIsClosing(false),
+      CLOSE_DURATION_MS,
+    );
     return () => window.clearTimeout(timer);
   }, [isExpanded, isClosing]);
 
@@ -265,7 +267,7 @@ export function VocalVolumeControl({
     <div className="absolute inset-e-5 top-5 z-[calc(var(--z-default)+1)]">
       <div
         ref={controlRef}
-        className={`relative grid place-items-center overflow-hidden bg-(--systemQuaternary-onDark) text-(--systemPrimary-onDark) backdrop-blur-[60px] backface-hidden will-change-transform transform-[translate3d(0,0,0)_scale3d(1,var(--vocal-volume-stretch,1),1)] origin-(--vocal-volume-stretch-origin,center) transition-[width,height,border-radius,transform] duration-(--vocal-volume-transition,320ms) ease-out ${isExpanded ? "h-27.5 w-10.5 rounded-[999px]" : "size-10 rounded-full hover:scale-105 hover:bg-(--systemTertiary-onDark)"}`}
+        className={`relative grid place-items-center overflow-hidden bg-(--systemQuaternary-onDark) text-(--systemPrimary-onDark) backdrop-blur-[60px] backface-hidden will-change-transform transform-[translate3d(0,0,0)_scale3d(1,var(--vocal-volume-stretch,1),1)] origin-(--vocal-volume-stretch-origin,center) transition-[width,height,border-radius,transform] duration-(--vocal-volume-transition,320ms) ease-out ${isExpanded ? "h-27.5 w-10.5 rounded-[999px]" : "size-10 rounded-full hover:bg-(--systemTertiary-onDark)"}`}
       >
         {!showSlider ? (
           <button
@@ -315,7 +317,7 @@ export function VocalVolumeControl({
             <span
               ref={fillRef}
               aria-hidden
-              className={`absolute inset-0 origin-bottom bg-(--systemPrimary-onDark) transition-opacity duration-200 will-change-transform ${isClosing ? "delay-[140ms] opacity-0" : "opacity-100"}`}
+              className={`absolute inset-0 origin-bottom bg-(--systemPrimary-onDark) transition-opacity duration-200 will-change-transform ${isClosing ? "delay-140 opacity-0" : "opacity-100"}`}
               style={{
                 transform: `translate3d(0,0,0) scale3d(1,${percent / 100},1)`,
               }}
@@ -323,7 +325,7 @@ export function VocalVolumeControl({
             <span
               ref={iconRef}
               aria-hidden
-              className={`absolute inset-s-1/2 z-10 -translate-x-1/2 transition-[bottom,color,transform] duration-[400ms] ease-out ${isClosing ? "bottom-1.5 scale-[0.892857] delay-[140ms]" : "bottom-3"}`}
+              className={`absolute inset-s-1/2 z-10 -translate-x-1/2 transition-[bottom,color,transform] duration-400 ease-out ${isClosing ? "bottom-1.5 scale-[0.892857] delay-140" : "bottom-3"}`}
               style={{
                 color: isClosing ? INACTIVE_ICON_COLOR : iconColor,
               }}

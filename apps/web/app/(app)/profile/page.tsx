@@ -476,7 +476,7 @@ export default function ProfilePage() {
           <div className="max-w-3xl py-2 sm:flex sm:items-center sm:justify-between">
             <div>
               <p className="text-(--systemSecondary) [font:var(--callout)]">
-                Available balance
+                MusicCoin · số dư ví hiện tại
               </p>
               <p className="mt-1 flex items-center gap-2 text-(--systemPrimary) [font:var(--large-title-emphasized)]">
                 <Coins className="h-6 w-6 text-(--keyColor)" />

@@ -165,6 +165,39 @@ function findPlayableIndex(
   return -1;
 }
 
+function findNextQueuedIndex(
+  state: Pick<
+    PlayerState,
+    "currentIndex" | "queue" | "repeatMode" | "stationMode"
+  >,
+) {
+  if (state.stationMode) {
+    return findPlayableIndex(state.queue, state.currentIndex + 1, 1);
+  }
+
+  let nextIndex = findPlayableIndex(
+    state.queue,
+    state.currentIndex < 0 ? 0 : state.currentIndex + 1,
+    1,
+  );
+  if (nextIndex < 0 && state.repeatMode === 2) {
+    nextIndex = findPlayableIndex(state.queue, 0, 1);
+  }
+  return nextIndex;
+}
+
+export function getNextQueuedSong(
+  state: Pick<
+    PlayerState,
+    "currentIndex" | "queue" | "repeatMode" | "stationMode"
+  >,
+) {
+  const nextIndex = findNextQueuedIndex(state);
+  return nextIndex >= 0 && nextIndex !== state.currentIndex
+    ? (state.queue[nextIndex] ?? null)
+    : null;
+}
+
 function shuffleQueue(songs: PlayerSong[], currentSongId: string) {
   const remaining = songs.filter((song) => song.id !== currentSongId);
   for (let index = remaining.length - 1; index > 0; index -= 1) {
@@ -362,17 +395,21 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       const currentIndex = queueWithoutRequested.findIndex(
         (song) => song.id === activeSongId,
       );
+      const insertionBeforeAutoplay = (
+        songs: PlayerSong[],
+        activeIndex: number,
+      ) => {
+        const firstUpcomingAutoplay = songs.findIndex(
+          (song, index) => index > activeIndex && song.sourceAutoplay,
+        );
+        return firstUpcomingAutoplay < 0
+          ? songs.length
+          : firstUpcomingAutoplay;
+      };
       const queueInsertionIndex =
         position === "next" && currentIndex >= 0
           ? currentIndex + 1
-          : (() => {
-              const firstAutoplay = queueWithoutRequested.findIndex(
-                (song) => song.sourceAutoplay,
-              );
-              return firstAutoplay < 0
-                ? queueWithoutRequested.length
-                : firstAutoplay;
-            })();
+          : insertionBeforeAutoplay(queueWithoutRequested, currentIndex);
       const queue = [...queueWithoutRequested];
       queue.splice(queueInsertionIndex, 0, ...queuedSongs);
 
@@ -383,12 +420,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       const originalInsertionIndex =
         position === "next" && originalCurrentIndex >= 0
           ? originalCurrentIndex + 1
-          : (() => {
-              const firstAutoplay = originalQueue.findIndex(
-                (song) => song.sourceAutoplay,
-              );
-              return firstAutoplay < 0 ? originalQueue.length : firstAutoplay;
-            })();
+          : insertionBeforeAutoplay(originalQueue, originalCurrentIndex);
       originalQueue.splice(originalInsertionIndex, 0, ...queuedSongs);
 
       return {
@@ -766,38 +798,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
     let didChangeTrack = false;
 
     set((state) => {
-      if (state.stationMode) {
-        const stationIndex = findPlayableIndex(
-          state.queue,
-          state.currentIndex + 1,
-          1,
-        );
-
-        if (stationIndex < 0) return stopAtEnd ? { playing: false } : state;
-        if (stationIndex === state.currentIndex) return state;
-
-        didChangeTrack = true;
-
-        return {
-          currentIndex: stationIndex,
-          currentSong: state.queue[stationIndex],
-          playbackTimeMs: 0,
-          playing: true,
-          videoPlayerOpen:
-            state.videoPlayerOpen &&
-            state.currentSong?.playbackKind === "video" &&
-            state.queue[stationIndex]?.playbackKind === "video",
-        };
-      }
-
-      let nextIndex = findPlayableIndex(
-        state.queue,
-        state.currentIndex < 0 ? 0 : state.currentIndex + 1,
-        1,
-      );
-
-      if (nextIndex < 0 && state.repeatMode === 2)
-        nextIndex = findPlayableIndex(state.queue, 0, 1);
+      const nextIndex = findNextQueuedIndex(state);
       if (nextIndex < 0) return stopAtEnd ? { playing: false } : state;
       if (nextIndex === state.currentIndex) return state;
 
@@ -811,7 +812,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
         // Autoplay always owns its recommendation order. If the listener
         // reaches this section from a shuffled manual queue, clear Shuffle
         // before the Autoplay track begins (Repeat is reset defensively too).
-        ...(state.queue[nextIndex].sourceAutoplay
+        ...(!state.stationMode && state.queue[nextIndex].sourceAutoplay
           ? { shuffleEnabled: false, repeatMode: 0 as RepeatMode }
           : {}),
         videoPlayerOpen:

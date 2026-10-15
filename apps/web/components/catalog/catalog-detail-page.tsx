@@ -388,9 +388,10 @@ export function CatalogDetailPage({
   const albumSummary = useMemo(() => {
     if (!albumResource) return "Playlist";
 
+    const trackCount = albumResource.attributes.trackCount ?? tracks.length;
     return [
       formatReleaseDate(albumResource.attributes.releaseDate),
-      `${albumResource.attributes.trackCount ?? tracks.length} songs, ${formatSummaryDuration(totalDurationSec)}`,
+      `${trackCount} ${trackCount === 1 ? "song" : "songs"}, ${formatSummaryDuration(totalDurationSec)}`,
       albumResource.attributes.copyright,
     ].join("\n");
   }, [albumResource, tracks.length, totalDurationSec]);

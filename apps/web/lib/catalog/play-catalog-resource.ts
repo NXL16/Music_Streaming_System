@@ -1,4 +1,4 @@
-import { getCatalogAlbum, getCatalogPlaylist } from "./catalog.api";
+import { getCatalogPlaylist, getCatalogResources } from "./catalog.api";
 import {
   catalogArtworkSrcSet,
   catalogArtworkUrl,
@@ -28,7 +28,10 @@ export function playCatalogResource(
 
   const request = (
     resourceType === "albums"
-      ? getCatalogAlbum(normalizedId)
+      ? // Playback needs the release and its tracks, not the detail-only
+        // related shelves. The resource batch provides the same queue data
+        // without waiting for personalised related-album generation.
+        getCatalogResources([{ id: normalizedId, type: "albums" }])
       : getCatalogPlaylist(normalizedId)
   )
     .then((response) => {

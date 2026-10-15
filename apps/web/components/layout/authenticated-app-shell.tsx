@@ -6,7 +6,6 @@ import { usePathname } from "next/navigation";
 import { ProtectedOnly } from "@/components/auth/protected-only";
 import { AppPlayerBar } from "@/components/layout/app-player-bar";
 import AppSidebar from "@/components/layout/app-sidebar";
-import MusicVideoPlayer from "../custom-elements/music-video/music-video-player";
 import { AppFooter } from "./app-footer";
 
 import { usePlayerStore } from "@/lib/player/use-player-store";
@@ -16,6 +15,7 @@ import {
   createPageThemeStyle,
   isLightPageTheme,
 } from "@/lib/layout/page-theme-style";
+import MusicVideoPlayer from "../custom-elements/music-video/m404-music-video-player";
 
 type ThemeMode = "light" | "dark";
 
@@ -106,11 +106,7 @@ export function AuthenticatedAppShell({
     <ProtectedOnly>
       <div className="min-h-full">
         <div
-          className={`app-container ${pageThemeClass} ${
-            hasResolvedArtworkTheme ? "has-theme-override" : ""
-          } grid gap-0 [grid-template-areas:'structure-header'_'structure-upsell'_'structure-main-section'_'structure-locale-switcher'] grid-cols-[minmax(0,1fr)] grid-rows-[52px_auto_1fr_auto] h-screen max-[483px]:h-auto max-[483px]:min-h-dvh min-[484px]:[grid-template-areas:'structure-header_structure-main-section'_'structure-upsell_structure-upsell'_'structure-locale-switcher_structure-locale-switcher'] min-[484px]:grid-cols-[33.88vw_minmax(0,1fr)] min-[484px]:grid-rows-[minmax(0,1fr)_auto_auto] min-[767.32px]:grid-cols-[260px_minmax(0,1fr)] ${
-            drawerOpen ? "is-drawer-open" : ""
-          }`}
+          className={`app-container ${pageThemeClass} ${hasResolvedArtworkTheme ? "has-theme-override" : ""} grid gap-0 [grid-template-areas:'structure-header'_'structure-upsell'_'structure-main-section'_'structure-locale-switcher'] grid-cols-[minmax(0,1fr)] grid-rows-[52px_auto_1fr_auto] h-screen min-[484px]:[grid-template-areas:'structure-header_structure-main-section'_'structure-upsell_structure-upsell'_'structure-locale-switcher_structure-locale-switcher'] min-[484px]:grid-cols-[33.88vw_minmax(0,1fr)] min-[484px]:grid-rows-[minmax(0,1fr)_auto_auto] min-[767.32px]:grid-cols-[260px_minmax(0,1fr)] pointer-coarse:max-h-[stretch] ${drawerOpen ? "is-drawer-open" : ""}`}
           style={
             hasResolvedArtworkTheme
               ? createPageThemeStyle(pageThemeBaseColor)

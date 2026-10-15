@@ -11,32 +11,33 @@ import {
   retainAmbientScrollState,
   subscribeAmbientScrollState,
 } from "./ambient-scroll-state";
+import { getAppScrollContainer } from "@/lib/layout/use-app-scroll-to-top";
 
 const WARM_RETENTION_MS = 1_500;
 
 type UseAmbientVideoOptions = {
   src: string;
   keepAlive: boolean;
-  keepMountedHorizontally: boolean;
+  preload: boolean;
 };
 
 export function useAmbientVideo({
   src,
   keepAlive,
-  keepMountedHorizontally,
+  preload,
 }: UseAmbientVideoOptions) {
   const ampElementRef = useRef<HTMLElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const idRef = useRef(Symbol());
   const isNearViewportRef = useRef(false);
-  const hasMountedInViewportRef = useRef(false);
   const resumePlaybackRef = useRef<() => void>(() => {});
+  const pausePlaybackRef = useRef<() => void>(() => {});
   const suspendPlaybackRef = useRef<() => void>(() => {});
   const [shouldMountMedia, setShouldMountMedia] = useState(false);
   const [readyMediaSrc, setReadyMediaSrc] = useState<string>();
 
-  const shouldRenderMedia = keepAlive || shouldMountMedia;
-  const isMediaReady = !keepAlive || readyMediaSrc === src;
+  const shouldRenderMedia = keepAlive || preload || shouldMountMedia;
+  const isMediaReady = !(keepAlive || preload) || readyMediaSrc === src;
 
   // Track page scrolling as soon as the card exists, before its video is
   // allowed to mount. This prevents the first HLS startup at a shelf edge.
@@ -51,31 +52,34 @@ export function useAmbientVideo({
       ([entry]) => {
         const isVerticallyVisible = Boolean(
           entry.rootBounds &&
-            entry.boundingClientRect.bottom > entry.rootBounds.top &&
-            entry.boundingClientRect.top < entry.rootBounds.bottom,
+          entry.boundingClientRect.bottom > entry.rootBounds.top &&
+          entry.boundingClientRect.top < entry.rootBounds.bottom,
         );
-        const isVisible = keepMountedHorizontally
-          ? isVerticallyVisible &&
-            (entry.isIntersecting || hasMountedInViewportRef.current)
-          : entry.isIntersecting;
+        // A preloaded hero owns one of the bounded Home video slots while its
+        // shelf is vertically near the viewport. Horizontal carousel clipping
+        // must not suspend it: doing so discards the HLS buffer that preload
+        // just prepared and makes the first horizontal reveal hitch.
+        const isVisible = preload ? isVerticallyVisible : entry.isIntersecting;
 
         if (isVisible) {
           if (destroyTimer) clearTimeout(destroyTimer);
           destroyTimer = undefined;
           isNearViewportRef.current = true;
-          if (entry.isIntersecting) hasMountedInViewportRef.current = true;
-          setShouldMountMedia(true);
+          if (!preload) setShouldMountMedia(true);
           resumePlaybackRef.current();
           return;
         }
 
         isNearViewportRef.current = false;
-        if (keepMountedHorizontally && !isVerticallyVisible) {
-          hasMountedInViewportRef.current = false;
+        if (keepAlive) return;
+        // Home has a bounded set of preloaded Hero videos. Retain their HLS
+        // session and decoder slot while offscreen; releasing it here makes a
+        // rapid return race a fresh player startup against scroll handling.
+        if (preload) {
+          pausePlaybackRef.current();
+          return;
         }
-        if (keepAlive) return;
         suspendPlaybackRef.current();
-        if (keepAlive) return;
         if (destroyTimer) clearTimeout(destroyTimer);
         destroyTimer = setTimeout(() => {
           destroyTimer = undefined;
@@ -83,7 +87,8 @@ export function useAmbientVideo({
         }, WARM_RETENTION_MS);
       },
       {
-        rootMargin: keepAlive ? "300px" : "150px",
+        root: getAppScrollContainer(),
+        rootMargin: keepAlive || preload ? "300px" : "150px",
         threshold: 0.01,
       },
     );
@@ -95,7 +100,7 @@ export function useAmbientVideo({
       isNearViewportRef.current = false;
       if (!keepAlive) suspendPlaybackRef.current();
     };
-  }, [keepAlive, keepMountedHorizontally]);
+  }, [keepAlive, preload]);
 
   useEffect(() => {
     if (!shouldRenderMedia) return;
@@ -142,10 +147,10 @@ export function useAmbientVideo({
       createAmbientHlsPlayer({
         video,
         src,
-        profile: keepAlive ? "hero" : "card",
+        profile: keepAlive || preload ? "hero" : "card",
         onPlayable: tryPlay,
         onReady: () => {
-          if (keepAlive) setReadyMediaSrc(src);
+          if (keepAlive || preload) setReadyMediaSrc(src);
         },
         onFatalError: () => {
           ambientVideoManager.release(id);
@@ -173,13 +178,13 @@ export function useAmbientVideo({
         player.start();
         return;
       }
-      const activated = ambientVideoManager.request(
+      ambientVideoManager.request(
         id,
         player.start,
         destroyMedia,
         interactionPriority,
       );
-      if (activated && video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
         tryPlay();
       }
     };
@@ -196,6 +201,12 @@ export function useAmbientVideo({
         ambientVideoManager.release(id);
       }
     };
+    const pausePlayback = () => {
+      if (disposed) return;
+      playAttempt += 1;
+      video.pause();
+      markPaused();
+    };
     const handlePointerEnter = () => requestPlayback(1);
     const handlePointerLeave = () =>
       ambientVideoManager.updateInteractionPriority(id, 0);
@@ -210,19 +221,12 @@ export function useAmbientVideo({
     }
 
     resumePlaybackRef.current = () => requestPlayback();
+    pausePlaybackRef.current = pausePlayback;
     suspendPlaybackRef.current = suspendPlayback;
-    if (keepAlive || isNearViewportRef.current) requestPlayback();
+    if (keepAlive || preload || isNearViewportRef.current) requestPlayback();
 
     const unsubscribeScrollState = subscribeAmbientScrollState((scrolling) => {
-      if (disposed) return;
-      if (scrolling) {
-        if (video.paused) return;
-        playAttempt += 1;
-        video.pause();
-        markPaused();
-        return;
-      }
-
+      if (disposed || scrolling) return;
       if (keepAlive || isNearViewportRef.current) requestPlayback();
     });
 
@@ -230,6 +234,7 @@ export function useAmbientVideo({
       disposed = true;
       unsubscribeScrollState();
       resumePlaybackRef.current = () => {};
+      pausePlaybackRef.current = () => {};
       suspendPlaybackRef.current = () => {};
       if (!keepAlive) {
         cardElement?.removeEventListener("pointerenter", handlePointerEnter);
@@ -238,7 +243,7 @@ export function useAmbientVideo({
       ambientVideoManager.release(id);
       destroyMedia();
     };
-  }, [keepAlive, shouldRenderMedia, src]);
+  }, [keepAlive, preload, shouldRenderMedia, src]);
 
   return { ampElementRef, videoRef, shouldRenderMedia, isMediaReady };
 }

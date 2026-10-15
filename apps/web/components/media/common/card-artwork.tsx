@@ -24,7 +24,7 @@ type SharedCardArtworkProps = Pick<
 type CardArtworkProps = SharedCardArtworkProps & {
   variant: "hero" | "cover";
   videoSrc?: string;
-  keepVideoMountedHorizontally?: boolean;
+  preloadVideo?: boolean;
 };
 
 const PLACEHOLDER_SRC = "/assets/artwork/1x1.gif";
@@ -36,7 +36,7 @@ export default function CardArtwork({
   imageSrcSet,
   artworkColors,
   videoSrc,
-  keepVideoMountedHorizontally,
+  preloadVideo = false,
   containerClassName,
   aspectRatio,
   containerStyle,
@@ -80,7 +80,7 @@ export default function CardArtwork({
             <AmbientVideo
               src={videoSrc}
               variant="hero"
-              keepMountedHorizontally={keepVideoMountedHorizontally}
+              preload={preloadVideo}
             />
           </div>
         )}
@@ -116,7 +116,11 @@ export default function CardArtwork({
         }
         src={PLACEHOLDER_SRC}
         srcSet={imageSrcSet}
-        style={{ opacity: 1, objectFit: "cover", objectPosition: "top" }}
+        style={{
+          opacity: 1,
+          objectFit: "cover",
+          objectPosition: "top",
+        }}
         width={316}
       />
       {videoSrc && (

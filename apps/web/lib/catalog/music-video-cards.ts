@@ -48,7 +48,10 @@ export function mapCatalogMusicVideoCards(
       imageSrcSet: video.posterSrcSet || video.posterUrl,
       artworkAspectRatio: "1.7777777777777777",
       altText: `${videoKindLabel(video.kind)}: ${video.songTitle}`,
-      artworkColors: { bg: "#2c2c2e", main: "#2c2c2e" },
+      artworkColors: {
+        bg: video.posterBgColor || "#2c2c2e",
+        main: video.posterBgColor || "#2c2c2e",
+      },
       slug: href,
       // A Music Video plays in the shared player; navigation stays distinct.
       onPlay: () => void playCatalogMusicVideo(video),

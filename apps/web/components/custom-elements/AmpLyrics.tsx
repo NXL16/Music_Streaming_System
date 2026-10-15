@@ -13,10 +13,19 @@ import {
 import { usePlayerStore } from "@/lib/player/use-player-store";
 import { syncPlaybackClock } from "@/lib/player/playback-clock";
 import { getSongLyrics, type LyricLine } from "@/lib/lyrics/song-lyrics.api";
+import {
+  getSongStaticLyrics,
+  type StaticLyricLine,
+} from "@/lib/lyrics/static-lyrics.api";
 
 type LoadedLyrics = {
   songId: string;
   lines: LyricLine[];
+};
+
+type LoadedStaticLyrics = {
+  songId: string;
+  lines: StaticLyricLine[];
 };
 
 type LyricsLoadStatus = "pending" | "loading" | "ready";
@@ -30,6 +39,10 @@ type TimeSyncedLyricsDisplay = HTMLElement & {
   setPlaying?(playing: boolean): void;
   focusLine(index: number, behavior?: ScrollBehavior): void;
   setAutoScroll(value: boolean, hidePastLines?: boolean): void;
+};
+
+type StaticLyricsDisplay = HTMLElement & {
+  setLines(lines: readonly StaticLyricLine[]): void;
 };
 
 const MANUAL_SCROLL_RESUME_MS = 4_000;
@@ -88,6 +101,8 @@ interface AmpLyricsProps {
   songId?: string;
   audioRef?: RefObject<HTMLAudioElement | null>;
   inDetailView?: boolean;
+  staticLines?: readonly StaticLyricLine[];
+  staticOnly?: boolean;
   emptyTitle?: string;
   emptyDescription?: string;
 }
@@ -96,12 +111,16 @@ export default function AmpLyrics({
   songId,
   audioRef,
   inDetailView,
+  staticLines: suppliedStaticLines,
+  staticOnly = false,
   emptyTitle = "No lyrics available",
   emptyDescription = "There are no lyrics available for this song.",
 }: AmpLyricsProps) {
   const containerRef = useRef<HTMLElement>(null);
   const activeLineTopRatio = inDetailView ? 0.32 : 0.18;
   const [loadedLyrics, setLoadedLyrics] = useState<LoadedLyrics | null>(null);
+  const [loadedStaticLyrics, setLoadedStaticLyrics] =
+    useState<LoadedStaticLyrics | null>(null);
   const [lyricsLoadStatus, setLyricsLoadStatus] = useState<{
     songId?: string;
     status: LyricsLoadStatus;
@@ -110,9 +129,14 @@ export default function AmpLyrics({
     if (!loadedLyrics || loadedLyrics.songId !== songId) return [];
     return loadedLyrics.lines;
   }, [loadedLyrics, songId]);
+  const staticLines = useMemo<readonly StaticLyricLine[]>(() => {
+    if (staticOnly) return suppliedStaticLines || [];
+    if (!loadedStaticLyrics || loadedStaticLyrics.songId !== songId) return [];
+    return loadedStaticLyrics.lines;
+  }, [loadedStaticLyrics, songId, staticOnly, suppliedStaticLines]);
 
   useEffect(() => {
-    if (!songId) return;
+    if (!songId || staticOnly) return;
 
     let cancelled = false;
     let loadingVisibleAt: number | undefined;
@@ -125,7 +149,10 @@ export default function AmpLyrics({
       setLyricsLoadStatus({ songId, status: "loading" });
     }, LOADING_DELAY_MS);
 
-    const resolveLyrics = (lines: LyricLine[]) => {
+    const resolveLyrics = (
+      lines: LyricLine[],
+      staticLines: StaticLyricLine[] = [],
+    ) => {
       if (loadingTimer) {
         window.clearTimeout(loadingTimer);
         loadingTimer = undefined;
@@ -134,6 +161,7 @@ export default function AmpLyrics({
       const commit = () => {
         if (cancelled) return;
         setLoadedLyrics({ songId, lines });
+        setLoadedStaticLyrics({ songId, lines: staticLines });
         setLyricsLoadStatus({ songId, status: "ready" });
       };
 
@@ -151,11 +179,14 @@ export default function AmpLyrics({
     };
 
     void getSongLyrics(songId)
-      .then((lines) => {
-        resolveLyrics(lines);
-      })
-      .catch(() => {
-        resolveLyrics([]);
+      .catch(() => [])
+      .then(async (lines) => {
+        if (lines.length) {
+          resolveLyrics(lines);
+          return;
+        }
+        const staticLines = await getSongStaticLyrics(songId).catch(() => []);
+        resolveLyrics([], staticLines);
       });
 
     return () => {
@@ -163,18 +194,20 @@ export default function AmpLyrics({
       if (loadingTimer) window.clearTimeout(loadingTimer);
       if (settleTimer) window.clearTimeout(settleTimer);
     };
-  }, [songId]);
+  }, [songId, staticOnly]);
 
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
     const lyricsContainer = getLyricsContainer(el);
-    const status = songId
-      ? lyricsLoadStatus.songId === songId
-        ? lyricsLoadStatus.status
-        : "pending"
-      : "ready";
+    const status = staticOnly
+      ? "ready"
+      : songId
+        ? lyricsLoadStatus.songId === songId
+          ? lyricsLoadStatus.status
+          : "pending"
+        : "ready";
 
     const renderMessage = (
       className: "lyrics__loading" | "lyrics__empty",
@@ -259,13 +292,19 @@ export default function AmpLyrics({
         }
         if (!Number.isFinite(nextBoundary)) return;
 
-        lineBoundaryTimer = window.setTimeout(() => {
-          lineBoundaryTimer = undefined;
-          if (!audio || audio.paused) return;
+        lineBoundaryTimer = window.setTimeout(
+          () => {
+            lineBoundaryTimer = undefined;
+            if (!audio || audio.paused) return;
 
-          syncPlaybackClock(audio, usePlayerStore.getState().setPlaybackTimeMs);
-          syncActiveLine();
-        }, Math.max(0, nextBoundary - timeMs));
+            syncPlaybackClock(
+              audio,
+              usePlayerStore.getState().setPlaybackTimeMs,
+            );
+            syncActiveLine();
+          },
+          Math.max(0, nextBoundary - timeMs),
+        );
       };
       const syncActiveLine = (shouldScroll = true) => {
         if (!display || !audio) return;
@@ -299,10 +338,8 @@ export default function AmpLyrics({
         display.setPlaying?.(
           playerState.currentSong?.id === songId && playerState.playing,
         );
-        if (lines[activeIndex]?.kind === "INSTRUMENTAL") {
-          display.setPlaybackTimeMs?.(timeMs);
-          startInstrumentalFrameSync();
-        }
+        display.setPlaybackTimeMs?.(timeMs);
+        startPlaybackFrameSync();
         scheduleNextLineSync(timeMs);
 
         if (isInitialSync && activeIndex >= 0) {
@@ -346,12 +383,21 @@ export default function AmpLyrics({
         }
         animationFrame = undefined;
       };
-      const startInstrumentalFrameSync = () => {
+      const startPlaybackFrameSync = () => {
         if (animationFrame !== undefined || !audio || audio.paused) return;
         const tick = () => {
           const currentLine = lines[activeLineIndex];
-          if (audio && !audio.paused && currentLine?.kind === "INSTRUMENTAL") {
-            syncPlaybackClock(audio, usePlayerStore.getState().setPlaybackTimeMs);
+          if (
+            audio &&
+            !audio.paused &&
+            (currentLine?.kind === "INSTRUMENTAL" ||
+              currentLine?.words?.length ||
+              currentLine?.backgroundWords?.length)
+          ) {
+            syncPlaybackClock(
+              audio,
+              usePlayerStore.getState().setPlaybackTimeMs,
+            );
             display?.setPlaybackTimeMs?.(
               usePlayerStore.getState().playbackTimeMs,
             );
@@ -398,10 +444,21 @@ export default function AmpLyrics({
           lineSeekScrollLockUntil = 0;
           lineSeekScrollLockTimer = undefined;
         }, LINE_SEEK_MAX_WAIT_MS);
+        const shouldResumePlayback = !usePlayerStore.getState().playing;
         audio.currentTime = startTimeMs / 1000;
         syncPlaybackClock(audio, usePlayerStore.getState().setPlaybackTimeMs);
-        if (!usePlayerStore.getState().playing) {
-          usePlayerStore.getState().togglePlayback();
+        if (shouldResumePlayback) {
+          // Start while this click still has browser user activation. The player
+          // store is updated only after playback actually succeeds, preventing
+          // a transient Pause state followed by an AbortError rollback.
+          void audio
+            .play()
+            .then(() => {
+              if (!cancelled && !usePlayerStore.getState().playing) {
+                usePlayerStore.getState().togglePlayback();
+              }
+            })
+            .catch(() => undefined);
         }
       };
       const enableAutoScroll = () => {
@@ -478,6 +535,24 @@ export default function AmpLyrics({
       };
     }
 
+    if (staticLines.length) {
+      let cancelled = false;
+      lyricsContainer.classList.remove("auto-scrolling");
+
+      void import("./m404-lyrics-display-static").then(() => {
+        if (cancelled) return;
+        const display = document.createElement(
+          "m404-lyrics-display-static",
+        ) as StaticLyricsDisplay;
+        display.setLines(staticLines);
+        lyricsContainer.replaceChildren(display);
+      });
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
     renderMessage("lyrics__empty", emptyTitle, emptyDescription);
   }, [
     activeLineTopRatio,
@@ -488,6 +563,8 @@ export default function AmpLyrics({
     lines,
     lyricsLoadStatus,
     songId,
+    staticLines,
+    staticOnly,
   ]);
 
   const AmpLyricsTag = "amp-lyrics" as unknown as ComponentType<{
@@ -507,12 +584,16 @@ export default function AmpLyrics({
       hydrated=""
       ref={containerRef}
       offset-ratio={`${activeLineTopRatio}`}
-      static-lyrics="false"
+      static-lyrics={staticLines.length ? "true" : "false"}
       show-translation="false"
       show-pronunciation="false"
       enable-translations="true"
-      class={`${inDetailView ? "[--gradient-color-override:255] [--line-animation-play-state:running] bg-transparent h-[80%] max-w-none" : "bg-transparent h-[calc(100vh-54px)]"}`}
-      style={{ "--inactive-gaussian-blur": "1.36px" } as CSSProperties}
+      class={`${staticOnly ? "[--lyricsBg:none] max-w-none lyrics" : inDetailView ? "[--gradient-color-override:255] [--line-animation-play-state:running] bg-transparent h-[80%] max-w-none" : "bg-transparent h-[calc(100vh-54px)]"}`}
+      style={
+        {
+          "--inactive-gaussian-blur": staticOnly ? "0" : "1.36px",
+        } as CSSProperties
+      }
     />
   );
 }

@@ -50,7 +50,7 @@ function fallbackSongFromVideo(video: CatalogMusicVideo): PlayerSong {
     artworkUrl,
     artworkSrcSet: artworkUrl,
     thumbnailArtworkSrcSet: artworkUrl,
-    artworkBgColor: video.songArtwork?.bgColor,
+    artworkBgColor: video.posterBgColor || video.songArtwork?.bgColor,
     contentRating: video.contentRating,
     playbackUrl: `mse:${video.songId}`,
   };

@@ -1,12 +1,14 @@
 type ScrollStateListener = (isScrolling: boolean) => void;
 
 const SCROLL_IDLE_DELAY_MS = 150;
+const APP_SCROLL_CONTAINER_SELECTOR = "[data-app-scroll-container]";
 
 const listeners = new Set<ScrollStateListener>();
 let retainCount = 0;
 let isScrolling = false;
 let idleTimer: ReturnType<typeof setTimeout> | undefined;
 let isListening = false;
+let scrollTarget: Window | HTMLElement | undefined;
 
 function notify() {
   listeners.forEach((listener) => listener(isScrolling));
@@ -29,14 +31,19 @@ function handleScroll() {
 
 function startListening() {
   if (isListening) return;
-  window.addEventListener("scroll", handleScroll, { passive: true });
+  scrollTarget = window.matchMedia("(max-width: 483px)").matches
+    ? window
+    : (document.querySelector<HTMLElement>(APP_SCROLL_CONTAINER_SELECTOR) ??
+      window);
+  scrollTarget.addEventListener("scroll", handleScroll, { passive: true });
   isListening = true;
 }
 
 function stopListeningIfUnused() {
   if (!isListening || listeners.size !== 0 || retainCount !== 0) return;
 
-  window.removeEventListener("scroll", handleScroll);
+  scrollTarget?.removeEventListener("scroll", handleScroll);
+  scrollTarget = undefined;
   isListening = false;
   if (idleTimer) clearTimeout(idleTimer);
   idleTimer = undefined;

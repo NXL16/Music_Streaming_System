@@ -9,6 +9,7 @@ export type CatalogMusicVideo = {
   kind: string;
   posterUrl: string;
   posterSrcSet: string;
+  posterBgColor: string;
   durationMillis: number;
   width: number;
   height: number;
@@ -49,6 +50,27 @@ type CatalogMusicVideosResponse = CatalogMusicVideoPage;
 
 export type MusicVideoCatalogResourceType = "albums" | "artists" | "songs";
 
+function normalizePosterBgColor(color: string | undefined): string {
+  const value = color?.replace(/^#/, "").trim();
+  return value && /^[0-9a-f]{6}$/i.test(value) ? `#${value}` : "#2c2c2e";
+}
+
+function normalizeMusicVideo(video: CatalogMusicVideo): CatalogMusicVideo {
+  return {
+    ...video,
+    posterBgColor: normalizePosterBgColor(video.posterBgColor),
+  };
+}
+
+function normalizeMusicVideoPage(
+  page: CatalogMusicVideoPage,
+): CatalogMusicVideoPage {
+  return {
+    ...page,
+    videos: page.videos.map(normalizeMusicVideo),
+  };
+}
+
 export async function getCatalogSongMusicVideos(
   songId: string,
   signal?: AbortSignal,
@@ -57,7 +79,7 @@ export async function getCatalogSongMusicVideos(
     `/catalog/${STOREFRONT}/songs/${encodeURIComponent(songId)}/videos`,
     { signal },
   );
-  return response.data.videos;
+  return normalizeMusicVideoPage(response.data).videos;
 }
 
 export async function getCatalogAlbumMusicVideos(
@@ -68,7 +90,7 @@ export async function getCatalogAlbumMusicVideos(
     `/catalog/${STOREFRONT}/albums/${encodeURIComponent(albumId)}/music-videos`,
     { signal },
   );
-  return response.data.videos;
+  return normalizeMusicVideoPage(response.data).videos;
 }
 
 export async function getCatalogArtistMusicVideos(
@@ -92,7 +114,7 @@ export async function getCatalogArtistMusicVideoPage(
     `/catalog/${STOREFRONT}/artists/${encodeURIComponent(artistId)}/music-videos`,
     { params: options, signal },
   );
-  return response.data;
+  return normalizeMusicVideoPage(response.data);
 }
 
 export function getCatalogMusicVideos(
@@ -118,7 +140,7 @@ export async function getCatalogMusicVideo(
     `/catalog/${STOREFRONT}/music-videos/${encodeURIComponent(songVideoId)}`,
     { signal },
   );
-  return response.data;
+  return normalizeMusicVideo(response.data);
 }
 
 export async function getCatalogRelatedMusicVideos(
@@ -130,5 +152,5 @@ export async function getCatalogRelatedMusicVideos(
     `/catalog/${STOREFRONT}/music-videos/${encodeURIComponent(songVideoId)}/recommendations`,
     { params: { limit }, signal },
   );
-  return response.data.videos;
+  return normalizeMusicVideoPage(response.data).videos;
 }

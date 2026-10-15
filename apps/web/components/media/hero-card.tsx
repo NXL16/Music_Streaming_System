@@ -10,7 +10,7 @@ import { playSystemStation } from "@/lib/recommendations/stations-for-you";
 type HeroCardProps = MediaCardProps & {
   cardType: "hero";
   priority?: boolean;
-  keepVideoMountedHorizontally?: boolean;
+  preloadVideo?: boolean;
 };
 
 export default function HeroCard(props: HeroCardProps) {
@@ -41,7 +41,7 @@ export default function HeroCard(props: HeroCardProps) {
               variant="hero"
               {...props}
               priority={props.priority}
-              keepVideoMountedHorizontally={props.keepVideoMountedHorizontally}
+              preloadVideo={props.preloadVideo}
               containerClassName="[--override-placeholder-bg-color:var(--artwork-bg-color,var(--genericJoeColor))] [--afterShadowBorderRadius:var(--global-border-radius-xlarge,14px)_var(--global-border-radius-xlarge,14px)_0_0] h-full"
             />
           </div>

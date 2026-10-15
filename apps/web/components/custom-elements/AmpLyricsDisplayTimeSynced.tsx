@@ -166,6 +166,11 @@ export class AmpLyricsDisplayTimeSynced extends HTMLElement {
       runtimeStyle.dataset.role = "runtime-style";
       runtimeStyle.textContent = RUNTIME_CSS;
 
+      const wordTimingStyle = document.createElement("style");
+      wordTimingStyle.dataset.role = "word-timing-style";
+      wordTimingStyle.textContent =
+        ".display-synced-line.is-current .syllable:not([style*='--gradient-progress']) { color: var(--lyrics-line-color, var(--systemTertiary)); }";
+
       const instrumentalTransitionStyle = document.createElement("style");
       instrumentalTransitionStyle.textContent = `.display-synced-line.collapsible { animation: none; transition: height ${INSTRUMENTAL_TRANSITION_DURATION_MS}ms ease-in-out; } .display-synced-line.is-current.collapsible { height: var(--instrumental-line-height, 0px); animation: none; } amp-lyrics-display-synced-line[data-past] .line { animation-name: none; opacity: var(--lyrics-display-synced-line-opacity, 1); } :host([detail-line-motion]) amp-lyrics-display-synced-line:has(~ [is-current]) .line { animation-duration: var(--lyrics-past-line-fade-duration, 1s); }`;
 
@@ -173,6 +178,7 @@ export class AmpLyricsDisplayTimeSynced extends HTMLElement {
         this.topSpacer,
         this.bottomSpacer,
         runtimeStyle,
+        wordTimingStyle,
         instrumentalTransitionStyle,
       );
 

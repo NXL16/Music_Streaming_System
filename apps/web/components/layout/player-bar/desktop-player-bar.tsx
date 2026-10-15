@@ -70,6 +70,12 @@ const restrictQueueToVerticalAxis: Modifier = ({ transform }) => ({
 });
 
 function PlayerSongArtwork({ song }: { song: PlayerSong }) {
+  const isVideo = song.playbackKind === "video";
+  const videoPoster =
+    song.video?.posterSrcSet ??
+    song.video?.poster ??
+    song.thumbnailArtworkSrcSet ??
+    song.artworkSrcSet;
   return (
     <div
       className="bg-(--override-placeholder-bg-color,var(--placeholder-bg-color,var(--genericJoeColor))) rounded-[inherit] box-border contain-content h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0px) min-w-(--artwork-override-min-width,0px) overflow-hidden relative w-(--artwork-override-width,100%) z-(--z-default) after:block after:absolute after:top-0 after:w-full after:h-0 after:min-h-full after:min-w-full after:max-h-full after:max-w-full after:rounded-(--afterShadowBorderRadius,inherit) after:shadow-(--artworkShadowInset) after:opacity-(--containerInnerStrokeAlpha,0.25) after:pointer-events-none after:z-[calc(var(--z-default)+1)]"
@@ -89,17 +95,14 @@ function PlayerSongArtwork({ song }: { song: PlayerSong }) {
         sizes="40px"
         src="/assets/artwork/1x1.gif"
         srcSet={
-          song.playbackKind === "video"
-            ? (song.video?.posterSrcSet ??
-              song.video?.poster ??
-              song.thumbnailArtworkSrcSet ??
-              song.artworkSrcSet)
+          isVideo
+            ? videoPoster
             : (song.thumbnailArtworkSrcSet ?? song.artworkSrcSet)
         }
         style={{ opacity: 1 }}
         width={40}
       />
-      {song.playbackKind === "video" && (
+      {isVideo && (
         <div
           data-video-playbar-media="true"
           className="absolute inset-0 z-[calc(var(--z-default)+1)]"
@@ -196,7 +199,7 @@ function SortableQueueSong({
       onClick={() => onSelect(song.id)}
       {...(draggable ? attributes : {})}
       {...(draggable ? listeners : {})}
-      className={`group ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${selected ? "selected bg-(--systemQuaternary) [--queueKeylineColor:transparent] [&+_.group]:[--queueKeylineColor:transparent]" : ""} ${active ? "active [--selectionColor:rgba(31,31,31,.04)]! [--selectedTextColor:inherit]! [--contextMenuEllipsisFillOverride:inherit]! bg-(--selectionColor)! dark:[--selectionColor:hsla(0,0%,100%,.05)]!" : ""} ${isDragging ? "opacity-40 z-[calc(var(--z-default)+3)]" : ""} [--artwork-override-height:auto] [--artwork-override-max-width:40px] [--artwork-override-max-height:40px] [--artwork-override-width:40px] [--queueKeylineColor:var(--labelDivider)] items-center rounded-md gap-x-3 grid grid-cols-[[left-edge]_40px_[artwork-edge]_calc(100%-104px)_[title-edge]_40px_[right-edge]] grid-rows-[55px] [outline:none] px-2.5 before:self-start before:[border-top:.5px_solid_var(--queueKeylineColor)] before:content-[''] before:col-[artwork-edge/right-edge] before:row-span-full before:h-0 first:before:col-[left-edge/right-edge] [&.selected]:before:border-t-transparent`}
+      className={`group ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${selected ? "selected bg-(--systemQuaternary) [--queueKeylineColor:transparent] [&+_.group]:[--queueKeylineColor:transparent]" : ""} ${active ? "active [--selectionColor:rgba(31,31,31,.04)]! [--selectedTextColor:inherit]! [--contextMenuEllipsisFillOverride:inherit]! bg-(--selectionColor)! dark:[--selectionColor:hsla(0,0%,100%,.05)]!" : ""} ${isDragging ? "relative z-[calc(var(--z-default)+3)] opacity-40" : ""} [--artwork-override-height:auto] [--artwork-override-max-width:40px] [--artwork-override-max-height:40px] [--artwork-override-width:40px] [--queueKeylineColor:var(--labelDivider)] items-center rounded-md gap-x-3 grid grid-cols-[[left-edge]_40px_[artwork-edge]_calc(100%-104px)_[title-edge]_40px_[right-edge]] grid-rows-[55px] [outline:none] px-2.5 before:self-start before:[border-top:.5px_solid_var(--queueKeylineColor)] before:content-[''] before:col-[artwork-edge/right-edge] before:row-span-full before:h-0 first:before:col-[left-edge/right-edge] [&.selected]:before:border-t-transparent`}
     >
       <div className="rounded-[3px] col-[left-edge/artwork-edge] row-span-full relative">
         <PlayerSongArtwork song={song} />
@@ -313,6 +316,16 @@ export function DesktopPlayerBar({
   const [queueMounted, setQueueMounted] = useState(false);
   const [isOpenMusicPlayer, setIsOpenMusicPlayer] = useState(false);
   const [isMusicPlayerLyricOpen, setIsMusicPlayerLyricOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isVideoPlayback) return;
+
+    queueMicrotask(() => {
+      setIsOpenMusicPlayer(false);
+      setIsMusicPlayerLyricOpen(false);
+    });
+  }, [isVideoPlayback]);
+
   const shuffleableManualSongCount = useMemo(
     () => countShuffleableManualSongs(queue, currentIndex),
     [currentIndex, queue],
@@ -868,7 +881,7 @@ export function DesktopPlayerBar({
                     data-player-drawer
                     className={`min-[1000px]:backdrop-saturate-220 min-[1000px]:backdrop-blur-lg min-[1000px]:bg-(--glassMaterialBackground) min-[1000px]:shadow-[0_10px_40px_var(--glassMaterialShadowColor)] min-[1000px]:h-screen min-[1000px]:overflow-y-hidden min-[1000px]:top-0 border-s-[0.5px] border-s-(--systemQuaternary) bottom-0 inset-e-0 overflow-x-hidden fixed scroll-pt-14.5 top-13.5 w-75 z-[calc(var(--z-web-chrome)+1)] [--side-panel-horizontal-padding:20px] transition-transform duration-300 ease-[cubic-bezier(.215,.61,.355,1)] ${showLyrics ? "translate-x-0" : "translate-x-full"}`}
                   >
-                    <div className="h-[calc(100dvh-58px)] overflow-y-auto">
+                    <div className="h-[calc(100dvh-54px)] overflow-y-auto">
                       <div className="group [--lyrics-linear-gradient:linear-gradient(180deg,#000,transparent)]">
                         <div className="group-hover:opacity-100 [--lyrics-toggle-button-size:26px] bg-(--lyrics-bg) text-[0] my-2.5 mx-4 opacity-0 p-1.25 absolute right-0 align-top z-(--z-default)">
                           <button
@@ -987,9 +1000,9 @@ export function DesktopPlayerBar({
                             </DndContext>
                           )}
 
-                          {hasManualUpcomingSongs &&
-                            hasAutoplayUpcomingSongs && (
-                              <>
+                          {hasAutoplayUpcomingSongs && (
+                            <>
+                              {hasManualUpcomingSongs && (
                                 <div className="ms-2.5 [border-bottom:var(--keyline-border-style)] me-2.5">
                                   <div className="items-center flex pt-3.5">
                                     <div className="shrink-0 size-5 me-1.5">
@@ -1009,6 +1022,19 @@ export function DesktopPlayerBar({
                                     Similar music will keep playing
                                   </p>
                                 </div>
+                              )}
+                              <DndContext
+                                collisionDetection={closestCenter}
+                                modifiers={[restrictQueueToVerticalAxis]}
+                                onDragEnd={handleQueueDragEnd}
+                                sensors={queueSensors}
+                              >
+                                <SortableContext
+                                  items={autoplayUpcomingSongs.map(
+                                    (song) => song.id,
+                                  )}
+                                  strategy={verticalListSortingStrategy}
+                                >
                                 <ul>
                                   {autoplayUpcomingSongs.map((song) => (
                                     <SortableQueueSong
@@ -1016,7 +1042,7 @@ export function DesktopPlayerBar({
                                       song={song}
                                       userId={userId}
                                       isFavorite={favoriteSongIds.has(song.id)}
-                                      draggable={false}
+                                      draggable={!stationMode}
                                       selected={selectedQueueSongId === song.id}
                                       active={activeQueueSongId === song.id}
                                       selectedRowRef={selectedQueueRowRef}
@@ -1024,25 +1050,9 @@ export function DesktopPlayerBar({
                                     />
                                   ))}
                                 </ul>
-                              </>
-                            )}
-
-                          {isAutoplayOnly && (
-                            <ul>
-                              {autoplayUpcomingSongs.map((song) => (
-                                <SortableQueueSong
-                                  key={song.id}
-                                  song={song}
-                                  userId={userId}
-                                  isFavorite={favoriteSongIds.has(song.id)}
-                                  draggable={false}
-                                  selected={selectedQueueSongId === song.id}
-                                  active={activeQueueSongId === song.id}
-                                  selectedRowRef={selectedQueueRowRef}
-                                  onSelect={selectQueueSong}
-                                />
-                              ))}
-                            </ul>
+                                </SortableContext>
+                              </DndContext>
+                            </>
                           )}
                         </div>
                       </div>

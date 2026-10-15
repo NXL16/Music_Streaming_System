@@ -53,13 +53,7 @@ export const roomNavigationItems: SidebarItem[] = roomUrl
         key: "room",
         label: "Room",
         href: roomUrl,
-        icon: (
-          <AudioLines
-            className="h-4 w-4 text-[#dad6d6]"
-            strokeWidth={1.5}
-            aria-hidden="true"
-          />
-        ),
+        icon: <AudioLines strokeWidth={1.5} aria-hidden="true" />,
         external: true,
       },
     ]
@@ -227,6 +221,6 @@ export const identityAdminItems: SidebarItem[] = [
     key: "admin",
     label: "Admin",
     href: "/admin",
-    icon: <ShieldCheck className="h-5 w-5" aria-hidden="true" />,
+    icon: <ShieldCheck aria-hidden="true" />,
   },
 ];

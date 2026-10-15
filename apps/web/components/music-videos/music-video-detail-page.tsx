@@ -195,8 +195,8 @@ export function MusicVideoDetailPage({
     altText: `${video.songTitle} Music Video`,
     imageSrcSet: video.posterSrcSet || posterUrl || "/assets/artwork/1x1.gif",
     artworkColors: {
-      bg: video.songArtwork?.bgColor || "#2c2c2e",
-      main: video.songArtwork?.bgColor || "#2c2c2e",
+      bg: video.posterBgColor || video.songArtwork?.bgColor || "#2c2c2e",
+      main: video.posterBgColor || video.songArtwork?.bgColor || "#2c2c2e",
     },
     aspectRatio: "1.7777777777777777",
     sizes: "(max-width: 999px) 100vw, 790px",

@@ -108,6 +108,36 @@ describe("SegmentedMediaPlayer stalled playback recovery", () => {
     expect(fillBuffer).toHaveBeenCalledOnce();
   });
 
+  it("only requires the tail after a buffered seek before ending the stream", () => {
+    const player = new MsePlayer() as unknown as PlayerInternals;
+    const fillBuffer = vi.fn().mockResolvedValue(undefined);
+    player.metadata = {
+      segments: [
+        { startTimeSec: 0, duration: 10 },
+        { startTimeSec: 10, duration: 10 },
+        { startTimeSec: 20, duration: 10 },
+        { startTimeSec: 30, duration: 10 },
+        { startTimeSec: 40, duration: 10 },
+        { startTimeSec: 50, duration: 10 },
+      ],
+    };
+    player.audio = {
+      currentTime: 50,
+      buffered: {
+        length: 1,
+        start: () => 50,
+        end: () => 60,
+      } as TimeRanges,
+    };
+    player.requiredTailStartIndex = 1;
+    player.downloading = false;
+    player.fillBuffer = fillBuffer;
+
+    player.onSeeking();
+
+    expect(player.requiredTailStartIndex).toBe(5);
+  });
+
   it("does not mark fragments appended before Safari creates its SourceBuffer", async () => {
     const player = new MsePlayer() as unknown as PlayerInternals;
     const fetchAndAppendBatch = vi.fn().mockResolvedValue(undefined);

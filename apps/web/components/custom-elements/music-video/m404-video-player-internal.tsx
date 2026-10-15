@@ -1,332 +1,61 @@
-"use client";
+import { ElementType, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import VideoPlay from "./m404-video-player";
 
-import {
-  type ElementType,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
-import {
-  createAmbientHlsPlayer,
-  isHlsPlaybackSource,
-  type AmbientHlsPlayer,
-} from "../ambient-hls-player";
-import type { MusicVideoSource } from "./music-video-player";
-import M404VideoKeyboardControls from "./m404-video-keyboard-controls";
-import M404VideoPlayer, { type VideoPlaybackStatus } from "./m404-video-player";
-import { useVideoFramePreview } from "./use-video-frame-preview";
-import { usePlayerStore } from "@/lib/player/use-player-store";
-import { videoPlaybackController } from "@/lib/player/video-playback-controller";
+const CustomElement = "m404-video-played-internal" as ElementType;
 
-const InternalTag = "amp-video-player-internal" as ElementType;
-const CONTROLS_IDLE_DELAY_MS = 2_500;
+const M404_CSS = `:host { --overlay-spacing-vt: 10px; --overlay-spacing-hz: 10px; --pse-overlay-spacing-vt: 10px; --pse-overlay-margin-left: 10px; --ratings-overlay-spacing-vt: 10px; --ratings-overlay-spacing-hz: 10px; display: flex; align-items: center; justify-content: stretch; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; background-color: rgb(0, 0, 0); } :host .player-internal__playback-control { --playback-control-button-width: 22px; --playback-control-button-height: 22px; --playback-control-icon-width: 100%; --playback-control-icon-height: 100%; } :host .player-internal__playback-control.player-internal__playback-play { margin: 0px 16px; } :host(:fullscreen) { height: 100%; background-color: rgb(0, 0, 0); } :host(:fullscreen) amp-video-player { width: 100vw; height: 100vh; } @media (min-width: 484px) { :host { --overlay-spacing-vt: 20px; --overlay-spacing-hz: 20px; --pse-overlay-spacing-vt: 20px; --pse-overlay-margin-left: 20px; --ratings-overlay-spacing-vt: 20px; --ratings-overlay-spacing-hz: 20px; } } @media (min-width: 1920px) { :host { --overlay-spacing-vt: 60px; --overlay-spacing-hz: 100px; --pse-overlay-spacing-vt: 60px; --pse-overlay-margin-left: 100px; --ratings-overlay-spacing-vt: 60px; --ratings-overlay-spacing-hz: 100px; } } [lang]:lang(ar) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Arabic UI Text", "SF Pro Icons", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(bn) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Bengali", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(gu) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Gujarati", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(he) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Arial Hebrew", "SF Pro Icons", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(hi) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Devanagari", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(ja) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Hiragino Sans", "SF Pro Icons", "Hiragino Kaku Gothic Pro", "ヒラギノ角ゴ Pro W3", メイリオ, Meiryo, "ＭＳ Ｐゴシック", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(kn) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Kannada", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(ko) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Apple SD Gothic Neo", "SF Pro Icons", "Apple Gothic", "HY Gulim", MalgunGothic, "HY Dotum", "Lexi Gulim", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(ml) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Malayalam", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(mr) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Devanagari", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(or) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Odia", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(pa) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Gurmukhi", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(ta) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Tamil", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(te) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Telugu", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(th) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Thonburi Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(ur) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Geeza Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(zh-CN) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang SC", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(zh-HK) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang HK", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(zh-MO) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang HK", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } [lang]:lang(zh-TW) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang TC", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; }.info__eyebrow { font-size: 17px; line-height: 1.29412; font-weight: 700; letter-spacing: 0em; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; color: var(--white80, rgba(255, 255, 255, 0.8)); } .info__eyebrow:lang(bn) { line-height: 1.94118; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Bengali", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__eyebrow:lang(gu) { line-height: 1.94118; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Gujarati", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__eyebrow:lang(hi) { line-height: 1.94118; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Devanagari", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__eyebrow:lang(kn) { line-height: 1.94118; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Kannada", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__eyebrow:lang(ml) { line-height: 1.94118; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Malayalam", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__eyebrow:lang(mr) { line-height: 1.94118; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Devanagari", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__eyebrow:lang(or) { line-height: 1.94118; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Odia", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__eyebrow:lang(pa) { line-height: 1.94118; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Gurmukhi", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__eyebrow:lang(ta) { line-height: 1.94118; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Tamil", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__eyebrow:lang(te) { line-height: 1.94118; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Telugu", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__eyebrow:lang(ur) { line-height: 1.94118; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Geeza Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__eyebrow:lang(th) { line-height: 1.53353; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Thonburi Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__eyebrow:lang(zh) { font-weight: 600; } .info__eyebrow:lang(ar) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Arabic UI Text", "SF Pro Icons", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__eyebrow:lang(he) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Arial Hebrew", "SF Pro Icons", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__eyebrow:lang(ja) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Hiragino Sans", "SF Pro Icons", "Hiragino Kaku Gothic Pro", "ヒラギノ角ゴ Pro W3", メイリオ, Meiryo, "ＭＳ Ｐゴシック", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__eyebrow:lang(ko) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Apple SD Gothic Neo", "SF Pro Icons", "Apple Gothic", "HY Gulim", MalgunGothic, "HY Dotum", "Lexi Gulim", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__eyebrow:lang(zh-CN) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang SC", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__eyebrow:lang(zh-HK) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang HK", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__eyebrow:lang(zh-MO) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang HK", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__eyebrow:lang(zh-TW) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang TC", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } @media (max-width: 734px) { .info__eyebrow { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } } .info__title { font-size: 26px; line-height: 1.23077; font-weight: 700; letter-spacing: 0em; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; margin-top: 1px; margin-bottom: 10px; } .info__title:lang(bn) { line-height: 1.84625; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Bengali", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__title:lang(gu) { line-height: 1.84625; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Gujarati", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__title:lang(hi) { line-height: 1.84625; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Devanagari", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__title:lang(kn) { line-height: 1.84625; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Kannada", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__title:lang(ml) { line-height: 1.84625; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Malayalam", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__title:lang(mr) { line-height: 1.84625; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Devanagari", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__title:lang(or) { line-height: 1.84625; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Odia", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__title:lang(pa) { line-height: 1.84625; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Gurmukhi", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__title:lang(ta) { line-height: 1.84625; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Tamil", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__title:lang(te) { line-height: 1.84625; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Kohinoor Telugu", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__title:lang(ur) { line-height: 1.84625; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Geeza Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__title:lang(th) { line-height: 1.4585; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Thonburi Pro", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__title:lang(zh) { font-weight: 600; }.info__title:lang(ar) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Arabic UI Display", "SF Pro Icons", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__title:lang(he) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Arial Hebrew", "SF Pro Icons", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__title:lang(ja) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Hiragino Sans", "SF Pro Icons", "Hiragino Kaku Gothic Pro", "ヒラギノ角ゴ Pro W3", メイリオ, Meiryo, "ＭＳ Ｐゴシック", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__title:lang(ko) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "Apple SD Gothic Neo", "SF Pro Icons", "Apple Gothic", "HY Gulim", MalgunGothic, "HY Dotum", "Lexi Gulim", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__title:lang(zh-CN) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang SC", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__title:lang(zh-HK) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang HK", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__title:lang(zh-MO) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang HK", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } .info__title:lang(zh-TW) { font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "SF Pro", "PingFang TC", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif; } @media (max-width: 734px) { .info__title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } } .footer__row { display: flex; flex: 0 0 100%; align-items: center; justify-content: space-between; } .footer__column { display: flex; flex: 0 0 33.3333%; align-items: center; justify-content: center; } .footer__column:first-child { justify-content: flex-start; } .footer__column:last-child { justify-content: flex-end; } .footer__control { width: 22px; height: 22px; } .footer__control:not(:first-child) { margin-left: 8px; } .footer__control.unsupported { display: none; } .footer__control--more { margin: 0px; padding: 0px; display: inline-block; border: 0px; background-color: transparent; outline: none; cursor: pointer; appearance: none; font-family: inherit; line-height: inherit; font-size: 0px; color: var(--button-color, white); background-repeat: no-repeat; transition: opacity 0.15s; background-size: 16px auto; } .footer__control--more:hover { opacity: 0.8; } .footer__control--more[disabled], .footer__control--more:disabled { color: black; opacity: 0.3; cursor: default; pointer-events: none; } @supports (background-image: -webkit-named-image(apple-pay-logo-black)) or (-webkit-appearance: -apple-pay-button) { .no-safari { display: none; } }`;
+const COMPONENT_STYLE_01 = `.playback-controls-skip{width:var(--playback-control-button-width, 32px);height:var(--playback-control-button-height, 32px);display:flex;flex:0 0 auto;align-items:stretch;justify-content:stretch;position:relative}.playback-controls-skip button{width:100%;height:100%;position:relative;transition:color 0.2s ease-out}.playback-controls-skip m404-icon{width:var(--playback-control-icon-width, 32px);height:var(--playback-control-icon-height, 28px);display:block;position:absolute;top:50%;left:50%;transform:translate(-50%, -50%)}button.skip-control{margin:0;padding:0;display:inline-flex;border:0;background-color:transparent;outline:none;cursor:pointer;appearance:none;font-family:inherit;font-size:inherit;line-height:inherit;width:100%;height:100%;align-items:center;justify-content:center;position:relative;transform:scale(1);color:var(--skip-control-color, var(--white80, rgba(255, 255, 255, 0.8)));transition:opacity 0.15s linear, transform 0.05s linear}button.skip-control::-moz-focus-inner{border:0}button.skip-control:hover:not([disabled]),button.skip-control:focus-visible:not([disabled]){color:var(--skip-control-color-hover, var(--skip-control-color, #fff))}button.skip-control:disabled{opacity:0.4;cursor:default}button.skip-control:focus-visible{--sk-focus-offset:2px;outline:4px solid var(--sk-focus-color, var(--keyColor-focus-color, var(--keyColor, #0071e3)));outline-offset:var(--sk-focus-offset, 1px)}button.skip-control:active{transform:scale(0.85)}button.skip-control:active:disabled{transform:none}.skip-control__label{position:absolute;clip:rect(1px, 1px, 1px, 1px);clip-path:inset(0 0 99.9% 99.9%);overflow:hidden;height:1px;width:1px;padding:0;border:0}`;
+const COMPONENT_STYLE_02 = `.playback-controls-play{width:var(--playback-control-button-width, 32px);height:var(--playback-control-button-height, 32px);display:flex;flex:0 0 auto;align-items:stretch;justify-content:stretch;position:relative}.playback-controls-play button{width:100%;height:100%;position:relative;transition:color 0.2s ease-out}.playback-controls-play m404-icon{width:var(--playback-control-icon-width, 32px);height:var(--playback-control-icon-height, 28px);display:block;position:absolute;top:50%;left:50%;transform:translate(-50%, -50%)}button.playback-play__play,button.playback-play__pause,button.playback-play__stop{position:relative;transition:transform 0.2s ease-out;margin:0;padding:0;display:inline-block;border:0;background-color:transparent;outline:none;cursor:pointer;appearance:none;font-family:inherit;font-size:inherit;line-height:inherit;width:100%;height:100%;position:absolute;top:0;left:0;color:var(--playback-controls-play-color, #fff)}button.playback-play__play:enabled:active,button.playback-play__pause:enabled:active,button.playback-play__stop:enabled:active{transform:scale(0.9)}button.playback-play__play:enabled:active::before,button.playback-play__pause:enabled:active::before,button.playback-play__stop:enabled:active::before{width:38px;height:38px;opacity:0.2}button.playback-play__play::before,button.playback-play__pause::before,button.playback-play__stop::before{content:"";width:32px;height:32px;display:block;position:absolute;z-index:-1;top:50%;left:50%;transform:translate(-50%, -50%);border-radius:50%;background:#000;transition:opacity 0.2s ease-out;opacity:0}@media (prefers-color-scheme: dark){button.playback-play__play::before,button.playback-play__pause::before,button.playback-play__stop::before{background:#fff}}button.playback-play__play::-moz-focus-inner,button.playback-play__pause::-moz-focus-inner,button.playback-play__stop::-moz-focus-inner{border:0}button.playback-play__play:hover:not([disabled]),button.playback-play__play:focus-visible:not([disabled]),button.playback-play__pause:hover:not([disabled]),button.playback-play__pause:focus-visible:not([disabled]),button.playback-play__stop:hover:not([disabled]),button.playback-play__stop:focus-visible:not([disabled]){color:var(--playback-controls-play-color-hover, var(--playback-controls-play-color, #fff))}button.playback-play__play:focus-visible,button.playback-play__pause:focus-visible,button.playback-play__stop:focus-visible{--sk-focus-offset:2px;outline:4px solid var(--sk-focus-color, var(--keyColor-focus-color, var(--keyColor, #0071e3)));outline-offset:var(--sk-focus-offset, 1px)}button.playback-play__play[aria-hidden=true],button.playback-play__pause[aria-hidden=true],button.playback-play__stop[aria-hidden=true]{opacity:0;pointer-events:none}button.playback-play__play:disabled,button.playback-play__pause:disabled,button.playback-play__stop:disabled{opacity:0.4;cursor:default}.button__label{position:absolute;clip:rect(1px, 1px, 1px, 1px);clip-path:inset(0 0 99.9% 99.9%);overflow:hidden;height:1px;width:1px;padding:0;border:0}`;
+const COMPONENT_STYLE_03 = `.icon{display:block}.icon svg{width:inherit;height:inherit;display:block;color:currentColor;pointer-events:none}.icon svg *{fill:currentColor}`;
 
-type Props = {
-  source: MusicVideoSource;
-  open: boolean;
-  previewEnabled: boolean;
-  isPlaybarReady: boolean;
-  onClose: () => void;
-  onControlsChange: (visible: boolean) => void;
-};
-
-export default function M404VideoPlayerInternal({
-  source,
-  open,
-  previewEnabled,
-  isPlaybarReady,
-  onClose,
-  onControlsChange,
-}: Props) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const videoMountRef = useRef<HTMLDivElement>(null);
-  const containerRef = useRef<HTMLElement>(null);
-  const hlsRef = useRef<AmbientHlsPlayer | null>(null);
-  const onCloseRef = useRef(onClose);
-  const openRef = useRef(open);
-  const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const controlsVisibleRef = useRef(true);
-  const [attempt, setAttempt] = useState(0);
-  const [controlsVisible, setControlsVisible] = useState(true);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [status, setStatus] = useState<VideoPlaybackStatus>("loading");
-  const playerPlaying = usePlayerStore((state) => state.playing);
-  const playbackRate = usePlayerStore((state) => state.playbackRate);
-  const setPlaybackTimeMs = usePlayerStore((state) => state.setPlaybackTimeMs);
-  const pausePlayer = usePlayerStore((state) => state.pause);
-  const next = usePlayerStore((state) => state.next);
-  const {
-    image: previewImage,
-    previewAt,
-    videoRef: previewVideoRef,
-  } = useVideoFramePreview(source.src, attempt, previewEnabled);
-
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
-
-  useEffect(() => {
-    openRef.current = open;
-    if (!open) return;
-
-    const video = videoRef.current;
-    if (!video) return;
-    setCurrentTime(video.currentTime);
-    setDuration(video.duration);
-  }, [open]);
+export default function VideoPlayInternal({
+  controlsVisible,
+  onActivity,
+}: {
+  controlsVisible: boolean;
+  onActivity: () => void;
+}) {
+  const hostRef = useRef<HTMLElement>(null);
+  const [shadowRoot, setShadowRoot] = useState<ShadowRoot | null>(null);
 
   useLayoutEffect(() => {
-    const video = document.createElement("video");
-    video.playsInline = true;
-    video.preload = "metadata";
-    video.setAttribute("disableRemotePlayback", "");
-    videoRef.current = video;
-    return () => {
-      if (videoRef.current === video) videoRef.current = null;
-      video.remove();
-    };
-  }, []);
+    const el = hostRef.current;
+    if (!el) return;
 
-  const setControls = useCallback(
-    (visible: boolean) => {
-      if (controlsVisibleRef.current === visible) return;
-      controlsVisibleRef.current = visible;
-      setControlsVisible(visible);
-      onControlsChange(visible);
-    },
-    [onControlsChange],
-  );
-  const revealControls = useCallback(() => {
-    setControls(true);
-    if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
-    if (videoRef.current && !videoRef.current.paused) {
-      controlsTimerRef.current = setTimeout(() => {
-        controlsTimerRef.current = null;
-        setControls(false);
-      }, CONTROLS_IDLE_DELAY_MS);
-    }
-  }, [setControls]);
+    let shadow = el.shadowRoot;
+    if (!shadow) shadow = el.attachShadow({ mode: "open" });
 
-  useEffect(
-    () => () => {
-      if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
-    },
-    [],
-  );
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    const detachVideo = videoPlaybackController.attach(video);
-
-    setStatus("loading");
-    setCurrentTime(0);
-    setDuration(0);
-
-    const playIfRequested = () => {
-      if (!usePlayerStore.getState().playing) return;
-      // Source replacement and HLS attachment can transiently abort an early
-      // play request. Keep the user's Play intent and retry on `canplay`.
-      void video.play().catch(() => undefined);
-    };
-
-    const syncTime = () => {
-      // The shared player bar gets its position imperatively. Keeping modal
-      // state in sync while it is closed only creates needless React renders.
-      if (openRef.current) {
-        setCurrentTime(video.currentTime);
-        setDuration(video.duration);
+    if (
+      "adoptedStyleSheets" in Document.prototype &&
+      "adoptedStyleSheets" in ShadowRoot.prototype
+    ) {
+      if (shadow.adoptedStyleSheets.length === 0) {
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(M404_CSS);
+        shadow.adoptedStyleSheets = [sheet];
       }
-      setPlaybackTimeMs(Math.max(0, Math.round(video.currentTime * 1000)));
-      videoPlaybackController.publishTime(
-        source.src,
-        video.currentTime,
-        video.duration,
-      );
-    };
-    const onPlay = () => {
-      setStatus("ready");
-      revealControls();
-    };
-    const onPause = () => {
-      if (usePlayerStore.getState().playing) pausePlayer();
-      setControls(true);
-    };
-    const onError = () => {
-      setStatus("error");
-      pausePlayer();
-    };
-    const onEnded = () => {
-      videoPlaybackController.publishEnded(source.src);
-      if (!next(true)) onCloseRef.current();
-    };
-
-    video.addEventListener("loadedmetadata", syncTime);
-    video.addEventListener("canplay", playIfRequested);
-    video.addEventListener("timeupdate", syncTime);
-    video.addEventListener("play", onPlay);
-    video.addEventListener("pause", onPause);
-    video.addEventListener("error", onError);
-    video.addEventListener("ended", onEnded);
-
-    if (isHlsPlaybackSource(source.src)) {
-      hlsRef.current = createAmbientHlsPlayer({
-        video,
-        src: source.src,
-        profile: "hero",
-        onPlayable: playIfRequested,
-        onReady: () => {
-          syncTime();
-          setStatus("ready");
-        },
-        onFatalError: () => {
-          setStatus("error");
-          pausePlayer();
-        },
-      });
-      hlsRef.current.start();
-    } else {
-      video.src = source.src;
     }
 
-    return () => {
-      hlsRef.current?.destroy();
-      hlsRef.current = null;
-      video.removeEventListener("loadedmetadata", syncTime);
-      video.removeEventListener("canplay", playIfRequested);
-      video.removeEventListener("timeupdate", syncTime);
-      video.removeEventListener("play", onPlay);
-      video.removeEventListener("pause", onPause);
-      video.removeEventListener("error", onError);
-      video.removeEventListener("ended", onEnded);
-      video.pause();
-      video.removeAttribute("src");
-      video.load();
-      detachVideo();
-    };
-  }, [
-    attempt,
-    next,
-    pausePlayer,
-    revealControls,
-    setControls,
-    setPlaybackTimeMs,
-    source.src,
-  ]);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    if (playerPlaying) {
-      void video.play().catch(() => undefined);
-    } else {
-      video.pause();
-    }
-  }, [playerPlaying, source.src]);
-
-  useEffect(() => {
-    videoPlaybackController.setPlaybackRate(playbackRate);
-  }, [playbackRate, source.src]);
-
-  const toggle = useCallback(() => {
-    if (status === "error") return;
-    usePlayerStore.getState().togglePlayback();
-    revealControls();
-  }, [revealControls, status]);
-  const seek = useCallback(
-    (time: number) => {
-      const video = videoRef.current;
-      if (!video || !Number.isFinite(video.duration)) return;
-      const nextTime = Math.max(0, Math.min(video.duration, time));
-      setCurrentTime(nextTime);
-      video.currentTime = nextTime;
-      revealControls();
-    },
-    [revealControls],
-  );
-  const skip = useCallback(
-    (seconds: number) => seek((videoRef.current?.currentTime || 0) + seconds),
-    [seek],
-  );
-  const fullscreen = useCallback(() => {
-    const element = containerRef.current;
-    if (!element) return;
-    if (document.fullscreenElement) void document.exitFullscreen();
-    else void element.requestFullscreen?.();
+    setShadowRoot(shadow);
   }, []);
-  const isInPlaybar = !open && isPlaybarReady;
-
-  useLayoutEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    let frame: number | undefined;
-    const mountVideo = () => {
-      const target = isInPlaybar
-        ? document.querySelector<HTMLElement>(
-            "[data-video-playbar-media='true']",
-          )
-        : videoMountRef.current;
-      if (!target) {
-        frame = requestAnimationFrame(mountVideo);
-        return;
-      }
-      video.className = isInPlaybar
-        ? "size-full rounded-[inherit] object-cover"
-        : "size-full object-contain";
-      video.poster = source.poster ?? "";
-      if (video.parentElement !== target) target.append(video);
-    };
-
-    mountVideo();
-    return () => {
-      if (frame) cancelAnimationFrame(frame);
-    };
-  }, [isInPlaybar, source.poster]);
 
   return (
-    <InternalTag
-      ref={containerRef}
-      className={open ? "absolute inset-0 block" : "pointer-events-none hidden"}
-      hydrated=""
-    >
-      <video
-        ref={previewVideoRef}
-        className="pointer-events-none absolute size-px opacity-0"
-        muted
-        playsInline
-        preload="metadata"
-        crossOrigin="anonymous"
-        aria-hidden="true"
-      />
-      <M404VideoPlayer
-        controlsVisible={controlsVisible}
-        currentTime={currentTime}
-        duration={duration}
-        onActivity={revealControls}
-        onFullscreen={fullscreen}
-        onPreview={previewAt}
-        onRetry={() => setAttempt((value) => value + 1)}
-        onSeek={seek}
-        onSkip={skip}
-        onToggle={toggle}
-        playing={playerPlaying}
-        previewImage={previewImage}
-        source={source}
-        status={status}
-        mediaMountRef={videoMountRef}
-      />
-      <M404VideoKeyboardControls
-        enabled={open}
-        onActivity={revealControls}
-        onClose={onClose}
-        onFullscreen={fullscreen}
-        onSeek={skip}
-        onToggle={toggle}
-      />
-    </InternalTag>
+    <CustomElement ref={hostRef} hydrated>
+      {shadowRoot &&
+        createPortal(
+          <>
+            <VideoPlay
+              controlsVisible={controlsVisible}
+              onActivity={onActivity}
+            />
+
+            <style>{COMPONENT_STYLE_01}</style>
+            <style>{COMPONENT_STYLE_02}</style>
+            <style>{COMPONENT_STYLE_03}</style>
+          </>,
+          shadowRoot,
+        )}
+    </CustomElement>
   );
 }

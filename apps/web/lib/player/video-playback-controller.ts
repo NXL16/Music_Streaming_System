@@ -13,6 +13,14 @@ function publish(event: VideoPlaybackEvent) {
   for (const listener of listeners) listener(event);
 }
 
+function seekVideo(time: number) {
+  const video = videoElement;
+  if (!video || !Number.isFinite(time) || !Number.isFinite(video.duration)) {
+    return;
+  }
+  video.currentTime = Math.max(0, Math.min(video.duration, time));
+}
+
 /** The single imperative boundary between video media and player UI. */
 export const videoPlaybackController = {
   attach(video: HTMLVideoElement) {
@@ -24,11 +32,11 @@ export const videoPlaybackController = {
     };
   },
   seek(time: number) {
-    const video = videoElement;
-    if (!video || !Number.isFinite(time) || !Number.isFinite(video.duration)) {
-      return;
-    }
-    video.currentTime = Math.max(0, Math.min(video.duration, time));
+    seekVideo(time);
+  },
+  skip(seconds: number) {
+    if (!Number.isFinite(seconds)) return;
+    seekVideo((videoElement?.currentTime ?? 0) + seconds);
   },
   play() {
     const video = videoElement;

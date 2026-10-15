@@ -71,7 +71,8 @@ export default function HomePage() {
             (reference) =>
               reference.type === "stations" &&
               /^artist-station-[a-f0-9]{32}$/.test(reference.id) &&
-              stations?.[reference.id]?.attributes?.stationArtworkReady !== true,
+              stations?.[reference.id]?.attributes?.stationArtworkReady !==
+                true,
           )
           .map((reference) => reference.id),
       ),
@@ -95,8 +96,7 @@ export default function HomePage() {
   }, [artistStationIds, refresh]);
 
   const shelvesWithRecentlyPlayed = useMemo(
-    () =>
-      ensureRecentlyPlayedShelf(shelves, recentlyPlayedShelf),
+    () => ensureRecentlyPlayedShelf(shelves, recentlyPlayedShelf),
     [recentlyPlayedShelf, shelves],
   );
 
@@ -244,9 +244,6 @@ export default function HomePage() {
                       : undefined
                   }
                   prioritizeFirstCard={index === 0}
-                  keepHeroVideoMountedHorizontally={
-                    shelf.displayKind === "MusicNotesHeroShelf"
-                  }
                   shelfId={shelf.id}
                   scrollToStartKey={
                     shelf.id === RECENTLY_PLAYED_SHELF_ID

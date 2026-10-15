@@ -7,6 +7,7 @@ import { getAccessToken } from "@/lib/auth/access-token-store";
 
 const MEDIA_RECOVERY_COOLDOWN_MS = 5_000;
 const MAX_NETWORK_RECOVERY_ATTEMPTS = 1;
+const SESSION_RECOVERY_DELAYS_MS = [1_000, 2_500, 5_000] as const;
 
 let hlsRuntimePromise: Promise<typeof import("hls.js")> | undefined;
 
@@ -55,11 +56,15 @@ export function createAmbientHlsPlayer({
   let hls: Hls | null = null;
   let nativeCanPlayHandler: (() => void) | undefined;
   let nativeManifestObjectUrl: string | undefined;
+  let nativeManifestAbortController: AbortController | undefined;
   let loading: Promise<void> | undefined;
   let destroyed = false;
   let lastMediaRecoveryAt = 0;
   let networkRecoveryAttempts = 0;
   let reportedReady = false;
+  let loadRequested = false;
+  let sessionRecoveryAttempts = 0;
+  let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
 
   const cleanupNativeHandler = () => {
     if (!nativeCanPlayHandler) return;
@@ -67,12 +72,52 @@ export function createAmbientHlsPlayer({
     nativeCanPlayHandler = undefined;
   };
 
+  const clearRecoveryTimer = () => {
+    if (!recoveryTimer) return;
+    clearTimeout(recoveryTimer);
+    recoveryTimer = undefined;
+  };
+
+  const clearMediaSource = () => {
+    cleanupNativeHandler();
+    nativeManifestAbortController?.abort();
+    nativeManifestAbortController = undefined;
+    if (nativeManifestObjectUrl) URL.revokeObjectURL(nativeManifestObjectUrl);
+    nativeManifestObjectUrl = undefined;
+    video.currentTime = 0;
+    video.removeAttribute("src");
+    video.load();
+  };
+
+  const restartAfterFatalError = () => {
+    if (destroyed || !loadRequested) return;
+    const delay = SESSION_RECOVERY_DELAYS_MS[sessionRecoveryAttempts];
+    if (delay === undefined) {
+      onFatalError();
+      return;
+    }
+
+    sessionRecoveryAttempts += 1;
+    hls?.destroy();
+    hls = null;
+    clearMediaSource();
+    clearRecoveryTimer();
+    recoveryTimer = setTimeout(() => {
+      recoveryTimer = undefined;
+      start();
+    }, delay);
+  };
+
   const startNativeFallback = () => {
-    if (destroyed || video.currentSrc) return;
-    if (!video.canPlayType("application/vnd.apple.mpegurl")) return;
+    if (destroyed || !loadRequested || nativeManifestObjectUrl) return;
+    if (!video.canPlayType("application/vnd.apple.mpegurl")) {
+      restartAfterFatalError();
+      return;
+    }
 
     nativeCanPlayHandler = () => {
       if (destroyed) return;
+      sessionRecoveryAttempts = 0;
       onReady();
       onPlayable();
     };
@@ -81,31 +126,47 @@ export function createAmbientHlsPlayer({
     const headers = new Headers();
     const token = getAccessToken();
     if (token) headers.set("Authorization", `Bearer ${token}`);
-    void fetch(src, { headers })
+    const abortController = new AbortController();
+    nativeManifestAbortController = abortController;
+    void fetch(src, { headers, signal: abortController.signal })
       .then(async (response) => {
-        if (!response.ok || destroyed)
+        if (
+          !response.ok ||
+          destroyed ||
+          !loadRequested ||
+          nativeManifestAbortController !== abortController
+        ) {
           throw new Error("HLS_MANIFEST_UNAVAILABLE");
+        }
         const playlist = await response.text();
-        if (destroyed) return;
+        if (
+          destroyed ||
+          !loadRequested ||
+          nativeManifestAbortController !== abortController
+        ) {
+          return;
+        }
+        nativeManifestAbortController = undefined;
         nativeManifestObjectUrl = URL.createObjectURL(
           new Blob([playlist], { type: "application/vnd.apple.mpegurl" }),
         );
         video.addEventListener("canplay", nativeCanPlayHandler!);
         video.src = nativeManifestObjectUrl;
       })
-      .catch(() => {
-        if (!destroyed) onFatalError();
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+        restartAfterFatalError();
       });
   };
 
   const start = () => {
     if (destroyed) return;
+    loadRequested = true;
+    clearRecoveryTimer();
     if (hls) {
       hls.startLoad(-1);
-      onPlayable();
-      return;
-    }
-    if (video.currentSrc) {
       onPlayable();
       return;
     }
@@ -113,7 +174,7 @@ export function createAmbientHlsPlayer({
 
     loading = loadHlsRuntime()
       .then(({ default: HlsRuntime }) => {
-        if (destroyed || hls || video.currentSrc) return;
+        if (destroyed || !loadRequested || hls) return;
         if (!HlsRuntime.isSupported()) {
           startNativeFallback();
           return;
@@ -123,15 +184,17 @@ export function createAmbientHlsPlayer({
         hls = instance;
 
         instance.on(HlsRuntime.Events.MANIFEST_PARSED, () => {
-          if (destroyed || hls !== instance) return;
+          if (destroyed || !loadRequested || hls !== instance) return;
           instance.startLoad(-1);
           onPlayable();
         });
 
         instance.on(HlsRuntime.Events.FRAG_BUFFERED, () => {
-          if (destroyed || hls !== instance) return;
+          if (destroyed || !loadRequested || hls !== instance) return;
           if (!reportedReady) {
             reportedReady = true;
+            networkRecoveryAttempts = 0;
+            sessionRecoveryAttempts = 0;
             onReady();
           }
         });
@@ -158,7 +221,7 @@ export function createAmbientHlsPlayer({
             return;
           }
 
-          onFatalError();
+          restartAfterFatalError();
         });
 
         instance.loadSource(src);
@@ -172,16 +235,18 @@ export function createAmbientHlsPlayer({
 
   return {
     start,
-    stopLoad: () => hls?.stopLoad(),
+    stopLoad: () => {
+      loadRequested = false;
+      clearRecoveryTimer();
+      hls?.stopLoad();
+    },
     destroy: () => {
       destroyed = true;
+      loadRequested = false;
+      clearRecoveryTimer();
       hls?.destroy();
       hls = null;
-      cleanupNativeHandler();
-      if (nativeManifestObjectUrl) URL.revokeObjectURL(nativeManifestObjectUrl);
-      nativeManifestObjectUrl = undefined;
-      video.removeAttribute("src");
-      video.load();
+      clearMediaSource();
     },
   };
 }

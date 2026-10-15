@@ -103,6 +103,29 @@ describe("Autoplay and Repeat", () => {
     ]);
   });
 
+  it("inserts Play Last after an active Autoplay song, before later recommendations", () => {
+    const player = usePlayerStore.getState();
+    player.setQueue([song("a"), song("b")]);
+    player.toggleAutoplay();
+    player.appendAutoplayTracks([song("c"), song("d")]);
+    player.next();
+    player.next();
+
+    player.enqueue([song("e")], "last");
+
+    expect(usePlayerStore.getState()).toMatchObject({
+      currentSong: expect.objectContaining({ id: "c", sourceAutoplay: true }),
+      currentIndex: 2,
+    });
+    expect(usePlayerStore.getState().queue.map((item) => item.id)).toEqual([
+      "a",
+      "b",
+      "c",
+      "e",
+      "d",
+    ]);
+  });
+
   it("turns Repeat off when Autoplay is enabled", () => {
     const player = usePlayerStore.getState();
     player.setQueue([song("a")]);

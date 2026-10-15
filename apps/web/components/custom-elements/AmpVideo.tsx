@@ -10,7 +10,8 @@ interface AmbientVideoProps {
   variant?: AmbientVideoVariant;
   /** Keeps the detail hero loaded while lightweight card video is pooled. */
   keepAlive?: boolean;
-  keepMountedHorizontally?: boolean;
+  /** Starts loading card video before it enters the viewport. */
+  preload?: boolean;
 }
 
 const AmpAmbientVideoTag = "amp-ambient-video" as ElementType;
@@ -19,13 +20,13 @@ export default function AmbientVideo({
   src,
   variant = "home",
   keepAlive = false,
-  keepMountedHorizontally = false,
+  preload = false,
 }: AmbientVideoProps) {
   const { ampElementRef, videoRef, shouldRenderMedia, isMediaReady } =
     useAmbientVideo({
       src,
       keepAlive,
-      keepMountedHorizontally,
+      preload,
     });
 
   return (
@@ -46,8 +47,8 @@ export default function AmbientVideo({
               : variant === "hero"
                 ? "absolute inset-0 size-full"
                 : "absolute bottom-[-9999px] left-[-9999px] m-auto right-[-9999px] top-[-9999px] h-(--editorialVideoHeight,100%) w-(--editorialVideoWidth,auto)"
-          } ${keepAlive && !isMediaReady ? "opacity-0" : "opacity-100"} transition-opacity duration-150`}
-          preload={keepAlive ? "auto" : "none"}
+          } ${(keepAlive || preload) && !isMediaReady ? "opacity-0" : "opacity-100"} transition-opacity duration-150`}
+          preload={keepAlive || preload ? "auto" : "none"}
           playsInline
           loop
           muted

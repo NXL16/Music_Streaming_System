@@ -70,10 +70,7 @@ function rangesOverlapSegment(
   segmentEnd: number,
 ): boolean {
   for (let index = 0; index < ranges.length; index += 1) {
-    if (
-      ranges.start(index) < segmentEnd &&
-      ranges.end(index) > segmentStart
-    ) {
+    if (ranges.start(index) < segmentEnd && ranges.end(index) > segmentStart) {
       return true;
     }
   }
@@ -358,10 +355,12 @@ export abstract class SegmentedMediaPlayer {
     const targetTime = this.audio.currentTime;
     const targetIndex = findSegmentIndex(this.metadata.segments, targetTime);
     if (this.isTimeBuffered(targetTime)) {
-      this.requiredTailStartIndex = Math.min(
-        this.requiredTailStartIndex,
-        targetIndex,
-      );
+      // End-of-stream only depends on the media still needed from the new
+      // playhead onward. Keeping an older seek position here can leave a
+      // missing, already-passed fragment as a permanent prerequisite after
+      // several scrubs. The final buffered fragment then plays, but MSE never
+      // receives endOfStream() and the audio element cannot emit `ended`.
+      this.requiredTailStartIndex = targetIndex;
       if (!this.downloading && this.getBufferAhead() < BUFFER_LOW_SEC) {
         this.fillBuffer();
       }
