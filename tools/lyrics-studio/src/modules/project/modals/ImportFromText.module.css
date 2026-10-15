@@ -1,0 +1,21 @@
+/* biome-ignore-all lint/complexity/noImportantStyles: Token colors must override the syntax-highlighter's inline styles. */
+.wordSeparator {
+	opacity: 0.5;
+}
+
+.lineSeparator {
+	color: var(--accent-11) !important;
+}
+
+.bgLinePrefix {
+	color: var(--blue-11) !important;
+}
+
+.duetLinePrefix {
+	color: var(--amber-11) !important;
+}
+
+.emptyBeatSymbol {
+	color: var(--accent-11) !important;
+	opacity: 0.5;
+}

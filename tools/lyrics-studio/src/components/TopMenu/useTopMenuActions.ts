@@ -1,0 +1,475 @@
+import { useAtom, useAtomValue, useSetAtom, useStore } from "jotai";
+import { useSetImmerAtom, withImmer } from "jotai-immer";
+import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
+import saveFile from "save-file";
+import { uid } from "uid";
+import { useFileOpener } from "$/hooks/useFileOpener.ts";
+import { applyGeneratedRuby } from "$/modules/lyric-editor/utils/ruby-generator";
+import {
+	segmentLyricLines,
+	segmentWord,
+} from "$/modules/segmentation/utils/segmentation";
+import { predictLineRomanization } from "$/modules/segmentation/utils/Transliteration/distributor";
+import { applyRomanizationWarnings } from "$/modules/segmentation/utils/Transliteration/roman-warning";
+import { useSegmentationConfig } from "$/modules/segmentation/utils/useSegmentationConfig";
+import { amllToTTML, ttmlLyricToAmllResult } from "$/modules/ttml-processor";
+import { useTtmlErrorHandler } from "$/modules/ttml-processor/useTtmlErrorHandler";
+import {
+	advancedSegmentationDialogAtom,
+	confirmDialogAtom,
+	historyRestoreDialogAtom,
+	latencyTestDialogAtom,
+	metadataEditorDialogAtom,
+	settingsDialogAtom,
+	syllableSmoothingDialogAtom,
+	timeShiftDialogAtom,
+} from "$/states/dialogs.ts";
+import {
+	keyDeleteSelectionAtom,
+	keyNewFileAtom,
+	keyOpenFileAtom,
+	keyRedoAtom,
+	keySaveFileAtom,
+	keySelectAllAtom,
+	keySelectInvertedAtom,
+	keySelectWordsOfMatchedSelectionAtom,
+	keyUndoAtom,
+} from "$/states/keybindings.ts";
+import {
+	isDirtyAtom,
+	lyricLinesAtom,
+	newLyricLinesAtom,
+	projectIdAtom,
+	redoLyricLinesAtom,
+	saveFileNameAtom,
+	selectedLinesAtom,
+	selectedWordsAtom,
+	undoableLyricLinesAtom,
+	undoLyricLinesAtom,
+} from "$/states/main.ts";
+import { type LyricWord, type LyricWordBase, newLyricWord } from "$/types/ttml";
+import { createLogger } from "$/utils/logger";
+
+const topMenuLogger = createLogger("TopMenu");
+
+export const useTopMenuActions = () => {
+	const { t } = useTranslation();
+	const [saveFileName, setSaveFileName] = useAtom(saveFileNameAtom);
+	const newLyricLine = useSetAtom(newLyricLinesAtom);
+	const editLyricLines = useSetImmerAtom(lyricLinesAtom);
+	const setMetadataEditorOpened = useSetAtom(metadataEditorDialogAtom);
+	const setSettingsDialogOpened = useSetAtom(settingsDialogAtom);
+	const undoLyricLines = useAtomValue(undoableLyricLinesAtom);
+	const store = useStore();
+	const isDirty = useAtomValue(isDirtyAtom);
+	const setConfirmDialog = useSetAtom(confirmDialogAtom);
+	const setHistoryRestoreDialog = useSetAtom(historyRestoreDialogAtom);
+	const setAdvancedSegmentationDialog = useSetAtom(
+		advancedSegmentationDialogAtom,
+	);
+	const setTimeShiftDialog = useSetAtom(timeShiftDialogAtom);
+	const setSyllableSmoothingDialog = useSetAtom(syllableSmoothingDialogAtom);
+	const { openFile } = useFileOpener();
+	const setProjectId = useSetAtom(projectIdAtom);
+	const { config: segmentationConfig } = useSegmentationConfig();
+	const newFileKey = useAtomValue(keyNewFileAtom);
+	const openFileKey = useAtomValue(keyOpenFileAtom);
+	const saveFileKey = useAtomValue(keySaveFileAtom);
+	const undoKey = useAtomValue(keyUndoAtom);
+	const redoKey = useAtomValue(keyRedoAtom);
+	const selectAllLinesKey = useAtomValue(keySelectAllAtom);
+	const selectInvertedLinesKey = useAtomValue(keySelectInvertedAtom);
+	const selectWordsOfMatchedSelectionKey = useAtomValue(
+		keySelectWordsOfMatchedSelectionAtom,
+	);
+	const deleteSelectionKey = useAtomValue(keyDeleteSelectionAtom);
+	const handleTtmlError = useTtmlErrorHandler();
+
+	const buildRubySegments = useCallback(
+		(text: string, baseWord: LyricWordBase) => {
+			const sourceWord: LyricWord = {
+				...newLyricWord(),
+				word: text,
+				startTime: baseWord.startTime,
+				endTime: baseWord.endTime,
+				emptyBeat: 0,
+			};
+			const segments = segmentWord(sourceWord, segmentationConfig);
+			if (segments.length === 0) {
+				return [
+					{
+						word: text,
+						startTime: baseWord.startTime,
+						endTime: baseWord.endTime,
+					},
+				];
+			}
+			return segments.map((segment) => ({
+				word: segment.word,
+				startTime: segment.startTime,
+				endTime: segment.endTime,
+			}));
+		},
+		[segmentationConfig],
+	);
+
+	const onNewFile = useCallback(() => {
+		const action = () => {
+			newLyricLine();
+			setProjectId(uid());
+			setSaveFileName("lyric.ttml");
+		};
+
+		if (isDirty) {
+			setConfirmDialog({
+				open: true,
+				title: t("confirmDialog.newFile.title", "Confirm New File"),
+				description: t(
+					"confirmDialog.newFile.description",
+					"The current file has unsaved changes. Continuing will lose these changes. Are you sure you want to create a new file?",
+				),
+				onConfirm: action,
+			});
+		} else {
+			action();
+		}
+	}, [
+		isDirty,
+		newLyricLine,
+		setConfirmDialog,
+		t,
+		setProjectId,
+		setSaveFileName,
+	]);
+
+	const onOpenFile = useCallback(() => {
+		const inputEl = document.createElement("input");
+		inputEl.type = "file";
+		inputEl.accept = ".ttml,.lrc,.qrc,.eslrc,.lys,.yrc,*/*";
+		inputEl.addEventListener(
+			"change",
+			() => {
+				const file = inputEl.files?.[0];
+				if (!file) return;
+				openFile(file);
+			},
+			{
+				once: true,
+			},
+		);
+		inputEl.click();
+	}, [openFile]);
+
+	const onOpenFileFromClipboard = useCallback(async () => {
+		try {
+			const ttmlText = await navigator.clipboard.readText();
+			const file = new File([ttmlText], "lyric.ttml", {
+				type: "application/xml",
+			});
+			openFile(file);
+		} catch (e) {
+			topMenuLogger.error("Failed to parse TTML file from clipboard", e);
+		}
+	}, [openFile]);
+
+	const onSaveFile = useCallback(() => {
+		try {
+			const amllResult = ttmlLyricToAmllResult(store.get(lyricLinesAtom));
+			const result = amllToTTML(amllResult);
+			if (!result.success) {
+				handleTtmlError(result.error, `Error when generating TTML`);
+				return;
+			}
+			const b = new Blob([result.data], { type: "text/xml" });
+			saveFile(b, saveFileName).catch(topMenuLogger.error);
+		} catch (e) {
+			topMenuLogger.error("Failed to save TTML file", e);
+		}
+	}, [saveFileName, store, handleTtmlError]);
+
+	const onOpenHistoryRestore = useCallback(() => {
+		setHistoryRestoreDialog(true);
+	}, [setHistoryRestoreDialog]);
+
+	const onSaveFileToClipboard = useCallback(async () => {
+		try {
+			const lyric = store.get(lyricLinesAtom);
+			const amllResult = ttmlLyricToAmllResult(lyric);
+			const result = amllToTTML(amllResult);
+			if (!result.success) {
+				handleTtmlError(result.error, `Error when generating TTML`);
+				return;
+			}
+			await navigator.clipboard.writeText(result.data);
+		} catch (e) {
+			topMenuLogger.error("Failed to save TTML file into clipboard", e);
+		}
+	}, [store, handleTtmlError]);
+
+	const onOpenMetadataEditor = useCallback(() => {
+		setMetadataEditorOpened(true);
+	}, [setMetadataEditorOpened]);
+
+	const onOpenSettings = useCallback(() => {
+		setSettingsDialogOpened(true);
+	}, [setSettingsDialogOpened]);
+
+	const onOpenLatencyTest = useCallback(() => {
+		store.set(latencyTestDialogAtom, true);
+	}, [store]);
+
+	const onUndo = useCallback(() => {
+		store.set(undoLyricLinesAtom);
+	}, [store]);
+
+	const onRedo = useCallback(() => {
+		store.set(redoLyricLinesAtom);
+	}, [store]);
+
+	const onUnselectAll = useCallback(() => {
+		const immerSelectedLinesAtom = withImmer(selectedLinesAtom);
+		const immerSelectedWordsAtom = withImmer(selectedWordsAtom);
+		store.set(immerSelectedLinesAtom, (old) => {
+			old.clear();
+		});
+		store.set(immerSelectedWordsAtom, (old) => {
+			old.clear();
+		});
+	}, [store]);
+
+	const onSelectAll = useCallback(() => {
+		const lines = store.get(lyricLinesAtom).lyricLines;
+		const selectedLineIds = store.get(selectedLinesAtom);
+		const selectedLines = lines.filter((l) => selectedLineIds.has(l.id));
+		const selectedWordIds = store.get(selectedWordsAtom);
+		const selectedWords = lines
+			.flatMap((l) => l.words)
+			.filter((w) => selectedWordIds.has(w.id));
+		if (selectedWords.length > 0) {
+			const tmpWordIds = new Set(selectedWordIds);
+			for (const selLine of selectedLines) {
+				for (const word of selLine.words) {
+					tmpWordIds.delete(word.id);
+				}
+			}
+			if (tmpWordIds.size === 0) {
+				store.set(
+					selectedWordsAtom,
+					new Set(selectedLines.flatMap((line) => line.words.map((w) => w.id))),
+				);
+				return;
+			}
+		} else {
+			store.set(
+				selectedLinesAtom,
+				new Set(store.get(lyricLinesAtom).lyricLines.map((l) => l.id)),
+			);
+		}
+		const sel = window.getSelection();
+		if (sel) {
+			if (sel.empty) {
+				sel.empty();
+			} else if (sel.removeAllRanges) {
+				sel.removeAllRanges();
+			}
+		}
+	}, [store]);
+
+	const onSelectInverted = useCallback(() => {}, []);
+
+	const onSelectWordsOfMatchedSelection = useCallback(() => {}, []);
+
+	const onDeleteSelection = useCallback(() => {
+		const selectedWordIds = store.get(selectedWordsAtom);
+		const selectedLineIds = store.get(selectedLinesAtom);
+		topMenuLogger.info("deleting selections", selectedWordIds, selectedLineIds);
+		if (selectedWordIds.size === 0) {
+			editLyricLines((prev) => {
+				prev.lyricLines = prev.lyricLines.filter(
+					(l) => !selectedLineIds.has(l.id),
+				);
+			});
+		} else {
+			editLyricLines((prev) => {
+				for (const line of prev.lyricLines) {
+					line.words = line.words.filter((w) => !selectedWordIds.has(w.id));
+				}
+			});
+		}
+		store.set(selectedWordsAtom, new Set());
+		store.set(selectedLinesAtom, new Set());
+	}, [store, editLyricLines]);
+
+	const onAutoSegment = useCallback(() => {
+		editLyricLines((draft) => {
+			draft.lyricLines = segmentLyricLines(
+				draft.lyricLines,
+				segmentationConfig,
+			);
+		});
+	}, [editLyricLines, segmentationConfig]);
+
+	const onRubySegment = useCallback(() => {
+		const selectedWordIds = store.get(selectedWordsAtom);
+		const hasSelection = selectedWordIds.size > 0;
+		editLyricLines((state) => {
+			for (const line of state.lyricLines) {
+				for (const word of line.words) {
+					if (hasSelection && !selectedWordIds.has(word.id)) continue;
+					if (!word.ruby || word.ruby.length === 0) continue;
+					const nextRuby: LyricWordBase[] = [];
+					for (const rubyWord of word.ruby) {
+						const parts = rubyWord.word.split("|");
+						const nextSegments = buildRubySegments(parts[0] ?? "", rubyWord);
+						const fallbackBase = {
+							word: "",
+							startTime: word.startTime,
+							endTime: word.endTime,
+						};
+						const extraSegments = parts
+							.slice(1)
+							.flatMap((part) => buildRubySegments(part, fallbackBase));
+						nextRuby.push(...nextSegments, ...extraSegments);
+					}
+					word.ruby = nextRuby;
+				}
+			}
+		});
+	}, [buildRubySegments, editLyricLines, store]);
+
+	const onOpenTimeShift = useCallback(() => {
+		setTimeShiftDialog(true);
+	}, [setTimeShiftDialog]);
+
+	const onSyncLineTimestamps = useCallback(() => {
+		const action = () => {
+			editLyricLines((draft) => {
+				for (let i = 0; i < draft.lyricLines.length; i++) {
+					const line = draft.lyricLines[i];
+					if (line.words.length === 0) continue;
+
+					let startTime = line.words[0].startTime;
+					let endTime = line.words[line.words.length - 1].endTime;
+
+					if (i + 1 < draft.lyricLines.length) {
+						const nextLine = draft.lyricLines[i + 1];
+						if (nextLine.isBG && nextLine.words.length > 0) {
+							const nextLineStart = nextLine.words[0].startTime;
+							const nextLineEnd =
+								nextLine.words[nextLine.words.length - 1].endTime;
+							startTime = Math.min(startTime, nextLineStart);
+							endTime = Math.max(endTime, nextLineEnd);
+						}
+					}
+
+					line.startTime = startTime;
+					line.endTime = endTime;
+				}
+			});
+		};
+
+		setConfirmDialog({
+			open: true,
+			title: t("confirmDialog.syncLineTimestamps.title", "Confirm Sync Line Timestamps"),
+			description: t(
+				"confirmDialog.syncLineTimestamps.description",
+				"This operation will automatically sync the start and end time of all lines based on word timestamps to the start of the first syllable and end of the last syllable. Are you sure you want to continue?",
+			),
+			onConfirm: action,
+		});
+	}, [editLyricLines, setConfirmDialog, t]);
+
+	const onOpenDistributeRomanization = useCallback(() => {
+		const selectedLines = store.get(selectedLinesAtom);
+		const hasSelection = selectedLines.size > 0;
+		editLyricLines((draft) => {
+			draft.lyricLines.forEach((line) => {
+				if (hasSelection && !selectedLines.has(line.id)) return;
+				const fullRoman = line.romanLyric || "";
+				if (line.words.length === 0 || fullRoman.trim() === "") return;
+				try {
+					const results = predictLineRomanization(line.words, fullRoman);
+					line.words.forEach((word, wordIndex) => {
+						if (!results[wordIndex]) return;
+						word.romanWord = results[wordIndex];
+					});
+					applyRomanizationWarnings(line.words);
+				} catch (e) {
+					topMenuLogger.error("Failed to distribute romanization", e);
+				}
+			});
+		});
+	}, [editLyricLines, store]);
+
+	const onAutoRuby = useCallback(() => {
+		const selectedLines = store.get(selectedLinesAtom);
+		const hasSelection = selectedLines.size > 0;
+		editLyricLines((draft) => {
+			draft.lyricLines.forEach((line) => {
+				if (hasSelection && !selectedLines.has(line.id)) return;
+				if (line.words.length === 0) return;
+				line.words.forEach((word) => {
+					if (!word.romanWord || word.romanWord.trim() === "") return;
+					applyGeneratedRuby(word);
+				});
+			});
+		});
+	}, [editLyricLines, store]);
+
+	const onCheckRomanizationWarnings = useCallback(() => {
+		editLyricLines((draft) => {
+			for (const line of draft.lyricLines) {
+				applyRomanizationWarnings(line.words);
+			}
+		});
+	}, [editLyricLines]);
+
+	const onOpenAdvancedSegmentation = useCallback(() => {
+		setAdvancedSegmentationDialog(true);
+	}, [setAdvancedSegmentationDialog]);
+
+	const onOpenSyllableSmoothing = useCallback(() => {
+		setSyllableSmoothingDialog(true);
+	}, [setSyllableSmoothingDialog]);
+
+	return {
+		newFileKey,
+		openFileKey,
+		saveFileKey,
+		undoKey,
+		redoKey,
+		selectAllLinesKey,
+		unselectAllLinesKey: selectAllLinesKey,
+		selectInvertedLinesKey,
+		selectWordsOfMatchedSelectionKey,
+		deleteSelectionKey,
+		undoDisabled: !undoLyricLines.canUndo,
+		redoDisabled: !undoLyricLines.canRedo,
+		onNewFile,
+		onOpenFile,
+		onOpenFileFromClipboard,
+		onSaveFile,
+		onOpenHistoryRestore,
+		onSaveFileToClipboard,
+		onUndo,
+		onRedo,
+		onSelectAll,
+		onUnselectAll,
+		onSelectInverted,
+		onSelectWordsOfMatchedSelection,
+		onDeleteSelection,
+		onOpenTimeShift,
+		onOpenSyllableSmoothing,
+		onOpenMetadataEditor,
+		onOpenSettings,
+		onAutoSegment,
+		onRubySegment,
+		onOpenAdvancedSegmentation,
+		onSyncLineTimestamps,
+		onOpenDistributeRomanization,
+		onAutoRuby,
+		onCheckRomanizationWarnings,
+		onOpenLatencyTest,
+	};
+};
