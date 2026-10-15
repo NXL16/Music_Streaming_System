@@ -14,6 +14,8 @@ service SongService {
   rpc GetSongIngestInfo(GetSongIngestInfoRequest) returns (GetSongIngestInfoResponse);
   rpc GetSongLyrics(GetSongLyricsRequest) returns (SongLyricsResponse);
   rpc UpsertSongLyrics(UpsertSongLyricsRequest) returns (SongLyricsResponse);
+  rpc GetSongStaticLyrics(GetSongStaticLyricsRequest) returns (SongStaticLyricsResponse);
+  rpc UpsertSongStaticLyrics(UpsertSongStaticLyricsRequest) returns (SongStaticLyricsResponse);
   rpc ListSongs(ListSongsRequest) returns (ListSongsResponse);
   // Internal recommendation index feed. The Song database remains the source
   // of truth; consumers may rebuild their vector index from this paged feed.
@@ -83,6 +85,7 @@ service SongService {
   rpc SaveCatalogAlbumDraft(SaveCatalogAlbumDraftRequest) returns (CatalogDraftInfo);
   rpc SaveCatalogPlaylistDraft(SaveCatalogPlaylistDraftRequest) returns (CatalogDraftInfo);
   rpc SaveCatalogSongVideoDraft(SaveCatalogSongVideoDraftRequest) returns (CatalogDraftInfo);
+  rpc DeleteCatalogSongVideo(DeleteCatalogSongVideoRequest) returns (DeleteCatalogSongVideoResponse);
   rpc GetCatalogDraft(GetCatalogDraftRequest) returns (CatalogDraftDetail);
   rpc ListCatalogDrafts(ListCatalogDraftsRequest) returns (ListCatalogDraftsResponse);
   rpc SubmitCatalogDraft(SubmitCatalogDraftRequest) returns (CatalogDraftInfo);
@@ -108,38 +111,38 @@ message GetSongLyricsRequest {
 message UpsertSongLyricsRequest {
   string                 song_id              = 1;
   string                 language             = 2;
-  string                 source_lrc           = 3;
   bool                   publish              = 4;
-  repeated SongLyricLine lines                = 5;
-  string                 sync_mode            = 6;
   string                 actor_user_id        = 7;
   bool                   can_manage_all_songs = 8;
-}
-
-message SongLyricLine {
-  int32                  position      = 1;
-  int32                  start_time_ms = 2;
-  int32                  end_time_ms   = 3;
-  string                 text          = 4;
-  repeated SongLyricWord words         = 5;
-  string                 kind          = 6;
-}
-
-message SongLyricWord {
-  int32  position      = 1;
-  int32  start_time_ms = 2;
-  int32  end_time_ms   = 3;
-  string text          = 4;
+  string                 source_ttml          = 9;
 }
 
 message SongLyricsResponse {
   string                 song_id        = 1;
   string                 language       = 2;
-  string                 plain_text     = 3;
-  bool                   is_time_synced = 4;
   bool                   published      = 5;
-  repeated SongLyricLine lines          = 6;
-  string                 sync_mode      = 7;
+  string                 source_ttml    = 8;
+}
+
+message StaticLyricLine {
+  string text          = 1;
+  string vocalist_type = 2;
+}
+
+message GetSongStaticLyricsRequest {
+  string song_id = 1;
+}
+
+message UpsertSongStaticLyricsRequest {
+  string                  song_id              = 1;
+  repeated StaticLyricLine lines                = 2;
+  string                  actor_user_id        = 3;
+  bool                    can_manage_all_songs = 4;
+}
+
+message SongStaticLyricsResponse {
+  string                  song_id = 1;
+  repeated StaticLyricLine lines   = 2;
 }
 
 enum SongStatus {
@@ -674,6 +677,7 @@ message CatalogSongVideo {
   string                     release_track_id = 18;
   repeated CatalogSongCredit artists          = 19;
   string                     poster_src_set   = 20;
+  string                     poster_bg_color = 21;
 }
 
 message GetCatalogSongVideosResponse {
@@ -889,6 +893,16 @@ message SaveCatalogSongVideoDraftRequest {
   string song_id        = 4;
   string video_asset_id = 5;
   string kind           = 6;
+}
+
+message DeleteCatalogSongVideoRequest {
+  string song_video_id = 1;
+  string actor_user_id = 2;
+}
+
+message DeleteCatalogSongVideoResponse {
+  string video_asset_id       = 1;
+  bool   asset_usage_pending  = 2;
 }
 
 message CatalogDraftInfo {
