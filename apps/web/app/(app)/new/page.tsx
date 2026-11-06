@@ -5,15 +5,7 @@ import { CSSProperties } from "react";
 export default function NewPage() {
   return (
     <>
-      
-
-      <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-7">
-        <div className="">
-          <div className="pb-8">
-            <NewFeaturedShelf />
-          </div>
-        </div>
-      </div>
+      <NewFeaturedShelf />
 
       <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-3">
         <div className="">
