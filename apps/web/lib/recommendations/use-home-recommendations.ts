@@ -34,7 +34,10 @@ export function useHomeRecommendations() {
       if (signal?.aborted) return;
       const version = ++requestVersion.current;
       if (force) invalidateHomeRecommendationsCache();
-      if (showLoading) setLoading(true);
+      if (showLoading) {
+        setError(null);
+        setLoading(true);
+      }
 
       try {
         const nextData = await getHomeRecommendations();

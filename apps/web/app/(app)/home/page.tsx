@@ -28,6 +28,7 @@ import {
   HOME_SHELF_PREVIEW_LIMIT,
 } from "@musical/shared-constants";
 import { useAppScrollToTop } from "@/lib/layout/use-app-scroll-to-top";
+import { RequestErrorState } from "@/components/states/request-error-state";
 
 const FEATURED_ARTISTS_SHELF_ID = "global-top-artists";
 const STATIONS_FOR_YOU_SHELF_ID = "user-stations-for-you";
@@ -83,12 +84,14 @@ export default function HomePage() {
     if (!artistStationIds.length) return;
     let active = true;
 
-    void ensureArtistStationArtworkBatch(artistStationIds).then((updated) => {
-      if (!active || !updated) return;
-      // The renderer persisted the composite cover. Refresh once for the
-      // complete batch so every card changes together without a page reload.
-      void refresh(false, undefined, true);
-    });
+    void ensureArtistStationArtworkBatch(artistStationIds)
+      .then((updated) => {
+        if (!active || !updated) return;
+        // The renderer persisted the composite cover. Refresh once for the
+        // complete batch so every card changes together without a page reload.
+        void refresh(false, undefined, true);
+      })
+      .catch(() => undefined);
 
     return () => {
       active = false;
@@ -202,27 +205,7 @@ export default function HomePage() {
         </>
       )}
 
-      {error && (
-        <div className="mx-auto min-h-full w-full z-(--z-default)">
-          <div
-            role="alert"
-            className="[--buttonTextColor:var(--systemSecondary)] [--buttonBorderColor:var(--systemSecondary)] items-center text-(--systemSecondary) flex flex-col gap-3 left-1/2 m-auto max-w-110 px-6.25 absolute text-center top-1/2 -translate-x-1/2 -translate-y-1/2 z-(--z-default)"
-          >
-            <h2 className="[font:var(--title-2)] mb-1.25">
-              An error occurred.
-            </h2>
-            <div className="w-auto">
-              <button
-                type="button"
-                onClick={() => void retry()}
-                className="items-center bg-(--buttonBackgroundColor,var(--keyColorBG,var(--systemBlue))) rounded-(--buttonRadius,3px) [display:var(--buttonDisplay,flex)] [justify-content:var(--buttonJustifyContent,center)] [--buttonBackgroundColor:transparent] border border-solid border-(--buttonBorderColor,var(--keyColor,var(--systemBlue))) text-(--buttonTextColor,var(--keyColor)) [font:var(--body-tall)] min-w-(--buttonMinWidth,108px) pe-4 ps-4 min-[1260px]:h-(--buttonHeight,28px) min-[1260px]:w-(--buttonWidth,auto)"
-              >
-                Try Again
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {error && <RequestErrorState onRetry={() => void retry()} />}
       {shelfLoadError && (
         <p className="mx-(--bodyGutter) text-red-500">{shelfLoadError}</p>
       )}
