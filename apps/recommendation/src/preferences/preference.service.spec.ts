@@ -11,9 +11,15 @@ type PreferenceEventCreateInput = {
   data: { eventType: string };
 };
 
+type RecentSearchUpsertInput = {
+  create: { userId: string; resourceType: string; resourceId: string };
+  update: { searchedAt: Date };
+};
+
 jest.mock('@musical/shared-proto', () => ({
   PreferenceEventType: {
     PREFERENCE_EVENT_TYPE_ALBUM_FAVOURITED: 3,
+    PREFERENCE_EVENT_TYPE_SEARCH_CLICKED: 11,
     PREFERENCE_EVENT_TYPE_CONTENT_HIDDEN: 12,
     PREFERENCE_EVENT_TYPE_PLAYLIST_FAVOURITED: 14,
   },
@@ -175,9 +181,9 @@ describe('PreferenceService', () => {
   });
 
   it('returns only the current hidden resources for Suggest Less hydration', async () => {
-    const findMany = jest.fn().mockResolvedValue([
-      { resourceType: 'albums', resourceId: 'album-1' },
-    ]);
+    const findMany = jest
+      .fn()
+      .mockResolvedValue([{ resourceType: 'albums', resourceId: 'album-1' }]);
     const service = new PreferenceService({
       userContentPreference: { findMany },
     } as unknown as PrismaService);
@@ -190,5 +196,61 @@ describe('PreferenceService', () => {
       select: { resourceType: true, resourceId: true },
       orderBy: { updatedAt: 'desc' },
     });
+  });
+
+  it('upserts a selected search result and keeps only the newest history', async () => {
+    const create = jest.fn();
+    const upsert = jest.fn<void, [RecentSearchUpsertInput]>();
+    const findMany = jest.fn().mockResolvedValue([]);
+    const deleteMany = jest.fn();
+    const service = new PreferenceService({
+      $transaction: jest.fn((callback: (client: unknown) => Promise<unknown>) =>
+        callback({
+          userPreferenceEvent: { create },
+          userRecentSearch: { upsert, findMany, deleteMany },
+          recommendationPage: { updateMany: jest.fn() },
+        }),
+      ),
+    } as unknown as PrismaService);
+
+    await expect(
+      service.record({ ...request, eventType: 11, weight: 1 }),
+    ).resolves.toEqual({ success: true });
+
+    expect(upsert).toHaveBeenCalledTimes(1);
+    const upsertInput = upsert.mock.calls[0]?.[0];
+    expect(upsertInput?.create).toEqual({
+      userId: 'user-1',
+      resourceType: 'albums',
+      resourceId: 'album-1',
+    });
+    expect(upsertInput?.update.searchedAt).toBeInstanceOf(Date);
+    expect(findMany).toHaveBeenCalledWith({
+      where: { userId: 'user-1' },
+      orderBy: { searchedAt: 'desc' },
+      skip: 10,
+      select: { id: true },
+    });
+    expect(deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('lists and clears only the requesting user’s search history', async () => {
+    const findMany = jest
+      .fn()
+      .mockResolvedValue([{ resourceType: 'songs', resourceId: 'song-1' }]);
+    const deleteMany = jest.fn();
+    const service = new PreferenceService({
+      userRecentSearch: { findMany, deleteMany },
+    } as unknown as PrismaService);
+
+    await expect(
+      service.listRecentSearches({ userId: 'user-1', limit: 30 }),
+    ).resolves.toEqual({
+      resources: [{ resourceType: 'songs', resourceId: 'song-1' }],
+    });
+    await expect(
+      service.clearRecentSearches({ userId: 'user-1' }),
+    ).resolves.toEqual({ success: true });
+    expect(deleteMany).toHaveBeenCalledWith({ where: { userId: 'user-1' } });
   });
 });
