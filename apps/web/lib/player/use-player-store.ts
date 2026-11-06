@@ -28,6 +28,8 @@ export type PlayerSong = {
   credits?: PlayerSongCredit[];
   album: string;
   albumId?: string;
+  /** Album/release context from which this Song was selected. */
+  sourceAlbumId?: string;
   albumUrl?: string;
   albumVideoSrc?: string;
   hasLyrics?: boolean;

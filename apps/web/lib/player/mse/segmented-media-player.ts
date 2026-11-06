@@ -390,6 +390,13 @@ export abstract class SegmentedMediaPlayer {
   private onTimeUpdate = (): void => {
     if (this.disposed) return;
 
+    // iOS can reclaim played ranges, which must not block endOfStream().
+    if (this.metadata && this.audio) {
+      this.requiredTailStartIndex = Math.max(
+        this.requiredTailStartIndex,
+        findSegmentIndex(this.metadata.segments, this.audio.currentTime),
+      );
+    }
     this.tryEndOfStream();
     if (!this.downloading && this.getBufferAhead() < BUFFER_LOW_SEC) {
       this.fillBuffer();

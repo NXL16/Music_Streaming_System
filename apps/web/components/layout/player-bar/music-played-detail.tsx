@@ -114,7 +114,10 @@ export default function MusicPlayDetail({
 
     setIsFavoriteSaving(true);
     try {
-      await toggleSongFavorite(currentSong.id, currentSong.albumId);
+      await toggleSongFavorite(
+        currentSong.id,
+        currentSong.sourceAlbumId ?? currentSong.albumId,
+      );
     } finally {
       setIsFavoriteSaving(false);
     }
@@ -273,7 +276,8 @@ export default function MusicPlayDetail({
                           kind: "song",
                           songId: currentSong.id,
                           releaseTrackId: currentSong.releaseTrackId,
-                          sourceAlbumId: currentSong.albumId,
+                          sourceAlbumId:
+                            currentSong.sourceAlbumId ?? currentSong.albumId,
                           title: currentSong.title,
                           userId,
                           isFavorite: isCurrentSongFavorite,

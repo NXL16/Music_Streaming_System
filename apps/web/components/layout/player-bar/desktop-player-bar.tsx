@@ -226,7 +226,7 @@ function SortableQueueSong({
               kind: "song",
               songId: song.id,
               releaseTrackId: song.releaseTrackId,
-              sourceAlbumId: song.albumId,
+              sourceAlbumId: song.sourceAlbumId ?? song.albumId,
               title: song.title,
               userId,
               isFavorite,
@@ -727,7 +727,10 @@ export function DesktopPlayerBar({
                                       <FavoriteSongButton
                                         compact
                                         songId={currentSong.id}
-                                        sourceAlbumId={currentSong.albumId}
+                                        sourceAlbumId={
+                                          currentSong.sourceAlbumId ??
+                                          currentSong.albumId
+                                        }
                                       />
                                     </div>
                                   </div>
@@ -806,7 +809,9 @@ export function DesktopPlayerBar({
                                 ),
                                 songId: currentSong.id,
                                 releaseTrackId: currentSong.releaseTrackId,
-                                sourceAlbumId: currentSong.albumId,
+                                sourceAlbumId:
+                                  currentSong.sourceAlbumId ??
+                                  currentSong.albumId,
                                 title: currentSong.title,
                                 userId,
                                 isFavorite: isCurrentSongFavorite,
@@ -815,7 +820,9 @@ export function DesktopPlayerBar({
                                 kind: "song",
                                 songId: currentSong.id,
                                 releaseTrackId: currentSong.releaseTrackId,
-                                sourceAlbumId: currentSong.albumId,
+                                sourceAlbumId:
+                                  currentSong.sourceAlbumId ??
+                                  currentSong.albumId,
                                 title: currentSong.title,
                                 userId,
                                 isFavorite: isCurrentSongFavorite,

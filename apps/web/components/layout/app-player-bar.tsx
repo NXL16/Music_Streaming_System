@@ -52,13 +52,12 @@ const DesktopPlayerBar = dynamic(
 );
 
 const LISTENING_QUALIFY_SECONDS = 3;
-const LOCK_SCREEN_SEEK_SECONDS = 10;
+const FORWARD_END_SEEK_THRESHOLD_SECONDS = 10;
 const END_SEEK_TOLERANCE_SECONDS = 3;
 const SONG_STATION_REFILL_THRESHOLD = 8;
 const SONG_STATION_REFILL_RETRY_DELAY_MS = 15_000;
 const AUTOPLAY_QUEUE_SIZE = 10;
 const AUTOPLAY_REFILL_RETRY_DELAY_MS = 15_000;
-const MEDIA_SESSION_POSITION_SYNC_INTERVAL_MS = 1_000;
 
 function resetAudioToStart(audio: HTMLAudioElement | null): void {
   if (audio) {
@@ -120,6 +119,8 @@ function getAbsoluteArtworkUrl(artworkUrl: string): string {
 }
 
 function recentlyPlayedCard(song: PlayerSong): MediaCardProps {
+  const sourceAlbumId = song.sourceAlbumId ?? song.albumId;
+
   if (song.sourceStation) {
     const station = song.sourceStation;
     return createAndHydrateMediaResourceCard(
@@ -178,7 +179,7 @@ function recentlyPlayedCard(song: PlayerSong): MediaCardProps {
     );
   }
 
-  if (!song.albumId) {
+  if (!sourceAlbumId) {
     return createAndHydrateMediaResourceCard(
       {
         id: song.id,
@@ -205,7 +206,7 @@ function recentlyPlayedCard(song: PlayerSong): MediaCardProps {
   // A track must not overwrite the canonical metadata for its parent album.
   const fallback = createMediaResourceCard(
     {
-      id: song.albumId,
+      id: sourceAlbumId,
       type: "albums",
       name: song.album || song.title,
       artistName: song.artist,
@@ -229,7 +230,7 @@ function recentlyPlayedCard(song: PlayerSong): MediaCardProps {
 
   return createMediaResourceCard(
     {
-      id: song.albumId,
+      id: sourceAlbumId,
       type: "albums",
       name: canonical.title || fallback.title,
       artistName: canonical.subtitle || fallback.subtitle,
@@ -244,38 +245,6 @@ function recentlyPlayedCard(song: PlayerSong): MediaCardProps {
       typeTag: canonical.typeTag ?? fallback.typeTag,
     },
   );
-}
-
-function syncMediaSessionPosition(
-  mediaSession: MediaSession,
-  audio: HTMLAudioElement | null,
-  fallbackDurationSeconds: number | undefined,
-  playbackRate: number,
-): void {
-  if (typeof mediaSession.setPositionState !== "function") return;
-
-  const elementDuration = audio?.duration;
-  const duration =
-    typeof elementDuration === "number" &&
-    Number.isFinite(elementDuration) &&
-    elementDuration > 0
-      ? elementDuration
-      : fallbackDurationSeconds;
-  if (!Number.isFinite(duration) || !duration || duration <= 0) return;
-
-  const position = Math.min(
-    Math.max(0, audio?.currentTime ?? 0),
-    duration,
-  );
-  try {
-    mediaSession.setPositionState({
-      duration,
-      position,
-      playbackRate: playbackRate > 0 ? playbackRate : 1,
-    });
-  } catch {
-    // A transient MSE duration can be invalid while its source is attaching.
-  }
 }
 
 function telemetryDurationSeconds(seconds: number | undefined): number {
@@ -302,7 +271,6 @@ export function AppPlayerBar() {
   const vocalGainRef = useRef<GainNode | null>(null);
   const audioContextCloseTimerRef = useRef<number | null>(null);
   const playbackTimeSessionRef = useRef<string | undefined>(undefined);
-  const lastMediaSessionPositionSyncRef = useRef(0);
   const {
     currentSong,
     queue,
@@ -478,7 +446,7 @@ export function AppPlayerBar() {
         songTitle: song.title,
         artistName: song.artist,
         albumName: song.album,
-        albumId: song.albumId,
+        albumId: song.sourceAlbumId ?? song.albumId,
         playlistId: song.sourcePlaylist?.id,
         playlistName: song.sourcePlaylist?.name,
         playlistCuratorName: song.sourcePlaylist?.curatorName,
@@ -503,41 +471,6 @@ export function AppPlayerBar() {
   useEffect(() => {
     void flushQueuedListeningEvents();
   }, []);
-
-  const syncLockScreenPosition = useCallback(
-    (force = false) => {
-      if (
-        isVideoPlayback ||
-        !currentPlaybackSessionKey ||
-        !("mediaSession" in navigator)
-      ) {
-        return;
-      }
-
-      const now = Date.now();
-      if (
-        !force &&
-        now - lastMediaSessionPositionSyncRef.current <
-          MEDIA_SESSION_POSITION_SYNC_INTERVAL_MS
-      ) {
-        return;
-      }
-
-      syncMediaSessionPosition(
-        navigator.mediaSession,
-        audioRef.current,
-        currentSong?.durationSec,
-        playbackRate,
-      );
-      lastMediaSessionPositionSyncRef.current = now;
-    },
-    [
-      currentPlaybackSessionKey,
-      currentSong?.durationSec,
-      isVideoPlayback,
-      playbackRate,
-    ],
-  );
 
   useEffect(() => {
     const handlePageHide = (event: PageTransitionEvent) => {
@@ -767,7 +700,6 @@ export function AppPlayerBar() {
 
   useLayoutEffect(() => {
     playbackTimeSessionRef.current = currentPlaybackSessionKey;
-    lastMediaSessionPositionSyncRef.current = 0;
     setPlaybackTimeMs(0);
     resetAudioToStart(audioRef.current);
     resetAudioToStart(vocalAudioRef.current);
@@ -780,8 +712,7 @@ export function AppPlayerBar() {
     playbackTimeSessionRef.current = currentPlaybackSessionKey;
     lastObservedPlaybackTimeRef.current = audio.currentTime;
     syncPlaybackClock(audio, setPlaybackTimeMs);
-    syncLockScreenPosition(true);
-  }, [currentPlaybackSessionKey, setPlaybackTimeMs, syncLockScreenPosition]);
+  }, [currentPlaybackSessionKey, setPlaybackTimeMs]);
 
   const handleTimeUpdate = useCallback(() => {
     const audio = audioRef.current;
@@ -795,14 +726,12 @@ export function AppPlayerBar() {
     }
     lastObservedPlaybackTimeRef.current = audio.currentTime;
     syncPlaybackClock(audio, setPlaybackTimeMs);
-    syncLockScreenPosition();
     markQualifiedPlay();
   }, [
     currentPlaybackSessionKey,
     markQualifiedPlay,
     playing,
     setPlaybackTimeMs,
-    syncLockScreenPosition,
   ]);
 
   const handleSeeking = useCallback(() => {
@@ -815,7 +744,7 @@ export function AppPlayerBar() {
     const remainingSeconds = audio.duration - audio.currentTime;
     if (
       Number.isFinite(audio.duration) &&
-      jumpedForwardSeconds >= LOCK_SCREEN_SEEK_SECONDS &&
+      jumpedForwardSeconds >= FORWARD_END_SEEK_THRESHOLD_SECONDS &&
       remainingSeconds <= END_SEEK_TOLERANCE_SECONDS
     ) {
       // Do not turn a scrub straight to the final seconds into a qualified
@@ -829,8 +758,7 @@ export function AppPlayerBar() {
     // clock here so progress, lyrics, and the audio element stay aligned
     // throughout a seek instead of briefly showing the old lyric line.
     syncPlaybackClock(audio, setPlaybackTimeMs);
-    syncLockScreenPosition(true);
-  }, [currentPlaybackSessionKey, setPlaybackTimeMs, syncLockScreenPosition]);
+  }, [currentPlaybackSessionKey, setPlaybackTimeMs]);
 
   useEffect(() => {
     if (audioContextCloseTimerRef.current !== null) {
@@ -1054,8 +982,9 @@ export function AppPlayerBar() {
       // or waits for one stem to buffer. Media Session must reflect the
       // player's intent, not that transient implementation detail; otherwise
       // the iPhone lock screen flickers from Pause to Play during recovery.
-      mediaSession.playbackState = playing ? "playing" : "paused";
-      syncLockScreenPosition(true);
+      mediaSession.playbackState = usePlayerStore.getState().playing
+        ? "playing"
+        : "paused";
     };
 
     syncMediaSession();
@@ -1124,61 +1053,8 @@ export function AppPlayerBar() {
       if (isVideoPlayback) videoPlaybackController.pause();
       usePlayerStore.getState().pause();
     });
-    // iOS may choose either transport or seek icons on the lock screen. Keep
-    // both handlers registered so every control the system presents works.
     setAction("nexttrack", handleNext);
     setAction("previoustrack", handlePrevious);
-    setAction("seekbackward", () => {
-      if (isVideoPlayback) {
-        // The controller clamps to the active video's duration.
-        const currentTimeMs = usePlayerStore.getState().playbackTimeMs;
-        videoPlaybackController.seek(
-          Math.max(0, currentTimeMs / 1000 - LOCK_SCREEN_SEEK_SECONDS),
-        );
-        return;
-      }
-      const audio = audioRef.current;
-      if (audio) {
-        const nextTime = Math.max(
-          0,
-          audio.currentTime - LOCK_SCREEN_SEEK_SECONDS,
-        );
-        audio.currentTime = nextTime;
-        syncPlaybackClock(audio, usePlayerStore.getState().setPlaybackTimeMs);
-        syncLockScreenPosition(true);
-      }
-    });
-    setAction("seekforward", () => {
-      if (isVideoPlayback) {
-        const currentTimeMs = usePlayerStore.getState().playbackTimeMs;
-        videoPlaybackController.seek(
-          currentTimeMs / 1000 + LOCK_SCREEN_SEEK_SECONDS,
-        );
-        return;
-      }
-      const audio = audioRef.current;
-      if (audio) {
-        const nextTime = Math.min(
-          audio.duration || Infinity,
-          audio.currentTime + LOCK_SCREEN_SEEK_SECONDS,
-        );
-        audio.currentTime = nextTime;
-        syncPlaybackClock(audio, usePlayerStore.getState().setPlaybackTimeMs);
-        syncLockScreenPosition(true);
-      }
-    });
-    setAction("seekto", (details) => {
-      if (isVideoPlayback && typeof details.seekTime === "number") {
-        videoPlaybackController.seek(details.seekTime);
-        return;
-      }
-      const audio = audioRef.current;
-      if (audio && typeof details.seekTime === "number") {
-        audio.currentTime = details.seekTime;
-        syncPlaybackClock(audio, usePlayerStore.getState().setPlaybackTimeMs);
-        syncLockScreenPosition(true);
-      }
-    });
 
     const audio = audioRef.current;
     // iOS can replace the lock-screen metadata while a MediaSource URL is
@@ -1198,9 +1074,6 @@ export function AppPlayerBar() {
         "pause",
         "nexttrack",
         "previoustrack",
-        "seekbackward",
-        "seekforward",
-        "seekto",
       ] as const) {
         setAction(action, null);
       }
@@ -1213,10 +1086,12 @@ export function AppPlayerBar() {
     isStemActive,
     isMseActive,
     isVideoPlayback,
-    playbackRate,
-    playing,
-    syncLockScreenPosition,
   ]);
+
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    navigator.mediaSession.playbackState = playing ? "playing" : "paused";
+  }, [playing]);
 
   const toggleMute = () => {
     if (!isExpanded) {

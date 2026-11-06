@@ -60,6 +60,7 @@ describe("projectSongSummary", () => {
       url: "/song/track/release-track-1",
       artist: "Artist One",
       albumUrl: "/album/album/album-1",
+      sourceAlbumId: "album-1",
       playbackUrl: "mse:song-1",
       mediaSessionArtworkUrl: "cover-632.jpg",
       artworkSrcSet: "cover-316.jpg 316w",

@@ -6,6 +6,7 @@ type PlayerInternals = {
   needsUrgentFill: boolean;
   onWaiting: () => void;
   onSeeking: () => void;
+  onTimeUpdate: () => void;
   onBufferedChange: (event: Event) => void;
   fillBuffer: () => Promise<void>;
   fetchAndAppendBatch: () => Promise<void>;
@@ -19,6 +20,7 @@ type PlayerInternals = {
     buffered: TimeRanges;
   } | null;
   sourceBuffer: SourceBuffer | null;
+  mediaSource: Pick<MediaSource, "readyState" | "endOfStream"> | null;
   abortController: AbortController | null;
 };
 
@@ -136,6 +138,35 @@ describe("SegmentedMediaPlayer stalled playback recovery", () => {
     player.onSeeking();
 
     expect(player.requiredTailStartIndex).toBe(5);
+  });
+
+  it("does not require iOS-reclaimed, already-played fragments at track end", () => {
+    const player = new MsePlayer() as unknown as PlayerInternals;
+    const endOfStream = vi.fn();
+    player.metadata = {
+      segments: [
+        { startTimeSec: 0, duration: 10 },
+        { startTimeSec: 10, duration: 10 },
+        { startTimeSec: 20, duration: 10 },
+      ],
+    };
+    player.audio = {
+      currentTime: 20,
+      buffered: {
+        length: 1,
+        start: () => 20,
+        end: () => 30,
+      } as TimeRanges,
+    };
+    player.requiredTailStartIndex = 0;
+    player.appendedSegments = new Set([2]);
+    player.mediaSource = { readyState: "open", endOfStream };
+    player.downloading = true;
+
+    player.onTimeUpdate();
+
+    expect(player.requiredTailStartIndex).toBe(2);
+    expect(endOfStream).toHaveBeenCalledOnce();
   });
 
   it("does not mark fragments appended before Safari creates its SourceBuffer", async () => {

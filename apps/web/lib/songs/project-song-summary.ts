@@ -18,6 +18,7 @@ export type SongSummaryProjectionSource = {
   artists?: Array<{ id: string; name: string; url?: string }>;
   album?: string;
   albumId?: string;
+  sourceAlbumId?: string;
   albumUrl?: string;
   albumVideoSrc?: string;
   hasLyrics?: boolean;
@@ -44,6 +45,7 @@ export type PlayerSongProjectionSource = {
   credits?: PlayerSong["credits"];
   album?: string;
   albumId?: string;
+  sourceAlbumId?: string;
   albumUrl?: string;
   albumVideoSrc?: string;
   hasLyrics?: boolean;
@@ -78,6 +80,7 @@ export function projectPlayerSong(
     credits: song.credits,
     album: song.album || "",
     albumId: song.albumId,
+    sourceAlbumId: song.sourceAlbumId ?? song.albumId,
     albumUrl:
       song.albumId && song.albumUrl
         ? albumRoute(song.albumUrl, song.albumId)
@@ -124,6 +127,7 @@ export function projectSongSummary(
     artists,
     album: song.album || "",
     albumId: song.albumId,
+    sourceAlbumId: song.sourceAlbumId,
     albumUrl: song.albumUrl,
     hasLyrics: song.hasLyrics,
     durationSec: song.durationSec,
