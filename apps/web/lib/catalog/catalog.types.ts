@@ -1,3 +1,5 @@
+import type { CatalogMusicVideo } from "./music-videos.api";
+
 export type CatalogReference = {
   id: string;
   type: string;
@@ -208,6 +210,8 @@ export type CatalogArtistResource = {
 
 export type CatalogResponse = {
   data: CatalogReference[];
+  hasMore?: boolean;
+  musicVideos?: CatalogMusicVideo[];
   resources: {
     albums: Record<string, CatalogAlbumResource>;
     playlists: Record<string, CatalogPlaylistResource>;
