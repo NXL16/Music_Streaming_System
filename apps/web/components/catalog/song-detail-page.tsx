@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePlayerStore } from "@/lib/player/use-player-store";
+import { playSong } from "@/lib/player/play-song";
 import { useCatalogSong } from "@/lib/catalog/use-catalog-song";
 import { formatReleaseDate } from "@/lib/format/release-date";
 import { ArtistLinks } from "../media/artist-links";
@@ -20,6 +20,8 @@ import { ExplicitBadgeIcon } from "../icons/explicit-badge-icon";
 import CardArtwork from "../media/common/card-artwork";
 import { CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { AlbumRelatedShelves } from "./album-related-shelves";
+import { NotFoundState } from "../states/not-found-state";
+import { RequestErrorState } from "../states/request-error-state";
 import type { MediaCardProps } from "../media/media-card.types";
 import {
   ShelfDetailLoading,
@@ -38,6 +40,7 @@ import {
   type StaticLyricLine,
 } from "@/lib/lyrics/static-lyrics.api";
 import AmpLyrics from "../custom-elements/AmpLyrics";
+import PlayIcon from "../icons/play-icon";
 
 type SongDetailPageProps = {
   releaseTrackId: string;
@@ -112,9 +115,9 @@ function SongDetailSection({
 }
 
 export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
-  const { song, loading, error, reload } = useCatalogSong(releaseTrackId);
+  const { song, loading, error, errorStatus, reload } =
+    useCatalogSong(releaseTrackId);
   const showLoading = useMinimumLoadingDuration(loading);
-  const setQueue = usePlayerStore((state) => state.setQueue);
   const currentAlbumId = song?.albumId ?? "";
   const relatedShelfKey = song ? `${currentAlbumId}:${song.id}` : "";
   const {
@@ -230,28 +233,11 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
     return <CatalogPageLoading />;
   }
 
-  if (error) {
-    return (
-      <div className="mx-(--bodyGutter) pt-8">
-        <p className="text-red-500">{error}</p>
-        <button
-          className="mt-3 hover:underline"
-          onClick={() => void reload()}
-          type="button"
-        >
-          Thử lại
-        </button>
-      </div>
-    );
-  }
+  if (errorStatus === 404) return <NotFoundState />;
 
-  if (!song) {
-    return (
-      <p className="mx-(--bodyGutter) pt-8 text-(--systemSecondary)">
-        Không tìm thấy bài hát.
-      </p>
-    );
-  }
+  if (error) return <RequestErrorState onRetry={() => void reload()} />;
+
+  if (!song) return <NotFoundState />;
 
   const songCredits = song.credits ?? [];
   const sections = creditSections(songCredits);
@@ -405,22 +391,16 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
                     <button
                       type="button"
                       disabled={!song.playbackUrl}
-                      onClick={() => setQueue([song])}
+                      onClick={() => playSong(song)}
                       className="[--button-action-min-width:130px] [--button-action-height:36px] bg-(--button-pill-background-color,#000) rounded-(--button-action-border-radius,24px) text-(--button-pill-color,#fff) [font:var(--title-3-semibold)] px-3 items-center flex h-(--button-action-height,36px) justify-center min-w-(--button-action-min-width-override,var(--button-action-min-width,none)) disabled:opacity-50 pointer-coarse:[--button-action-height:48px] pointer-coarse:[--button-action-min-width:160px] pointer-coarse:[font:var(--title-2-semibold)]"
                     >
                       <span className="block">
-                        <svg
+                        <PlayIcon
                           className="pointer-coarse:[--button-action-icon-height:17px] [--button-action-icon-height:15px] [--button-action-icon-top-offset:0] w-[inherit] block text-current pointer-events-none shrink-0 h-(--button-action-icon-height,12px) relative top-(--button-action-icon-top-offset,1px) right-(--button-action-icon-inline-end,5px)"
-                          height="16"
-                          width="16"
-                          viewBox="0 0 16 16"
-                        >
-                          <path
-                            fill="currentColor"
-                            d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"
-                          ></path>
-                        </svg>
+                          fill="currentColor"
+                        />
                       </span>
+
                       <span className="contents">Play</span>
                     </button>
                   </div>

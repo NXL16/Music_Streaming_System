@@ -1,219 +1,295 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import MediaCardRenderer from "@/components/media/media-card-renderer";
-import type { MediaCardProps } from "@/components/media/media-card.types";
-import { MusicPageLayout } from "@/components/layout/music-page-layout";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import SearchResults from "@/components/search/search-results";
+import RecentlySearched from "@/components/search/recently-searched";
 import {
-  CATALOG_SEARCH_FILTERS,
-  type CatalogSearchFilter,
-  useCatalogSearch,
-} from "@/lib/catalog/use-catalog-search";
-
-const GRID_CLASSNAME =
-  "grid list-none grid-cols-2 gap-x-5 gap-y-6 m-0 px-(--bodyGutter) pb-10 pt-0 min-[640px]:grid-cols-3 min-[1000px]:grid-cols-4 min-[1260px]:grid-cols-5 min-[1580px]:grid-cols-6 min-[1940px]:grid-cols-7";
-
-const FILTER_LABELS: Record<CatalogSearchFilter, string> = {
-  all: "Tất cả",
-  songs: "Bài hát",
-  artists: "Nghệ sĩ",
-  albums: "Album",
-  playlists: "Playlist",
-};
-
-function parseFilter(value: string | null): CatalogSearchFilter {
-  return CATALOG_SEARCH_FILTERS.includes(value as CatalogSearchFilter)
-    ? (value as CatalogSearchFilter)
-    : "all";
-}
-
-function ResultSection({
-  title,
-  items,
-}: {
-  title: string;
-  items: MediaCardProps[];
-}) {
-  if (!items.length) return null;
-
-  return (
-    <section className="pb-4" aria-label={title}>
-      <h2 className="mx-(--bodyGutter) mb-3 text-(--systemPrimary) [font:var(--title-3-emphasized)]">
-        {title}
-      </h2>
-      <ul className={GRID_CLASSNAME}>
-        {items.map((card) => (
-          <MediaCardRenderer key={card.id} {...card} />
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-function SearchResultsSkeleton() {
-  return (
-    <section aria-label="Đang tải kết quả tìm kiếm" aria-busy="true">
-      <div className="mx-(--bodyGutter) mb-3 h-6 w-28 animate-pulse rounded bg-(--fillTertiary,#7676801f)" />
-      <div className={GRID_CLASSNAME}>
-        {Array.from({ length: 7 }, (_, index) => (
-          <li key={index} className="animate-pulse">
-            <div className="aspect-square rounded-[7px] bg-(--fillTertiary,#7676801f)" />
-            <div className="mt-2 h-4 w-4/5 rounded bg-(--fillTertiary,#7676801f)" />
-            <div className="mt-1 h-3 w-3/5 rounded bg-(--fillTertiary,#7676801f)" />
-          </li>
-        ))}
-      </div>
-    </section>
-  );
-}
+  SearchWrapper,
+  type SearchSuggestion,
+} from "@/components/search/search-wrapper";
+import type { CatalogSearchShelfType } from "@/lib/catalog/catalog.api";
+import { useCatalogSearch } from "@/lib/catalog/use-catalog-search";
+import { useCatalogSearchOverview } from "@/lib/catalog/use-catalog-search-overview";
+import { useSearchSongShelfPages } from "@/lib/catalog/use-search-song-shelf-pages";
+import {
+  CATALOG_SEARCH_ARTIST_SHELF_PREVIEW_LIMIT,
+  CATALOG_SEARCH_MOBILE_SHELF_MAX_ITEMS,
+  CATALOG_SEARCH_SHELF_MAX_ITEMS,
+  CATALOG_SEARCH_SHELF_PREVIEW_LIMIT,
+  CATALOG_SEARCH_TOP_RESULTS_MAX_ITEMS,
+  CATALOG_SEARCH_TOP_RESULTS_PREVIEW_LIMIT,
+} from "@musical/shared-constants";
+import { useMediaQuery } from "@/hooks/use-media-query";
+import { useRecentlySearched } from "@/lib/catalog/use-recently-searched";
 
 export default function SearchPage() {
   const router = useRouter();
-  const pathname = usePathname();
   const searchParams = useSearchParams();
-  const urlQuery = searchParams.get("q") ?? "";
-  const urlFilter = parseFilter(searchParams.get("type"));
+  const urlQuery = searchParams.get("term") ?? "";
   const [query, setQuery] = useState(urlQuery);
-  const [filter, setFilter] = useState<CatalogSearchFilter>(urlFilter);
-  const { results, loading, error } = useCatalogSearch(query, filter);
+  const [expandedTopResultsTerm, setExpandedTopResultsTerm] = useState<
+    string | null
+  >(null);
+  const [expandedTopResultsRequestKey, setExpandedTopResultsRequestKey] =
+    useState(0);
+  const [expandedShelfType, setExpandedShelfType] =
+    useState<CatalogSearchShelfType | null>(null);
+  const [expandedCardShelfRequestKey, setExpandedCardShelfRequestKey] =
+    useState(0);
+  const [isFocused, setIsFocused] = useState(false);
+  const [isCancellingSearch, setIsCancellingSearch] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const searchRootRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const hasAutoFocusedRef = useRef(false);
   const trimmedQuery = query.trim();
-  const hasQuery = Boolean(trimmedQuery);
-  const showNoResults = hasQuery && !loading && !error && results.isEmpty;
-  const searchSummary = useMemo(() => {
-    if (!hasQuery) return "";
-    return `Kết quả cho “${trimmedQuery}”`;
-  }, [hasQuery, trimmedQuery]);
+  const hasPendingSearch = trimmedQuery !== urlQuery;
+  const maxWidth484 = useMediaQuery("(max-width: 483px)");
+  const shouldOpenSuggestions =
+    isFocused && Boolean(trimmedQuery) && hasPendingSearch;
+  const isTopResultsExpanded = expandedTopResultsTerm === urlQuery;
+  const isCatalogShelfExpanded = expandedShelfType !== null;
+  const isSearchDetailExpanded = isTopResultsExpanded || isCatalogShelfExpanded;
+  const expandedCardShelfPreviewLimit =
+    expandedShelfType === "artists"
+      ? CATALOG_SEARCH_ARTIST_SHELF_PREVIEW_LIMIT
+      : CATALOG_SEARCH_SHELF_PREVIEW_LIMIT;
 
-  // Keep a shareable URL without creating a history entry for every keystroke.
+  const searchOverview = useCatalogSearchOverview(urlQuery, {
+    topLimit: maxWidth484
+      ? CATALOG_SEARCH_TOP_RESULTS_MAX_ITEMS
+      : CATALOG_SEARCH_TOP_RESULTS_PREVIEW_LIMIT,
+    shelfLimit: maxWidth484 ? CATALOG_SEARCH_MOBILE_SHELF_MAX_ITEMS : undefined,
+  });
+  const expandedResultSearch = useCatalogSearch(urlQuery, {
+    enabled: isTopResultsExpanded,
+    keepPreviousResults: false,
+    source: "results",
+    limit:
+      CATALOG_SEARCH_TOP_RESULTS_MAX_ITEMS -
+      CATALOG_SEARCH_TOP_RESULTS_PREVIEW_LIMIT,
+    offset: CATALOG_SEARCH_TOP_RESULTS_PREVIEW_LIMIT,
+    requestKey: expandedTopResultsRequestKey,
+  });
+  const expandedCardShelfSearch = useCatalogSearch(urlQuery, {
+    enabled: isCatalogShelfExpanded && expandedShelfType !== "songs",
+    keepPreviousResults: false,
+    source: "shelf",
+    shelfType: expandedShelfType ?? undefined,
+    limit: CATALOG_SEARCH_SHELF_MAX_ITEMS - expandedCardShelfPreviewLimit,
+    offset: expandedCardShelfPreviewLimit,
+    requestKey: expandedCardShelfRequestKey,
+  });
+  const expandedSongShelf = useSearchSongShelfPages(urlQuery, {
+    enabled: isCatalogShelfExpanded && expandedShelfType === "songs",
+    initialSongs: searchOverview.shelves.trackSongs,
+    initialHasMore: Boolean(searchOverview.shelves.shelfHasMore.songs),
+  });
+  const suggestionSearch = useCatalogSearch(trimmedQuery, {
+    enabled: shouldOpenSuggestions,
+  });
+  const recentlySearched = useRecentlySearched(!urlQuery);
+
   useEffect(() => {
-    const normalizedQuery = query.trim();
-    const currentQuery = searchParams.get("q") ?? "";
-    const currentFilter = parseFilter(searchParams.get("type"));
+    const frame = requestAnimationFrame(() => {
+      setQuery(urlQuery);
+      setActiveIndex(-1);
+      setIsCancellingSearch(false);
+      setExpandedTopResultsTerm(null);
+      setExpandedShelfType(null);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [urlQuery]);
 
-    if (normalizedQuery === currentQuery && filter === currentFilter) return;
+  useEffect(() => {
+    if (
+      maxWidth484 ||
+      isSearchDetailExpanded ||
+      hasAutoFocusedRef.current
+    ) {
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      if (!searchInputRef.current || hasAutoFocusedRef.current) return;
+      hasAutoFocusedRef.current = true;
+      searchInputRef.current.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [isSearchDetailExpanded, maxWidth484]);
 
-    const timer = window.setTimeout(() => {
-      const params = new URLSearchParams();
-      if (normalizedQuery) params.set("q", normalizedQuery);
-      if (filter !== "all") params.set("type", filter);
-      const target = params.size ? `${pathname}?${params}` : pathname;
-      router.replace(target, { scroll: false });
-    }, 300);
+  useEffect(() => {
+    const close = (event: PointerEvent) => {
+      if (!searchRootRef.current?.contains(event.target as Node)) {
+        setIsFocused(false);
+        setActiveIndex(-1);
+      }
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, []);
 
-    return () => window.clearTimeout(timer);
-  }, [filter, pathname, query, router, searchParams]);
+  const suggestions = useMemo<SearchSuggestion[]>(() => {
+    if (!trimmedQuery) return [];
+    const availableSuggestions = [
+      ...suggestionSearch.results.hints
+        .slice(0, 3)
+        .map((value) => ({ kind: "query" as const, value })),
+      ...suggestionSearch.results.ordered
+        .slice(0, 10)
+        .map((card) => ({ kind: "media" as const, card })),
+    ];
+
+    const shouldKeepEmptySuggestion =
+      suggestionSearch.isCurrentQueryResolved ||
+      suggestionSearch.hasRelatedPreviousResults;
+
+    if (
+      availableSuggestions.length === 0 &&
+      shouldKeepEmptySuggestion &&
+      !suggestionSearch.error
+    ) {
+      return [{ kind: "query", value: trimmedQuery }];
+    }
+
+    return availableSuggestions;
+  }, [
+    suggestionSearch.error,
+    suggestionSearch.hasRelatedPreviousResults,
+    suggestionSearch.isCurrentQueryResolved,
+    suggestionSearch.results.hints,
+    suggestionSearch.results.ordered,
+    trimmedQuery,
+  ]);
+
+  const isOpen = shouldOpenSuggestions;
+  const hasVisibleSuggestions = isOpen && suggestions.length > 0;
+  const submitSearch = (value: string) => {
+    const normalizedValue = value.trim();
+    if (!normalizedValue) return;
+    searchInputRef.current?.blur();
+    setQuery(normalizedValue);
+    setIsFocused(false);
+    setActiveIndex(-1);
+    router.push("/search?term=" + encodeURIComponent(normalizedValue));
+  };
+  const selectSuggestion = (suggestion: SearchSuggestion) => {
+    if (suggestion.kind === "query") return submitSearch(suggestion.value);
+    suggestion.card.onOpen?.();
+    searchInputRef.current?.blur();
+    setIsFocused(false);
+    setActiveIndex(-1);
+    if (suggestion.card.slug) router.push(suggestion.card.slug);
+  };
+  const searchWrapper = (
+    <SearchWrapper
+      activeIndex={activeIndex}
+      inputRef={searchInputRef}
+      isLoading={suggestionSearch.loading}
+      isOpen={hasVisibleSuggestions}
+      onEscape={() => {
+        setIsFocused(false);
+        setActiveIndex(-1);
+      }}
+      onCancel={() => {
+        searchInputRef.current?.blur();
+        setQuery("");
+        setIsFocused(false);
+        setActiveIndex(-1);
+        if (urlQuery) {
+          setIsCancellingSearch(true);
+          router.replace("/search");
+          return;
+        }
+      }}
+      onFocus={() => setIsFocused(true)}
+      onQueryChange={(nextQuery) => {
+        setQuery(nextQuery);
+        setActiveIndex(-1);
+        if (nextQuery.trim() !== urlQuery) setIsFocused(true);
+      }}
+      onSelect={selectSuggestion}
+      onSubmit={() => {
+        const selected = suggestions[activeIndex];
+        if (selected) selectSuggestion(selected);
+        else submitSearch(query);
+      }}
+      query={query}
+      rootRef={searchRootRef}
+      setActiveIndex={setActiveIndex}
+      showCancel={maxWidth484 && Boolean(trimmedQuery)}
+      suggestions={suggestions}
+      trimmedQuery={trimmedQuery}
+    />
+  );
 
   return (
-    <MusicPageLayout>
-      <header className="mx-(--bodyGutter) mb-5 pt-1">
-        <h1 className="mb-4 text-(--systemPrimary) [font:var(--large-title)]">
-          Tìm kiếm
-        </h1>
-        <div className="flex items-center gap-3 rounded-lg bg-(--fillTertiary,#7676801f) px-4 py-3 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-(--keyColor)">
-          <svg
-            aria-hidden="true"
-            className="h-5 w-5 shrink-0 fill-(--systemSecondary)"
-            viewBox="0 0 24 24"
-          >
-            <path d="M17.979 18.553c.476 0 .813-.366.813-.835a.807.807 0 0 0-.235-.586l-3.45-3.457a5.61 5.61 0 0 0 1.158-3.413c0-3.098-2.535-5.633-5.633-5.633C7.542 4.63 5 7.156 5 10.262c0 3.098 2.534 5.632 5.632 5.632a5.614 5.614 0 0 0 3.274-1.055l3.472 3.472a.835.835 0 0 0 .6.242zm-7.347-3.875c-2.417 0-4.416-2-4.416-4.416 0-2.417 2-4.417 4.416-4.417 2.417 0 4.417 2 4.417 4.417s-2 4.416-4.417 4.416z" />
-          </svg>
-          <input
-            autoFocus
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Nghệ sĩ, bài hát, album hoặc playlist"
-            aria-label="Tìm kiếm"
-            className="min-w-0 flex-1 bg-transparent text-(--systemPrimary) [font:var(--body-tall)] outline-none placeholder:text-(--systemSecondary)"
-          />
-          {loading && (
-            <span
-              aria-label="Đang tìm kiếm"
-              className="size-4 shrink-0 animate-spin rounded-full border-2 border-(--systemSecondary) border-t-transparent"
-            />
-          )}
-          {!loading && query && (
-            <button
-              type="button"
-              onClick={() => setQuery("")}
-              aria-label="Xóa tìm kiếm"
-              className="grid size-5 shrink-0 place-items-center rounded-full bg-(--systemSecondary) text-(--systemBackground) hover:opacity-80"
-            >
-              <span
-                aria-hidden="true"
-                className="relative -top-px text-sm leading-none"
-              >
-                ×
-              </span>
-            </button>
-          )}
-        </div>
+    <div className="desktop-search-page">
+      {!isSearchDetailExpanded &&
+        (maxWidth484 ? (
+          searchWrapper
+        ) : (
+          <div className="search-controls-bar">
+            <div className="search-scope-bar scope-bar-non-material">
+              <div className="content-scope-bar content-scope-bar--desktop">
+                <div className="content-scope-bar__content">
+                  <div className="search-input search-input--with-scope">
+                    {searchWrapper}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
 
-        <div
-          className="mt-4 flex gap-2 overflow-x-auto pb-1"
-          role="tablist"
-          aria-label="Lọc kết quả"
-        >
-          {CATALOG_SEARCH_FILTERS.map((item) => {
-            const selected = filter === item;
-            return (
-              <button
-                key={item}
-                type="button"
-                role="tab"
-                aria-selected={selected}
-                onClick={() => setFilter(item)}
-                className={`shrink-0 rounded-full px-3 py-1.5 [font:var(--subhead-emphasized)] ${
-                  selected
-                    ? "bg-(--keyColor) text-(--systemBackground)"
-                    : "bg-(--fillTertiary,#7676801f) text-(--systemPrimary) hover:bg-(--fillSecondary)"
-                }`}
-              >
-                {FILTER_LABELS[item]}
-              </button>
-            );
-          })}
-        </div>
-      </header>
-
-      <p className="sr-only" aria-live="polite">
-        {loading ? "Đang tìm kiếm" : error || searchSummary}
-      </p>
-
-      {error && (
-        <p className="mx-(--bodyGutter) py-6 text-(--keyColor) [font:var(--callout)]">
-          {error}
-        </p>
+      {urlQuery && !isCancellingSearch && (
+        <SearchResults
+          error={searchOverview.error}
+          expandedError={expandedResultSearch.error}
+          expandedLoading={expandedResultSearch.loading}
+          expandedResults={expandedResultSearch.results}
+          loading={searchOverview.loading}
+          onRetry={searchOverview.retry}
+          results={searchOverview.topResults}
+          term={urlQuery}
+          isTopResultsExpanded={isTopResultsExpanded}
+          onCollapseTopResults={() => setExpandedTopResultsTerm(null)}
+          onExpandTopResults={() => {
+            setIsFocused(false);
+            setActiveIndex(-1);
+            setExpandedTopResultsRequestKey((current) => current + 1);
+            setExpandedTopResultsTerm(urlQuery);
+          }}
+          onRetryExpanded={expandedResultSearch.retry}
+          expandedShelfError={expandedCardShelfSearch.error}
+          expandedShelfLoading={expandedCardShelfSearch.loading}
+          expandedShelfResults={expandedCardShelfSearch.results}
+          expandedSongShelfError={expandedSongShelf.error}
+          expandedSongShelfHasMore={expandedSongShelf.hasMore}
+          expandedSongShelfLoadingMore={expandedSongShelf.loadingMore}
+          expandedSongShelfSongs={expandedSongShelf.songs}
+          expandedShelfType={expandedShelfType}
+          onCollapseShelf={() => setExpandedShelfType(null)}
+          onExpandShelf={(type) => {
+            setIsFocused(false);
+            setActiveIndex(-1);
+            if (type !== "songs")
+              setExpandedCardShelfRequestKey((current) => current + 1);
+            setExpandedShelfType(type);
+          }}
+          onRetryExpandedShelf={expandedCardShelfSearch.retry}
+          onLoadMoreExpandedSongs={expandedSongShelf.loadMore}
+          shelfError={searchOverview.error}
+          shelfLoading={searchOverview.loading}
+          shelfResults={searchOverview.shelves}
+        />
       )}
-
-      {!error && loading && <SearchResultsSkeleton />}
-
-      {!error && !loading && hasQuery && !results.isEmpty && (
-        <>
-          <h2 className="mx-(--bodyGutter) mb-4 text-(--systemPrimary) [font:var(--title-2-emphasized)]">
-            {searchSummary}
-          </h2>
-          <ResultSection title="Bài hát" items={results.songs} />
-          <ResultSection title="Nghệ sĩ" items={results.artists} />
-          <ResultSection title="Album" items={results.albums} />
-          <ResultSection title="Playlist" items={results.playlists} />
-        </>
+      {!urlQuery && !recentlySearched.loading && (
+        <RecentlySearched
+          items={recentlySearched.cards}
+          onClear={() => void recentlySearched.clear()}
+        />
       )}
-
-      {showNoResults && (
-        <p className="mx-(--bodyGutter) py-6 text-(--systemSecondary) [font:var(--callout)]">
-          Không tìm thấy kết quả cho “{trimmedQuery}”.
-        </p>
-      )}
-
-      {!hasQuery && (
-        <p className="mx-(--bodyGutter) py-6 text-(--systemSecondary) [font:var(--callout)]">
-          Tìm kiếm bài hát, nghệ sĩ, album hoặc playlist.
-        </p>
-      )}
-    </MusicPageLayout>
-
-    // <div className=""></div>
+    </div>
   );
 }

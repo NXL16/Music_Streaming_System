@@ -1293,9 +1293,13 @@ message SearchCatalogRequest {
   int32 limit = 3;
 
   repeated string types = 4;
+  bool include_music_videos = 5;
+  bool include_related_candidates = 6;
+  map<string, int32> related_candidate_limits = 7;
 }
 
 message SearchCatalogResponse {
   repeated CatalogReference data      = 1;
   CatalogResources          resources = 2;
+  repeated CatalogSongVideo music_videos = 3;
 }

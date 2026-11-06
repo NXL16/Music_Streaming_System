@@ -29,6 +29,10 @@ import {
   CleanupPlaylistHistoryResponse,
   RecordPreferenceEventRequest,
   RecordPreferenceEventResponse,
+  ListRecentSearchesRequest,
+  ListRecentSearchesResponse,
+  ClearRecentSearchesRequest,
+  ClearRecentSearchesResponse,
   SetArtistFollowRequest,
   GetArtistFollowRequest,
   ArtistFollowResponse,
@@ -74,7 +78,7 @@ export class RecommendationsController implements RecommendationServiceControlle
     private readonly preferenceService: PreferenceService,
     private readonly songStationService: SongStationService,
     private readonly artistStationService: ArtistStationService,
-  ) { }
+  ) {}
 
   async cleanupPlaylistHistory(
     request: CleanupPlaylistHistoryRequest,
@@ -238,9 +242,9 @@ export class RecommendationsController implements RecommendationServiceControlle
 
     return request.userId
       ? this.recommendationsService.getHomeRecommendations(
-        request,
-        globalResult,
-      )
+          request,
+          globalResult,
+        )
       : globalResult;
   }
 
@@ -290,6 +294,16 @@ export class RecommendationsController implements RecommendationServiceControlle
     request: RecordPreferenceEventRequest,
   ): Promise<RecordPreferenceEventResponse> {
     return this.preferenceService.record(request);
+  }
+  listRecentSearches(
+    request: ListRecentSearchesRequest,
+  ): Promise<ListRecentSearchesResponse> {
+    return this.preferenceService.listRecentSearches(request);
+  }
+  clearRecentSearches(
+    request: ClearRecentSearchesRequest,
+  ): Promise<ClearRecentSearchesResponse> {
+    return this.preferenceService.clearRecentSearches(request);
   }
   listContentPreferences(request: { userId: string }) {
     return this.preferenceService.listHiddenContent(request.userId);
@@ -356,16 +370,16 @@ export class RecommendationsController implements RecommendationServiceControlle
     );
     const artwork = hasVideoMedia
       ? await this.systemPlaylistArtworkService.bindVideos(
-        request.playlistKey,
-        request.detailSquareVideoAssetId,
-        request.detailMobileVideoAssetId,
-        request.homeHeroVideoAssetId,
-      )
+          request.playlistKey,
+          request.detailSquareVideoAssetId,
+          request.detailMobileVideoAssetId,
+          request.homeHeroVideoAssetId,
+        )
       : await this.systemPlaylistArtworkService.bind(
-        request.playlistKey,
-        request.coverAssetId,
-        request.homeCardAssetId,
-      );
+          request.playlistKey,
+          request.coverAssetId,
+          request.homeCardAssetId,
+        );
     return {
       playlistKey: request.playlistKey,
       coverAssetId: artwork.cover.assetId,

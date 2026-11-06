@@ -76,6 +76,7 @@ import {
   GetCatalogAlbumRelatedRequest,
   GetCatalogAlbumRelatedResponse,
   CatalogResponse,
+  SearchCatalogResponse,
   SearchCatalogRequest,
   SaveCatalogArtistDraftRequest,
   SaveCatalogSongDraftRequest,
@@ -1234,11 +1235,14 @@ export class SongsService {
     );
   }
 
-  async searchCatalog(data: SearchCatalogRequest): Promise<CatalogResponse> {
+  async searchCatalog(
+    data: SearchCatalogRequest,
+  ): Promise<SearchCatalogResponse> {
     const response = await grpcFirstValueFrom(
       this.songServiceClient.searchCatalog(data),
     );
-    return this.unwrapCatalogResponse(response);
+    this.unwrapCatalogResponse(response);
+    return response;
   }
 
   async saveCatalogArtistDraft(
