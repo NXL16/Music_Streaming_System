@@ -26,10 +26,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const exceptionResponse =
       exception.getResponse() as HttpExceptionResponseBody;
 
-    const responseRecord =
-      typeof exceptionResponse === 'object' && exceptionResponse !== null
-        ? (exceptionResponse as unknown as Record<string, unknown>)
-        : undefined;
     let message: string | string[] =
       status >= 500
         ? 'Lỗi xử lý yêu cầu. Vui lòng thử lại sau.'
@@ -38,10 +34,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       DEFAULT_ERROR_CODE_BY_STATUS[status] ||
       (status >= 500 ? 'INTERNAL_SERVER_ERROR' : `HTTP_${status}`);
 
-    if (
-      status < 500 &&
-      typeof exceptionResponse === 'object'
-    ) {
+    if (status < 500 && typeof exceptionResponse === 'object') {
       const responseObj = exceptionResponse as unknown as Record<
         string,
         unknown

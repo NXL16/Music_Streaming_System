@@ -4,6 +4,7 @@ import { NestFactory } from "@nestjs/core";
 import { MicroserviceOptions, Transport } from "@nestjs/microservices";
 import {
   ASSET,
+  REPORT,
   GRPC_LOADER_OPTIONS,
   resolveProtoPath,
 } from "@musical/shared-proto";
@@ -20,8 +21,11 @@ async function bootstrap(): Promise<void> {
     {
       transport: Transport.GRPC,
       options: {
-        package: ASSET.PACKAGE,
-        protoPath: resolveProtoPath(ASSET.PROTO_FILE),
+        package: [ASSET.PACKAGE, REPORT.PACKAGE],
+        protoPath: [
+          resolveProtoPath(ASSET.PROTO_FILE),
+          resolveProtoPath(REPORT.PROTO_FILE),
+        ],
         url: grpcUrl,
         loader: GRPC_LOADER_OPTIONS,
       },

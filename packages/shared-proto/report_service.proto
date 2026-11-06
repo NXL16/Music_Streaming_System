@@ -1,0 +1,113 @@
+syntax = "proto3";
+
+package report_service;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "Music_Streaming_System/packages/shared-proto/report";
+
+service ReportService {
+  rpc RequestReportAttachmentUpload(RequestReportAttachmentUploadRequest) returns (RequestReportAttachmentUploadResponse);
+  rpc FinalizeReportAttachmentUpload(FinalizeReportAttachmentUploadRequest) returns (ReportAttachmentResponse);
+  rpc CreateReport(CreateReportRequest) returns (ReportResponse);
+  rpc ListReports(ListReportsRequest) returns (ListReportsResponse);
+  rpc UpdateReportStatus(UpdateReportStatusRequest) returns (ReportResponse);
+  rpc GetReportAttachmentDownloadUrl(GetReportAttachmentDownloadUrlRequest) returns (ReportAttachmentDownloadResponse);
+}
+
+enum ReportType {
+  REPORT_TYPE_UNSPECIFIED = 0;
+  REPORT_TYPE_ISSUE = 1;
+  REPORT_TYPE_FEEDBACK = 2;
+}
+
+enum ReportStatus {
+  REPORT_STATUS_UNSPECIFIED = 0;
+  REPORT_STATUS_NEW = 1;
+  REPORT_STATUS_VIEWED = 2;
+  REPORT_STATUS_IN_PROGRESS = 3;
+  REPORT_STATUS_RESOLVED = 4;
+  REPORT_STATUS_CLOSED = 5;
+}
+
+enum ReportAttachmentKind {
+  REPORT_ATTACHMENT_KIND_UNSPECIFIED = 0;
+  REPORT_ATTACHMENT_KIND_IMAGE = 1;
+  REPORT_ATTACHMENT_KIND_VIDEO = 2;
+}
+
+message RequestReportAttachmentUploadRequest {
+  string actor_user_id = 1;
+  ReportAttachmentKind kind = 2;
+  string filename = 3;
+  string content_type = 4;
+  string checksum = 5;
+  int64 size_bytes = 6;
+}
+
+message RequestReportAttachmentUploadResponse {
+  ReportAttachment attachment = 1;
+  string upload_url = 2;
+}
+
+message FinalizeReportAttachmentUploadRequest {
+  string actor_user_id = 1;
+  string attachment_id = 2;
+}
+
+message CreateReportRequest {
+  string reporter_user_id = 1;
+  string reporter_username = 2;
+  ReportType type = 3;
+  string content = 4;
+  repeated string attachment_ids = 5;
+  string page_url = 6;
+  google.protobuf.Struct client_context = 7;
+  string reporter_email = 8;
+}
+
+message ListReportsRequest {
+  ReportType type = 1;
+  ReportStatus status = 2;
+  string cursor = 3;
+  int32 limit = 4;
+}
+
+message UpdateReportStatusRequest {
+  string report_id = 1;
+  ReportStatus status = 2;
+}
+
+message GetReportAttachmentDownloadUrlRequest {
+  string attachment_id = 1;
+}
+
+message ReportAttachment {
+  string id = 1;
+  string report_id = 2;
+  string filename = 3;
+  string content_type = 4;
+  int64 size_bytes = 5;
+  ReportAttachmentKind kind = 6;
+  string created_at = 7;
+}
+
+message Report {
+  string id = 1;
+  ReportType type = 2;
+  ReportStatus status = 3;
+  string content = 4;
+  string reporter_user_id = 5;
+  string reporter_username = 6;
+  string page_url = 7;
+  google.protobuf.Struct client_context = 8;
+  repeated ReportAttachment attachments = 9;
+  string created_at = 10;
+  string updated_at = 11;
+  string reporter_email = 12;
+}
+
+message ReportResponse { Report report = 1; }
+message ReportAttachmentResponse { ReportAttachment attachment = 1; }
+message ListReportsResponse { repeated Report reports = 1; string next_cursor = 2; bool has_more = 3; }
+message ReportAttachmentDownloadResponse { string download_url = 1; }

@@ -29,6 +29,24 @@ enum AssetStatus {
   DELETED
 }
 
+enum ReportType {
+  ISSUE
+  FEEDBACK
+}
+
+enum ReportStatus {
+  NEW
+  VIEWED
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum ReportAttachmentStatus {
+  PENDING_UPLOAD
+  READY
+}
+
 model Asset {
   id              String       @id @default(uuid())
   kind            AssetKind
@@ -143,4 +161,47 @@ model AssetArtifactCleanupJob {
 
   @@index([availableAt, lockedAt])
   @@map("asset_artifact_cleanup_jobs")
+}
+
+// Reports are private operational records. Their media is deliberately kept
+// separate from catalog assets: no CDN URL, transcoding, or public rendition
+// is ever produced for a report attachment.
+model Report {
+  id               String       @id @default(uuid())
+  type             ReportType
+  status           ReportStatus @default(NEW)
+  content          String       @db.VarChar(1000)
+  reporterUserId   String       @db.VarChar(128)
+  reporterUsername String       @db.VarChar(128)
+  reporterEmail    String       @db.VarChar(320)
+  pageUrl          String       @default("") @db.VarChar(2000)
+  clientContext    Json?
+  createdAt        DateTime     @default(now()) @db.Timestamptz
+  updatedAt        DateTime     @updatedAt @db.Timestamptz
+
+  attachments ReportAttachment[]
+
+  @@index([status, type, createdAt])
+  @@index([reporterUserId, createdAt])
+  @@map("reports")
+}
+
+model ReportAttachment {
+  id            String                 @id @default(uuid())
+  reportId      String?
+  ownerUserId   String                 @db.VarChar(128)
+  status        ReportAttachmentStatus @default(PENDING_UPLOAD)
+  filename      String                 @db.VarChar(255)
+  contentType   String                 @db.VarChar(128)
+  checksum      String                 @db.Char(64)
+  sizeBytes     BigInt
+  objectKey     String                 @unique @db.VarChar(1000)
+  createdAt     DateTime               @default(now()) @db.Timestamptz
+  finalizedAt   DateTime?              @db.Timestamptz
+
+  report Report? @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([ownerUserId, status, createdAt])
+  @@index([reportId])
+  @@map("report_attachments")
 }

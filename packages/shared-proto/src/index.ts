@@ -6,6 +6,7 @@ export * from "./generated/wallet_service";
 export * from "./grpc-tls";
 export * from "./generated/recommendation_service";
 export * from "./generated/asset_service";
+export * from "./generated/report_service";
 
 export {
   type SeekPoint,
@@ -57,6 +58,12 @@ export const ASSET = {
   PACKAGE: "asset_service",
   SERVICE: "AssetService",
   PROTO_FILE: "asset_service.proto",
+} as const;
+
+export const REPORT = {
+  PACKAGE: "report_service",
+  SERVICE: "ReportService",
+  PROTO_FILE: "report_service.proto",
 } as const;
 
 export const GRPC_LOADER_OPTIONS = {

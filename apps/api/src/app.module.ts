@@ -17,6 +17,7 @@ import { HealthModule } from './health/health.module';
 import { RequestLoggerMiddleware } from './common/middleware/request-logger.middleware';
 import { SsoModule } from './sso/sso.module';
 import { RoomIntegrationModule } from './integrations/room/room-integration.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { RoomIntegrationModule } from './integrations/room/room-integration.modu
     RecommendationsModule,
     AssetsModule,
     HealthModule,
+    ReportsModule,
   ],
   providers: [
     {

@@ -1,5 +1,5 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Injectable, OnModuleDestroy } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import {
   DeleteObjectsCommand,
   GetObjectCommand,
@@ -7,12 +7,12 @@ import {
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
-} from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { createReadStream, createWriteStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
-import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { createReadStream, createWriteStream } from "node:fs";
+import { stat } from "node:fs/promises";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 @Injectable()
 export class StorageService implements OnModuleDestroy {
@@ -21,14 +21,14 @@ export class StorageService implements OnModuleDestroy {
   private readonly client: S3Client;
 
   constructor(config: ConfigService) {
-    this.bucket = config.getOrThrow<string>('R2_BUCKET');
-    this.cdnUrl = config.getOrThrow<string>('CDN_URL').replace(/\/+$/, '');
+    this.bucket = config.getOrThrow<string>("R2_BUCKET");
+    this.cdnUrl = config.getOrThrow<string>("CDN_URL").replace(/\/+$/, "");
     this.client = new S3Client({
-      region: 'auto',
-      endpoint: config.getOrThrow<string>('R2_ENDPOINT'),
+      region: "auto",
+      endpoint: config.getOrThrow<string>("R2_ENDPOINT"),
       credentials: {
-        accessKeyId: config.getOrThrow<string>('R2_ACCESS_KEY'),
-        secretAccessKey: config.getOrThrow<string>('R2_SECRET_KEY'),
+        accessKeyId: config.getOrThrow<string>("R2_ACCESS_KEY"),
+        secretAccessKey: config.getOrThrow<string>("R2_SECRET_KEY"),
       },
       forcePathStyle: true,
     });
@@ -50,6 +50,14 @@ export class StorageService implements OnModuleDestroy {
     );
   }
 
+  createDownloadUrl(objectKey: string, expiresIn = 300): Promise<string> {
+    return getSignedUrl(
+      this.client,
+      new GetObjectCommand({ Bucket: this.bucket, Key: objectKey }),
+      { expiresIn },
+    );
+  }
+
   async head(objectKey: string): Promise<{
     contentLength: number;
     contentType: string;
@@ -59,7 +67,7 @@ export class StorageService implements OnModuleDestroy {
     );
     return {
       contentLength: Number(response.ContentLength ?? 0),
-      contentType: response.ContentType ?? '',
+      contentType: response.ContentType ?? "",
     };
   }
 
@@ -81,10 +89,10 @@ export class StorageService implements OnModuleDestroy {
       );
       if (response.Errors?.length) {
         const codes = [
-          ...new Set(response.Errors.map(({ Code }) => Code || 'Unknown')),
+          ...new Set(response.Errors.map(({ Code }) => Code || "Unknown")),
         ]
           .slice(0, 3)
-          .join(',');
+          .join(",");
         throw new Error(
           `STORAGE_DELETE_PARTIAL_FAILURE count=${response.Errors.length} codes=${codes}`,
         );
@@ -115,7 +123,19 @@ export class StorageService implements OnModuleDestroy {
     const response = await this.client.send(
       new GetObjectCommand({ Bucket: this.bucket, Key: objectKey }),
     );
-    if (!response.Body) throw new Error('STORAGE_OBJECT_BODY_MISSING');
+    if (!response.Body) throw new Error("STORAGE_OBJECT_BODY_MISSING");
+    return Buffer.from(await response.Body.transformToByteArray());
+  }
+
+  async getPrefix(objectKey: string, length = 4096): Promise<Buffer> {
+    const response = await this.client.send(
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: objectKey,
+        Range: `bytes=0-${Math.max(0, length - 1)}`,
+      }),
+    );
+    if (!response.Body) throw new Error("STORAGE_OBJECT_BODY_MISSING");
     return Buffer.from(await response.Body.transformToByteArray());
   }
 
@@ -124,7 +144,7 @@ export class StorageService implements OnModuleDestroy {
       new GetObjectCommand({ Bucket: this.bucket, Key: objectKey }),
     );
     if (!(response.Body instanceof Readable)) {
-      throw new Error('STORAGE_OBJECT_STREAM_INVALID');
+      throw new Error("STORAGE_OBJECT_STREAM_INVALID");
     }
     await pipeline(response.Body, createWriteStream(destination));
   }
@@ -133,7 +153,7 @@ export class StorageService implements OnModuleDestroy {
     objectKey: string,
     body: Buffer,
     contentType: string,
-    cacheControl = 'public, max-age=31536000, immutable',
+    cacheControl = "public, max-age=31536000, immutable",
   ): Promise<void> {
     await this.client.send(
       new PutObjectCommand({
@@ -151,7 +171,7 @@ export class StorageService implements OnModuleDestroy {
     objectKey: string,
     filePath: string,
     contentType: string,
-    cacheControl = 'public, max-age=31536000, immutable',
+    cacheControl = "public, max-age=31536000, immutable",
   ): Promise<void> {
     const file = await stat(filePath);
     await this.client.send(
@@ -168,9 +188,9 @@ export class StorageService implements OnModuleDestroy {
 
   publicUrl(objectKey: string): string {
     const encodedKey = objectKey
-      .split('/')
+      .split("/")
       .map((part) => encodeURIComponent(part))
-      .join('/');
+      .join("/");
     return `${this.cdnUrl}/${encodedKey}`;
   }
 
