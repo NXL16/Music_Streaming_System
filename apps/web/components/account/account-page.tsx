@@ -27,14 +27,20 @@ import { useProfile } from "@/lib/auth/use-profile";
 import { formatDateTime } from "@/lib/format/date";
 import { useWalletBalance } from "@/lib/wallet/use-wallet-balance";
 
-const tabs = [
+const accountTabs = [
   { id: "ho-so", label: "Profile" },
+ ] as const;
+
+const settingsTabs = [
   { id: "bao-mat", label: "Security" },
   { id: "thiet-bi", label: "Devices" },
   { id: "vi", label: "Coin Wallet" },
 ] as const;
 
+const tabs = [...accountTabs, ...settingsTabs] as const;
+
 type TabId = (typeof tabs)[number]["id"];
+type AccountPageSection = "account" | "settings";
 
 function isTabId(value: string): value is TabId {
   return tabs.some((tab) => tab.id === value);
@@ -83,7 +89,11 @@ function StatusRow({
   );
 }
 
-export default function ProfilePage() {
+export default function AccountPage({
+  section,
+}: {
+  section: AccountPageSection;
+}) {
   const { user, loading, error } = useProfile();
   const { balance } = useWalletBalance();
   const verificationRequest = useEmailVerificationRequest();
@@ -94,7 +104,10 @@ export default function ProfilePage() {
   } = useAvatarUpload();
   const profileDetails = useProfileDetailsUpdate();
   const avatarInputRef = useRef<HTMLInputElement>(null);
-  const [activeTab, setActiveTab] = useState<TabId>("ho-so");
+  const visibleTabs = section === "account" ? accountTabs : settingsTabs;
+  const [activeTab, setActiveTab] = useState<TabId>(
+    section === "account" ? "ho-so" : "bao-mat",
+  );
   const [securityWorkspace, setSecurityWorkspace] = useState<
     "password" | "twoFactor" | null
   >(null);
@@ -107,13 +120,14 @@ export default function ProfilePage() {
   useEffect(() => {
     const syncTab = () => {
       const hash = window.location.hash.slice(1);
-      if (isTabId(hash)) setActiveTab(hash);
+      if (isTabId(hash) && visibleTabs.some((tab) => tab.id === hash))
+        setActiveTab(hash);
     };
 
     syncTab();
     window.addEventListener("hashchange", syncTab);
     return () => window.removeEventListener("hashchange", syncTab);
-  }, []);
+  }, [visibleTabs]);
 
   const name = user?.displayName || user?.username || "Your account";
   const coinBalance = (balance?.coinBalance ?? 0).toLocaleString();
@@ -148,8 +162,9 @@ export default function ProfilePage() {
 
   return (
     <MusicPageLayout>
-      <MusicPageHeading title="Account" />
+      <MusicPageHeading title={section === "account" ? "Account" : "Settings"} />
 
+      {section === "account" && (
       <section className="px-(--bodyGutter) pb-6 pt-2">
         <div className="flex items-center gap-5">
           <button
@@ -257,12 +272,21 @@ export default function ProfilePage() {
           </div>
         </div>
       </section>
+      )}
 
-      <nav
-        aria-label="Các phần tài khoản"
+      {section === "settings" && (
+        <section className="px-(--bodyGutter) pb-4 pt-2">
+          <p className="max-w-2xl text-(--systemSecondary) [font:var(--body-tall)]">
+            Manage your security, signed-in devices, and MusicCoin wallet.
+          </p>
+        </section>
+      )}
+
+      {visibleTabs.length > 1 && <nav
+        aria-label="Settings sections"
         className="mb-6 flex gap-1 overflow-x-auto border-b border-(--labelDivider) px-(--bodyGutter)"
       >
-        {tabs.map((tab) => {
+        {visibleTabs.map((tab) => {
           const active = activeTab === tab.id;
           return (
             <button
@@ -275,7 +299,7 @@ export default function ProfilePage() {
             </button>
           );
         })}
-      </nav>
+      </nav>}
 
       {activeTab === "ho-so" && (
         <section className="relative z-(--z-default) w-full px-(--bodyGutter) pb-8">

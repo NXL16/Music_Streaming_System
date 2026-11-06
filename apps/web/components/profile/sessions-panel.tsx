@@ -1,6 +1,6 @@
 "use client";
 
-import { Laptop, LogOut, RefreshCw, ShieldCheck } from "lucide-react";
+import { Laptop, ShieldCheck } from "lucide-react";
 import { formatDateTime } from "@/lib/format/date";
 import { useSessions } from "@/lib/auth/use-sessions";
 
@@ -40,47 +40,24 @@ export function SessionsPanel({ className = "mt-6" }: SessionsPanelProps) {
     error,
     actionDeviceId,
     logoutAllLoading,
-    reload,
     revokeDevice,
     revokeAllSessions,
   } = useSessions();
 
   return (
-    <section className={`${className}`}>
-      <div className="flex flex-col gap-5 pb-2 md:flex-row md:items-end md:justify-between">
-        <div>
-          <p className="text-(--systemSecondary) [font:var(--subhead-emphasized)]">
-            ACCOUNT SECURITY
-          </p>
-          <h2 className="mt-1 text-(--systemPrimary) [font:var(--title-2-emphasized)]">
-            Signed-in devices
-          </h2>
-          <p className="mt-1 text-(--systemSecondary) [font:var(--callout)]">
-            Manage your signed-in sessions and sign out other devices when needed.
-          </p>
-        </div>
-
-        <div className="flex shrink-0 flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => void reload()}
-            disabled={loading}
-            className="inline-flex items-center gap-2 rounded-full border border-(--labelDivider) px-3.5 py-2 text-(--systemPrimary) [font:var(--callout-emphasized)] transition hover:bg-(--systemQuinary) disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            {loading ? "Loading…" : "Refresh"}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => void revokeAllSessions()}
-            disabled={logoutAllLoading}
-            className="inline-flex items-center gap-2 rounded-full bg-(--keyColor) px-3.5 py-2 text-(--keyColorText) [font:var(--callout-emphasized)] transition hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <LogOut className="h-4 w-4" />
-            {logoutAllLoading ? "Signing out…" : "Sign out all"}
-          </button>
-        </div>
+    <section className={className}>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="text-(--systemPrimary) [font:var(--title-2-emphasized)]">
+          Devices
+        </h2>
+        <button
+          type="button"
+          onClick={() => void revokeAllSessions()}
+          disabled={logoutAllLoading}
+          className="rounded-full border border-(--labelDivider) px-3.5 py-2 text-(--systemSecondary) [font:var(--callout-emphasized)] transition hover:border-(--keyColor) hover:text-(--keyColor) disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {logoutAllLoading ? "Signing out..." : "Sign out all"}
+        </button>
       </div>
 
       {error && (
@@ -89,7 +66,7 @@ export function SessionsPanel({ className = "mt-6" }: SessionsPanelProps) {
         </div>
       )}
 
-      <div className="mt-6 divide-y divide-(--labelDivider)">
+      <div className="mt-5 divide-y divide-(--labelDivider)">
         {sessions.length === 0 && !loading && (
           <div className="py-8 text-(--systemSecondary) [font:var(--callout)]">
             No signed-in sessions yet.
@@ -132,7 +109,7 @@ export function SessionsPanel({ className = "mt-6" }: SessionsPanelProps) {
                 disabled={actionDeviceId === session.deviceId}
                 className="justify-self-start rounded-full border border-(--labelDivider) px-3.5 py-2 text-(--systemPrimary) [font:var(--callout-emphasized)] transition hover:border-(--keyColor) hover:text-(--keyColor) disabled:cursor-not-allowed disabled:opacity-50 sm:justify-self-end"
               >
-                {actionDeviceId === session.deviceId ? "Signing out…" : "Sign out"}
+                {actionDeviceId === session.deviceId ? "Signing out..." : "Sign out"}
               </button>
             )}
           </div>

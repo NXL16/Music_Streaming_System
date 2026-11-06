@@ -136,7 +136,7 @@ export function useVerifyEmail() {
         setRedirecting(true);
 
         redirectTimer = window.setTimeout(() => {
-          router.push("/profile");
+          router.push("/account");
         }, SUCCESS_REDIRECT_MS);
       } catch (error) {
         if (cancelled) {
