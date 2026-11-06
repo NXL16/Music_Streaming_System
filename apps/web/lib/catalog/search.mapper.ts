@@ -11,39 +11,40 @@ import { formatReleaseYear } from "@/lib/format/release-date";
 import { createMediaResourceCard } from "@/lib/media/normalize-media-resource";
 import { catalogArtists, catalogArtistsFromResources } from "./catalog-artists";
 import { songRoute } from "./song-route";
-import { playSong } from "@/lib/player/play-song";
-import { mapCatalogSong } from "./catalog.mapper";
-import { mapCatalogMusicVideoCards } from "./music-video-cards";
-import type { PlayerSong } from "@/lib/player/use-player-store";
-import type { CatalogSearchShelfType } from "./catalog.api";
+import { projectPlayerSong } from "@/lib/songs/project-song-summary";
+import { usePlayerStore } from "@/lib/player/use-player-store";
 
 export type SearchResults = {
-  hints: string[];
-  ordered: MediaCardProps[];
   songs: MediaCardProps[];
-  trackSongs: PlayerSong[];
   artists: MediaCardProps[];
   albums: MediaCardProps[];
   playlists: MediaCardProps[];
-  musicVideos: MediaCardProps[];
-  hasMore: boolean;
-  shelfHasMore: Partial<Record<CatalogSearchShelfType, boolean>>;
   isEmpty: boolean;
 };
 
 function mapSong(
   response: CatalogResponse,
   song: CatalogSongResource,
-): { card: MediaCardProps; track: PlayerSong } {
+): MediaCardProps {
   const artists = catalogArtists(response, song.relationships.artists?.data);
   const albumReference = song.relationships.albums?.data[0];
   const releaseTrackId = albumReference?.meta?.releaseTrackId;
-  const playbackSong = mapCatalogSong(response, song, {
+  const playbackSong = projectPlayerSong({
+    id: song.id,
+    releaseTrackId,
+    title: song.attributes.name,
+    artist: formatArtistNames(song.attributes.artistName),
+    artists,
+    album: song.attributes.albumName,
     albumId: albumReference?.id,
+    hasLyrics: song.attributes.hasLyrics,
+    durationSec: Math.round(song.attributes.durationInMillis / 1000),
+    artworkUrl: song.attributes.artwork?.url,
+    releaseDate: song.attributes.releaseDate,
+    contentRating: song.attributes.contentRating,
   });
 
-  return {
-    card: createMediaResourceCard(
+  return createMediaResourceCard(
     {
       id: song.id,
       type: "songs",
@@ -57,7 +58,7 @@ function mapSong(
       slug: releaseTrackId
         ? songRoute(song.attributes.name, releaseTrackId)
         : undefined,
-      onPlay: () => playSong(playbackSong),
+      onPlay: () => usePlayerStore.getState().setQueue([playbackSong]),
       menuContext: {
         kind: "song",
         songId: song.id,
@@ -69,9 +70,7 @@ function mapSong(
         albumHref: playbackSong.albumUrl,
       },
     },
-    ),
-    track: playbackSong,
-  };
+  );
 }
 
 function mapArtist(artist: CatalogArtistResource): MediaCardProps {
@@ -192,71 +191,43 @@ export function mapCatalogPlaylists(
   });
 }
 
-// Preserve the API's ranked order for Top Results while exposing each media
-// type as a separate shelf.
-export function mapSearchResults(
-  response: CatalogResponse & {
-    hints?: string[];
-    shelfHasMore?: Partial<Record<CatalogSearchShelfType, boolean>>;
-  },
-): SearchResults {
+// The search response groups references in `data` (songs → artists → albums
+// → playlists). Preserve that ordering per group while pulling the full
+// resource from the `resources` maps.
+export function mapSearchResults(response: CatalogResponse): SearchResults {
   const songs: MediaCardProps[] = [];
-  const trackSongs: PlayerSong[] = [];
   const artists: MediaCardProps[] = [];
   const albums: MediaCardProps[] = [];
   const playlists: MediaCardProps[] = [];
-  const musicVideos = mapCatalogMusicVideoCards(response.musicVideos ?? [], {
-    artistShelf: false,
-  });
-  const ordered: MediaCardProps[] = [];
 
   for (const reference of response.data) {
     if (reference.type === "songs") {
       const song = response.resources.songs[reference.id];
-      if (song) {
-        const { card, track } = mapSong(response, song);
-        songs.push(card);
-        trackSongs.push(track);
-        ordered.push(card);
-      }
+      if (song) songs.push(mapSong(response, song));
     } else if (reference.type === "artists") {
       const artist = response.resources.artists[reference.id];
-      if (artist) {
-        const card = mapArtist(artist);
-        artists.push(card);
-        ordered.push(card);
-      }
+      if (artist) artists.push(mapArtist(artist));
     } else if (reference.type === "albums") {
       const album = response.resources.albums[reference.id];
       if (album) {
-        const card = mapAlbum(
-          album,
-          catalogArtists(response, album.relationships.artists?.data),
+        albums.push(
+          mapAlbum(
+            album,
+            catalogArtists(response, album.relationships.artists?.data),
+          ),
         );
-        albums.push(card);
-        ordered.push(card);
       }
     } else if (reference.type === "playlists") {
       const playlist = response.resources.playlists[reference.id];
-      if (playlist) {
-        const card = mapPlaylist(playlist);
-        playlists.push(card);
-        ordered.push(card);
-      }
+      if (playlist) playlists.push(mapPlaylist(playlist));
     }
   }
 
   return {
-    hints: response.hints ?? [],
-    ordered,
     songs,
-    trackSongs,
     artists,
     albums,
     playlists,
-    musicVideos,
-    hasMore: response.hasMore ?? false,
-    shelfHasMore: response.shelfHasMore ?? {},
     isEmpty:
       !songs.length && !artists.length && !albums.length && !playlists.length,
   };

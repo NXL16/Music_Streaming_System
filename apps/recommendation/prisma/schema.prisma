@@ -208,18 +208,6 @@ model UserPreferenceEvent {
   @@map("user_preference_events")
 }
 
-model UserRecentSearch {
-  id           String   @id @default(uuid())
-  userId       String   @db.VarChar(128)
-  resourceType String   @db.VarChar(64)
-  resourceId   String   @db.VarChar(128)
-  searchedAt   DateTime @updatedAt @db.Timestamptz
-
-  @@unique([userId, resourceType, resourceId])
-  @@index([userId, searchedAt(sort: Desc)])
-  @@map("user_recent_searches")
-}
-
 // Current opt-out state is deliberately separate from the immutable event log.
 // The log explains why a profile changed; this table answers the latency-
 // sensitive question used while generating Home: must this resource be absent?

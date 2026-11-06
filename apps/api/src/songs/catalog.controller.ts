@@ -16,9 +16,6 @@ import type { Request } from 'express';
 import type { JwtUser } from '@musical/shared-types';
 import {
   CatalogDraftStatus,
-  type CatalogReference,
-  type CatalogResponse,
-  type SearchCatalogResponse,
   SaveCatalogAlbumDraftRequest,
   SaveCatalogArtistDraftRequest,
   SaveCatalogPlaylistDraftRequest,
@@ -33,277 +30,7 @@ import { PermissionsGuard } from '../common/guards/permissions.guard';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { ArtistOrAdminGuard } from '../common/guards/artist-or-admin.guard';
 import { RecommendationsService } from '../recommendations/recommendations.service';
-import { mapWithConcurrency } from '../common/utils/concurrency';
-import {
-  CATALOG_RECENT_SEARCH_LIMIT,
-  CATALOG_SEARCH_QUERY_MAX_LENGTH,
-  CATALOG_SEARCH_TOP_RESULTS_MAX_ITEMS,
-  CATALOG_SEARCH_TOP_RESULTS_PREVIEW_LIMIT,
-  CATALOG_SEARCH_TOP_RESULTS_PREVIEW_POOL_LIMIT,
-  CATALOG_SEARCH_ARTIST_SHELF_PREVIEW_LIMIT,
-  CATALOG_SEARCH_EXPANDABLE_SHELF_TYPES,
-  CATALOG_SEARCH_SHELF_MAX_ITEMS,
-  CATALOG_SEARCH_SHELF_PREVIEW_LIMIT,
-  CATALOG_SEARCH_SONG_SHELF_PREVIEW_LIMIT,
-  type CatalogSearchExpandableShelfType,
-  normalizeCatalogSearchQuery,
-  PREFERENCE_SIGNAL_WEIGHT,
-} from '@musical/shared-constants';
-
-type SearchCandidate = {
-  reference: CatalogReference;
-  name: string;
-  releaseId?: string;
-  score: number;
-};
-
-const SEARCH_HINT_TYPE_PRIORITY: Record<string, number> = {
-  songs: 0,
-  artists: 1,
-  albums: 2,
-  playlists: 3,
-};
-
-function searchQuery(value?: string) {
-  return value?.trim().slice(0, CATALOG_SEARCH_QUERY_MAX_LENGTH) ?? '';
-}
-
-function candidateFor(
-  catalog: CatalogResponse,
-  reference: CatalogReference,
-  query: string,
-): SearchCandidate | undefined {
-  let name = '';
-  let related: string[] = [];
-  let releaseId: string | undefined;
-  const resources = catalog.resources;
-  if (!resources) return undefined;
-  if (reference.type === 'songs') {
-    const song = resources.songs?.[reference.id];
-    if (!song?.attributes) return undefined;
-    name = song.attributes.name;
-    related = [song.attributes.artistName, song.attributes.albumName];
-    releaseId = song.relationships?.albums?.data?.[0]?.id;
-  } else if (reference.type === 'artists') {
-    const artist = resources.artists?.[reference.id];
-    if (!artist?.attributes) return undefined;
-    name = artist.attributes.name;
-  } else if (reference.type === 'albums') {
-    const album = resources.albums?.[reference.id];
-    if (!album?.attributes) return undefined;
-    name = album.attributes.name;
-    related = [album.attributes.artistName];
-    releaseId = album.id;
-  } else if (reference.type === 'playlists') {
-    const playlist = resources.playlists?.[reference.id];
-    if (!playlist?.attributes) return undefined;
-    name = playlist.attributes.name;
-    related = [playlist.attributes.curatorName];
-  } else {
-    return undefined;
-  }
-
-  const normalizedName = normalizeCatalogSearchQuery(name);
-  const normalizedQuery = normalizeCatalogSearchQuery(query);
-  const tokens = normalizedQuery.split(' ').filter(Boolean);
-  const score =
-    normalizedName === normalizedQuery
-      ? 1_000
-      : normalizedName.startsWith(normalizedQuery)
-        ? 900
-        : tokens.every((token) =>
-              normalizedName.split(' ').some((word) => word.startsWith(token)),
-            )
-          ? 800
-          : normalizedName.includes(normalizedQuery)
-            ? 700
-            : related.some((value) =>
-                  normalizeCatalogSearchQuery(value).includes(normalizedQuery),
-                )
-              ? 500
-              : 100;
-  return { reference, name, releaseId, score };
-}
-
-function rankedSearchCandidates(
-  catalog: CatalogResponse,
-  query: string,
-): SearchCandidate[] {
-  return catalog.data
-    .flatMap((reference) => {
-      const candidate = candidateFor(catalog, reference, query);
-      return candidate ? [candidate] : [];
-    })
-    .sort(
-      (left, right) =>
-        right.score - left.score ||
-        left.name.localeCompare(right.name) ||
-        left.reference.id.localeCompare(right.reference.id),
-    );
-}
-
-function uniqueReleaseCandidates(
-  candidates: SearchCandidate[],
-  limit: number,
-): SearchCandidate[] {
-  const unique: SearchCandidate[] = [];
-  const seenReleaseIds = new Set<string>();
-
-  for (const candidate of candidates) {
-    if (candidate.releaseId && seenReleaseIds.has(candidate.releaseId)) {
-      continue;
-    }
-    if (candidate.releaseId) seenReleaseIds.add(candidate.releaseId);
-    unique.push(candidate);
-    if (unique.length === limit) break;
-  }
-
-  return unique;
-}
-
-function searchHints(candidates: SearchCandidate[]): string[] {
-  const seenNames = new Set<string>();
-  const seenReleaseIds = new Set<string>();
-
-  return candidates
-    .slice()
-    .sort(
-      (left, right) =>
-        (SEARCH_HINT_TYPE_PRIORITY[left.reference.type] ?? 99) -
-          (SEARCH_HINT_TYPE_PRIORITY[right.reference.type] ?? 99) ||
-        right.score - left.score ||
-        left.name.localeCompare(right.name),
-    )
-    .flatMap((candidate) => {
-      const normalizedName = normalizeCatalogSearchQuery(candidate.name);
-      if (
-        seenNames.has(normalizedName) ||
-        (candidate.releaseId && seenReleaseIds.has(candidate.releaseId))
-      ) {
-        return [];
-      }
-      seenNames.add(normalizedName);
-      if (candidate.releaseId) seenReleaseIds.add(candidate.releaseId);
-      return [candidate.name];
-    })
-    .slice(0, 3);
-}
-
-function searchPageResources(
-  catalog: CatalogResponse,
-  page: CatalogReference[],
-): NonNullable<CatalogResponse['resources']> {
-  const resources = catalog.resources;
-  const songs: NonNullable<CatalogResponse['resources']>['songs'] = {};
-  const artists: NonNullable<CatalogResponse['resources']>['artists'] = {};
-  const albums: NonNullable<CatalogResponse['resources']>['albums'] = {};
-  const playlists: NonNullable<CatalogResponse['resources']>['playlists'] = {};
-
-  const addArtist = (artistId: string) => {
-    const artist = resources?.artists?.[artistId];
-    if (artist) artists[artistId] = artist;
-  };
-  const addAlbum = (albumId: string) => {
-    const album = resources?.albums?.[albumId];
-    if (!album) return;
-    albums[albumId] = album;
-    album.relationships?.artists?.data?.forEach((artist) =>
-      addArtist(artist.id),
-    );
-  };
-
-  page.forEach((reference) => {
-    if (reference.type === 'songs') {
-      const song = resources?.songs?.[reference.id];
-      if (!song) return;
-      songs[reference.id] = song;
-      song.relationships?.artists?.data?.forEach((artist) =>
-        addArtist(artist.id),
-      );
-      song.relationships?.albums?.data?.forEach((album) => addAlbum(album.id));
-      return;
-    }
-    if (reference.type === 'artists') {
-      addArtist(reference.id);
-      return;
-    }
-    if (reference.type === 'albums') {
-      addAlbum(reference.id);
-      return;
-    }
-    if (reference.type === 'playlists') {
-      const playlist = resources?.playlists?.[reference.id];
-      if (playlist) playlists[reference.id] = playlist;
-    }
-  });
-
-  return { songs, artists, albums, playlists };
-}
-
-function topResultsPage(
-  catalog: SearchCatalogResponse,
-  query: string,
-  limit: number,
-  offset = 0,
-) {
-  const candidates = rankedSearchCandidates(catalog, query);
-  const media = uniqueReleaseCandidates(
-    candidates,
-    CATALOG_SEARCH_TOP_RESULTS_MAX_ITEMS,
-  );
-  const data = media
-    .slice(offset, offset + limit)
-    .map((candidate) => candidate.reference);
-  return { data, hasMore: offset + data.length < media.length };
-}
-
-type SearchShelfLimits = {
-  songs: number;
-  artists: number;
-  cards: number;
-};
-
-function searchShelfPreviews(
-  catalog: SearchCatalogResponse,
-  limits: SearchShelfLimits,
-) {
-  const referencesFor = (type: string, limit: number) =>
-    catalog.data.filter((reference) => reference.type === type).slice(0, limit);
-  const songCandidates = referencesFor('songs', limits.songs + 1);
-  const artistCandidates = referencesFor('artists', limits.artists + 1);
-  const albumCandidates = referencesFor('albums', limits.cards + 1);
-  const playlistCandidates = referencesFor('playlists', limits.cards + 1);
-  const musicVideoCandidates = (catalog.musicVideos ?? []).slice(
-    0,
-    limits.cards + 1,
-  );
-  const data = [
-    ...songCandidates.slice(0, limits.songs),
-    ...artistCandidates.slice(0, limits.artists),
-    ...albumCandidates.slice(0, limits.cards),
-    ...playlistCandidates.slice(0, limits.cards),
-  ];
-
-  return {
-    data,
-    musicVideos: musicVideoCandidates.slice(0, limits.cards),
-    shelfHasMore: {
-      songs: songCandidates.length > limits.songs,
-      artists: artistCandidates.length > limits.artists,
-      albums: albumCandidates.length > limits.cards,
-      playlists: playlistCandidates.length > limits.cards,
-      'music-videos': musicVideoCandidates.length > limits.cards,
-    },
-  };
-}
-
-function isExpandableSearchShelfType(
-  value: string,
-): value is CatalogSearchExpandableShelfType {
-  return CATALOG_SEARCH_EXPANDABLE_SHELF_TYPES.includes(
-    value as CatalogSearchExpandableShelfType,
-  );
-}
+import { PREFERENCE_SIGNAL_WEIGHT } from '@musical/shared-constants';
 
 @Controller('catalog/:storefront')
 export class CatalogController {
@@ -323,11 +50,7 @@ export class CatalogController {
     if (!resourceType || !resourceId) {
       throw new BadRequestException('SEARCH_RESOURCE_REQUIRED');
     }
-    if (
-      !['songs', 'albums', 'artists', 'playlists', 'music-videos'].includes(
-        resourceType,
-      )
-    ) {
+    if (!['songs', 'albums', 'artists', 'playlists'].includes(resourceType)) {
       throw new BadRequestException('SEARCH_RESOURCE_TYPE_INVALID');
     }
 
@@ -339,88 +62,6 @@ export class CatalogController {
       resourceType,
       resourceId,
       weight: PREFERENCE_SIGNAL_WEIGHT.SEARCH_CLICKED,
-    });
-  }
-
-  @Get('search/recent')
-  @UseGuards(StrictJwtAuthGuard)
-  async getRecentSearches(
-    @Req() req: Request,
-    @Param('storefront') storefront: string,
-    @Query('limit') limit?: string,
-  ) {
-    const user = req.user as JwtUser;
-    const recentSearches = await this.recommendationsService.listRecentSearches(
-      {
-        userId: user.userId,
-        limit: Math.min(
-          CATALOG_RECENT_SEARCH_LIMIT,
-          Math.max(1, Number(limit) || CATALOG_RECENT_SEARCH_LIMIT),
-        ),
-      },
-    );
-    const standardResources = recentSearches.resources.filter(
-      (resource) => resource.resourceType !== 'music-videos',
-    );
-    const musicVideoIds = recentSearches.resources
-      .filter((resource) => resource.resourceType === 'music-videos')
-      .map((resource) => resource.resourceId);
-    const [catalog, resolvedMusicVideos] = await Promise.all([
-      this.songsService.getCatalogResources({
-        storefront,
-        resources: standardResources.map((resource) => ({
-          type: resource.resourceType,
-          id: resource.resourceId,
-        })),
-      }),
-      mapWithConcurrency(musicVideoIds, 6, (songVideoId) =>
-        this.songsService
-          .getCatalogSongVideo({ storefront, songVideoId })
-          .catch(() => undefined),
-      ),
-    ]);
-    const musicVideos = resolvedMusicVideos.filter(
-      (video): video is NonNullable<typeof video> => Boolean(video),
-    );
-    const standardReferences = new Map(
-      catalog.data.map((reference) => [
-        `${reference.type}:${reference.id}`,
-        reference,
-      ]),
-    );
-    const musicVideosById = new Map(
-      musicVideos.map((video) => [video.id, video]),
-    );
-
-    return {
-      ...catalog,
-      data: recentSearches.resources.flatMap((resource) => {
-        if (resource.resourceType === 'music-videos') {
-          return musicVideosById.has(resource.resourceId)
-            ? [
-                {
-                  id: resource.resourceId,
-                  type: resource.resourceType,
-                  href: '',
-                },
-              ]
-            : [];
-        }
-        const reference = standardReferences.get(
-          `${resource.resourceType}:${resource.resourceId}`,
-        );
-        return reference ? [reference] : [];
-      }),
-      musicVideos,
-    };
-  }
-
-  @Delete('search/recent')
-  @UseGuards(StrictJwtAuthGuard)
-  async clearRecentSearches(@Req() req: Request) {
-    const user = req.user as JwtUser;
-    return this.recommendationsService.clearRecentSearches({
-      userId: user.userId,
     });
   }
 
@@ -559,209 +200,27 @@ export class CatalogController {
     });
   }
 
-  @Get('search/results')
+  @Get('search')
   @UseGuards(StrictJwtAuthGuard)
-  async searchResults(
+  search(
     @Param('storefront') storefront: string,
     @Query('q') query?: string,
     @Query('limit') limit?: string,
-    @Query('offset') offset?: string,
+    @Query('types') types?: string,
   ) {
-    const normalizedQuery = searchQuery(query);
     const parsedLimit = Number(limit);
-    const parsedOffset = Number(offset);
-    const pageLimit = Number.isInteger(parsedLimit)
-      ? Math.min(Math.max(parsedLimit, 1), CATALOG_SEARCH_TOP_RESULTS_MAX_ITEMS)
-      : CATALOG_SEARCH_TOP_RESULTS_PREVIEW_LIMIT;
-    const pageOffset = Number.isInteger(parsedOffset)
-      ? Math.min(
-          Math.max(parsedOffset, 0),
-          CATALOG_SEARCH_TOP_RESULTS_MAX_ITEMS,
-        )
-      : 0;
-    const catalog = await this.songsService.searchCatalog({
+
+    return this.songsService.searchCatalog({
       storefront,
-      query: normalizedQuery,
-      limit:
-        pageOffset === 0 &&
-        pageLimit <= CATALOG_SEARCH_TOP_RESULTS_PREVIEW_LIMIT
-          ? CATALOG_SEARCH_TOP_RESULTS_PREVIEW_POOL_LIMIT
-          : CATALOG_SEARCH_TOP_RESULTS_MAX_ITEMS,
-      types: [],
-      includeMusicVideos: false,
-      includeRelatedCandidates: true,
-      relatedCandidateLimits: {
-        songs: CATALOG_SEARCH_SONG_SHELF_PREVIEW_LIMIT,
-        artists: CATALOG_SEARCH_ARTIST_SHELF_PREVIEW_LIMIT,
-        albums: CATALOG_SEARCH_SHELF_PREVIEW_LIMIT,
-        playlists: CATALOG_SEARCH_SHELF_PREVIEW_LIMIT,
-      },
+      query: query?.trim() ?? '',
+      limit: Number.isInteger(parsedLimit) ? parsedLimit : 0,
+      types: types
+        ? types
+            .split(',')
+            .map((type) => type.trim())
+            .filter(Boolean)
+        : [],
     });
-    const page = topResultsPage(
-      catalog,
-      normalizedQuery,
-      pageLimit,
-      pageOffset,
-    );
-
-    return {
-      data: page.data,
-      resources: searchPageResources(catalog, page.data),
-      hasMore: page.hasMore,
-    };
-  }
-
-  @Get('search/overview')
-  @UseGuards(StrictJwtAuthGuard)
-  async searchOverview(
-    @Param('storefront') storefront: string,
-    @Query('q') query?: string,
-    @Query('topLimit') topLimit?: string,
-    @Query('shelfLimit') shelfLimit?: string,
-  ) {
-    const normalizedQuery = searchQuery(query);
-    const parsedTopLimit = Number(topLimit);
-    const parsedShelfLimit = Number(shelfLimit);
-    const topResultLimit = Number.isInteger(parsedTopLimit)
-      ? Math.min(
-          Math.max(parsedTopLimit, 1),
-          CATALOG_SEARCH_TOP_RESULTS_MAX_ITEMS,
-        )
-      : CATALOG_SEARCH_TOP_RESULTS_PREVIEW_LIMIT;
-    const itemLimit = Number.isInteger(parsedShelfLimit)
-      ? Math.min(
-          Math.max(parsedShelfLimit, 1),
-          CATALOG_SEARCH_TOP_RESULTS_MAX_ITEMS,
-        )
-      : undefined;
-    const limits = {
-      songs: itemLimit ?? CATALOG_SEARCH_SONG_SHELF_PREVIEW_LIMIT,
-      artists: itemLimit ?? CATALOG_SEARCH_ARTIST_SHELF_PREVIEW_LIMIT,
-      cards: itemLimit ?? CATALOG_SEARCH_SHELF_PREVIEW_LIMIT,
-    };
-    const catalog = await this.songsService.searchCatalog({
-      storefront,
-      query: normalizedQuery,
-      limit: CATALOG_SEARCH_TOP_RESULTS_MAX_ITEMS,
-      types: [],
-      includeMusicVideos: true,
-      includeRelatedCandidates: true,
-      relatedCandidateLimits: {
-        songs: limits.songs,
-        artists: limits.artists,
-        albums: limits.cards,
-        playlists: limits.cards,
-        'music-videos': limits.cards,
-      },
-    });
-    const topResults = topResultsPage(catalog, normalizedQuery, topResultLimit);
-    const shelves = searchShelfPreviews(catalog, limits);
-    const pageReferences = [
-      ...new Map(
-        [...topResults.data, ...shelves.data].map((reference) => [
-          `${reference.type}:${reference.id}`,
-          reference,
-        ]),
-      ).values(),
-    ];
-
-    return {
-      resources: searchPageResources(catalog, pageReferences),
-      topResults,
-      shelves,
-    };
-  }
-
-  @Get('search/shelf')
-  @UseGuards(StrictJwtAuthGuard)
-  async searchShelf(
-    @Param('storefront') storefront: string,
-    @Query('q') query?: string,
-    @Query('type') type?: string,
-    @Query('limit') limit?: string,
-    @Query('offset') offset?: string,
-  ) {
-    const shelfType = type?.trim() ?? '';
-    if (!isExpandableSearchShelfType(shelfType)) {
-      throw new BadRequestException('SEARCH_SHELF_TYPE_INVALID');
-    }
-    const parsedLimit = Number(limit);
-    const parsedOffset = Number(offset);
-    const pageLimit = Number.isInteger(parsedLimit)
-      ? Math.min(Math.max(parsedLimit, 1), CATALOG_SEARCH_SHELF_MAX_ITEMS)
-      : CATALOG_SEARCH_SHELF_MAX_ITEMS - CATALOG_SEARCH_SHELF_PREVIEW_LIMIT;
-    const pageOffset = Number.isInteger(parsedOffset)
-      ? Math.min(Math.max(parsedOffset, 0), CATALOG_SEARCH_SHELF_MAX_ITEMS)
-      : 0;
-    const catalog = await this.songsService.searchCatalog({
-      storefront,
-      query: searchQuery(query),
-      limit: CATALOG_SEARCH_SHELF_MAX_ITEMS,
-      types: [],
-      includeMusicVideos: shelfType === 'music-videos',
-      includeRelatedCandidates: true,
-      relatedCandidateLimits: {
-        songs: CATALOG_SEARCH_SONG_SHELF_PREVIEW_LIMIT,
-        artists: CATALOG_SEARCH_ARTIST_SHELF_PREVIEW_LIMIT,
-        albums: CATALOG_SEARCH_SHELF_PREVIEW_LIMIT,
-        playlists: CATALOG_SEARCH_SHELF_PREVIEW_LIMIT,
-        'music-videos': CATALOG_SEARCH_SHELF_PREVIEW_LIMIT,
-      },
-    });
-    if (shelfType === 'music-videos') {
-      const musicVideos = (catalog.musicVideos ?? []).slice(
-        pageOffset,
-        pageOffset + pageLimit,
-      );
-      return {
-        data: [],
-        resources: searchPageResources(catalog, []),
-        musicVideos,
-        hasMore: pageOffset + musicVideos.length < catalog.musicVideos.length,
-      };
-    }
-    const matchingReferences = catalog.data.filter(
-      (reference) => reference.type === shelfType,
-    );
-    const references = matchingReferences.slice(
-      pageOffset,
-      pageOffset + pageLimit,
-    );
-
-    return {
-      data: references,
-      resources: searchPageResources(catalog, references),
-      hasMore: pageOffset + references.length < matchingReferences.length,
-    };
-  }
-
-  @Get('search/suggestions')
-  @UseGuards(StrictJwtAuthGuard)
-  async suggestions(
-    @Param('storefront') storefront: string,
-    @Query('q') query?: string,
-  ) {
-    const normalizedQuery = searchQuery(query);
-    const catalog = await this.songsService.searchCatalog({
-      storefront,
-      query: normalizedQuery,
-      limit: 25,
-      types: [],
-      includeMusicVideos: false,
-      includeRelatedCandidates: false,
-      relatedCandidateLimits: {},
-    });
-    const candidates = rankedSearchCandidates(catalog, normalizedQuery);
-    // A track and its Single/Album are two representations of the same
-    // release in autocomplete. Keep the higher-ranked representation.
-    const media = uniqueReleaseCandidates(candidates, 10);
-    const hints = searchHints(candidates);
-
-    return {
-      ...catalog,
-      hints,
-      data: media.map((candidate) => candidate.reference),
-    };
   }
 
   @Get('artists/:artistId/songs')
@@ -1126,9 +585,7 @@ export class ArtistStudioCatalogController {
       }),
     ]);
     const draftDetails = await Promise.all(
-      draftPage.drafts.map((draft) =>
-        this.songsService.getCatalogDraft({ draftId: draft.id }),
-      ),
+      draftPage.drafts.map((draft) => this.songsService.getCatalogDraft({ draftId: draft.id })),
     );
     const drafts = draftDetails
       .filter(
@@ -1136,10 +593,7 @@ export class ArtistStudioCatalogController {
           ['songs', 'albums'].includes(detail.draft?.resourceType || '') &&
           this.draftBelongsToArtist(detail, artistId),
       )
-      .map((detail) => ({
-        ...detail.draft,
-        name: String(detail.payload?.name || ''),
-      }));
+      .map((detail) => ({ ...detail.draft, name: String(detail.payload?.name || '') }));
     const songs = catalog.data
       .filter((resource) => resource.type === 'songs')
       .map((resource) => {
@@ -1252,14 +706,8 @@ export class ArtistStudioCatalogController {
     const payload = detail.payload ?? {};
     const artistIds = Array.isArray(payload.artistIds) ? payload.artistIds : [];
     const credits = Array.isArray(payload.credits) ? payload.credits : [];
-    return (
-      artistIds.includes(artistId) ||
-      credits.some(
-        (credit) =>
-          typeof credit === 'object' &&
-          credit !== null &&
-          (credit as { artistId?: unknown }).artistId === artistId,
-      )
+    return artistIds.includes(artistId) || credits.some(
+      (credit) => typeof credit === 'object' && credit !== null && (credit as { artistId?: unknown }).artistId === artistId,
     );
   }
 

@@ -1,124 +1,90 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { isAxiosError } from "axios";
-import {
-  searchCatalogShelf,
-  searchCatalogResults,
-  searchCatalogSuggestions,
-  type CatalogSearchShelfType,
-} from "./catalog.api";
-import { attachSearchResultsClickTracking } from "./search-click-tracking";
+import { recordCatalogSearchClick, searchCatalog } from "./catalog.api";
 import { mapSearchResults, type SearchResults } from "./search.mapper";
 import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 
-const DEBOUNCE_MS = 150;
-type CatalogSearchSource = "results" | "shelf" | "suggestions";
+const DEBOUNCE_MS = 300;
 
-type CatalogSearchOptions = {
-  enabled?: boolean;
-  keepPreviousResults?: boolean;
-  source?: CatalogSearchSource;
-  shelfType?: CatalogSearchShelfType;
-  limit?: number;
-  offset?: number;
-  requestKey?: number;
-};
+export const CATALOG_SEARCH_FILTERS = [
+  "all",
+  "songs",
+  "artists",
+  "albums",
+  "playlists",
+] as const;
 
-export const EMPTY_SEARCH_RESULTS: SearchResults = {
-  hints: [],
-  ordered: [],
+export type CatalogSearchFilter = (typeof CATALOG_SEARCH_FILTERS)[number];
+
+const EMPTY_RESULTS: SearchResults = {
   songs: [],
-  trackSongs: [],
   artists: [],
   albums: [],
   playlists: [],
-  musicVideos: [],
-  hasMore: false,
-  shelfHasMore: {},
   isEmpty: true,
 };
 
 type SearchState = {
   key: string;
-  query: string;
   results: SearchResults;
   error: string | null;
 };
 
-function requestCatalogSearch(
-  source: CatalogSearchSource,
-  query: string,
-  shelfType: CatalogSearchShelfType | undefined,
-  options: { limit?: number; offset?: number },
-  signal: AbortSignal,
-) {
-  switch (source) {
-    case "results":
-      return searchCatalogResults(query, options, signal);
-    case "suggestions":
-      return searchCatalogSuggestions(query, signal);
-    case "shelf":
-      if (!shelfType) {
-        return Promise.reject(new Error("SEARCH_SHELF_TYPE_REQUIRED"));
-      }
-      return searchCatalogShelf(query, shelfType, options, signal);
-  }
+function withSearchClickTracking(results: SearchResults): SearchResults {
+  const track = (resourceType: string, resourceId: string) => {
+    void recordCatalogSearchClick(resourceType, resourceId).catch(
+      () => undefined,
+    );
+  };
+  const attach = (cards: SearchResults["songs"]) =>
+    cards.map((card) => ({
+      ...card,
+      onOpen: () => track(card.resourceType, card.resourceId),
+    }));
+
+  return {
+    ...results,
+    songs: attach(results.songs),
+    artists: attach(results.artists),
+    albums: attach(results.albums),
+    playlists: attach(results.playlists),
+  };
+}
+
+function typesForFilter(filter: CatalogSearchFilter) {
+  return filter === "all" ? undefined : [filter];
 }
 
 /** Searches the catalog with debouncing, cancellation, and stale-result guards. */
 export function useCatalogSearch(
   query: string,
-  {
-    enabled = true,
-    keepPreviousResults = true,
-    source = "suggestions",
-    shelfType,
-    limit,
-    offset,
-    requestKey = 0,
-  }: CatalogSearchOptions = {},
+  filter: CatalogSearchFilter = "all",
 ) {
   const trimmedQuery = query.trim();
-  const hasQuery = enabled && Boolean(trimmedQuery);
-  const searchKey = [
-    trimmedQuery.toLocaleLowerCase(),
-    source,
-    shelfType ?? "",
-    limit ?? "",
-    offset ?? "",
-    requestKey,
-  ].join(":");
+  const hasQuery = Boolean(trimmedQuery);
+  const searchKey = `${filter}:${trimmedQuery.toLocaleLowerCase()}`;
   const [state, setState] = useState<SearchState>({
     key: "",
-    query: "",
-    results: EMPTY_SEARCH_RESULTS,
+    results: EMPTY_RESULTS,
     error: null,
   });
   const [loading, setLoading] = useMinimumLoadingState();
-  const [retryKey, setRetryKey] = useState(0);
+  const types = useMemo(() => typesForFilter(filter), [filter]);
 
   useEffect(() => {
     if (!hasQuery) return;
 
     const controller = new AbortController();
     setLoading(true);
-    const search = () => {
-      requestCatalogSearch(
-        source,
-        trimmedQuery,
-        shelfType,
-        { limit, offset },
-        controller.signal,
-      )
+    const timer = window.setTimeout(() => {
+      searchCatalog(trimmedQuery, { types }, controller.signal)
         .then((response) => {
           if (controller.signal.aborted) return;
           setState({
             key: searchKey,
-            query: trimmedQuery.toLocaleLowerCase(),
-            results: attachSearchResultsClickTracking(
-              mapSearchResults(response),
-            ),
+            results: withSearchClickTracking(mapSearchResults(response)),
             error: null,
           });
         })
@@ -131,65 +97,26 @@ export function useCatalogSearch(
           }
           setState({
             key: searchKey,
-            query: trimmedQuery.toLocaleLowerCase(),
-            results: EMPTY_SEARCH_RESULTS,
+            results: EMPTY_RESULTS,
             error: "Không thấy tìm kiếm. Vui lòng thử lại.",
           });
         })
         .finally(() => {
           if (!controller.signal.aborted) setLoading(false);
         });
-    };
-    const timer =
-      source === "suggestions"
-        ? window.setTimeout(search, DEBOUNCE_MS)
-        : undefined;
-
-    if (timer === undefined) search();
+    }, DEBOUNCE_MS);
 
     return () => {
-      if (timer !== undefined) window.clearTimeout(timer);
+      window.clearTimeout(timer);
       controller.abort();
     };
-  }, [
-    hasQuery,
-    limit,
-    offset,
-    retryKey,
-    searchKey,
-    setLoading,
-    shelfType,
-    source,
-    trimmedQuery,
-  ]);
+  }, [hasQuery, searchKey, setLoading, trimmedQuery, types]);
 
   const isCurrentResult = state.key === searchKey;
-  const normalizedQuery = trimmedQuery.toLocaleLowerCase();
-  const hasRelatedPreviousQuery =
-    Boolean(state.query) &&
-    (normalizedQuery.startsWith(state.query) ||
-      state.query.startsWith(normalizedQuery));
-  // Keep the previous suggestion list visible while the next debounced
-  // request is in flight only when the query is being refined. Unrelated
-  // queries must not briefly render stale suggestions.
-  const canKeepPreviousResults =
-    keepPreviousResults &&
-    hasQuery &&
-    hasRelatedPreviousQuery &&
-    Boolean(state.key) &&
-    !state.error;
-  const isAwaitingCurrentResult =
-    hasQuery && !isCurrentResult && !canKeepPreviousResults;
 
   return {
-    results:
-      hasQuery && (isCurrentResult || canKeepPreviousResults)
-        ? state.results
-        : EMPTY_SEARCH_RESULTS,
-    loading: hasQuery && (loading || isAwaitingCurrentResult),
+    results: hasQuery && isCurrentResult ? state.results : EMPTY_RESULTS,
+    loading: hasQuery && loading,
     error: hasQuery && isCurrentResult ? state.error : null,
-    hasRelatedPreviousResults: canKeepPreviousResults,
-    isCurrentQueryResolved: hasQuery && isCurrentResult,
-    retry: () => setRetryKey((current) => current + 1),
   };
 }

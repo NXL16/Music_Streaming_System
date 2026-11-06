@@ -71,7 +71,6 @@ describe("mapCatalogTracks", () => {
       id: "song-1",
       url: "/song/track/release-track-1",
       album: "Context Album",
-      sourceAlbumId: "album-context",
       albumUrl: "/album/context-album/album-context",
       durationSec: 180,
       playbackUrl: "mse:song-1",
@@ -147,7 +146,6 @@ describe("mapCatalogTracks", () => {
 
     expect(track).toMatchObject({
       albumId: "album-2",
-      sourceAlbumId: "album-2",
       url: "/song/track/release-track-2",
       artworkUrl: "https://image.example/single.jpg",
       artworkBgColor: "#222222",

@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { RpcException } from '@nestjs/microservices';
 import { status } from '@grpc/grpc-js';
 import {
@@ -35,14 +35,9 @@ import {
   SearchCatalogResponse,
 } from '@musical/shared-proto';
 import { PrismaService } from '../database/prisma.service';
-import { Prisma } from '../generated/prisma/client';
+import type { Prisma } from '../generated/prisma/client';
 import { albumPrimaryArtistName } from './album-artist';
 import { CatalogAssetsService } from './catalog-assets.service';
-import type Redis from 'ioredis';
-import {
-  CATALOG_SEARCH_QUERY_MAX_LENGTH,
-  normalizeCatalogSearchQuery,
-} from '@musical/shared-constants';
 
 const songCatalogInclude = {
   artistCredits: {
@@ -189,55 +184,11 @@ const BATCH_RESOURCE_TYPES = new Set([
   'release-tracks',
 ]);
 
-function preserveSearchOrder<T extends { id: string }>(
-  items: T[],
-  rankedRows: Array<{ id: string }>,
-) {
-  const position = new Map(rankedRows.map((row, index) => [row.id, index]));
-  return items.sort(
-    (left, right) =>
-      (position.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
-      (position.get(right.id) ?? Number.MAX_SAFE_INTEGER),
-  );
-}
-
-function uniqueById<T extends { id: string }>(items: T[]): T[] {
-  return [...new Map(items.map((item) => [item.id, item] as const)).values()];
-}
-
-function escapeSqlLikePattern(value: string) {
-  return value.replace(/[\\%_]/g, '\\$&');
-}
-
-function primarySongArtists(song: CatalogSongEntity): CatalogArtistEntity[] {
-  const performerCredits = song.artistCredits.filter(
-    (credit) => credit.role === 'artist',
-  );
-  const primaryCredits = performerCredits.filter((credit) => credit.isPrimary);
-
-  return (primaryCredits.length ? primaryCredits : performerCredits).map(
-    (credit) => credit.artist,
-  );
-}
-
-function primaryAlbumArtists(
-  album: CatalogAlbumBrowseEntity,
-): CatalogArtistEntity[] {
-  const primaryCredits = album.artistCredits.filter(
-    (credit) => credit.isPrimary,
-  );
-
-  return (primaryCredits.length ? primaryCredits : album.artistCredits).map(
-    (credit) => credit.artist,
-  );
-}
-
 @Injectable()
 export class CatalogService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly catalogAssetsService: CatalogAssetsService,
-    @Inject('REDIS_INSTANCE') private readonly redis: Redis,
   ) {}
 
   async getAlbum(request: GetCatalogAlbumRequest): Promise<CatalogResponse> {
@@ -2689,19 +2640,8 @@ export class CatalogService {
     request: SearchCatalogRequest,
   ): Promise<SearchCatalogResponse> {
     const storefront = this.storefront(request.storefront);
-    const query = request.query.trim().slice(0, CATALOG_SEARCH_QUERY_MAX_LENGTH);
-    const includeMusicVideos = request.includeMusicVideos;
-    const includeRelatedCandidates = request.includeRelatedCandidates;
-    const limit = Math.min(Math.max(request.limit || 20, 1), 100);
-    const relatedCandidateLimits = Object.entries(
-      request.relatedCandidateLimits ?? {},
-    )
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([type, target]) => `${type}:${target}`)
-      .join(',');
-    const relatedCandidateLimitFor = (type: string) =>
-      Math.min(limit, Math.max(request.relatedCandidateLimits?.[type] ?? 0, 0));
-    const canSearchLyrics = query.split(/\s+/).filter(Boolean).length >= 3;
+    const query = request.query.trim();
+    const limit = Math.min(Math.max(request.limit || 20, 1), 50);
 
     const requestedTypes = request.types?.length
       ? request.types
@@ -2714,179 +2654,8 @@ export class CatalogService {
       return {
         data: [],
         resources: { albums: {}, playlists: {}, songs: {}, artists: {} },
-        musicVideos: [],
       };
     }
-
-    const cacheKey = [
-      'catalog-search-v2',
-      storefront,
-      normalizeCatalogSearchQuery(query),
-      [...wanted].sort().join(','),
-      limit,
-      includeMusicVideos ? 'videos' : 'no-videos',
-      includeRelatedCandidates ? 'related' : 'direct',
-      relatedCandidateLimits,
-    ].join(':');
-    const cached = await this.redis.get(cacheKey).catch(() => null);
-    if (cached) {
-      try {
-        return JSON.parse(cached) as SearchCatalogResponse;
-      } catch {
-        // A malformed cache entry is ignored and replaced below.
-      }
-    }
-
-    const normalizedQuery = normalizeCatalogSearchQuery(query);
-    // A one-character contains search is both noisy and expensive. Restrict it
-    // to indexed prefix matching until the listener provides more context.
-    const escapedQuery = escapeSqlLikePattern(normalizedQuery);
-    const prefixPattern = `${escapedQuery}%`;
-    const searchPattern =
-      normalizedQuery.length === 1 ? prefixPattern : `%${escapedQuery}%`;
-    const canUseFuzzyMatch = normalizedQuery.length >= 4;
-    const songIdsPromise = wanted.has('songs')
-      ? this.prisma.$queryRaw<Array<{ id: string }>>(
-          Prisma.sql`
-            SELECT
-              s.id,
-              MAX(
-                CASE
-                  WHEN lower(immutable_unaccent(s."catalogTitle")) = ${normalizedQuery} THEN 1000
-                  WHEN lower(immutable_unaccent(s."catalogTitle")) LIKE ${prefixPattern} ESCAPE '\\' THEN 900
-                  WHEN lower(immutable_unaccent(s."catalogTitle")) LIKE ${searchPattern} ESCAPE '\\' THEN 700
-                  WHEN lower(immutable_unaccent(credited_artist.name)) LIKE ${searchPattern} ESCAPE '\\' THEN 500
-                  WHEN lower(immutable_unaccent(linked_album.name)) LIKE ${searchPattern} ESCAPE '\\' THEN 450
-                  ELSE 100
-                END
-              ) AS search_score
-            FROM songs s
-            LEFT JOIN song_artist_credits sac
-              ON sac."songId" = s.id AND sac.role = 'artist'
-            LEFT JOIN artists credited_artist ON credited_artist.id = sac."artistId"
-            LEFT JOIN album_tracks at ON at."songId" = s.id
-            LEFT JOIN albums linked_album ON linked_album.id = at."albumId"
-            WHERE s.storefront = ${storefront}
-              AND s."isCatalog" = true
-              AND (
-                lower(immutable_unaccent(s."catalogTitle")) LIKE ${searchPattern} ESCAPE '\\'
-                OR (
-                  ${canUseFuzzyMatch}
-                  AND lower(immutable_unaccent(s."catalogTitle")) % ${normalizedQuery}
-                )
-                OR lower(immutable_unaccent(credited_artist.name)) LIKE ${searchPattern} ESCAPE '\\'
-                OR lower(immutable_unaccent(linked_album.name)) LIKE ${searchPattern} ESCAPE '\\'
-                OR (
-                  ${canSearchLyrics}
-                  AND EXISTS (
-                    SELECT 1
-                    FROM song_static_lyric_lines lyric
-                    WHERE lyric."songId" = s.id
-                      AND lower(immutable_unaccent(lyric.text)) LIKE ${searchPattern} ESCAPE '\\'
-                  )
-                )
-              )
-            GROUP BY s.id
-            ORDER BY search_score DESC,
-              s.id
-            LIMIT ${limit}
-          `,
-        )
-      : Promise.resolve<Array<{ id: string }>>([]);
-    const artistIdsPromise = wanted.has('artists')
-      ? this.prisma.$queryRaw<Array<{ id: string }>>(
-          Prisma.sql`
-            SELECT a.id
-            FROM artists a
-            WHERE a.storefront = ${storefront}
-              AND (
-                lower(immutable_unaccent(a.name)) LIKE ${searchPattern} ESCAPE '\\'
-                OR (
-                  ${canUseFuzzyMatch}
-                  AND lower(immutable_unaccent(a.name)) % ${normalizedQuery}
-                )
-              )
-            ORDER BY
-              CASE
-                WHEN lower(immutable_unaccent(a.name)) = ${normalizedQuery} THEN 1000
-                WHEN lower(immutable_unaccent(a.name)) LIKE ${prefixPattern} ESCAPE '\\' THEN 900
-                WHEN lower(immutable_unaccent(a.name)) LIKE ${searchPattern} ESCAPE '\\' THEN 700
-                ELSE 100
-              END DESC,
-              a.id
-            LIMIT ${limit}
-          `,
-        )
-      : Promise.resolve<Array<{ id: string }>>([]);
-    const albumIdsPromise = wanted.has('albums')
-      ? this.prisma.$queryRaw<Array<{ id: string }>>(
-          Prisma.sql`
-            SELECT
-              a.id,
-              MAX(
-                CASE
-                  WHEN lower(immutable_unaccent(a.name)) = ${normalizedQuery} THEN 1000
-                  WHEN lower(immutable_unaccent(a.name)) LIKE ${prefixPattern} ESCAPE '\\' THEN 900
-                  WHEN lower(immutable_unaccent(a.name)) LIKE ${searchPattern} ESCAPE '\\' THEN 700
-                  WHEN lower(immutable_unaccent(a."artistName")) LIKE ${searchPattern} ESCAPE '\\' THEN 500
-                  ELSE 100
-                END
-              ) AS search_score
-            FROM albums a
-            LEFT JOIN album_artist_credits aac ON aac."albumId" = a.id
-            LEFT JOIN artists credited_artist ON credited_artist.id = aac."artistId"
-            WHERE a.storefront = ${storefront}
-              AND (
-                lower(immutable_unaccent(a.name)) LIKE ${searchPattern} ESCAPE '\\'
-                OR (
-                  ${canUseFuzzyMatch}
-                  AND lower(immutable_unaccent(a.name)) % ${normalizedQuery}
-                )
-                OR lower(immutable_unaccent(a."artistName")) LIKE ${searchPattern} ESCAPE '\\'
-                OR lower(immutable_unaccent(credited_artist.name)) LIKE ${searchPattern} ESCAPE '\\'
-              )
-            GROUP BY a.id
-            ORDER BY search_score DESC,
-              a.id
-            LIMIT ${limit}
-          `,
-        )
-      : Promise.resolve<Array<{ id: string }>>([]);
-    const playlistIdsPromise = wanted.has('playlists')
-      ? this.prisma.$queryRaw<Array<{ id: string }>>(
-          Prisma.sql`
-            SELECT p.id
-            FROM playlists p
-            WHERE p.storefront = ${storefront}
-              AND p."isPublic" = true
-              AND p."playlistType" <> 'system-personalized'
-              AND (
-                lower(immutable_unaccent(p.name)) LIKE ${searchPattern} ESCAPE '\\'
-                OR (
-                  ${canUseFuzzyMatch}
-                  AND lower(immutable_unaccent(p.name)) % ${normalizedQuery}
-                )
-                OR lower(immutable_unaccent(p."curatorName")) LIKE ${searchPattern} ESCAPE '\\'
-              )
-            ORDER BY
-              CASE
-                WHEN lower(immutable_unaccent(p.name)) = ${normalizedQuery} THEN 1000
-                WHEN lower(immutable_unaccent(p.name)) LIKE ${prefixPattern} ESCAPE '\\' THEN 900
-                WHEN lower(immutable_unaccent(p.name)) LIKE ${searchPattern} ESCAPE '\\' THEN 700
-                WHEN lower(immutable_unaccent(p."curatorName")) LIKE ${searchPattern} ESCAPE '\\' THEN 500
-                ELSE 100
-              END DESC,
-              p.id
-            LIMIT ${limit}
-          `,
-        )
-      : Promise.resolve<Array<{ id: string }>>([]);
-    const [songIds, artistIds, albumIds, playlistIds] = await Promise.all([
-      songIdsPromise,
-      artistIdsPromise,
-      albumIdsPromise,
-      playlistIdsPromise,
-    ]);
 
     const [songs, artists, albums, playlists] = await Promise.all([
       wanted.has('songs')
@@ -2894,7 +2663,28 @@ export class CatalogService {
             where: {
               storefront,
               isCatalog: true,
-              id: { in: songIds.map((row) => row.id) },
+              OR: [
+                { catalogTitle: { contains: query, mode: 'insensitive' } },
+                {
+                  artistCredits: {
+                    some: {
+                      role: 'artist',
+                      artist: {
+                        name: { contains: query, mode: 'insensitive' },
+                      },
+                    },
+                  },
+                },
+                {
+                  albumTracks: {
+                    some: {
+                      album: {
+                        name: { contains: query, mode: 'insensitive' },
+                      },
+                    },
+                  },
+                },
+              ],
             },
             include: songCatalogInclude,
             orderBy: { catalogTitle: 'asc' },
@@ -2905,7 +2695,7 @@ export class CatalogService {
         ? this.prisma.artist.findMany({
             where: {
               storefront,
-              id: { in: artistIds.map((row) => row.id) },
+              name: { contains: query, mode: 'insensitive' },
             },
             orderBy: { name: 'asc' },
             take: limit,
@@ -2915,7 +2705,21 @@ export class CatalogService {
         ? this.prisma.album.findMany({
             where: {
               storefront,
-              id: { in: albumIds.map((row) => row.id) },
+              OR: [
+                { name: { contains: query, mode: 'insensitive' } },
+                {
+                  artistName: { contains: query, mode: 'insensitive' },
+                },
+                {
+                  artistCredits: {
+                    some: {
+                      artist: {
+                        name: { contains: query, mode: 'insensitive' },
+                      },
+                    },
+                  },
+                },
+              ],
             },
             include: albumCatalogBrowseInclude,
             orderBy: { name: 'asc' },
@@ -2927,8 +2731,7 @@ export class CatalogService {
             where: {
               storefront,
               isPublic: true,
-              playlistType: { not: 'system-personalized' },
-              id: { in: playlistIds.map((row) => row.id) },
+              name: { contains: query, mode: 'insensitive' },
             },
             include: playlistCatalogBrowseInclude,
             orderBy: [{ name: 'asc' }, { id: 'asc' }],
@@ -2936,179 +2739,34 @@ export class CatalogService {
           })
         : Promise.resolve([] as CatalogPlaylistBrowseEntity[]),
     ]);
-    const matchedAlbumIds = new Set(albums.map((album) => album.id));
-    const linkedAlbumIds = [
-      ...new Set(
-        songs
-          .flatMap((song) => song.albumTracks.map((track) => track.album.id))
-          .filter((albumId) => !matchedAlbumIds.has(albumId)),
-      ),
-    ];
-    const linkedAlbums = linkedAlbumIds.length
-      ? await this.prisma.album.findMany({
-          where: { storefront, id: { in: linkedAlbumIds } },
-          include: albumCatalogBrowseInclude,
-        })
-      : [];
-    preserveSearchOrder(songs, songIds);
-    preserveSearchOrder(artists, artistIds);
-    preserveSearchOrder(albums, albumIds);
-    preserveSearchOrder(playlists, playlistIds);
-    const baseAlbums = uniqueById([...albums, ...linkedAlbums]).slice(0, limit);
-    const seedArtists = uniqueById([
-      ...artists,
-      ...songs.flatMap(primarySongArtists),
-      ...baseAlbums.flatMap(primaryAlbumArtists),
-    ]);
-    const seedArtistIds = seedArtists.map((artist) => artist.id);
-    const canExpandFromArtists =
-      includeRelatedCandidates && seedArtistIds.length > 0;
-    const relatedSongTarget = relatedCandidateLimitFor('songs');
-    const relatedAlbumTarget = relatedCandidateLimitFor('albums');
-    const relatedArtistTarget = relatedCandidateLimitFor('artists');
-    const relatedPlaylistTarget = relatedCandidateLimitFor('playlists');
-    const [relatedSongs, relatedAlbums] = await Promise.all([
-      canExpandFromArtists &&
-      wanted.has('songs') &&
-      songs.length < relatedSongTarget
-        ? this.prisma.song.findMany({
-            where: {
-              storefront,
-              isCatalog: true,
-              id: { notIn: songs.map((song) => song.id) },
-              artistCredits: {
-                some: { artistId: { in: seedArtistIds }, role: 'artist' },
-              },
-            },
-            include: songCatalogInclude,
-            orderBy: [{ releaseDate: 'desc' }, { id: 'desc' }],
-            take: relatedSongTarget - songs.length,
-          })
-        : Promise.resolve([] as CatalogSongEntity[]),
-      canExpandFromArtists &&
-      wanted.has('albums') &&
-      baseAlbums.length < relatedAlbumTarget
-        ? this.prisma.album.findMany({
-            where: {
-              storefront,
-              id: { notIn: baseAlbums.map((album) => album.id) },
-              artistCredits: { some: { artistId: { in: seedArtistIds } } },
-            },
-            include: albumCatalogBrowseInclude,
-            orderBy: [{ releaseDate: 'desc' }, { id: 'desc' }],
-            take: relatedAlbumTarget - baseAlbums.length,
-          })
-        : Promise.resolve([] as CatalogAlbumBrowseEntity[]),
-    ]);
-    const orderedSongs = uniqueById([...songs, ...relatedSongs]).slice(
-      0,
-      limit,
-    );
-    const orderedAlbums = uniqueById([...baseAlbums, ...relatedAlbums]).slice(
-      0,
-      limit,
-    );
-    const relatedPlaylists =
-      canExpandFromArtists &&
-      wanted.has('playlists') &&
-      playlists.length < relatedPlaylistTarget &&
-      orderedSongs.length
-        ? await this.prisma.playlist.findMany({
-            where: {
-              storefront,
-              isPublic: true,
-              playlistType: { not: 'system-personalized' },
-              id: { notIn: playlists.map((playlist) => playlist.id) },
-              tracks: {
-                some: { songId: { in: orderedSongs.map((song) => song.id) } },
-              },
-            },
-            include: playlistCatalogBrowseInclude,
-            orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-            take: relatedPlaylistTarget - playlists.length,
-          })
-        : [];
-    const orderedPlaylists = uniqueById([
-      ...playlists,
-      ...relatedPlaylists,
-    ]).slice(0, limit);
-    const relatedArtists = [
-      ...orderedSongs.flatMap(primarySongArtists),
-      ...orderedAlbums.flatMap(primaryAlbumArtists),
-    ];
-    const orderedArtists = [
-      ...new Map(
-        [
-          ...artists,
-          ...(artists.length < relatedArtistTarget ? relatedArtists : []),
-        ].map((artist) => [artist.id, artist] as const),
-      ).values(),
-    ].slice(0, limit);
-    const videos =
-      includeMusicVideos && orderedSongs.length
-        ? await this.prisma.songVideo.findMany({
-            where: { songId: { in: orderedSongs.map((song) => song.id) } },
-            orderBy: [{ publishedAt: 'desc' }, { id: 'desc' }],
-          })
-        : [];
-    const videosBySongId = new Map<string, typeof videos>();
-    for (const video of videos) {
-      const current = videosBySongId.get(video.songId) ?? [];
-      current.push(video);
-      videosBySongId.set(video.songId, current);
-    }
-    const songsById = new Map(
-      orderedSongs.map((song) => [song.id, song] as const),
-    );
-    const orderedVideos = orderedSongs.flatMap(
-      (song) => videosBySongId.get(song.id) ?? [],
-    );
-    const musicVideos = includeMusicVideos
-      ? await this.mapWithConcurrency(
-          orderedVideos,
-          MUSIC_VIDEO_ASSET_CONCURRENCY,
-          (video) => this.catalogSongVideo(video, songsById.get(video.songId)!),
-        )
-      : [];
     // Search cards need linked artist resources even when the artist itself
     // does not match the query. Without these, a song/album result loses its
     // clickable artist metadata despite the relation already being loaded.
     const searchArtists = new Map(
       [
         ...artists,
-        ...orderedSongs.flatMap((song) =>
+        ...songs.flatMap((song) =>
           song.artistCredits.map((credit) => credit.artist),
         ),
-        ...orderedAlbums.flatMap((album) =>
+        ...albums.flatMap((album) =>
           album.artistCredits.map((credit) => credit.artist),
         ),
       ].map((artist) => [artist.id, artist] as const),
     );
 
-    const response: SearchCatalogResponse = {
+    return {
       data: [
-        ...orderedSongs.map((song) =>
-          this.reference(song.id, 'songs', storefront),
-        ),
-        ...orderedArtists.map((artist) =>
-          this.reference(artist.id, 'artists', storefront),
-        ),
-        ...orderedAlbums.map((album) =>
-          this.reference(album.id, 'albums', storefront),
-        ),
-        ...orderedPlaylists.map((playlist) =>
-          this.reference(playlist.id, 'playlists', storefront),
-        ),
+        ...songs.map((s) => this.reference(s.id, 'songs', storefront)),
+        ...artists.map((a) => this.reference(a.id, 'artists', storefront)),
+        ...albums.map((a) => this.reference(a.id, 'albums', storefront)),
+        ...playlists.map((p) => this.reference(p.id, 'playlists', storefront)),
       ],
       resources: {
         albums: Object.fromEntries(
-          orderedAlbums.map((album) => [
-            album.id,
-            this.albumResource(album, storefront),
-          ]),
+          albums.map((a) => [a.id, this.albumResource(a, storefront)]),
         ),
         playlists: Object.fromEntries(
-          orderedPlaylists.map((p) => [
+          playlists.map((p) => [
             p.id,
             this.playlistResource(
               p,
@@ -3120,10 +2778,7 @@ export class CatalogService {
           ]),
         ),
         songs: Object.fromEntries(
-          orderedSongs.map((song) => [
-            song.id,
-            this.songResource(song, storefront),
-          ]),
+          songs.map((s) => [s.id, this.songResource(s, storefront)]),
         ),
         artists: Object.fromEntries(
           [...searchArtists.values()].map((artist) => [
@@ -3132,11 +2787,6 @@ export class CatalogService {
           ]),
         ),
       },
-      musicVideos,
     };
-    await this.redis
-      .set(cacheKey, JSON.stringify(response), 'EX', 30)
-      .catch(() => undefined);
-    return response;
   }
 }

@@ -1,7 +1,6 @@
 import { http } from "@/lib/api/http";
 import { developmentCacheDisabled } from "@/lib/config/development-cache";
 import { hydrateCatalogMediaEntities } from "./hydrate-catalog-media-entities";
-import type { CatalogSearchExpandableShelfType } from "@musical/shared-constants";
 import { invalidateAllMediaEntities } from "@/lib/media/media-entity-store";
 import { notifyHomeRecommendationsStale } from "@/lib/recommendations/home-revalidation";
 import type {
@@ -10,7 +9,6 @@ import type {
   CatalogReference,
   CatalogResponse,
 } from "./catalog.types";
-import type { CatalogMusicVideo } from "./music-videos.api";
 
 const STOREFRONT = process.env.NEXT_PUBLIC_STOREFRONT || "vn";
 const RESOURCE_CACHE_TTL_MS = 2 * 60 * 1000;
@@ -105,13 +103,9 @@ function getCachedCatalogResources(
   const requestGeneration = cacheGeneration;
   const controller = new AbortController();
   const request = http
-    .post<CatalogResponse>(
-      `/catalog/${STOREFRONT}/resources`,
-      { resources },
-      {
-        signal: controller.signal,
-      },
-    )
+    .post<CatalogResponse>(`/catalog/${STOREFRONT}/resources`, { resources }, {
+      signal: controller.signal,
+    })
     .then((response) => {
       if (requestGeneration === cacheGeneration) {
         if (!developmentCacheDisabled) {
@@ -283,11 +277,7 @@ export async function getCatalogPlaylist(
   );
   const trackRefs = trackIds
     .filter((id) => Boolean(tracks.resources.songs[id]))
-    .map((id) => ({
-      id,
-      type: "songs",
-      href: `/catalog/${STOREFRONT}/songs/${id}`,
-    }));
+    .map((id) => ({ id, type: "songs", href: `/catalog/${STOREFRONT}/songs/${id}` }));
   if (trackRefs.length === 0) return catalog;
 
   return {
@@ -320,9 +310,7 @@ async function getPersonalizedSystemPlaylistTrackIds(
     { signal },
   );
   return Array.isArray(response.data.trackIds)
-    ? response.data.trackIds.filter(
-        (id): id is string => typeof id === "string",
-      )
+    ? response.data.trackIds.filter((id): id is string => typeof id === "string")
     : [];
 }
 
@@ -340,81 +328,24 @@ export async function getCatalogResources(
   return hydrateCatalogMediaEntities(response.data);
 }
 
-export type CatalogSearchSuggestionsResponse = CatalogResponse & {
-  hints: string[];
+export type CatalogSearchOptions = {
+  types?: Array<"songs" | "artists" | "albums" | "playlists">;
 };
 
-export type CatalogSearchResultsResponse = CatalogResponse & {
-  hasMore: boolean;
-};
-
-export type CatalogSearchShelfType = CatalogSearchExpandableShelfType;
-
-export type CatalogSearchOverviewResponse = {
-  resources: CatalogResponse["resources"];
-  topResults: {
-    data: CatalogResponse["data"];
-    hasMore: boolean;
-  };
-  shelves: {
-    data: CatalogResponse["data"];
-    musicVideos: CatalogMusicVideo[];
-    shelfHasMore: Partial<Record<CatalogSearchShelfType, boolean>>;
-  };
-};
-
-function hydrateCatalogSearchOverview(response: CatalogSearchOverviewResponse) {
-  hydrateCatalogMediaEntities({
-    data: response.topResults.data,
-    resources: response.resources,
-  });
-  return response;
-}
-
-export async function searchCatalogSuggestions(
+export async function searchCatalog(
   query: string,
+  options: CatalogSearchOptions = {},
   signal?: AbortSignal,
-): Promise<CatalogSearchSuggestionsResponse> {
-  const response = await http.get<CatalogSearchSuggestionsResponse>(
-    `/catalog/${STOREFRONT}/search/suggestions`,
-    { params: { q: query }, signal },
-  );
-  return hydrateCatalogMediaEntities(response.data);
-}
-
-export async function searchCatalogResults(
-  query: string,
-  options: { limit?: number; offset?: number } = {},
-  signal?: AbortSignal,
-): Promise<CatalogSearchResultsResponse> {
-  const response = await http.get<CatalogSearchResultsResponse>(
-    `/catalog/${STOREFRONT}/search/results`,
-    { params: { q: query, ...options }, signal },
-  );
-  return hydrateCatalogMediaEntities(response.data);
-}
-
-export async function searchCatalogOverview(
-  query: string,
-  options: { topLimit?: number; shelfLimit?: number } = {},
-  signal?: AbortSignal,
-): Promise<CatalogSearchOverviewResponse> {
-  const response = await http.get<CatalogSearchOverviewResponse>(
-    `/catalog/${STOREFRONT}/search/overview`,
-    { params: { q: query, ...options }, signal },
-  );
-  return hydrateCatalogSearchOverview(response.data);
-}
-
-export async function searchCatalogShelf(
-  query: string,
-  type: CatalogSearchShelfType,
-  options: { limit?: number; offset?: number } = {},
-  signal?: AbortSignal,
-): Promise<CatalogSearchResultsResponse> {
-  const response = await http.get<CatalogSearchResultsResponse>(
-    `/catalog/${STOREFRONT}/search/shelf`,
-    { params: { q: query, type, ...options }, signal },
+) {
+  const response = await http.get<CatalogResponse>(
+    `/catalog/${STOREFRONT}/search`,
+    {
+      params: {
+        q: query,
+        ...(options.types?.length ? { types: options.types.join(",") } : {}),
+      },
+      signal,
+    },
   );
   return hydrateCatalogMediaEntities(response.data);
 }
@@ -423,33 +354,11 @@ export async function recordCatalogSearchClick(
   resourceType: string,
   resourceId: string,
 ) {
-  const response = await http.post<{ success: boolean }>(
-    `/catalog/${STOREFRONT}/search/click`,
-    {
-      resourceType,
-      resourceId,
-    },
-  );
-  if (!response.data.success) {
-    throw new Error("SEARCH_CLICK_NOT_RECORDED");
-  }
+  await http.post(`/catalog/${STOREFRONT}/search/click`, {
+    resourceType,
+    resourceId,
+  });
   notifyHomeRecommendationsStale();
-}
-
-export type CatalogRecentSearchesResponse = CatalogResponse & {
-  musicVideos?: CatalogMusicVideo[];
-};
-
-export async function getCatalogRecentSearches(signal?: AbortSignal) {
-  const response = await http.get<CatalogRecentSearchesResponse>(
-    `/catalog/${STOREFRONT}/search/recent`,
-    { signal },
-  );
-  return hydrateCatalogMediaEntities(response.data);
-}
-
-export async function clearCatalogRecentSearches() {
-  await http.delete(`/catalog/${STOREFRONT}/search/recent`);
 }
 
 export async function getCatalogArtist(artistId: string, signal?: AbortSignal) {

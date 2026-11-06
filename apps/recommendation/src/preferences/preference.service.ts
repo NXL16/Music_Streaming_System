@@ -1,9 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
-  ClearRecentSearchesRequest,
-  ClearRecentSearchesResponse,
-  ListRecentSearchesRequest,
-  ListRecentSearchesResponse,
   PreferenceEventType,
   RecordPreferenceEventRequest,
   RecordPreferenceEventResponse,
@@ -13,10 +9,7 @@ import {
   PreferenceEventType as PrismaPreferenceEventType,
 } from '../generated/prisma/client';
 import { PrismaService } from '../database/prisma.service';
-import {
-  CATALOG_RECENT_SEARCH_LIMIT,
-  PREFERENCE_SIGNAL_WEIGHT,
-} from '@musical/shared-constants';
+import { PREFERENCE_SIGNAL_WEIGHT } from '@musical/shared-constants';
 
 const EVENT_TYPES: Record<number, PrismaPreferenceEventType | undefined> = {
   [PreferenceEventType.PREFERENCE_EVENT_TYPE_LIBRARY_ADDED]: 'LIBRARY_ADDED',
@@ -89,30 +82,6 @@ export class PreferenceService {
             weight: request.weight,
           },
         });
-        if (eventType === 'SEARCH_CLICKED') {
-          await tx.userRecentSearch.upsert({
-            where: {
-              userId_resourceType_resourceId: {
-                userId,
-                resourceType,
-                resourceId,
-              },
-            },
-            create: { userId, resourceType, resourceId },
-            update: { searchedAt: new Date() },
-          });
-          const staleSearches = await tx.userRecentSearch.findMany({
-            where: { userId },
-            orderBy: { searchedAt: 'desc' },
-            skip: CATALOG_RECENT_SEARCH_LIMIT,
-            select: { id: true },
-          });
-          if (staleSearches.length) {
-            await tx.userRecentSearch.deleteMany({
-              where: { id: { in: staleSearches.map((search) => search.id) } },
-            });
-          }
-        }
         if (eventType === 'CONTENT_HIDDEN') {
           await tx.userContentPreference.upsert({
             where: {
@@ -176,38 +145,6 @@ export class PreferenceService {
       orderBy: { updatedAt: 'desc' },
     });
     return { hiddenResources };
-  }
-
-  async listRecentSearches(
-    request: ListRecentSearchesRequest,
-  ): Promise<ListRecentSearchesResponse> {
-    const userId = request.userId?.trim();
-    if (!userId || userId.length > 128) return { resources: [] };
-    const limit = Math.min(
-      Math.max(
-        Number.isFinite(request.limit) && request.limit > 0
-          ? request.limit
-          : CATALOG_RECENT_SEARCH_LIMIT,
-        1,
-      ),
-      CATALOG_RECENT_SEARCH_LIMIT,
-    );
-    const resources = await this.prisma.userRecentSearch.findMany({
-      where: { userId },
-      orderBy: { searchedAt: 'desc' },
-      take: limit,
-      select: { resourceType: true, resourceId: true },
-    });
-    return { resources };
-  }
-
-  async clearRecentSearches(
-    request: ClearRecentSearchesRequest,
-  ): Promise<ClearRecentSearchesResponse> {
-    const userId = request.userId?.trim();
-    if (!userId || userId.length > 128) return { success: false };
-    await this.prisma.userRecentSearch.deleteMany({ where: { userId } });
-    return { success: true };
   }
 
   async setArtistFollow(userId: string, artistId: string, isFollowed: boolean) {

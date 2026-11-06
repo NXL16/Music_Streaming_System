@@ -21,8 +21,6 @@ service RecommendationService {
   rpc GetRecommendationQualityAnalytics(GetRecommendationQualityAnalyticsRequest) returns (RecommendationQualityAnalyticsResponse);
   rpc RecordRecommendationInteraction(RecordRecommendationInteractionRequest) returns (RecordRecommendationInteractionResponse);
   rpc RecordPreferenceEvent(RecordPreferenceEventRequest) returns (RecordPreferenceEventResponse);
-  rpc ListRecentSearches(ListRecentSearchesRequest) returns (ListRecentSearchesResponse);
-  rpc ClearRecentSearches(ClearRecentSearchesRequest) returns (ClearRecentSearchesResponse);
   rpc ListContentPreferences(ListContentPreferencesRequest) returns (ListContentPreferencesResponse);
   rpc SetArtistFollow(SetArtistFollowRequest) returns (ArtistFollowResponse);
   rpc GetArtistFollow(GetArtistFollowRequest) returns (ArtistFollowResponse);
@@ -418,24 +416,6 @@ message RecordPreferenceEventRequest {
 }
 
 message RecordPreferenceEventResponse { bool success = 1; }
-
-message ListRecentSearchesRequest {
-  string user_id = 1;
-  uint32 limit = 2;
-}
-
-message RecentSearchResource {
-  string resource_type = 1;
-  string resource_id = 2;
-}
-
-message ListRecentSearchesResponse {
-  repeated RecentSearchResource resources = 1;
-}
-
-message ClearRecentSearchesRequest { string user_id = 1; }
-
-message ClearRecentSearchesResponse { bool success = 1; }
 
 message ListContentPreferencesRequest { string user_id = 1; }
 

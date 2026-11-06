@@ -6,7 +6,6 @@ import type { MediaCardProps } from "@/components/media/media-card.types";
 import CardArtwork from "./common/card-artwork";
 import Link from "next/link";
 import { getAppScrollContainer } from "@/lib/layout/use-app-scroll-to-top";
-import { useMediaQuery } from "@/hooks/use-media-query";
 
 export type MediaShelfDisplayKind =
   | "MusicNotesHeroShelf"
@@ -242,8 +241,6 @@ function MediaShelf({
 }: MediaShelfProps) {
   const isHeroShelf = displayKind === "MusicNotesHeroShelf";
   const isArtistShelf = contentType === "artist";
-  const isDesktopViewport = useMediaQuery("(min-width: 1000px)");
-  const shouldVirtualize = !isHeroShelf && isDesktopViewport;
   const shelfContainerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const measuredHeightRef = useRef<number | undefined>(undefined);
@@ -252,14 +249,13 @@ function MediaShelf({
   const [isNearViewport, setIsNearViewport] = useState(
     () => prioritizeFirstCard || isHeroShelf,
   );
-  const shouldRenderCards = !shouldVirtualize || isNearViewport;
   const trackedImpressionsRef = useRef(new Set<string>());
 
   const isMoreLikeShelf = shelfId?.startsWith("user-more-like-");
 
   useEffect(() => {
     const shelf = listRef.current;
-    if (!shouldRenderCards || !onCardInteraction || !shelf) return;
+    if (!isNearViewport || !onCardInteraction || !shelf) return;
 
     const record = (position: number) => {
       const card = items[position];
@@ -290,7 +286,7 @@ function MediaShelf({
 
     cards.forEach((card) => observer.observe(card));
     return () => observer.disconnect();
-  }, [items, onCardInteraction, shelfId, shouldRenderCards]);
+  }, [isNearViewport, items, onCardInteraction, shelfId]);
 
   const handleTitleClick = () => {
     if (onSelect && shelfId) {
@@ -303,7 +299,11 @@ function MediaShelf({
   const isClickable = Boolean(onSelect || onTitleClick);
 
   useEffect(() => {
-    if (!shouldVirtualize) return;
+    // The hero is visually expensive to reconstruct (artwork, gradients and
+    // optional ambient media). Unlike ordinary shelves, retain its cards once
+    // loaded so the virtual-height placeholder never swaps them back in while
+    // the user scrolls past the Home hero.
+    if (isHeroShelf) return;
 
     const shelfContainer = shelfContainerRef.current;
     const scrollContainer = getAppScrollContainer();
@@ -329,10 +329,10 @@ function MediaShelf({
 
     observer.observe(shelfContainer);
     return () => observer.disconnect();
-  }, [shouldVirtualize]);
+  }, [isHeroShelf]);
 
   useEffect(() => {
-    if (!shouldVirtualize) return;
+    if (isHeroShelf) return;
 
     const shelfContainer = shelfContainerRef.current;
     if (!shelfContainer || !("ResizeObserver" in window)) return;
@@ -349,10 +349,10 @@ function MediaShelf({
 
     observer.observe(shelfContainer);
     return () => observer.disconnect();
-  }, [isNearViewport, shouldVirtualize]);
+  }, [isHeroShelf, isNearViewport]);
 
   useEffect(() => {
-    if (!shouldVirtualize || measuredHeight === undefined) return;
+    if (isHeroShelf || measuredHeight === undefined) return;
 
     const scrollContainer = getAppScrollContainer();
     const shelfContainer = shelfContainerRef.current;
@@ -370,7 +370,7 @@ function MediaShelf({
     setIsNearViewport((current) =>
       current === isWithinRenderBuffer ? current : isWithinRenderBuffer,
     );
-  }, [isNearViewport, measuredHeight, shouldVirtualize]);
+  }, [isHeroShelf, isNearViewport, measuredHeight]);
 
   useEffect(() => {
     const shelf = listRef.current;
@@ -671,7 +671,7 @@ function MediaShelf({
       ref={shelfContainerRef}
       className={`min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-3 ${containerClassName ?? ""} section--alternate`}
       style={
-        shouldVirtualize && !isNearViewport
+        !isNearViewport
           ? {
               minHeight: measuredHeight ?? ESTIMATED_SHELF_HEIGHT[displayKind],
             }
@@ -742,7 +742,7 @@ function MediaShelf({
                 ref={listRef}
                 className={`${isArtistShelf ? "shelf-grid__list--artist" : `shelf-grid__list ${isHeroShelf ? "shelf-grid__list--align-items-end" : ""}`}`}
               >
-                {shouldRenderCards &&
+                {isNearViewport &&
                   items.map((item, index) => {
                     const card = normalizeItem?.(item) ?? item;
 

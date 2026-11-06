@@ -71,8 +71,6 @@ describe("mapSearchResults", () => {
 
     const results = mapSearchResults({
       data: [{ id: playlist.id, type: "playlists", href: playlist.href }],
-      hasMore: true,
-      shelfHasMore: { artists: true, playlists: true },
       resources: {
         albums: {},
         artists: {},
@@ -89,7 +87,5 @@ describe("mapSearchResults", () => {
       subtitle: playlist.attributes.curatorName,
     });
     expect(results.isEmpty).toBe(false);
-    expect(results.hasMore).toBe(true);
-    expect(results.shelfHasMore).toEqual({ artists: true, playlists: true });
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, type CSSProperties } from "react";
 import MediaShelf from "@/components/media/media-shelf";
 import type { MediaCardProps } from "@/lib/media/media-card.types";
 import {
@@ -12,7 +12,27 @@ import { mapCatalogMusicVideoCards } from "@/lib/catalog/music-video-cards";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { preloadAmbientHlsRuntime } from "@/components/custom-elements/ambient-hls-player";
-import { COMPACT_MUSIC_VIDEO_GRID_STYLE } from "./music-video-grid-style";
+
+export const ARTIST_MUSIC_VIDEO_GRID_STYLE = {
+  "--grid-max-content-xsmall": "200px",
+  "--grid-column-gap-xsmall": "10px",
+  "--grid-row-gap-xsmall": "24px",
+  "--grid-small": "3",
+  "--grid-column-gap-small": "20px",
+  "--grid-row-gap-small": "24px",
+  "--grid-medium": "4",
+  "--grid-column-gap-medium": "20px",
+  "--grid-row-gap-medium": "24px",
+  "--grid-large": "5",
+  "--grid-column-gap-large": "20px",
+  "--grid-row-gap-large": "24px",
+  "--grid-xlarge": "5",
+  "--grid-column-gap-xlarge": "20px",
+  "--grid-row-gap-xlarge": "24px",
+  "--grid-type": "C",
+  "--grid-rows": "1",
+  "--standard-lockup-shadow-offset": "15px",
+} as CSSProperties;
 
 type CatalogMusicVideosShelfProps = {
   resourceType: MusicVideoCatalogResourceType;
@@ -68,7 +88,7 @@ export function CatalogMusicVideosShelf({
       displayKind="MusicVideoShelf"
       items={visibleCards}
       shelfId={`catalog-music-videos-${key}`}
-      gridStyle={isArtistShelf ? COMPACT_MUSIC_VIDEO_GRID_STYLE : undefined}
+      gridStyle={isArtistShelf ? ARTIST_MUSIC_VIDEO_GRID_STYLE : undefined}
       {...(!isArtistShelf
         ? { containerClassName: "bg-(--opaqueShelfBG)" }
         : {})}

@@ -37,10 +37,6 @@ import {
   CleanupPlaylistHistoryResponse,
   RecordPreferenceEventRequest,
   RecordPreferenceEventResponse,
-  ListRecentSearchesRequest,
-  ListRecentSearchesResponse,
-  ClearRecentSearchesRequest,
-  ClearRecentSearchesResponse,
   ListContentPreferencesRequest,
   ListContentPreferencesResponse,
   SetArtistFollowRequest,
@@ -265,22 +261,6 @@ export class RecommendationsService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  async listRecentSearches(
-    request: ListRecentSearchesRequest,
-  ): Promise<ListRecentSearchesResponse> {
-    return grpcFirstValueFrom(
-      this.recommendationClient.listRecentSearches(request, this.metadata()),
-    );
-  }
-
-  async clearRecentSearches(
-    request: ClearRecentSearchesRequest,
-  ): Promise<ClearRecentSearchesResponse> {
-    return grpcFirstValueFrom(
-      this.recommendationClient.clearRecentSearches(request, this.metadata()),
-    );
-  }
-
   private async retryPreferenceEvents() {
     for (let index = 0; index < 24; index += 1) {
       const raw = (await this.redis
@@ -401,20 +381,14 @@ export class RecommendationsService implements OnModuleInit, OnModuleDestroy {
     request: UpsertSystemPlaylistArtworkRequest,
   ): Promise<SystemPlaylistArtworkResponse> {
     return grpcFirstValueFrom(
-      this.recommendationClient.upsertSystemPlaylistArtwork(
-        request,
-        this.metadata(),
-      ),
+      this.recommendationClient.upsertSystemPlaylistArtwork(request, this.metadata()),
     );
   }
   setSystemPlaylistArtworkColor(
     request: SetSystemPlaylistArtworkColorRequest,
   ): Promise<SystemPlaylistArtworkResponse> {
     return grpcFirstValueFrom(
-      this.recommendationClient.setSystemPlaylistArtworkColor(
-        request,
-        this.metadata(),
-      ),
+      this.recommendationClient.setSystemPlaylistArtworkColor(request, this.metadata()),
     );
   }
 
@@ -517,4 +491,5 @@ export class RecommendationsService implements OnModuleInit, OnModuleDestroy {
       ]),
     );
   }
+
 }
