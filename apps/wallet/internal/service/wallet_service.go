@@ -241,10 +241,6 @@ func (s *WalletService) DebitWallet(ctx context.Context, req *walletpb.DebitWall
 	}, nil
 }
 
-// ==============================================================================
-// CORE GATEWAY ROUTER SECTION (IMPLEMENTING STRATEGY PATTERN / PAYMENT METHOD)
-// ==============================================================================
-
 // CreateDepositOrder: Hàm gRPC chính nhận diện và điều hướng cổng thanh toán tương ứng
 func (s *WalletService) CreateDepositOrder(ctx context.Context, req *walletpb.DepositOrderRequest) (*walletpb.DepositOrderResponse, error) {
 	if req.UserId == "" {
@@ -403,10 +399,6 @@ func nextWalletVersion(version int64) (int64, error) {
 
 	return version + 1, nil
 }
-
-// ==============================================================================
-// MOMO PAYMENT GATEWAY IMPLEMENTATION
-// ==============================================================================
 
 type MomoRequest struct {
 	PartnerCode string `json:"partnerCode"`
@@ -576,10 +568,6 @@ func (s *WalletService) processDepositWebhook(ctx context.Context, orderID strin
 
 	return tx.Commit()
 }
-
-// ==============================================================================
-// NF BANK PAYMENT GATEWAY IMPLEMENTATION
-// ==============================================================================
 
 type NFBankCreateRequest struct {
 	PartnerCode string `json:"partnerCode"`

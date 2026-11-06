@@ -102,6 +102,11 @@ func main() {
 
 	router.POST("/v1/wallet/webhook/momo", momoHandler.HandleWebhook)
 	router.POST("/v1/wallet/webhook/nfbank", nfbankHandler.HandleWebhook)
+	// Private service-to-service endpoints; never expose the internal token to browsers.
+	router.POST("/internal/room/gifts/credit", deliveryHTTP.RoomGiftCreditHandler(walletService, cfg.InternalGRPCToken))
+	for _, operation := range []string{"catalog", "create", "status"} {
+		router.POST("/internal/room/topups/"+operation, deliveryHTTP.RoomTopUpHandler(walletService, cfg.InternalGRPCToken, operation))
+	}
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPPort,

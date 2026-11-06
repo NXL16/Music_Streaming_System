@@ -12,6 +12,7 @@ const REQUIRED_KEYS = [
   'RECOMMENDATION_GRPC_URL',
   'ASSET_GRPC_URL',
   'WALLET_HTTP_URL',
+  'WALLET_INTERNAL_HTTP_URL',
   'REDIS_HOST',
   'REDIS_PORT',
   'REDIS_PASSWORD',
@@ -101,7 +102,9 @@ function validateMetaGrpcTls(rawEnv: RawEnv): void {
   if (tlsEnabled !== 'true') return;
 
   if (!rawEnv.META_GRPC_TLS_CA_FILE?.trim()) {
-    throw new Error('META_GRPC_TLS_CA_FILE is required when Meta TLS is enabled');
+    throw new Error(
+      'META_GRPC_TLS_CA_FILE is required when Meta TLS is enabled',
+    );
   }
   const certificateFile = rawEnv.META_GRPC_TLS_CLIENT_CERT_FILE?.trim();
   const keyFile = rawEnv.META_GRPC_TLS_CLIENT_KEY_FILE?.trim();
