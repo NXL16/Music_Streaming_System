@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { getApiErrorMessage } from "@/lib/api/api-error";
+import { getApiErrorMessage, getApiErrorStatus } from "@/lib/api/api-error";
 import { developmentCacheDisabled } from "@/lib/config/development-cache";
 import {
   getCatalogArtist,
@@ -190,6 +190,7 @@ export function useCatalogArtist(
   const [songs, setSongs] = useState<PlayerSong[]>([]);
   const [loading, setLoading] = useMinimumLoadingState(true);
   const [error, setError] = useState("");
+  const [errorStatus, setErrorStatus] = useState<number | undefined>();
 
   const fetchData = useCallback(
     async (force = false) => {
@@ -256,6 +257,7 @@ export function useCatalogArtist(
       if (controller.signal.aborted) return;
       setLoading(true);
       setError("");
+      setErrorStatus(undefined);
 
       fetchData()
         .then(({ artistDetail, albumList, albumSections, songList }) => {
@@ -275,6 +277,7 @@ export function useCatalogArtist(
                 "Không thể tải nội dung thông tin nghệ sĩ.",
               ),
             );
+            setErrorStatus(getApiErrorStatus(requestError));
           }
         })
         .finally(() => {
@@ -288,6 +291,7 @@ export function useCatalogArtist(
   const reload = useCallback(async () => {
     setLoading(true);
     setError("");
+    setErrorStatus(undefined);
     try {
       const { artistDetail, albumList, albumSections, songList } =
         await fetchData(true);
@@ -302,6 +306,7 @@ export function useCatalogArtist(
           "Không thể tải nội dung thông tin nghệ sĩ.",
         ),
       );
+      setErrorStatus(getApiErrorStatus(requestError));
     } finally {
       setLoading(false);
     }
@@ -322,6 +327,7 @@ export function useCatalogArtist(
     songs,
     loading,
     error,
+    errorStatus,
     reload,
     loadAlbumSection,
   };

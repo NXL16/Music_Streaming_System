@@ -49,6 +49,9 @@ import {
   appendUniqueById,
   getSafeNextCursor,
 } from "@/lib/pagination/cursor-page";
+import { RequestErrorState } from "@/components/states/request-error-state";
+import PauseIcon from "@/components/icons/pause-icon";
+import PlayIcon from "@/components/icons/play-icon";
 
 const LIBRARY_SONG_PAGE_SIZE = 40;
 
@@ -61,10 +64,12 @@ export default function SongsPage() {
   const [nextCursor, setNextCursor] = useState("");
   const [initialLoading, setInitialLoading] = useMinimumLoadingState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState(false);
   const [songTableElement, setSongTableElement] =
     useState<HTMLDivElement | null>(null);
   const pageRequestIdRef = useRef(0);
   const loadingPageRef = useRef(false);
+  const hasLoadedRef = useRef(false);
   const seenCursorsRef = useRef(new Set<string>());
   const favoriteSongIds = useFavoriteStore((state) => state.songIds);
   const currentSong = usePlayerStore((state) => state.currentSong);
@@ -110,6 +115,7 @@ export default function SongsPage() {
     loadingPageRef.current = true;
     seenCursorsRef.current = new Set();
     setLoadingMore(true);
+    setError(false);
     try {
       const page = await listLibrarySongs({
         limit: LIBRARY_SONG_PAGE_SIZE,
@@ -119,8 +125,9 @@ export default function SongsPage() {
       if (requestId !== pageRequestIdRef.current) return;
       setSongs(page.songs ?? []);
       setNextCursor(getSafeNextCursor(page, seenCursorsRef.current));
+      hasLoadedRef.current = true;
     } catch {
-      // The current list remains visible if a background refresh fails.
+      if (!hasLoadedRef.current) setError(true);
     } finally {
       if (requestId === pageRequestIdRef.current) {
         loadingPageRef.current = false;
@@ -208,6 +215,8 @@ export default function SongsPage() {
   if (initialLoading) {
     return <CatalogPageLoading />;
   }
+
+  if (error) return <RequestErrorState onRetry={() => void loadFirstPage()} />;
 
   // Match the other Library surfaces: an optimistic pending deletion is no
   // longer visible content, so the final-song state renders Empty immediately
@@ -363,50 +372,14 @@ export default function SongsPage() {
 
                                   <div className="bottom-0 inset-x-0 m-auto opacity-0 absolute top-0 z-1 group-hover:opacity-100">
                                     {isTrackPlaying ? (
-                                      <svg
-                                        width="16"
-                                        height="16"
-                                        viewBox="0 0 16 16"
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        className="inline-block align-bottom"
-                                        aria-hidden="true"
-                                      >
-                                        <path
-                                          fill="var(--nonPlatterIconFill, var(--keyColor, black))"
-                                          d="M9.918.464h2.672a.89.89 0 0 1 .89.89v13.291a.89.89 0 0 1-.89.891H9.918a.89.89 0 0 1-.89-.89V1.354a.89.89 0 0 1 .89-.891zm-6.371 0h2.398c.567 0 1.027.46 1.027 1.028v13.016c0 .568-.46 1.028-1.027 1.028H3.547c-.567 0-1.028-.46-1.028-1.028V1.492c0-.568.46-1.028 1.028-1.028z"
-                                        ></path>
-                                      </svg>
+                                      <PauseIcon className="inline-block align-bottom" />
                                     ) : (
-                                      <svg
-                                        width="16"
-                                        height="16"
-                                        viewBox="0 0 16 16"
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        className="inline-block align-bottom"
-                                        aria-hidden="true"
-                                      >
-                                        <path
-                                          fill="var(--nonPlatterIconFill, var(--keyColor, black))"
-                                          d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"
-                                        ></path>
-                                      </svg>
+                                      <PlayIcon className="pointer-events-none inline-block h-(--playButtonSize,16px) w-(--playButtonSize,16px) align-bottom" />
                                     )}
                                   </div>
                                 </div>
                               ) : (
-                                <svg
-                                  width="16"
-                                  height="16"
-                                  viewBox="0 0 16 16"
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  className="pointer-events-none inline-block h-(--playButtonSize,16px) w-(--playButtonSize,16px) align-bottom"
-                                  aria-hidden="true"
-                                >
-                                  <path
-                                    fill="var(--nonPlatterIconFill, var(--keyColor, black))"
-                                    d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"
-                                  ></path>
-                                </svg>
+                                <PlayIcon className="pointer-events-none inline-block h-(--playButtonSize,16px) w-(--playButtonSize,16px) align-bottom" />
                               )}
                             </button>
                           </div>

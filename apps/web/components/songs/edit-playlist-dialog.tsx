@@ -5,6 +5,7 @@ import type { CollectionMenuContext } from "@/lib/context-menu/types";
 import { EDIT_PLAYLIST_DIALOG_EVENT } from "@/lib/playlists/edit-playlist-dialog";
 import { updateUserPlaylist } from "@/lib/playlists/user-playlists.api";
 import { updateRecentlyPlayedPlaylistSnapshot } from "@/lib/recommendations/recently-played-snapshot";
+import { useHydrated } from "@/hooks/use-hydrated";
 import {
   notifyMenuError,
   notifyMenuSuccess,
@@ -16,6 +17,7 @@ export function EditPlaylistDialog() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const hydrated = useHydrated();
 
   useEffect(() => {
     const open = (event: Event) => {
@@ -60,6 +62,8 @@ export function EditPlaylistDialog() {
       setSubmitting(false);
     }
   };
+
+  if (!hydrated) return null;
 
   return (
     <dialog

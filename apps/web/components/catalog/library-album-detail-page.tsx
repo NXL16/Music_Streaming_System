@@ -10,6 +10,8 @@ import {
 } from "@/lib/library/library-resources.api";
 import { useLibraryResourcesRevision } from "@/lib/library/use-library-resources-revision";
 import CatalogPageLoading from "../loading/catalog-page-loading";
+import { NotFoundState } from "../states/not-found-state";
+import { RequestErrorState } from "../states/request-error-state";
 import { CatalogDetailPage } from "./catalog-detail-page";
 
 type LibraryAlbumDetailPageProps = {
@@ -22,7 +24,7 @@ export function LibraryAlbumDetailPage({
 }: LibraryAlbumDetailPageProps) {
   const userId = useAuthStore((state) => state.user?.userId);
   const revision = useLibraryResourcesRevision();
-  const { resources, loading } = useLibraryMediaCards({
+  const { resources, loading, error, retry } = useLibraryMediaCards({
     userId,
     errorMessage: "Could not load your saved albums.",
   });
@@ -30,13 +32,19 @@ export function LibraryAlbumDetailPage({
     [],
   );
   const [loadingLibraryResources, setLoadingLibraryResources] = useState(true);
+  const [libraryResourcesError, setLibraryResourcesError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     if (!userId) return;
     let active = true;
+    setLibraryResourcesError(false);
     void getLibraryResources()
       .then((nextResources) => {
         if (active) setLibraryResources(nextResources);
+      })
+      .catch(() => {
+        if (active) setLibraryResourcesError(true);
       })
       .finally(() => {
         if (active) setLoadingLibraryResources(false);
@@ -44,7 +52,7 @@ export function LibraryAlbumDetailPage({
     return () => {
       active = false;
     };
-  }, [revision, userId]);
+  }, [revision, retryKey, userId]);
   const isSaved = useMemo(
     () =>
       resources.some(
@@ -72,25 +80,24 @@ export function LibraryAlbumDetailPage({
   );
 
   if (!userId) {
-    return (
-      <div className="[--buttonTextColor:var(--systemSecondary)] [--buttonBorderColor:var(--systemSecondary)] items-center text-(--systemSecondary) flex gap-3 flex-col left-[50%] m-auto max-w-110 p-[0_25px] absolute text-center top-[50%] transform-[translate(-50%,-50%)] z-(--z-default)">
-        <h1 className="[font:var(--title-2)] mb-1.25">
-          {`The page you're looking for can't be found.`}
-        </h1>
-      </div>
-    );
+    return <NotFoundState />;
   }
 
   if (loading || loadingLibraryResources) return <CatalogPageLoading />;
 
-  if (!isSaved) {
+  if (error || libraryResourcesError) {
     return (
-      <div className="[--buttonTextColor:var(--systemSecondary)] [--buttonBorderColor:var(--systemSecondary)] items-center text-(--systemSecondary) flex gap-3 flex-col left-[50%] m-auto max-w-110 p-[0_25px] absolute text-center top-[50%] transform-[translate(-50%,-50%)] z-(--z-default)">
-        <h1 className="[font:var(--title-2)] mb-1.25">
-          {`The page you're looking for can't be found.`}
-        </h1>
-      </div>
+      <RequestErrorState
+        onRetry={() => {
+          retry();
+          setRetryKey((key) => key + 1);
+        }}
+      />
     );
+  }
+
+  if (!isSaved) {
+    return <NotFoundState />;
   }
 
   return (

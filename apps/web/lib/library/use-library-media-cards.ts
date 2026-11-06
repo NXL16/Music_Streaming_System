@@ -27,6 +27,7 @@ export function useLibraryMediaCards({
   const requestVersion = useRef(0);
   const hasLoadedRef = useRef(false);
   const loadedUserIdRef = useRef<string | undefined>(userId);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     const version = ++requestVersion.current;
@@ -61,7 +62,12 @@ export function useLibraryMediaCards({
         if (requestVersion.current === version) setLoading(false);
       }
     })();
-  }, [ensureFavorite, errorMessage, revision, userId]);
+  }, [ensureFavorite, errorMessage, revision, retryKey, userId]);
 
-  return { resources, loading, error };
+  return {
+    resources,
+    loading,
+    error,
+    retry: () => setRetryKey((current) => current + 1),
+  };
 }

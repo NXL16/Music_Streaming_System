@@ -8,6 +8,8 @@ export type MenuItemData = {
   icon?: ReactNode;
   /** Internal route opened with Next client-side navigation. */
   href?: string;
+  /** Runs immediately before an item navigates to its internal route. */
+  onNavigate?: () => void;
   onClick?: () => void | Promise<void>;
   disabled?: boolean;
   /** Keep the menu visible after selecting this item (for submenus/toggles). */
@@ -23,6 +25,7 @@ export type MenuItemData = {
 export type OpenMenuOptions = {
   id: string;
   items: MenuItemData[];
+  anchorPoint?: { x: number; y: number };
 };
 
 let preloadRequestId = 0;
@@ -48,6 +51,7 @@ type MenuState = {
   isOpen: boolean;
   activeId: string | null;
   triggerEl: HTMLElement | null;
+  anchorPoint: { x: number; y: number } | null;
   items: MenuItemData[];
   openMenu: (options: OpenMenuOptions, triggerEl: HTMLElement) => void;
   closeMenu: () => void;
@@ -57,10 +61,17 @@ export const useMenuStore = create<MenuState>((set, get) => ({
   isOpen: false,
   activeId: null,
   triggerEl: null,
+  anchorPoint: null,
   items: [],
-  openMenu: ({ id, items }, triggerEl) => {
+  openMenu: ({ id, items, anchorPoint }, triggerEl) => {
     const requestId = ++preloadRequestId;
-    set({ isOpen: true, activeId: id, triggerEl, items });
+    set({
+      isOpen: true,
+      activeId: id,
+      triggerEl,
+      anchorPoint: anchorPoint ?? null,
+      items,
+    });
 
     void preloadMenuItems(items).then((preloadedItems) => {
       if (requestId !== preloadRequestId || !get().isOpen) return;
@@ -69,6 +80,12 @@ export const useMenuStore = create<MenuState>((set, get) => ({
   },
   closeMenu: () => {
     preloadRequestId += 1;
-    set({ isOpen: false, activeId: null, triggerEl: null, items: [] });
+    set({
+      isOpen: false,
+      activeId: null,
+      triggerEl: null,
+      anchorPoint: null,
+      items: [],
+    });
   },
 }));

@@ -5,16 +5,12 @@ import { CSSProperties } from "react";
 export default function NewPage() {
   return (
     <>
-      <div className="grid items-end grid-cols-[1fr_auto] me-(--bodyGutter) ms-(--bodyGutter) pb-[0.05px] pt-8">
-        <h1 className="text-(--systemPrimary) [font:var(--header-emphasized)] col-1 row-1">
-          New
-        </h1>
-      </div>
+      
 
       <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-7">
         <div className="">
           <div className="pb-8">
-            <NewFeaturedShelf/>
+            <NewFeaturedShelf />
           </div>
         </div>
       </div>

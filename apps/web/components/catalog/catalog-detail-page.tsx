@@ -33,6 +33,8 @@ import {
 import { catalogArtists } from "@/lib/catalog/catalog-artists";
 import { ArtistLinks } from "../media/artist-links";
 import CatalogPageLoading from "../loading/catalog-page-loading";
+import { NotFoundState } from "../states/not-found-state";
+import { RequestErrorState } from "../states/request-error-state";
 import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
 import { AddToLibraryButton } from "../songs/add-to-library-button";
 import { AddSongToLibraryButton } from "../songs/add-song-to-library-button";
@@ -70,6 +72,8 @@ import { albumRoute } from "@/lib/catalog/album-route";
 import { CatalogMusicVideosShelf } from "../music-videos/catalog-music-videos-shelf";
 import { useArtworkPageTheme } from "@/lib/layout/use-artwork-page-theme";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import PlayIcon from "../icons/play-icon";
+import PauseIcon from "../icons/pause-icon";
 
 const AmbientVideo = dynamic(() => import("../custom-elements/AmpVideo"), {
   ssr: false,
@@ -119,7 +123,7 @@ export function CatalogDetailPage({
   isLibraryView = false,
   librarySongIds,
 }: CatalogDetailPageProps) {
-  const { data, loading, error, reload } = useCatalogDetail(
+  const { data, loading, error, errorStatus, reload } = useCatalogDetail(
     resourceType,
     resourceId,
   );
@@ -601,22 +605,10 @@ export function CatalogDetailPage({
     <>
       {showPageLoading && <CatalogPageLoading />}
 
-      {!showPageLoading && error && (
-        <div
-          role="alert"
-          className="[--buttonTextColor:var(--systemSecondary)] [--buttonBorderColor:var(--systemSecondary)] items-center text-(--systemSecondary) flex flex-col gap-3 left-1/2 m-auto max-w-110 px-6.25 absolute text-center top-1/2 -translate-x-1/2 -translate-y-1/2 z-(--z-default)"
-        >
-          <h2 className="[font:var(--title-2)] mb-1.25">An error occurred.</h2>
-          <div className="w-auto">
-            <button
-              type="button"
-              onClick={() => void reload()}
-              className="items-center bg-(--buttonBackgroundColor,var(--keyColorBG,var(--systemBlue))) rounded-(--buttonRadius,3px) [display:var(--buttonDisplay,flex)] [justify-content:var(--buttonJustifyContent,center)] [--buttonBackgroundColor:transparent] border border-solid border-(--buttonBorderColor,var(--keyColor,var(--systemBlue))) text-(--buttonTextColor,var(--keyColor)) [font:var(--body-tall)] min-w-(--buttonMinWidth,108px) pe-4 ps-4 min-[1260px]:h-(--buttonHeight,28px) min-[1260px]:w-(--buttonWidth,auto)"
-            >
-              Try Again
-            </button>
-          </div>
-        </div>
+      {!showPageLoading && errorStatus === 404 && <NotFoundState />}
+
+      {!showPageLoading && error && errorStatus !== 404 && (
+        <RequestErrorState onRetry={() => void reload()} />
       )}
 
       {!showInitialLoading && !isWaitingForAlbumTheme && resource && (
@@ -773,17 +765,10 @@ export function CatalogDetailPage({
                           className="[--button-action-min-width:130px] [--button-action-height:36px] bg-(--button-pill-background-color,#000) rounded-(--button-action-border-radius,24px) text-(--button-pill-color,#fff) [font:var(--title-3-semibold)] px-3 items-center flex h-(--button-action-height,36px) justify-center min-w-(--button-action-min-width-override,var(--button-action-min-width,none)) w-(--button-action-width,100%) disabled:opacity-50 pointer-coarse:[--button-action-height:48px] pointer-coarse:[--button-action-min-width:160px] pointer-coarse:[font:var(--title-2-semibold)]"
                         >
                           <span className="block">
-                            <svg
+                            <PlayIcon
                               className="pointer-coarse:[--button-action-icon-height:17px] [--button-action-icon-height:15px] [--button-action-icon-top-offset:0] w-[inherit] block text-current pointer-events-none shrink-0 h-(--button-action-icon-height,12px) relative top-(--button-action-icon-top-offset,1px) right-(--button-action-icon-inline-end,5px)"
-                              height="16"
-                              width="16"
-                              viewBox="0 0 16 16"
-                            >
-                              <path
-                                fill="currentColor"
-                                d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"
-                              ></path>
-                            </svg>
+                              fill="currentColor"
+                            />
                           </span>
                           <span className="contents">Play</span>
                         </button>
@@ -1008,55 +993,14 @@ export function CatalogDetailPage({
 
                                       <div className="bottom-0 inset-x-0 m-auto opacity-0 absolute top-0 z-1 group-hover:opacity-100">
                                         {isTrackPlaying ? (
-                                          <svg
-                                            width="16"
-                                            height="16"
-                                            viewBox="0 0 16 16"
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            fillRule="evenodd"
-                                            clipRule="evenodd"
-                                            strokeLinejoin="round"
-                                            strokeMiterlimit="2"
-                                            className="inline-block align-bottom"
-                                            aria-hidden="true"
-                                          >
-                                            <path
-                                              fill="var(--nonPlatterIconFill, var(--keyColor, black))"
-                                              d="M9.918.464h2.672a.89.89 0 0 1 .89.89v13.291a.89.89 0 0 1-.89.891H9.918a.89.89 0 0 1-.89-.89V1.354a.89.89 0 0 1 .89-.891zm-6.371 0h2.398c.567 0 1.027.46 1.027 1.028v13.016c0 .568-.46 1.028-1.027 1.028H3.547c-.567 0-1.028-.46-1.028-1.028V1.492c0-.568.46-1.028 1.028-1.028z"
-                                              fillRule="nonzero"
-                                            ></path>
-                                          </svg>
+                                          <PauseIcon className="inline-block align-bottom" />
                                         ) : (
-                                          <svg
-                                            width="16"
-                                            height="16"
-                                            viewBox="0 0 16 16"
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            className="inline-block align-bottom"
-                                            aria-hidden="true"
-                                          >
-                                            <path
-                                              fill="var(--nonPlatterIconFill, var(--keyColor, black))"
-                                              d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"
-                                            ></path>
-                                          </svg>
+                                          <PlayIcon className="inline-block align-bottom" />
                                         )}
                                       </div>
                                     </div>
                                   ) : (
-                                    <svg
-                                      width="16"
-                                      height="16"
-                                      viewBox="0 0 16 16"
-                                      xmlns="http://www.w3.org/2000/svg"
-                                      className="pointer-events-none inline-block h-(--playButtonSize,16px) w-(--playButtonSize,16px) align-bottom"
-                                      aria-hidden="true"
-                                    >
-                                      <path
-                                        className="fill-(--nonPlatterIconFill,var(--keyColor,black))"
-                                        d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"
-                                      ></path>
-                                    </svg>
+                                    <PlayIcon className="pointer-events-none inline-block h-(--playButtonSize,16px) w-(--playButtonSize,16px) align-bottom" />
                                   )}
                                 </button>
                               </div>

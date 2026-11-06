@@ -19,10 +19,10 @@ export function useCatalogSong(releaseTrackId: string) {
     [releaseTrackId],
   );
 
-  const { data: song, loading, error, reload } = useAsyncResource(
+  const { data: song, loading, error, errorStatus, reload } = useAsyncResource(
     fetchSong,
     "Không thể tải thông tin bài hát.",
   );
 
-  return { song, loading, error, reload };
+  return { song, loading, error, errorStatus, reload };
 }

@@ -23,28 +23,6 @@ export type UserProfile = {
   updatedAt: number;
 };
 
-export type UserRole =
-  | "USER"
-  | "ARTIST_PENDING"
-  | "ARTIST"
-  | "SUPER_ADMIN"
-  | "ADMIN_USER_OPS"
-  | "ADMIN_SECURITY_OPS";
-
-export type ListAdminUsersQuery = {
-  page?: number;
-  limit?: number;
-  search?: string;
-  role?: UserRole;
-  isActive?: boolean;
-};
-
-export type ListAdminUsersResponse = {
-  users: UserProfile[];
-  total: number;
-  page: number;
-  limit: number;
-};
 
 export type AuthSession = {
   accessToken: string;

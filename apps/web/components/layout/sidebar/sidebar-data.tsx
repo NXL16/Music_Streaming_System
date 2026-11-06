@@ -1,4 +1,4 @@
-import { AudioLines, ShieldCheck } from "lucide-react";
+import { AudioLines } from "lucide-react";
 import type { SidebarItem } from "./sidebar-types";
 export const primaryNavigationItems: SidebarItem[] = [
   {
@@ -44,7 +44,6 @@ export const primaryNavigationItems: SidebarItem[] = [
     ),
   },
 ];
-
 const roomUrl = process.env.NEXT_PUBLIC_ROOM_URL?.trim() + "/rooms";
 
 export const roomNavigationItems: SidebarItem[] = roomUrl
@@ -174,7 +173,6 @@ export const libraryItems: SidebarItem[] = [
     ),
   },
 ];
-
 export const playlistItems: SidebarItem[] = [
   {
     key: "all-playlists",
@@ -216,11 +214,3 @@ export const playlistItems: SidebarItem[] = [
   },
 ];
 
-export const identityAdminItems: SidebarItem[] = [
-  {
-    key: "admin",
-    label: "Admin",
-    href: "/admin",
-    icon: <ShieldCheck aria-hidden="true" />,
-  },
-];

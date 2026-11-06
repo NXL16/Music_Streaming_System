@@ -3,7 +3,7 @@ import type { CatalogResponse } from "./catalog.types";
 import { catalogArtists } from "./catalog-artists";
 
 /** Hydrates canonical card metadata from every Catalog response, including detail pages. */
-export function hydrateCatalogMediaEntities(response: CatalogResponse) {
+export function hydrateCatalogMediaEntities<T extends CatalogResponse>(response: T): T {
   for (const album of Object.values(response.resources.albums)) {
     createAndHydrateMediaResourceCard(
       {

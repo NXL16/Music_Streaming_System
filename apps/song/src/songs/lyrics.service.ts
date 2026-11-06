@@ -73,7 +73,11 @@ export class LyricsService {
           sourceTtml,
           status: SongLyricStatus.PUBLISHED,
         },
-        update: { language, sourceTtml, status: SongLyricStatus.PUBLISHED },
+        update: {
+          language,
+          sourceTtml,
+          status: SongLyricStatus.PUBLISHED,
+        },
       });
       await tx.song.update({
         where: { id: song.id },

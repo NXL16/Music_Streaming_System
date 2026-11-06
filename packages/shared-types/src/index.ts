@@ -1,6 +1,3 @@
-// ==========================================
-//                  REDIS
-// ==========================================
 export const TRANSCODE_QUEUE = "transcode_queue" as const;
 export const SONG_COMPLETION_QUEUE = "song_completion_queue" as const;
 export const SONG_COMPLETION_DLQ = "song_completion_queue:dlq" as const;
@@ -75,9 +72,6 @@ export function getArtworkRenditionSrcSet(
     .join(", ");
 }
 
-// ==========================================
-// CONSTANTS & TYPES
-// ==========================================
 export const UserRole = {
   USER: "USER",
   ARTIST_PENDING: "ARTIST_PENDING",
@@ -114,10 +108,6 @@ export interface HttpExceptionResponseBody {
   error?: string;
   statusCode?: number;
 }
-
-// ==========================================
-//              ARTWORK THEME
-// ==========================================
 
 const ARTWORK_NEUTRAL_COLOR = "#2e2e2e";
 

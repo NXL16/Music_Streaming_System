@@ -37,6 +37,9 @@ import {
   getSafeNextCursor,
 } from "@/lib/pagination/cursor-page";
 import Loading from "@/app/loading";
+import { RequestErrorState } from "@/components/states/request-error-state";
+import { NotFoundState } from "@/components/states/not-found-state";
+import { getApiErrorStatus } from "@/lib/api/api-error";
 
 type Track = SongSummaryProjectionSource;
 
@@ -91,6 +94,7 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
   const [nextCursor, setNextCursor] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
+  const [notFound, setNotFound] = useState(false);
   const [revision, setRevision] = useState(0);
   const pageRequestVersionRef = useRef(0);
   const seenCursorsRef = useRef(new Set<string>());
@@ -102,6 +106,7 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
     let active = true;
     const requestVersion = ++pageRequestVersionRef.current;
     seenCursorsRef.current = new Set();
+    setNotFound(false);
     queueMicrotask(() => {
       if (active) setLoadingMore(false);
     });
@@ -152,7 +157,8 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
               setError("");
               return;
             }
-          } catch {
+          } catch (catalogError) {
+            if (getApiErrorStatus(catalogError) !== 404) throw catalogError;
             // A private/user playlist is resolved through its own service below.
           }
 
@@ -167,11 +173,20 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
           setTracks(firstPage.songs ?? []);
           setNextCursor(getSafeNextCursor(firstPage, seenCursorsRef.current));
           setError("");
-        } catch {
+        } catch (requestError) {
           if (!active || requestVersion !== pageRequestVersionRef.current)
             return;
           setCatalogPlaylist(null);
-          setError("Could not load playlist.");
+          if (
+            getApiErrorStatus(requestError) === 404 ||
+            requestError instanceof Error &&
+              requestError.message === "PLAYLIST_NOT_IN_LIBRARY"
+          ) {
+            setNotFound(true);
+            setError("");
+          } else {
+            setError("Could not load playlist.");
+          }
         } finally {
           if (active && requestVersion === pageRequestVersionRef.current) {
             setLoading(false);
@@ -243,12 +258,10 @@ export default function LibraryPlaylistDetailPage({ params }: PageProps) {
     return <CatalogPageLoading />;
   }
 
+  if (notFound) return <NotFoundState />;
+
   if (error || (!isFavorites && !playlist && !catalogPlaylist)) {
-    return (
-      <div className="mx-(--bodyGutter) py-20 text-center text-(--keyColor)">
-        {error || "Could not load playlist."}
-      </div>
-    );
+    return <RequestErrorState onRetry={() => setRevision((current) => current + 1)} />;
   }
 
   // ── MAP DỮ LIỆU SANG CHUẨN GENERICPLAYLIST ──────────────────────────────

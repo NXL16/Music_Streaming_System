@@ -20,6 +20,7 @@ export function useUserPlaylistPages(userId?: string) {
   const [nextCursor, setNextCursor] = useState<string>();
   const [isLoading, setIsLoading] = useState(Boolean(userId));
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [error, setError] = useState("");
   const requestVersion = useRef(0);
   const hasLoadedRef = useRef(false);
   const loadingMoreRef = useRef(false);
@@ -30,6 +31,7 @@ export function useUserPlaylistPages(userId?: string) {
     loadingMoreRef.current = false;
     seenCursorsRef.current = new Set();
     setIsLoadingMore(false);
+    setError("");
     if (!userId) {
       setPlaylists([]);
       setNextCursor(undefined);
@@ -52,6 +54,7 @@ export function useUserPlaylistPages(userId?: string) {
       if (requestVersion.current !== version) return;
       setPlaylists([]);
       setNextCursor(undefined);
+      setError("Could not load your playlists.");
     } finally {
       if (requestVersion.current === version) setIsLoading(false);
     }
@@ -114,6 +117,8 @@ export function useUserPlaylistPages(userId?: string) {
     hasMore: Boolean(nextCursor),
     isLoading,
     isLoadingMore,
+    error,
     loadMore,
+    reload,
   };
 }

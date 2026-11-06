@@ -16,10 +16,11 @@ import {
   projectLibraryMediaCard,
   projectUserPlaylistCard,
 } from "@/lib/library/library-media-card.mapper";
+import { RequestErrorState } from "@/components/states/request-error-state";
 
 export default function AllPlaylistsPage() {
   const user = useAuthStore((state) => state.user);
-  const { resources, loading: isLoadingResources, error } = useLibraryMediaCards({
+  const { resources, loading: isLoadingResources, error, retry } = useLibraryMediaCards({
     userId: user?.userId,
     ensureFavorite: true,
     errorMessage: "Could not load your library.",
@@ -29,7 +30,9 @@ export default function AllPlaylistsPage() {
     hasMore,
     isLoading: isLoadingPlaylists,
     isLoadingMore,
+    error: playlistsError,
     loadMore,
+    reload,
   } = useUserPlaylistPages(user?.userId);
   const loading = useMinimumLoadingDuration(
     isLoadingResources || isLoadingPlaylists,
@@ -81,7 +84,9 @@ export default function AllPlaylistsPage() {
     <>
       {loading ? (
         <CatalogPageLoading />
-      ) : !error && !libraryCards.length ? (
+      ) : error || playlistsError ? (
+        <RequestErrorState onRetry={() => { retry(); void reload(); }} />
+      ) : !libraryCards.length ? (
         <EmptyState />
       ) : (
         <>

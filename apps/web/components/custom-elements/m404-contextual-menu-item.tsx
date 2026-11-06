@@ -43,6 +43,7 @@ export default function M404ContextualMenuItem({
     }
 
     if (item.href) {
+      item.onNavigate?.();
       router.push(item.href);
     } else {
       void item.onClick?.();

@@ -5,7 +5,7 @@ import EmptyState from "@/components/layout/empty-state";
 import HeaderWithSort from "@/components/layout/header-with-sort";
 import CatalogPageLoading from "@/components/loading/catalog-page-loading";
 import MediaCardRenderer from "@/components/media/media-card-renderer";
-import { ARTIST_MUSIC_VIDEO_GRID_STYLE } from "@/components/music-videos/catalog-music-videos-shelf";
+import { COMPACT_MUSIC_VIDEO_GRID_STYLE } from "@/components/music-videos/music-video-grid-style";
 import type {
   LibrarySortBy,
   SortDirection,
@@ -18,6 +18,7 @@ import { mapCatalogMusicVideoCards } from "@/lib/catalog/music-video-cards";
 import { getLibraryResources } from "@/lib/library/library-resources.api";
 import { useLibraryResourcesRevision } from "@/lib/library/use-library-resources-revision";
 import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
+import { RequestErrorState } from "@/components/states/request-error-state";
 
 type LibraryMusicVideo = {
   video: CatalogMusicVideo;
@@ -28,6 +29,8 @@ export default function MusicVideosPage() {
   const revision = useLibraryResourcesRevision();
   const [videos, setVideos] = useState<LibraryMusicVideo[]>();
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
   const [sortBy, setSortBy] = useState<LibrarySortBy>("recently-added");
   const [sortDirection, setSortDirection] =
     useState<SortDirection>("descending");
@@ -35,6 +38,7 @@ export default function MusicVideosPage() {
 
   useEffect(() => {
     let active = true;
+    setError(false);
     void getLibraryResources()
       .then(async (resources) => {
         const videoResources = resources
@@ -60,7 +64,10 @@ export default function MusicVideosPage() {
         setVideos(libraryVideos);
       })
       .catch(() => {
-        if (active) setVideos([]);
+        if (active) {
+          setVideos([]);
+          setError(true);
+        }
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -68,7 +75,7 @@ export default function MusicVideosPage() {
     return () => {
       active = false;
     };
-  }, [revision]);
+  }, [revision, retryKey]);
 
   const cards = useMemo(() => {
     const sort = [...(videos ?? [])].sort((left, right) => {
@@ -85,6 +92,10 @@ export default function MusicVideosPage() {
 
   if (visibleLoading) {
     return <CatalogPageLoading />;
+  }
+
+  if (error) {
+    return <RequestErrorState onRetry={() => setRetryKey((key) => key + 1)} />;
   }
 
   if (!cards.length) {
@@ -104,7 +115,7 @@ export default function MusicVideosPage() {
       <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-5.5">
         <section
           className="box-border px-(--shelfGridPaddingInline,var(--bodyGutter)) relative w-full z-(--z-default) max-[999px]:ps-(--shelfGridPaddingInline,var(--bodyGutter)) max-[999px]:pe-0"
-          style={ARTIST_MUSIC_VIDEO_GRID_STYLE}
+          style={COMPACT_MUSIC_VIDEO_GRID_STYLE}
         >
           <div className="box-content -mx-0.5 overflow-visible px-0.5 w-full">
             <ul className="shelf-grid__list mb-8">

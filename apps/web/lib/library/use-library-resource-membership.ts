@@ -33,9 +33,11 @@ export function useLibraryResourceMembership({
 
   useEffect(() => {
     let active = true;
-    void getLibraryResources().finally(() => {
-      if (active) setLoaded(true);
-    });
+    void getLibraryResources()
+      .catch(() => undefined)
+      .finally(() => {
+        if (active) setLoaded(true);
+      });
     return () => {
       active = false;
     };

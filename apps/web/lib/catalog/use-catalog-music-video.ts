@@ -10,5 +10,5 @@ export function useCatalogMusicVideo(songVideoId: string) {
     [songVideoId],
   );
 
-  return useAsyncResource(fetchVideo, "Không tìm thấy music video.");
+  return useAsyncResource(fetchVideo, "Không thể tải Music Video.");
 }

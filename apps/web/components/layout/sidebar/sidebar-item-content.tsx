@@ -111,8 +111,8 @@ function PinnedSidebarItemContent({
                   <div className="bottom-0 inset-x-0 m-auto opacity-0 absolute top-0 z-1 group-hover/pin:opacity-100">
                     {isPinPlaying ? (
                       <svg
-                        width="11"
-                        height="11"
+                        width="12"
+                        height="12"
                         viewBox="0 0 16 16"
                         xmlns="http://www.w3.org/2000/svg"
                         className="fill-white inline-block align-bottom"
@@ -122,8 +122,8 @@ function PinnedSidebarItemContent({
                       </svg>
                     ) : (
                       <svg
-                        width="11"
-                        height="11"
+                        width="12"
+                        height="12"
                         viewBox="0 0 16 16"
                         xmlns="http://www.w3.org/2000/svg"
                         className="fill-white inline-block align-bottom"
@@ -136,8 +136,8 @@ function PinnedSidebarItemContent({
                 </div>
               ) : (
                 <svg
-                  width="11"
-                  height="11"
+                  width="12"
+                  height="12"
                   viewBox="0 0 16 16"
                   xmlns="http://www.w3.org/2000/svg"
                   className="fill-white inline-block align-bottom"

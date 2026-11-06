@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getApiErrorMessage } from "./api-error";
+import { getApiErrorMessage, getApiErrorStatus } from "./api-error";
 import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 
 type ResourceLoader<T> = (signal?: AbortSignal) => Promise<T>;
@@ -17,6 +17,7 @@ export function useAsyncResource<T>(
   const [data, setData] = useState<T | null>(() => initialData ?? null);
   const [loading, setLoading] = useMinimumLoadingState(!initialData && enabled);
   const [error, setError] = useState("");
+  const [errorStatus, setErrorStatus] = useState<number | undefined>();
   const requestVersion = useRef(0);
 
   const load = useCallback(
@@ -24,6 +25,7 @@ export function useAsyncResource<T>(
       const version = ++requestVersion.current;
       setLoading(true);
       setError("");
+      setErrorStatus(undefined);
 
       try {
         const nextData = await loadResource(signal);
@@ -34,6 +36,7 @@ export function useAsyncResource<T>(
       } catch (requestError) {
         if (!signal?.aborted && requestVersion.current === version) {
           setError(getApiErrorMessage(requestError, fallbackErrorMessage));
+          setErrorStatus(getApiErrorStatus(requestError));
         }
         return null;
       } finally {
@@ -58,5 +61,5 @@ export function useAsyncResource<T>(
     return () => controller.abort();
   }, [enabled, initialData, load, setLoading]);
 
-  return { data, loading, error, reload: load };
+  return { data, loading, error, errorStatus, reload: load };
 }

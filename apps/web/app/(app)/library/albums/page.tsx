@@ -17,10 +17,11 @@ import {
   projectLibraryMediaCard,
 } from "@/lib/library/library-media-card.mapper";
 import { setLibraryAlbumOrigin } from "@/lib/library/library-album-origin";
+import { RequestErrorState } from "@/components/states/request-error-state";
 
 export default function AlbumsPage() {
   const user = useAuthStore((state) => state.user);
-  const { resources, loading, error } = useLibraryMediaCards({
+  const { resources, loading, error, retry } = useLibraryMediaCards({
     userId: user?.userId,
     errorMessage: "Could not load your saved albums.",
   });
@@ -58,13 +59,7 @@ export default function AlbumsPage() {
     return <CatalogPageLoading />;
   }
 
-  if (error) {
-    return (
-      <div className="mx-(--bodyGutter) py-20 text-center text-(--keyColor)">
-        {error}
-      </div>
-    );
-  }
+  if (error) return <RequestErrorState onRetry={retry} />;
 
   if (!albumCards.length) {
     return <EmptyState />;

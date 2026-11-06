@@ -24,3 +24,7 @@ export function getApiErrorMessage(error: unknown, fallback: string) {
 
   return fallback;
 }
+
+export function getApiErrorStatus(error: unknown): number | undefined {
+  return error instanceof AxiosError ? error.response?.status : undefined;
+}

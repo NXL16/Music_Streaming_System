@@ -71,6 +71,7 @@ export function M404ContextualMenuPortalHost() {
 function calculateMenuPosition(
   triggerEl: HTMLElement,
   menuEl: HTMLElement,
+  anchorPoint: { x: number; y: number } | null,
   config: MenuConfig = {},
 ) {
   const { padding = 12 } = config;
@@ -82,19 +83,29 @@ function calculateMenuPosition(
 
   const OVERLAP_X = 16;
   const OFFSET_Y = 18;
+  const POINTER_OFFSET = 4;
 
-  let left = rect.right - OVERLAP_X;
+  const anchorX = anchorPoint
+    ? anchorPoint.x + POINTER_OFFSET
+    : rect.right - OVERLAP_X;
+  const anchorY = anchorPoint?.y ?? rect.top;
+  let left = anchorX;
 
   if (left + menuWidth > viewportWidth - padding) {
-    left = rect.left - menuWidth + OVERLAP_X;
+    left = anchorPoint
+      ? anchorPoint.x - menuWidth - POINTER_OFFSET
+      : rect.left - menuWidth + OVERLAP_X;
   }
 
-  let top: number | undefined = rect.top + OFFSET_Y;
+  let top: number | undefined =
+    anchorY + (anchorPoint ? POINTER_OFFSET : OFFSET_Y);
   let bottom: number | undefined = undefined;
 
   if (top + menuHeight > viewportHeight - padding) {
     top = undefined;
-    bottom = viewportHeight - rect.bottom + OFFSET_Y;
+    bottom = anchorPoint
+      ? viewportHeight - anchorPoint.y + POINTER_OFFSET
+      : viewportHeight - rect.bottom + OFFSET_Y;
   }
 
   if (top !== undefined) {
@@ -165,7 +176,8 @@ function NestedContextualMenu({
 }
 
 function RootContextualMenu() {
-  const { isOpen, activeId, triggerEl, closeMenu, items } = useMenuStore();
+  const { isOpen, activeId, triggerEl, anchorPoint, closeMenu, items } =
+    useMenuStore();
 
   const rootRef = useRef<HTMLElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -201,7 +213,7 @@ function RootContextualMenu() {
   useLayoutEffect(() => {
     if (!isOpen || !triggerEl || !menuRef.current || !rootRef.current) return;
 
-    const pos = calculateMenuPosition(triggerEl, menuRef.current, {
+    const pos = calculateMenuPosition(triggerEl, menuRef.current, anchorPoint, {
       padding: 12,
     });
 
@@ -215,7 +227,7 @@ function RootContextualMenu() {
       style.setProperty("--ctxmenu-bottom", `${pos.bottom}px`);
       style.removeProperty("--ctxmenu-top");
     }
-  }, [isOpen, triggerEl, items]);
+  }, [isOpen, triggerEl, anchorPoint, items]);
 
   if (!isOpen) return null;
 

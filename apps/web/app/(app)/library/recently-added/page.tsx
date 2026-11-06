@@ -17,10 +17,11 @@ import {
   projectUserPlaylistCard,
 } from "@/lib/library/library-media-card.mapper";
 import { setLibraryAlbumOrigin } from "@/lib/library/library-album-origin";
+import { RequestErrorState } from "@/components/states/request-error-state";
 
 export default function RecentlyAddedPage() {
   const user = useAuthStore((state) => state.user);
-  const { resources, loading: isLoadingResources, error } = useLibraryMediaCards({
+  const { resources, loading: isLoadingResources, error, retry } = useLibraryMediaCards({
     userId: user?.userId,
     ensureFavorite: true,
     errorMessage: "Could not load recently added items.",
@@ -30,7 +31,9 @@ export default function RecentlyAddedPage() {
     hasMore,
     isLoading: isLoadingPlaylists,
     isLoadingMore,
+    error: playlistsError,
     loadMore,
+    reload,
   } = useUserPlaylistPages(user?.userId);
   const loading = useMinimumLoadingDuration(
     isLoadingResources || isLoadingPlaylists,
@@ -86,7 +89,9 @@ export default function RecentlyAddedPage() {
     <>
       {loading ? (
         <CatalogPageLoading />
-      ) : !error && !recentCards.length ? (
+      ) : error || playlistsError ? (
+        <RequestErrorState onRetry={() => { retry(); void reload(); }} />
+      ) : !recentCards.length ? (
         <EmptyState />
       ) : (
         <>

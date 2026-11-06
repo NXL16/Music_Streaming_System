@@ -7,6 +7,7 @@ import { CreatePlaylistDialog } from "@/components/songs/create-playlist-dialog"
 import { EditPlaylistDialog } from "@/components/songs/edit-playlist-dialog";
 import { Toaster } from "sonner";
 import { DeleteLibraryConfirmationDialog } from "@/components/songs/delete-library-confirmation-dialog";
+import { SharedFeedbackDialog } from "@/components/reports/shared-feedback-dialog";
 
 export const metadata: Metadata = {
   title: "Music App",
@@ -64,6 +65,7 @@ export default function RootLayout({
         <CreatePlaylistDialog />
         <EditPlaylistDialog />
         <DeleteLibraryConfirmationDialog />
+        <SharedFeedbackDialog />
         <Toaster
           position="bottom-right"
           toastOptions={{

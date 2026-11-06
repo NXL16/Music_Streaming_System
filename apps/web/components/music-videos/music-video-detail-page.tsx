@@ -18,12 +18,14 @@ import CardArtwork from "../media/common/card-artwork";
 import MediaShelf from "../media/media-shelf";
 import type { MediaCardProps } from "../media/media-card.types";
 import { ShelfDetailView } from "../media/shelf-detail-view";
-import { ARTIST_MUSIC_VIDEO_GRID_STYLE } from "./catalog-music-videos-shelf";
+import { COMPACT_MUSIC_VIDEO_GRID_STYLE } from "./music-video-grid-style";
 import { playCatalogMusicVideo } from "@/lib/catalog/play-catalog-music-video";
 import CatalogPageLoading from "../loading/catalog-page-loading";
 import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { preloadAmbientHlsRuntime } from "@/components/custom-elements/ambient-hls-player";
+import { NotFoundState } from "@/components/states/not-found-state";
+import { RequestErrorState } from "@/components/states/request-error-state";
 
 type MusicVideoDetailPageProps = { songVideoId: string };
 
@@ -34,7 +36,13 @@ const YOU_MIGHT_ALSO_LIKE_LIMIT = 10;
 export function MusicVideoDetailPage({
   songVideoId,
 }: MusicVideoDetailPageProps) {
-  const { data: video, loading, error } = useCatalogMusicVideo(songVideoId);
+  const {
+    data: video,
+    loading,
+    error,
+    errorStatus,
+    reload,
+  } = useCatalogMusicVideo(songVideoId);
   const releaseTrackId = video?.releaseTrackId ?? "";
   const { song: sourceSong } = useCatalogSong(releaseTrackId);
   const isFavorite = useFavoriteStore((state) =>
@@ -158,25 +166,15 @@ export function MusicVideoDetailPage({
     }
   }, [primaryArtist, selectedShelf, video?.id]);
 
-  if (error) {
-    return (
-      <main className="mx-(--bodyGutter) pt-8">
-        <p className="text-(--systemSecondary)">{error}</p>
-      </main>
-    );
-  }
-
   if (showLoading) {
     return <CatalogPageLoading />;
   }
 
-  if (!video) {
-    return (
-      <main className="mx-(--bodyGutter) pt-8">
-        <p className="text-(--systemSecondary)">Không tìm thấy Music Video.</p>
-      </main>
-    );
-  }
+  if (errorStatus === 404) return <NotFoundState />;
+
+  if (error) return <RequestErrorState onRetry={() => void reload()} />;
+
+  if (!video) return <NotFoundState />;
 
   const artists = projectLinkedArtists(
     video.artists.map(({ artistId, name, url }) => ({
@@ -320,7 +318,7 @@ export function MusicVideoDetailPage({
           displayKind="MusicVideoShelf"
           items={moreByCards.slice(0, MORE_BY_ARTIST_PREVIEW_LIMIT)}
           shelfId={`music-video-more-by-${songVideoId}`}
-          gridStyle={ARTIST_MUSIC_VIDEO_GRID_STYLE}
+          gridStyle={COMPACT_MUSIC_VIDEO_GRID_STYLE}
           onSelect={
             moreByCards.length > MORE_BY_ARTIST_PREVIEW_LIMIT ||
             Boolean(moreByPage?.nextCursor)
@@ -343,7 +341,7 @@ export function MusicVideoDetailPage({
           displayKind="MusicVideoShelf"
           items={relatedCards}
           shelfId={`music-video-related-${songVideoId}`}
-          gridStyle={ARTIST_MUSIC_VIDEO_GRID_STYLE}
+          gridStyle={COMPACT_MUSIC_VIDEO_GRID_STYLE}
         />
       )}
     </>

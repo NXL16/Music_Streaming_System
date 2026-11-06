@@ -8,6 +8,7 @@ import { resolvePlaylistSource } from "@/lib/playlists/resolve-playlist-source";
 import { createUserPlaylistFromSource } from "@/lib/playlists/user-playlists.api";
 import { uploadGeneratedPlaylistCover } from "@/lib/playlists/generated-playlist-cover";
 import { useAuthStore } from "@/lib/auth/auth-store";
+import { useHydrated } from "@/hooks/use-hydrated";
 import {
   notifyMenuError,
   notifyMenuSuccess,
@@ -21,6 +22,7 @@ export function CreatePlaylistDialog() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const hydrated = useHydrated();
 
   useEffect(() => {
     const open = (event: Event) => {
@@ -70,6 +72,8 @@ export function CreatePlaylistDialog() {
       setSubmitting(false);
     }
   };
+
+  if (!hydrated) return null;
 
   return (
     <dialog

@@ -95,9 +95,6 @@ export class UsersService {
     });
   }
 
-  // ================================
-  // CREATE USER
-  // ================================
   async create(data: CreateUserInput): Promise<UserEntity> {
     const user = await this.prisma.$transaction(async (tx) => {
       const createdUser = await tx.user.create({
@@ -132,9 +129,6 @@ export class UsersService {
     return this.mapToEntity(user, null);
   }
 
-  // ================================
-  // FIND BY ID
-  // ================================
   async findById(
     id: string,
     includeMetadata = false,
@@ -154,9 +148,6 @@ export class UsersService {
     return this.mapToEntity(user, metadata);
   }
 
-  // ================================
-  // FIND BY USERNAME
-  // ================================
   async findByUsername(
     username: string,
     includeMetadata = false,
@@ -173,9 +164,6 @@ export class UsersService {
     return this.mapToEntity(user, metadata);
   }
 
-  // ================================
-  // AUTH LOOKUP (WITH PASSWORD)
-  // ================================
   async findAuthUserByIdentifier(
     identifier: string,
   ): Promise<AuthUserRecord | null> {
@@ -197,10 +185,6 @@ export class UsersService {
       where: { email },
     });
   }
-
-  // ================================
-  // AUTH LOOKUP (WITH PASSWORD)
-  // ================================
 
   async findUserByGoogleSub(providerSub: string): Promise<UserEntity | null> {
     const account = await this.prisma.oAuthAccount.findUnique({
@@ -433,9 +417,6 @@ export class UsersService {
     return this.mapToEntity(user, null);
   }
 
-  // ================================
-  // UPDATE USER (split DB)
-  // ================================
   async update(id: string, data: UpdateUserInput): Promise<UserEntity> {
     // Update Postgres
     const user = await this.prisma.user.update({
@@ -465,9 +446,6 @@ export class UsersService {
     return this.mapToEntity(user, metadata);
   }
 
-  // ================================
-  // UPDATE LAST LOGIN
-  // ================================
   async updateLastLogin(id: string): Promise<void> {
     await this.prisma.user.update({
       where: { id },
@@ -490,9 +468,6 @@ export class UsersService {
     return this.mapToEntity(user, null);
   }
 
-  // ================================
-  // CHANGE PASSWORD
-  // ================================
   async setActive(id: string, isActive: boolean): Promise<UserEntity> {
     const user = await this.prisma.user.update({
       where: { id },
@@ -608,9 +583,6 @@ export class UsersService {
     return this.mapToEntity(user, null);
   }
 
-  // ================================
-  // INTERNAL MAPPER (QUAN TRỌNG)
-  // ================================
   private mapToEntity(
     user: PrismaUser,
     metadata: MetadataLean | null,

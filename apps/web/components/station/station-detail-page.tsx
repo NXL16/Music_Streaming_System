@@ -11,6 +11,9 @@ import { useAppScrollToTop } from "@/lib/layout/use-app-scroll-to-top";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import AmpContextMenuButton from "../custom-elements/AmpContextMenuButton";
 import CardArtwork from "../media/common/card-artwork";
+import { RequestErrorState } from "../states/request-error-state";
+import { NotFoundState } from "../states/not-found-state";
+import PlayIcon from "../icons/play-icon";
 
 type StationDetailPageProps = {
   stationId: string;
@@ -23,6 +26,8 @@ export function StationDetailPage({ stationId }: StationDetailPageProps) {
     detail: SystemStationDetail | null;
   } | null>(null);
   const [playing, setPlaying] = useState(false);
+  const [error, setError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
   const loading = resolvedStation?.stationId !== stationId;
   const station = loading ? null : resolvedStation.detail;
 
@@ -31,16 +36,22 @@ export function StationDetailPage({ stationId }: StationDetailPageProps) {
   useEffect(() => {
     let active = true;
 
-    void getSystemStationDetail(stationId).then((detail) => {
-      if (active) {
-        setResolvedStation({ stationId, detail });
-      }
-    });
+    setError(false);
+    void getSystemStationDetail(stationId)
+      .then((detail) => {
+        if (active) setResolvedStation({ stationId, detail });
+      })
+      .catch(() => {
+        if (active) {
+          setResolvedStation({ stationId, detail: null });
+          setError(true);
+        }
+      });
 
     return () => {
       active = false;
     };
-  }, [stationId]);
+  }, [stationId, retryKey]);
 
   const handlePlay = async () => {
     if (playing) return;
@@ -58,14 +69,12 @@ export function StationDetailPage({ stationId }: StationDetailPageProps) {
     );
   }
 
+  if (error) {
+    return <RequestErrorState onRetry={() => setRetryKey((key) => key + 1)} />;
+  }
+
   if (!station) {
-    return (
-      <section className="flex min-h-full items-center justify-center px-6">
-        <p className="text-(--systemSecondary) [font:var(--body)]">
-          Station này hiện không khả dụng.
-        </p>
-      </section>
-    );
+    return <NotFoundState />;
   }
 
   const artworkColor = station.artwork?.bgColor
@@ -123,14 +132,10 @@ export function StationDetailPage({ stationId }: StationDetailPageProps) {
                   onClick={() => void handlePlay()}
                 >
                   <span className="inline-block align-baseline w-4 me-0.5 mb-0.5">
-                    <svg
-                      height="16"
-                      viewBox="0 0 16 16"
-                      width="16"
+                    <PlayIcon
                       className="h-(--button-action-icon-height,12px) relative top-(--button-action-icon-top-offset,1px) shrink-0 w-[inherit] block text-current pointer-events-none fill-white"
-                    >
-                      <path d="m4.4 15.14 10.386-6.096c.842-.459.794-1.64 0-2.097L4.401.85c-.87-.53-2-.12-2 .82v12.625c0 .966 1.06 1.4 2 .844z"></path>
-                    </svg>
+                      fill="currentColor"
+                    />
                   </span>
 
                   <span className="">Play</span>
