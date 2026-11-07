@@ -18,7 +18,7 @@ import {
 import AmpContextMenuButton from "../custom-elements/AmpContextMenuButton";
 import { ExplicitBadgeIcon } from "../icons/explicit-badge-icon";
 import CardArtwork from "../media/common/card-artwork";
-import { CSSProperties, useCallback, useEffect, useRef, useState } from "react";
+import { CSSProperties, useCallback, useEffect, useState } from "react";
 import { AlbumRelatedShelves } from "./album-related-shelves";
 import { NotFoundState } from "../states/not-found-state";
 import { RequestErrorState } from "../states/request-error-state";
@@ -41,9 +41,21 @@ import {
 } from "@/lib/lyrics/static-lyrics.api";
 import AmpLyrics from "../custom-elements/AmpLyrics";
 import PlayIcon from "../icons/play-icon";
+import { ContentDialog } from "./content-dialog";
+import { useShelfDetailHistory } from "@/hooks/use-shelf-detail-history";
 
 type SongDetailPageProps = {
   releaseTrackId: string;
+};
+
+type RelatedShelfDetail = {
+  albumId: string;
+  sourceSongId: string;
+  title: string;
+  section: string;
+  items: MediaCardProps[] | null;
+  nextCursor: string;
+  loadingMore: boolean;
 };
 
 const MORE_BY_SHELF_SECTIONS = ["more-by"] as const;
@@ -127,21 +139,21 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
     onLoadingChange: handleRelatedShelvesLoading,
     onDataLoaded: handleRelatedShelvesData,
   } = useAlbumRelatedShelfState(relatedShelfKey);
-  const [selectedRelatedShelf, setSelectedRelatedShelf] = useState<{
-    albumId: string;
-    sourceSongId: string;
-    title: string;
-    section: string;
-    items: MediaCardProps[] | null;
-    nextCursor: string;
-    loadingMore: boolean;
-  } | null>(null);
+  const [selectedRelatedShelf, setSelectedRelatedShelf] =
+    useState<RelatedShelfDetail | null>(null);
+  const { open: openRelatedShelf, close: closeRelatedShelf } =
+    useShelfDetailHistory({
+      owner: `song-related:${relatedShelfKey}`,
+      selected: selectedRelatedShelf,
+      setSelected: setSelectedRelatedShelf,
+      getKey: (shelf) =>
+        `${shelf.albumId}:${shelf.sourceSongId}:${shelf.section}`,
+    });
   const [staticLyricsResult, setStaticLyricsResult] = useState<{
     songId: string;
     lines: StaticLyricLine[];
   } | null>(null);
   const [isStaticLyricsDialogOpen, setStaticLyricsDialogOpen] = useState(false);
-  const staticLyricsDialogRef = useRef<HTMLDialogElement>(null);
   const staticLyricsSongId = song?.id;
   const staticLyrics =
     staticLyricsResult && staticLyricsResult.songId === staticLyricsSongId
@@ -169,12 +181,6 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
     };
   }, [staticLyricsSongId]);
 
-  useEffect(() => {
-    const dialog = staticLyricsDialogRef.current;
-    if (!dialog) return;
-    if (isStaticLyricsDialogOpen && !dialog.open) dialog.showModal();
-    if (!isStaticLyricsDialogOpen && dialog.open) dialog.close();
-  }, [isStaticLyricsDialogOpen, staticLyrics.length, staticLyricsSongId]);
   const loadMoreRelatedShelf = useCallback(async () => {
     if (
       !selectedRelatedShelf?.items ||
@@ -299,7 +305,7 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
           title: selectedRelatedShelf.title,
           items: selectedRelatedShelf.items,
         }}
-        onBack={() => setSelectedRelatedShelf(null)}
+        onBack={closeRelatedShelf}
         hasMore={Boolean(selectedRelatedShelf.nextCursor)}
         loadingMore={selectedRelatedShelf.loadingMore}
         onLoadMore={loadMoreRelatedShelf}
@@ -513,54 +519,16 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
             </div>
 
             <div className="credits__lyrics-modal">
-              <dialog
-                ref={staticLyricsDialogRef}
-                className="lyrics-box"
-                aria-labelledby="static-lyrics-dialog-title"
-                onCancel={(event) => {
-                  event.preventDefault();
-                  setStaticLyricsDialogOpen(false);
-                }}
+              <ContentDialog
+                open={isStaticLyricsDialogOpen}
+                title={title}
+                subtitle={detailLine}
                 onClose={() => setStaticLyricsDialogOpen(false)}
               >
-                <div className="content-modal-container">
-                  <div className="button-container">
-                    <button
-                      type="button"
-                      className="close-button"
-                      aria-label="Close"
-                      onClick={() => setStaticLyricsDialogOpen(false)}
-                    >
-                      <svg
-                        width="18"
-                        height="18"
-                        aria-hidden="true"
-                        viewBox="0 0 18 18"
-                      >
-                        <path d="M1.2 18C.6 18 0 17.5 0 16.8c0-.4.1-.6.4-.8l7-7-7-7c-.3-.2-.4-.5-.4-.8C0 .5.6 0 1.2 0c.3 0 .6.1.8.3l7 7 7-7c.2-.2.5-.3.8-.3.6 0 1.2.5 1.2 1.2 0 .3-.1.6-.4.8l-7 7 7 7c.2.2.4.5.4.8 0 .7-.6 1.2-1.2 1.2-.3 0-.6-.1-.8-.3l-7-7-7 7c-.2.1-.5.3-.8.3"></path>
-                      </svg>
-                    </button>
-                  </div>
-
-                  <div className="header-container">
-                    <h1
-                      id="static-lyrics-dialog-title"
-                      className="text-(--systemPrimary) [font:var(--title-1-emphasized)] p-[0_30px] min-[1000px]:[font:var(--large-title-emphasized)]"
-                    >
-                      {title}
-                    </h1>
-                    <h2 className="text-(--systemSecondary) [font:var(--body)] p-[0_30px]">
-                      {detailLine}
-                    </h2>
-                  </div>
-
-                  <div className="content-container">
-                    <div slot="content">
-                      <AmpLyrics staticOnly staticLines={staticLyrics} />
-                    </div>
-                  </div>
+                <div slot="content">
+                  <AmpLyrics staticOnly staticLines={staticLyrics} />
                 </div>
-              </dialog>
+              </ContentDialog>
             </div>
           </div>
         </SongDetailSection>
@@ -638,7 +606,7 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
           onLoadingChange={handleRelatedShelvesLoading}
           onDataLoaded={handleRelatedShelvesData}
           onOpenDetail={(shelf) =>
-            setSelectedRelatedShelf({
+            openRelatedShelf({
               albumId: song.albumId!,
               sourceSongId: song.id,
               title: shelf.title,
@@ -656,7 +624,7 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
               return { ...current, items, nextCursor };
             })
           }
-          onDetailLoadError={() => setSelectedRelatedShelf(null)}
+          onDetailLoadError={closeRelatedShelf}
         />
       )}
     </>

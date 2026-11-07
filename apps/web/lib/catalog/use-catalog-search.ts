@@ -83,6 +83,7 @@ export function useCatalogSearch(
   const trimmedQuery = query.trim();
   const normalizedQuery = normalizeCatalogSearchQuery(trimmedQuery);
   const hasQuery = enabled && Boolean(trimmedQuery);
+  const [retryKey, setRetryKey] = useState(0);
   const searchKey = [
     normalizedQuery,
     source,
@@ -90,6 +91,7 @@ export function useCatalogSearch(
     limit ?? "",
     offset ?? "",
     requestKey,
+    retryKey,
   ].join(":");
   const [state, setState] = useState<SearchState>({
     key: "",
@@ -98,10 +100,14 @@ export function useCatalogSearch(
     error: null,
   });
   const [loading, setLoading] = useMinimumLoadingState();
-  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
-    if (!hasQuery) return;
+    // Returning to an already expanded shelf must reuse its result instead of
+    // restarting the request and replacing visible cards with a page loader.
+    if (!hasQuery || state.key === searchKey) {
+      setLoading(false);
+      return;
+    }
 
     const controller = new AbortController();
     setLoading(true);
@@ -157,10 +163,10 @@ export function useCatalogSearch(
     hasQuery,
     limit,
     offset,
-    retryKey,
     searchKey,
     setLoading,
     shelfType,
+    state.key,
     source,
     trimmedQuery,
     normalizedQuery,

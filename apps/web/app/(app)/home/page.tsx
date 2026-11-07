@@ -29,6 +29,7 @@ import {
 } from "@musical/shared-constants";
 import { useAppScrollToTop } from "@/lib/layout/use-app-scroll-to-top";
 import { RequestErrorState } from "@/components/states/request-error-state";
+import { useShelfDetailHistory } from "@/hooks/use-shelf-detail-history";
 
 const FEATURED_ARTISTS_SHELF_ID = "global-top-artists";
 const STATIONS_FOR_YOU_SHELF_ID = "user-stations-for-you";
@@ -41,13 +42,19 @@ export default function HomePage() {
     loading || recentlyPlayedLoading,
   );
   const [selectedShelfId, setSelectedShelfId] = useState<string | null>(null);
+  const { open: openShelf, close: closeShelf } = useShelfDetailHistory({
+    owner: "home-shelf",
+    selected: selectedShelfId,
+    setSelected: setSelectedShelfId,
+    getKey: (shelfId) => shelfId,
+  });
   const [loadedShelves, setLoadedShelves] = useState<Record<string, HomeShelf>>(
     {},
   );
   const [loadingShelfId, setLoadingShelfId] = useState<string | null>(null);
   const [shelfLoadError, setShelfLoadError] = useState<string | null>(null);
   const showShelfDetailLoading = useMinimumLoadingDuration(
-    Boolean(loadingShelfId),
+    Boolean(selectedShelfId && loadingShelfId === selectedShelfId),
   );
 
   const shelves = useMemo(
@@ -111,13 +118,13 @@ export default function HomePage() {
       if (!localShelf) return;
 
       if (loadedShelves[shelfId]) {
-        setSelectedShelfId(shelfId);
+        openShelf(shelfId);
         return;
       }
 
       try {
         setShelfLoadError(null);
-        setSelectedShelfId(shelfId);
+        openShelf(shelfId);
         setLoadingShelfId(shelfId);
         const response = await getRecommendationSection(shelfId);
         const fullShelf = mapHomeRecommendations(response).find(
@@ -127,13 +134,13 @@ export default function HomePage() {
 
         setLoadedShelves((current) => ({ ...current, [shelfId]: fullShelf }));
       } catch {
-        setSelectedShelfId(null);
+        closeShelf();
         setShelfLoadError("Không thể tải đầy đủ nội dung của kệ này.");
       } finally {
         setLoadingShelfId((current) => (current === shelfId ? null : current));
       }
     },
-    [loadedShelves, shelvesWithRecentlyPlayed],
+    [closeShelf, loadedShelves, openShelf, shelvesWithRecentlyPlayed],
   );
 
   const homeShelves = useMemo(
@@ -182,7 +189,7 @@ export default function HomePage() {
         <ShelfDetailView
           shelf={selectedShelfWithOverlay}
           onBack={() => {
-            setSelectedShelfId(null);
+            closeShelf();
             setLoadingShelfId(null);
           }}
         />

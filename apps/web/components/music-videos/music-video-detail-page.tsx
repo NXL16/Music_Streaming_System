@@ -26,8 +26,17 @@ import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { preloadAmbientHlsRuntime } from "@/components/custom-elements/ambient-hls-player";
 import { NotFoundState } from "@/components/states/not-found-state";
 import { RequestErrorState } from "@/components/states/request-error-state";
+import { useShelfDetailHistory } from "@/hooks/use-shelf-detail-history";
 
 type MusicVideoDetailPageProps = { songVideoId: string };
+
+type MusicVideoShelfDetail = {
+  songVideoId: string;
+  title: string;
+  items: MediaCardProps[];
+  nextCursor: string;
+  loadingMore: boolean;
+};
 
 const MORE_BY_ARTIST_PREVIEW_LIMIT = 10;
 const MORE_BY_PAGE_SIZE = MORE_BY_ARTIST_PREVIEW_LIMIT + 1;
@@ -90,13 +99,14 @@ export function MusicVideoDetailPage({
     loadRelatedVideos,
     "Không thể tải Music Video gợi ý.",
   );
-  const [selectedShelf, setSelectedShelf] = useState<{
-    songVideoId: string;
-    title: string;
-    items: MediaCardProps[];
-    nextCursor: string;
-    loadingMore: boolean;
-  } | null>(null);
+  const [selectedShelf, setSelectedShelf] =
+    useState<MusicVideoShelfDetail | null>(null);
+  const { open: openShelf, close: closeShelf } = useShelfDetailHistory({
+    owner: `music-video:${songVideoId}`,
+    selected: selectedShelf,
+    setSelected: setSelectedShelf,
+    getKey: (shelf) => shelf.songVideoId,
+  });
   const moreByVideos = useMemo(
     () => moreByPage?.videos.filter((item) => item.id !== video?.id) ?? [],
     [moreByPage?.videos, video?.id],
@@ -225,7 +235,7 @@ export function MusicVideoDetailPage({
     return (
       <ShelfDetailView
         shelf={selectedShelf}
-        onBack={() => setSelectedShelf(null)}
+        onBack={closeShelf}
         hasMore={Boolean(selectedShelf.nextCursor)}
         loadingMore={selectedShelf.loadingMore}
         onLoadMore={loadNextMoreByPage}
@@ -323,7 +333,7 @@ export function MusicVideoDetailPage({
             moreByCards.length > MORE_BY_ARTIST_PREVIEW_LIMIT ||
             Boolean(moreByPage?.nextCursor)
               ? () =>
-                  setSelectedShelf({
+                  openShelf({
                     songVideoId,
                     title: `More by ${primaryArtist.name}`,
                     items: moreByCards,

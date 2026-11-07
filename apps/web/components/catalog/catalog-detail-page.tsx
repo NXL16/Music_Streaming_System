@@ -72,8 +72,10 @@ import { albumRoute } from "@/lib/catalog/album-route";
 import { CatalogMusicVideosShelf } from "../music-videos/catalog-music-videos-shelf";
 import { useArtworkPageTheme } from "@/lib/layout/use-artwork-page-theme";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { useShelfDetailHistory } from "@/hooks/use-shelf-detail-history";
 import PlayIcon from "../icons/play-icon";
 import PauseIcon from "../icons/pause-icon";
+import { CatalogDescription } from "./catalog-description";
 
 const AmbientVideo = dynamic(() => import("../custom-elements/AmpVideo"), {
   ssr: false,
@@ -93,6 +95,14 @@ type CatalogDetailPageProps = {
 const VIRTUALIZE_THRESHOLD = 50;
 const ESTIMATED_ROW_HEIGHT = 46;
 const OVERSCAN = 8;
+
+type RelatedShelfDetail = {
+  title: string;
+  section: string;
+  items: MediaCardProps[] | null;
+  nextCursor: string;
+  loadingMore: boolean;
+};
 
 function CatalogTrackTitle({ title, url }: { title: string; url?: string }) {
   const content = (
@@ -186,13 +196,8 @@ export function CatalogDetailPage({
     resourceId,
     resourceType === "albums" && !isLibraryView,
   );
-  const [selectedRelatedShelf, setSelectedRelatedShelf] = useState<{
-    title: string;
-    section: string;
-    items: MediaCardProps[] | null;
-    nextCursor: string;
-    loadingMore: boolean;
-  } | null>(null);
+  const [selectedRelatedShelf, setSelectedRelatedShelf] =
+    useState<RelatedShelfDetail | null>(null);
   const [expandedLibraryAlbumId, setExpandedLibraryAlbumId] = useState<
     string | null
   >(null);
@@ -200,6 +205,34 @@ export function CatalogDetailPage({
     string | null
   >(null);
   const selectedRelatedShelfSection = selectedRelatedShelf?.section;
+
+  const relatedShelfCacheKey = useCallback(
+    (section: string) => `${resourceId}:${section}`,
+    [resourceId],
+  );
+
+  const { open: openShelfHistory, close: closeRelatedShelf } =
+    useShelfDetailHistory({
+      owner: `catalog-related:${resourceId}`,
+      selected: selectedRelatedShelf,
+      setSelected: setSelectedRelatedShelf,
+      getKey: (shelf) => relatedShelfCacheKey(shelf.section),
+    });
+
+  const openRelatedShelf = useCallback(
+    (
+      shelf: Omit<RelatedShelfDetail, "items" | "nextCursor" | "loadingMore">,
+    ) => {
+      const nextShelf: RelatedShelfDetail = {
+        ...shelf,
+        items: null,
+        nextCursor: "",
+        loadingMore: false,
+      };
+      openShelfHistory(nextShelf);
+    },
+    [openShelfHistory],
+  );
 
   useAppScrollToTop(resourceId);
   useAppScrollToTop(
@@ -584,7 +617,7 @@ export function CatalogDetailPage({
           title: selectedRelatedShelf.title,
           items: selectedRelatedShelf.items,
         }}
-        onBack={() => setSelectedRelatedShelf(null)}
+        onBack={closeRelatedShelf}
         hasMore={Boolean(selectedRelatedShelf.nextCursor)}
         loadingMore={selectedRelatedShelf.loadingMore}
         onLoadMore={loadMoreRelatedShelf}
@@ -737,22 +770,12 @@ export function CatalogDetailPage({
                   </div>
 
                   {description && (
-                    <div className="wrap-anywhere [--truncate-font:var(--body-tall)] [grid-area:description] mt-4.5 max-w-110 min-[1000]:self-end min-[1000]:min-h-13.5 min-[1000]:mb-3.75 min-[1000]:mt-0">
-                      <div className="relative z-(--z-default) text-(--systemSecondary) truncate-wrapper">
-                        <p
-                          className="line-clamp-(--lines) [font:var(--truncate-font,var(--body-tall))] whitespace-pre-wrap wrap-anywhere"
-                          style={
-                            {
-                              "--lines": "3",
-                              "--line-height": "var(--lineHeight, 16)",
-                              "--link-length": "4",
-                            } as CSSProperties
-                          }
-                        >
-                          {description}
-                        </p>
-                      </div>
-                    </div>
+                    <CatalogDescription
+                      key={resourceId}
+                      description={description}
+                      title={title}
+                      detailLine={detailLine}
+                    />
                   )}
 
                   <div className="[--addToLibraryMarginEnd:0] grid [grid-template-areas:'primary-start_primary-center_primary-end'] grid-cols-[1fr_auto_1fr] mt-3.5 gap-3 [grid-area:primary-actions] pointer-coarse:gap-3.5 min-[1000px]:self-end min-[1000px]:justify-start min-[1000px]:mt-0">
@@ -1137,14 +1160,7 @@ export function CatalogDetailPage({
               onAvailabilityChange={handleRelatedShelvesAvailability}
               onLoadingChange={handleRelatedShelvesLoading}
               onDataLoaded={handleRelatedShelvesData}
-              onOpenDetail={(shelf) =>
-                setSelectedRelatedShelf({
-                  ...shelf,
-                  items: null,
-                  nextCursor: "",
-                  loadingMore: false,
-                })
-              }
+              onOpenDetail={openRelatedShelf}
               onDetailLoaded={({ section, items, nextCursor }) =>
                 setSelectedRelatedShelf((current) =>
                   current?.section === section
@@ -1152,11 +1168,7 @@ export function CatalogDetailPage({
                     : current,
                 )
               }
-              onDetailLoadError={(section) =>
-                setSelectedRelatedShelf((current) =>
-                  current?.section === section ? null : current,
-                )
-              }
+              onDetailLoadError={closeRelatedShelf}
             />
           )}
         </div>

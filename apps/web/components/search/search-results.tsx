@@ -116,7 +116,8 @@ export default function SearchResults({
   if (
     isTopResultsExpanded &&
     !expandedError &&
-    (expandedLoading || expandedResults.isEmpty)
+    expandedLoading &&
+    expandedResults.isEmpty
   ) {
     return <CatalogPageLoading />;
   }
@@ -140,7 +141,8 @@ export default function SearchResults({
     expandedShelfType &&
     expandedShelfType !== "songs" &&
     !expandedShelfError &&
-    (expandedShelfLoading || expandedShelfResults.isEmpty)
+    expandedShelfLoading &&
+    expandedShelfResults.isEmpty
   ) {
     return <CatalogPageLoading />;
   }

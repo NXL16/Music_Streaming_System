@@ -52,6 +52,7 @@ import {
   setArtistFollow,
 } from "@/lib/favorites/artist-follow.api";
 import { subscribeArtistFollowChanges } from "@/lib/favorites/artist-follow-events";
+import { useShelfDetailHistory } from "@/hooks/use-shelf-detail-history";
 
 type ArtistDetailPageProps = {
   artistId: string;
@@ -91,6 +92,20 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
   const [selectedSimilarArtistId, setSelectedSimilarArtistId] = useState<
     string | null
   >(null);
+  const { open: openAlbumShelf, close: closeAlbumShelf } =
+    useShelfDetailHistory({
+      owner: `artist-albums:${artistId}`,
+      selected: selectedAlbumSection,
+      setSelected: setSelectedAlbumSection,
+      getKey: (section) => section,
+    });
+  const { open: openSimilarArtists, close: closeSimilarArtists } =
+    useShelfDetailHistory({
+      owner: `artist-similar:${artistId}`,
+      selected: selectedSimilarArtistId,
+      setSelected: setSelectedSimilarArtistId,
+      getKey: (value) => value,
+    });
   const [allSimilarArtistCards, setAllSimilarArtistCards] = useState<{
     artistId: string;
     cards: ReturnType<typeof mapCatalogArtists>;
@@ -255,12 +270,12 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
   const handleSelectAlbumSection = useCallback(
     async (section: AlbumShelfSection) => {
       if (loadedAlbumSections[section]) {
-        setSelectedAlbumSection(section);
+        openAlbumShelf(section);
         return;
       }
 
       try {
-        setSelectedAlbumSection(section);
+        openAlbumShelf(section);
         setLoadingAlbumSection(section);
         const sectionAlbums = await loadAlbumSection(section);
         setLoadedAlbumSections((current) => ({
@@ -268,25 +283,25 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
           [section]: sectionAlbums,
         }));
       } catch {
-        setSelectedAlbumSection(null);
+        closeAlbumShelf();
       } finally {
         setLoadingAlbumSection((current) =>
           current === section ? null : current,
         );
       }
     },
-    [loadAlbumSection, loadedAlbumSections],
+    [closeAlbumShelf, loadAlbumSection, loadedAlbumSections, openAlbumShelf],
   );
 
   const handleSelectSimilarArtists = useCallback(async () => {
     if (currentSimilarArtistCards) {
-      setSelectedSimilarArtistId(artistId);
+      openSimilarArtists(artistId);
       return;
     }
     if (loadingSimilarArtists) return;
 
     try {
-      setSelectedSimilarArtistId(artistId);
+      openSimilarArtists(artistId);
       setLoadingSimilarArtistId(artistId);
       const catalog = await getCatalogSimilarArtists(artistId, { limit: 500 });
       setAllSimilarArtistCards({
@@ -294,15 +309,19 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
         cards: mapCatalogArtists(catalog),
       });
     } catch {
-      setSelectedSimilarArtistId((current) =>
-        current === artistId ? null : current,
-      );
+      closeSimilarArtists();
     } finally {
       setLoadingSimilarArtistId((current) =>
         current === artistId ? null : current,
       );
     }
-  }, [artistId, currentSimilarArtistCards, loadingSimilarArtists]);
+  }, [
+    artistId,
+    closeSimilarArtists,
+    currentSimilarArtistCards,
+    loadingSimilarArtists,
+    openSimilarArtists,
+  ]);
 
   const selectedAlbumShelf = useMemo(() => {
     if (!selectedAlbumSection) return null;
@@ -341,16 +360,16 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
 
   if (!artist) return <NotFoundState />;
 
-  if (loadingAlbumSection || loadingSimilarArtists) {
+  if (
+    (selectedAlbumSection && loadingAlbumSection === selectedAlbumSection) ||
+    (selectedSimilarArtists && loadingSimilarArtists)
+  ) {
     return <ShelfDetailLoading />;
   }
 
   if (selectedAlbumShelf) {
     return (
-      <ShelfDetailView
-        shelf={selectedAlbumShelf}
-        onBack={() => setSelectedAlbumSection(null)}
-      />
+      <ShelfDetailView shelf={selectedAlbumShelf} onBack={closeAlbumShelf} />
     );
   }
 
@@ -358,7 +377,7 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
     return (
       <ShelfDetailView
         shelf={{ title: "Similar Artists", items: currentSimilarArtistCards }}
-        onBack={() => setSelectedSimilarArtistId(null)}
+        onBack={closeSimilarArtists}
       />
     );
   }

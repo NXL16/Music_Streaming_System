@@ -22,6 +22,7 @@ import {
 } from "@musical/shared-constants";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useRecentlySearched } from "@/lib/catalog/use-recently-searched";
+import { useShelfDetailHistory } from "@/hooks/use-shelf-detail-history";
 
 export default function SearchPage() {
   const router = useRouter();
@@ -31,10 +32,23 @@ export default function SearchPage() {
   const [expandedTopResultsTerm, setExpandedTopResultsTerm] = useState<
     string | null
   >(null);
+  const { open: openTopResults, close: closeTopResults } =
+    useShelfDetailHistory({
+      owner: `search-top-results:${urlQuery}`,
+      selected: expandedTopResultsTerm,
+      setSelected: setExpandedTopResultsTerm,
+      getKey: (term) => term,
+    });
   const [expandedTopResultsRequestKey, setExpandedTopResultsRequestKey] =
     useState(0);
   const [expandedShelfType, setExpandedShelfType] =
     useState<CatalogSearchShelfType | null>(null);
+  const { open: openShelf, close: closeShelf } = useShelfDetailHistory({
+    owner: `search-shelf:${urlQuery}`,
+    selected: expandedShelfType,
+    setSelected: setExpandedShelfType,
+    getKey: (type) => type,
+  });
   const [expandedCardShelfRequestKey, setExpandedCardShelfRequestKey] =
     useState(0);
   const [isFocused, setIsFocused] = useState(false);
@@ -103,11 +117,7 @@ export default function SearchPage() {
   }, [urlQuery]);
 
   useEffect(() => {
-    if (
-      maxWidth484 ||
-      isSearchDetailExpanded ||
-      hasAutoFocusedRef.current
-    ) {
+    if (maxWidth484 || isSearchDetailExpanded || hasAutoFocusedRef.current) {
       return;
     }
     const frame = requestAnimationFrame(() => {
@@ -253,12 +263,12 @@ export default function SearchPage() {
           results={searchOverview.topResults}
           term={urlQuery}
           isTopResultsExpanded={isTopResultsExpanded}
-          onCollapseTopResults={() => setExpandedTopResultsTerm(null)}
+          onCollapseTopResults={closeTopResults}
           onExpandTopResults={() => {
             setIsFocused(false);
             setActiveIndex(-1);
             setExpandedTopResultsRequestKey((current) => current + 1);
-            setExpandedTopResultsTerm(urlQuery);
+            openTopResults(urlQuery);
           }}
           onRetryExpanded={expandedResultSearch.retry}
           expandedShelfError={expandedCardShelfSearch.error}
@@ -269,13 +279,13 @@ export default function SearchPage() {
           expandedSongShelfLoadingMore={expandedSongShelf.loadingMore}
           expandedSongShelfSongs={expandedSongShelf.songs}
           expandedShelfType={expandedShelfType}
-          onCollapseShelf={() => setExpandedShelfType(null)}
+          onCollapseShelf={closeShelf}
           onExpandShelf={(type) => {
             setIsFocused(false);
             setActiveIndex(-1);
             if (type !== "songs")
               setExpandedCardShelfRequestKey((current) => current + 1);
-            setExpandedShelfType(type);
+            openShelf(type);
           }}
           onRetryExpandedShelf={expandedCardShelfSearch.retry}
           onLoadMoreExpandedSongs={expandedSongShelf.loadMore}

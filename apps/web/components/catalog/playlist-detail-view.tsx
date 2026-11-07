@@ -49,6 +49,7 @@ import {
 } from "@/lib/player/song-list-virtualization";
 import PlayIcon from "../icons/play-icon";
 import PauseIcon from "../icons/pause-icon";
+import { useShelfDetailHistory } from "@/hooks/use-shelf-detail-history";
 
 export type GenericArtwork = {
   bgColor?: string;
@@ -125,6 +126,13 @@ export default function PlaylistDetailView({
     selectedFeaturedArtistsPlaylistId,
     setSelectedFeaturedArtistsPlaylistId,
   ] = useState<string | null>(null);
+  const { open: openFeaturedArtists, close: closeFeaturedArtists } =
+    useShelfDetailHistory({
+      owner: `playlist-featured-artists:${playlist.id}`,
+      selected: selectedFeaturedArtistsPlaylistId,
+      setSelected: setSelectedFeaturedArtistsPlaylistId,
+      getKey: (value) => value,
+    });
 
   useEffect(() => {
     if (userId) {
@@ -344,7 +352,7 @@ export default function PlaylistDetailView({
     return (
       <ShelfDetailView
         shelf={{ title: "Featured Artists", items: featuredArtistCards }}
-        onBack={() => setSelectedFeaturedArtistsPlaylistId(null)}
+        onBack={closeFeaturedArtists}
       />
     );
   }
@@ -942,7 +950,7 @@ export default function PlaylistDetailView({
                 )}
                 onSelect={
                   featuredArtistIds.length > FEATURED_ARTIST_SHELF_PREVIEW_LIMIT
-                    ? () => setSelectedFeaturedArtistsPlaylistId(playlist.id)
+                    ? () => openFeaturedArtists(playlist.id)
                     : undefined
                 }
               />
