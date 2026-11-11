@@ -32,7 +32,7 @@ export default function AmbientVideo({
   return (
     <AmpAmbientVideoTag
       ref={ampElementRef}
-      className="absolute inset-0 size-full rounded-[inherit] overflow-hidden z-(--z-default) data-[playing=true]:will-change-transform data-[playing=true]:mask-[radial-gradient(#fff,#000)] data-[playing=true]:[-webkit-mask-image:radial-gradient(#fff,#000)]"
+      className="editorial-video"
       data-playing="false"
       aria-hidden="true"
       src={src}

@@ -16,6 +16,7 @@ type PlayerBarMarqueeProps = {
   children: ReactNode;
   className?: string;
   isPlaybackActive?: boolean;
+  isDetail?: boolean;
   onOverflowChange?: (overflows: boolean) => void;
   onAnimatingChange?: (isAnimating: boolean) => void;
 };
@@ -24,6 +25,7 @@ export function PlayerBarMarquee({
   children,
   className = "",
   isPlaybackActive = true,
+  isDetail = false,
   onOverflowChange,
   onAnimatingChange,
 }: PlayerBarMarqueeProps) {
@@ -192,7 +194,7 @@ export function PlayerBarMarquee({
     >
       <div
         onAnimationEnd={handleAnimationEnd}
-        className="[--marquee-scroll-width:calc((var(--marquee-text-content-width)+var(--marquee-line-padding,8px))/1px)] grid grid-cols-[auto_1fr] h-3.75 z-(--z-default) in-[.active.is-animating]:[animation-delay:0s] in-[.active.is-animating]:[animation-duration:calc(var(--marquee-scroll-width)/25*1.25s)] in-[.active.is-animating]:[animation-fill-mode:forwards] in-[.active.is-animating]:[animation-iteration-count:1] in-[.active.is-animating]:[animation-name:marquee] in-[.active.is-animating]:[animation-play-state:running] hover:[animation-play-state:paused] in-[.active.is-animating]:[animation-timing-function:linear] in-[.active.is-animating]:will-change-transform"
+        className={`${isDetail ? "lcd-meta-line__marquee-scroller" : "marquee-line__scroller"}`}
         style={
           {
             "--marquee-text-content-width": shouldMarquee
@@ -203,15 +205,14 @@ export function PlayerBarMarquee({
       >
         <div
           ref={contentRef}
-          className="in-[.active]:pe-(--marquee-line-padding,8px)"
+          className={`${isDetail ? "lcd-meta-line__scrolling-text-chunk" : "marquee-line__scrolling-text-chunk"}`}
         >
           {children}
         </div>
 
         <div
           ref={duplicateRef}
-          aria-hidden="true"
-          className="in-[.active]:pe-(--marquee-line-padding,8px) in-[.active.is-animating]:opacity-100 in-[.inactive]:hidden opacity-0"
+          className={`${isDetail ? "lcd-meta-line__scrolling-text-chunk lcd-meta-line__scrolling-text-chunk--copy" : "marquee-line__scrolling-text-chunk marquee-line__scrolling-text-chunk--copy"}`}
         >
           {children}
         </div>

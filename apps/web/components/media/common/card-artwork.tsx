@@ -103,7 +103,7 @@ export default function CardArtwork({
     >
       <ResponsiveArtwork
         alt={altText ?? title}
-        className="rounded-[inherit] [transition:var(--global-transition,opacity_.1s_ease-in)] block h-(--artwork-override-height,auto) max-h-(--artwork-override-max-height,none) max-w-(--artwork-override-max-width,none) min-h-(--artwork-override-min-height,0) min-w-(--artwork-override-min-width,0) [object-fit:var(--artwork-override-object-fit,fill)] object-(--artwork-override-object-position,center) w-(--artwork-override-width,100%)"
+        className="artwork-component__contents artwork-component__image"
         fetchPriority={priority ? "high" : "auto"}
         height={316}
         width={316}

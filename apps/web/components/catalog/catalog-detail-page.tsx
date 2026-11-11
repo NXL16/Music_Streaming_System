@@ -691,7 +691,7 @@ export function CatalogDetailPage({
                             />
 
                             {albumVideoSrc && (
-                              <div className="rounded-[inherit] size-full pointer-events-none absolute top-0 z-(--z-default)">
+                              <div className="video-artwork__container">
                                 <AmbientVideo
                                   src={albumVideoSrc}
                                   variant="artist"
