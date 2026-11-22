@@ -39,7 +39,7 @@ type PlaybackTicketClaims = {
 };
 
 type ByteRange = { start: number; end?: number };
-type CatalogQuery = { cursor: string; limit: number; search: string };
+type CatalogQuery = { cursor: string; limit: number; search: string; artist?: string };
 
 @Injectable()
 export class RoomIntegrationService {
@@ -49,18 +49,37 @@ export class RoomIntegrationService {
     private readonly streams: StreamService,
   ) {}
 
-  async listCatalog({ cursor, limit, search }: CatalogQuery) {
+  async listCatalog({ cursor, limit, search, artist = '' }: CatalogQuery) {
     const catalog = await this.songs.listSongs({
       cursor: cursor.slice(0, 256),
       limit: Number.isFinite(limit)
         ? Math.min(Math.max(Math.floor(limit), 1), ROOM_MEDIA_CATALOG_LIMIT.max)
         : ROOM_MEDIA_CATALOG_LIMIT.default,
       search: search.trim().slice(0, 120),
-      artist: '',
+      artist: artist.trim().slice(0, 120),
       onlyPublic: true,
       requesterUserId: '',
     });
     return catalog;
+  }
+
+  async listFavorites(userId: string, cursor: string, limit: number) {
+    const page = await this.songs.listFavoriteSongs({
+      userId,
+      cursor: cursor.slice(0, 256),
+      limit: Number.isFinite(limit)
+        ? Math.min(Math.max(Math.floor(limit), 1), ROOM_MEDIA_CATALOG_LIMIT.max)
+        : ROOM_MEDIA_CATALOG_LIMIT.default,
+    });
+
+    return {
+      nextCursor: page.nextCursor,
+      hasMore: page.hasMore,
+      songs: page.songs.map(({ id, title, artist, album, durationSec, coverUrl, isPublic, status }) => ({
+        id, title, artist, album, durationSec, coverUrl,
+        playable: isPublic && status === SongStatus.SONG_STATUS_READY,
+      })),
+    };
   }
 
   async createPlaybackTicket(dto: CreateRoomPlaybackTicketDto) {

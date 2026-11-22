@@ -4,6 +4,7 @@ import {
   Header,
   Headers,
   Param,
+  ParseUUIDPipe,
   Post,
   Body,
   Query,
@@ -25,13 +26,27 @@ export class RoomIntegrationController {
     @Query('cursor') cursor = '',
     @Query('limit') limit?: string,
     @Query('search') search = '',
+    @Query('artist') artist = '',
   ) {
     const data = await this.roomIntegration.listCatalog({
       cursor,
       limit: Number(limit),
       search,
+      artist,
     });
     return { success: true, code: 'ROOM_CATALOG_LISTED', data };
+  }
+
+  @Get('favorites')
+  @UseGuards(RoomClientAuthGuard)
+  @Header('Cache-Control', 'private, no-store')
+  async listFavorites(
+    @Query('userId', ParseUUIDPipe) userId: string,
+    @Query('cursor') cursor = '',
+    @Query('limit') limit?: string,
+  ) {
+    const data = await this.roomIntegration.listFavorites(userId, cursor, Number(limit));
+    return { success: true, code: 'ROOM_FAVORITES_LISTED', data };
   }
 
   @Post('playback-tickets')
