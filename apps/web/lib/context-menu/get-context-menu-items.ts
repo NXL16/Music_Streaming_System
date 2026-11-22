@@ -283,11 +283,13 @@ function createArtistStationAction(context: ArtistMenuContext): MenuItemData {
     icon: createElement(CreateStationIcon),
     onClick: async () => {
       try {
-        if (!(await createAndPlayArtistStation(
-          context.artistId,
-          context.artworkUrl,
-          () => notifyMenuError("Couldn't create Station artwork"),
-        ))) {
+        if (
+          !(await createAndPlayArtistStation(
+            context.artistId,
+            context.artworkUrl,
+            () => notifyMenuError("Couldn't create Station artwork"),
+          ))
+        ) {
           notifyMenuError("Couldn't start Station");
         }
       } catch (error) {
@@ -330,7 +332,8 @@ function createSongStationAction(context: SongMenuContext): MenuItemData {
 
 function favouriteAction(context: CollectionMenuContext): MenuItemData | null {
   if (
-    (context.resourceType !== "albums" && context.resourceType !== "playlists") ||
+    (context.resourceType !== "albums" &&
+      context.resourceType !== "playlists") ||
     (!context.isFavorite && context.isSuggestLess)
   )
     return null;
@@ -373,7 +376,9 @@ function favouriteAction(context: CollectionMenuContext): MenuItemData | null {
               : undefined,
           );
         }
-        notifyMenuSuccess(nextFavorite ? "Added to Favourites" : "Removed from Favourites");
+        notifyMenuSuccess(
+          nextFavorite ? "Added to Favourites" : "Removed from Favourites",
+        );
       } catch (error) {
         console.error("[context-menu] collection favourite", error);
         notifyMenuError("Couldn't update favourites");
@@ -389,7 +394,8 @@ function suggestLessAction(
   // contradictory negative action while that state is active.
   if (context.isFavorite) return null;
   const resourceType = context.kind === "song" ? "songs" : context.resourceType;
-  const resourceId = context.kind === "song" ? context.songId : context.resourceId;
+  const resourceId =
+    context.kind === "song" ? context.songId : context.resourceId;
   const isActive = Boolean(context.isSuggestLess);
   return {
     id: "suggest-less",
@@ -398,7 +404,9 @@ function suggestLessAction(
     onClick: async () => {
       try {
         await setSuggestLess(resourceType, resourceId, !isActive);
-        notifyMenuSuccess(isActive ? "Suggestions restored" : "We'll suggest less like this");
+        notifyMenuSuccess(
+          isActive ? "Suggestions restored" : "We'll suggest less like this",
+        );
       } catch (error) {
         console.error("[context-menu] suggest less", error);
         notifyMenuError("Couldn't update suggestions");
@@ -501,7 +509,11 @@ function buildSongMenu(context: SongMenuContext): MenuItemData[] {
         label: context.isPinned ? "Unpin Song" : "Pin Song",
         onClick: async () => {
           try {
-            await toggleLibraryResourcePin("songs", context.songId);
+            await toggleLibraryResourcePin(
+              "songs",
+              context.songId,
+              context.sourceAlbumId,
+            );
             notifyMenuSuccess(
               context.isPinned ? "Song unpinned" : "Song pinned",
             );
@@ -571,9 +583,7 @@ function buildSongMenu(context: SongMenuContext): MenuItemData[] {
   ];
 }
 
-function viewMusicVideoCreditsAction(
-  context: VideoMenuContext,
-): MenuItemData {
+function viewMusicVideoCreditsAction(context: VideoMenuContext): MenuItemData {
   return {
     id: "view-credits",
     label: "View Credits",
@@ -588,14 +598,14 @@ function buildVideoMenu(context: VideoMenuContext): MenuItemData[] {
   const songItems = buildSongMenu({ ...context, kind: "song" });
   const videoQueueActions = queueActions(context);
   const items = songItems.filter(
-      (item) =>
-        item.id !== "create-station" &&
-        item.id !== "view-credits" &&
-        item.id !== "show-album" &&
-        item.id !== "copy-link" &&
-        item.id !== "play-next" &&
-        item.id !== "play-last",
-    );
+    (item) =>
+      item.id !== "create-station" &&
+      item.id !== "view-credits" &&
+      item.id !== "show-album" &&
+      item.id !== "copy-link" &&
+      item.id !== "play-next" &&
+      item.id !== "play-last",
+  );
   const addToPlaylistIndex = items.findIndex(
     (item) => item.id === "add-to-playlist",
   );

@@ -1,8 +1,12 @@
+"use client";
+
 import Link from "next/link";
 import type { MediaCardProps } from "./media-card.types";
 import MediaCardShell from "./common/media-card-shell";
 import CardArtwork from "./common/card-artwork";
 import CircleCardMetadata from "./circle-card-metadata";
+import { useAuthStore } from "@/lib/auth/auth-store";
+import { useArtistFollow } from "@/lib/favorites/use-artist-follow";
 
 type CircleCardProps = MediaCardProps & {
   cardType: "circle";
@@ -12,6 +16,12 @@ type CircleCardProps = MediaCardProps & {
 
 export default function CircleCard(props: CircleCardProps) {
   const cardId = props.resourceId || props.id;
+  const userId = useAuthStore((state) => state.user?.userId);
+  const isArtist = props.resourceType === "artists";
+  const { isFollowing } = useArtistFollow(
+    isArtist ? cardId : "",
+    isArtist ? userId : undefined,
+  );
   const cardContent = (
     <div className="text-center">
       <div className="overflow-hidden relative rounded-[50%] shadow-[0_1px_1px_rgba(0,0,0,.01),0_2px_2px_rgba(0,0,0,.01),0_4px_4px_rgba(0,0,0,.02),0_8px_8px_rgba(0,0,0,.03),0_14px_14px_rgba(0,0,0,.03)] z-(--z-default) before:absolute before:top-0 before:z-(--z-default) before:block before:size-full before:max-h-full before:max-w-full before:pointer-events-none before:rounded-[50%] before:shadow-[inset_0_0_0_1px_rgba(128,128,128,.1)] before:content-[''] after:absolute after:inset-0 after:z-1 after:rounded-[50%] after:bg-[#333333]/30 after:opacity-0 after:transition-opacity after:duration-100 after:ease-in group-hover:after:opacity-100">
@@ -24,7 +34,10 @@ export default function CircleCard(props: CircleCardProps) {
           sizes="94px"
         />
       </div>
-      <CircleCardMetadata title={props.title} />
+      <CircleCardMetadata
+        title={props.title}
+        isFavorite={isArtist && isFollowing}
+      />
     </div>
   );
 

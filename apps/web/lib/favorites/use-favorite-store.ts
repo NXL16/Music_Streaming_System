@@ -1,3 +1,4 @@
+import { librarySongKey } from "@/lib/library/library-song-key";
 import { create } from "zustand";
 import {
   addFavoriteSong,
@@ -11,6 +12,7 @@ import {
   subscribeFavoriteChanges,
 } from "./favorite-events";
 import {
+  isLibraryResourcePendingRemoval,
   optimisticallyAddLibraryResource,
   revalidateLibraryResources,
   rollbackOptimisticLibraryAddition,
@@ -22,13 +24,15 @@ import {
 
 let hydrationRequest: Promise<void> | null = null;
 let hydrationVersion = 0;
+let sessionVersion = 0;
+const pendingFavoriteChanges = new Map<string, boolean>();
 const FAVORITES_CACHE_TTL_MS = 3 * 60 * 1000;
 const FAVORITES_PAGE_SIZE = 50;
 let favoritesCacheExpiresAt = 0;
 
 type FavoriteState = {
   songs: SongSummary[];
-  songIds: Set<string>;
+  songKeys: Set<string>;
   collection?: FavoriteCollection;
   loading: boolean;
   loaded: boolean;
@@ -38,14 +42,14 @@ type FavoriteState = {
 
 export const useFavoriteStore = create<FavoriteState>((set, get) => ({
   songs: [],
-  songIds: new Set(),
+  songKeys: new Set(),
   loading: false,
   loaded: false,
   async hydrate(force = false) {
+    if (!force && hydrationRequest) return hydrationRequest;
     if (!force && get().loaded && Date.now() < favoritesCacheExpiresAt) {
       return;
     }
-    if (!force && hydrationRequest) return hydrationRequest;
 
     const requestVersion = ++hydrationVersion;
     const showInitialLoading = !get().loaded;
@@ -54,7 +58,7 @@ export const useFavoriteStore = create<FavoriteState>((set, get) => ({
     const request = (async () => {
       try {
         const songs: SongSummary[] = [];
-        const songIds = new Set<string>();
+        const songKeys = new Set<string>();
         const cursors = new Set<string>();
         let cursor: string | undefined;
         let collection: FavoriteCollection | undefined;
@@ -68,8 +72,9 @@ export const useFavoriteStore = create<FavoriteState>((set, get) => ({
           isFirstPage = false;
 
           for (const song of response.songs ?? []) {
-            if (songIds.has(song.id)) continue;
-            songIds.add(song.id);
+            const key = librarySongKey(song.id, song.albumId);
+            if (songKeys.has(key)) continue;
+            songKeys.add(key);
             songs.push(song);
           }
           collection ??= response.collection;
@@ -84,9 +89,21 @@ export const useFavoriteStore = create<FavoriteState>((set, get) => ({
 
         if (requestVersion !== hydrationVersion) return;
 
+        const visibleSongs = songs.filter((song) => {
+          if (!isLibraryResourcePendingRemoval("songs", song.id, song.albumId))
+            return true;
+          songKeys.delete(librarySongKey(song.id, song.albumId));
+          return false;
+        });
+        for (const [key, favorite] of pendingFavoriteChanges) {
+          if (favorite) songKeys.add(key);
+          else songKeys.delete(key);
+        }
         set({
-          songs,
-          songIds,
+          songs: visibleSongs.filter((song) =>
+            songKeys.has(librarySongKey(song.id, song.albumId)),
+          ),
+          songKeys,
           collection,
           loaded: true,
         });
@@ -102,41 +119,61 @@ export const useFavoriteStore = create<FavoriteState>((set, get) => ({
     return request;
   },
   async toggle(songId, sourceAlbumId) {
+    if (!sourceAlbumId) throw new Error("SOURCE_ALBUM_ID_REQUIRED");
+    const session = sessionVersion;
     await get().hydrate();
-    const currentlyFavorite = get().songIds.has(songId);
+    if (session !== sessionVersion) return false;
+    const key = librarySongKey(songId, sourceAlbumId);
+    const currentlyFavorite = get().songKeys.has(key);
+    hydrationVersion += 1;
+    hydrationRequest = null;
+    pendingFavoriteChanges.set(key, !currentlyFavorite);
     if (currentlyFavorite) {
-      const previousSong = get().songs.find((song) => song.id === songId);
+      const previousSong = get().songs.find(
+        (song) => librarySongKey(song.id, song.albumId) === key,
+      );
       set((state) => {
-        const songIds = new Set(state.songIds);
-        songIds.delete(songId);
+        const songKeys = new Set(state.songKeys);
+        songKeys.delete(key);
         return {
-          songs: state.songs.filter((song) => song.id !== songId),
-          songIds,
+          songs: state.songs.filter(
+            (song) => librarySongKey(song.id, song.albumId) !== key,
+          ),
+          songKeys,
         };
       });
-      notifyFavoriteChanged(songId, false);
+      notifyFavoriteChanged(songId, false, sourceAlbumId, true);
       try {
-        await removeFavoriteSong(songId);
+        await removeFavoriteSong(songId, sourceAlbumId);
+        if (session !== sessionVersion) return false;
+        notifyFavoriteChanged(songId, false, sourceAlbumId);
+        pendingFavoriteChanges.delete(key);
+        hydrationVersion += 1;
+        hydrationRequest = null;
         favoritesCacheExpiresAt = Date.now() + FAVORITES_CACHE_TTL_MS;
         return false;
       } catch (error) {
+        if (session !== sessionVersion) throw error;
+        pendingFavoriteChanges.delete(key);
         set((state) => {
-          const songIds = new Set(state.songIds);
-          songIds.add(songId);
+          const songKeys = new Set(state.songKeys);
+          songKeys.add(key);
           return {
             songs:
-              previousSong && !state.songs.some((song) => song.id === songId)
+              previousSong &&
+              !state.songs.some(
+                (song) => librarySongKey(song.id, song.albumId) === key,
+              )
                 ? [previousSong, ...state.songs]
                 : state.songs,
-            songIds,
+            songKeys,
           };
         });
-        notifyFavoriteChanged(songId, true);
+        notifyFavoriteChanged(songId, true, sourceAlbumId);
         throw error;
       }
     }
 
-    if (!sourceAlbumId) throw new Error("SOURCE_ALBUM_ID_REQUIRED");
     if (isSuggestLessActive("songs", songId)) {
       void setSuggestLess("songs", songId, false).catch(() => undefined);
     }
@@ -145,18 +182,21 @@ export const useFavoriteStore = create<FavoriteState>((set, get) => ({
       resourceId: songId,
       sourceAlbumId,
     });
-      const addedAlbumLibraryResource = optimisticallyAddLibraryResource({
+    const addedAlbumLibraryResource = optimisticallyAddLibraryResource({
       resourceType: "albums",
       resourceId: sourceAlbumId,
     });
     set((state) => {
-      const songIds = new Set(state.songIds);
-      songIds.add(songId);
-      return { songIds };
+      const songKeys = new Set(state.songKeys);
+      songKeys.add(key);
+      return { songKeys };
     });
-    notifyFavoriteChanged(songId, true);
+    notifyFavoriteChanged(songId, true, sourceAlbumId, true);
     try {
       await addFavoriteSong(songId, sourceAlbumId);
+      if (session !== sessionVersion) return false;
+      notifyFavoriteChanged(songId, true, sourceAlbumId);
+      pendingFavoriteChanges.delete(key);
       revalidateLibraryResources({
         resourceType: "songs",
         resourceId: songId,
@@ -164,17 +204,26 @@ export const useFavoriteStore = create<FavoriteState>((set, get) => ({
       });
       // The current surface only needs the id for its immediate state. Fetch
       // the canonical projection in the background for Favourite Songs.
-      void get().hydrate(true).catch(() => undefined);
+      void get()
+        .hydrate(true)
+        .catch(() => undefined);
       return true;
     } catch (error) {
+      if (session !== sessionVersion) throw error;
+      pendingFavoriteChanges.delete(key);
       set((state) => {
-        const songIds = new Set(state.songIds);
-        songIds.delete(songId);
-        return { songIds };
+        const songKeys = new Set(state.songKeys);
+        songKeys.delete(key);
+        return {
+          songKeys,
+          songs: state.songs.filter(
+            (song) => librarySongKey(song.id, song.albumId) !== key,
+          ),
+        };
       });
       rollbackOptimisticLibraryAddition(addedSongLibraryResource);
       rollbackOptimisticLibraryAddition(addedAlbumLibraryResource);
-      notifyFavoriteChanged(songId, false);
+      notifyFavoriteChanged(songId, false, sourceAlbumId);
       throw error;
     }
   },
@@ -183,6 +232,7 @@ export const useFavoriteStore = create<FavoriteState>((set, get) => ({
 if (typeof window !== "undefined") {
   subscribeFavoriteChanges((change) => {
     if (!change.remote) return;
+    if (change.pending) return;
     // A remote tab may not have the song's full projection locally. Reloading
     // the canonical paginated collection preserves ordering and metadata.
     void useFavoriteStore
@@ -193,12 +243,14 @@ if (typeof window !== "undefined") {
 }
 
 export function clearFavoriteStore() {
+  sessionVersion += 1;
   hydrationVersion += 1;
   hydrationRequest = null;
   favoritesCacheExpiresAt = 0;
+  pendingFavoriteChanges.clear();
   useFavoriteStore.setState({
     songs: [],
-    songIds: new Set(),
+    songKeys: new Set(),
     collection: undefined,
     loading: false,
     loaded: false,
@@ -206,15 +258,23 @@ export function clearFavoriteStore() {
 }
 
 /** Applies a Library Album cascade without waiting for another favourites fetch. */
-export function removeFavoriteSongsFromStore(songIds: string[]) {
-  if (!songIds.length) return;
-  const removedSongIds = new Set(songIds);
+export function removeFavoriteSongsFromStore(
+  songIds: string[],
+  sourceAlbumId: string,
+) {
+  const songKeys = songIds.map((id) => librarySongKey(id, sourceAlbumId));
+  if (!songKeys.length) return;
+  hydrationVersion += 1;
+  hydrationRequest = null;
+  const removedKeys = new Set(songKeys);
   useFavoriteStore.setState((state) => {
-    const nextSongIds = new Set(state.songIds);
-    for (const songId of removedSongIds) nextSongIds.delete(songId);
+    const nextKeys = new Set(state.songKeys);
+    for (const key of removedKeys) nextKeys.delete(key);
     return {
-      songs: state.songs.filter((song) => !removedSongIds.has(song.id)),
-      songIds: nextSongIds,
+      songs: state.songs.filter(
+        (song) => !removedKeys.has(librarySongKey(song.id, song.albumId)),
+      ),
+      songKeys: nextKeys,
     };
   });
 }
@@ -222,14 +282,19 @@ export function removeFavoriteSongsFromStore(songIds: string[]) {
 /** Restores optimistic Library deletion changes when the user chooses Undo. */
 export function restoreFavoriteSongsToStore(songs: SongSummary[]) {
   if (!songs.length) return;
+  hydrationVersion += 1;
+  hydrationRequest = null;
   useFavoriteStore.setState((state) => {
-    const existingSongIds = new Set(state.songIds);
-    const restoredSongs = songs.filter((song) => !existingSongIds.has(song.id));
+    const existingKeys = new Set(state.songKeys);
+    const restoredSongs = songs.filter(
+      (song) => !existingKeys.has(librarySongKey(song.id, song.albumId)),
+    );
     if (!restoredSongs.length) return state;
-    for (const song of restoredSongs) existingSongIds.add(song.id);
+    for (const song of restoredSongs)
+      existingKeys.add(librarySongKey(song.id, song.albumId));
     return {
       songs: [...restoredSongs, ...state.songs],
-      songIds: existingSongIds,
+      songKeys: existingKeys,
     };
   });
 }

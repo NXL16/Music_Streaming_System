@@ -7,6 +7,7 @@ import type {
 type HeaderWithSortProps = {
   title: string;
   sortBy?: LibrarySortBy;
+  sortOptions?: readonly LibrarySortBy[];
   direction?: SortDirection;
   onSortByChange?: (sortBy: LibrarySortBy) => void;
   onDirectionChange?: (direction: SortDirection) => void;
@@ -16,6 +17,7 @@ type HeaderWithSortProps = {
 export default function HeaderWithSort({
   title,
   sortBy,
+  sortOptions,
   direction,
   onSortByChange,
   onDirectionChange,
@@ -32,6 +34,7 @@ export default function HeaderWithSort({
           <div className="[--linkColor:var(--keyColor)] inline-block [font:var(--title-3)] z-[calc(var(--z-default))+1]">
             <M404SortButton
               sortBy={sortBy}
+              sortOptions={sortOptions}
               direction={direction}
               onSortByChange={onSortByChange}
               onDirectionChange={onDirectionChange}

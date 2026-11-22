@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { useLibraryMediaCards } from "@/lib/library/use-library-media-cards";
 import {
@@ -9,6 +9,7 @@ import {
   type LibraryResource,
 } from "@/lib/library/library-resources.api";
 import { useLibraryResourcesRevision } from "@/lib/library/use-library-resources-revision";
+import { libraryAlbumSongIds } from "@/lib/library/library-album-song-ids";
 import CatalogPageLoading from "../loading/catalog-page-loading";
 import { NotFoundState } from "../states/not-found-state";
 import { RequestErrorState } from "../states/request-error-state";
@@ -38,10 +39,12 @@ export function LibraryAlbumDetailPage({
   useEffect(() => {
     if (!userId) return;
     let active = true;
-    setLibraryResourcesError(false);
     void getLibraryResources()
       .then((nextResources) => {
-        if (active) setLibraryResources(nextResources);
+        if (active) {
+          setLibraryResources(nextResources);
+          setLibraryResourcesError(false);
+        }
       })
       .catch(() => {
         if (active) setLibraryResourcesError(true);
@@ -53,31 +56,17 @@ export function LibraryAlbumDetailPage({
       active = false;
     };
   }, [revision, retryKey, userId]);
-  const isSaved = useMemo(
-    () =>
-      resources.some(
-        (resource) =>
-          resource.resourceType === "albums" &&
-          resource.resourceId === albumId &&
-          !isLibraryResourcePendingRemoval(
-            resource.resourceType,
-            resource.resourceId,
-          ),
+  const isSaved = resources.some(
+    (resource) =>
+      resource.resourceType === "albums" &&
+      resource.resourceId === albumId &&
+      !isLibraryResourcePendingRemoval(
+        resource.resourceType,
+        resource.resourceId,
       ),
-    [albumId, resources],
   );
 
-  const librarySongIds = useMemo(
-    () =>
-      libraryResources
-        .filter(
-          (resource) =>
-            resource.resourceType === "songs" &&
-            resource.sourceAlbumId === albumId,
-        )
-        .map((resource) => resource.resourceId),
-    [albumId, libraryResources],
-  );
+  const librarySongIds = libraryAlbumSongIds(libraryResources, [albumId]);
 
   if (!userId) {
     return <NotFoundState />;

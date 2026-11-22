@@ -1,3 +1,4 @@
+import { librarySongKey } from "@/lib/library/library-song-key";
 import Link from "next/link";
 import CollectionCardMetadata from "./collection-card-metadata";
 import type { MediaCardProps } from "./media-card.types";
@@ -6,6 +7,9 @@ import CardArtwork from "./common/card-artwork";
 import CardPlayButton from "./common/card-play-button";
 import CardContextMenu from "./common/card-context-menu";
 import { playCatalogResource } from "@/lib/catalog/play-catalog-resource";
+import { playLibraryAlbums } from "@/lib/library/play-library-albums";
+import { notifyMenuError } from "@/lib/notifications/menu-toast";
+import { getMediaCardMenuContext } from "@/lib/context-menu/media-card-menu-context";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { playUserPlaylist } from "@/lib/playlists/play-user-playlist";
 import { playFavoritePlaylist } from "@/lib/favorites/play-favorite-playlist";
@@ -37,7 +41,16 @@ export default function CollectionCard(props: CollectionCardProps) {
   const musicVideoSongId =
     props.menuContext?.kind === "video" ? props.menuContext.songId : undefined;
   const isMusicVideoFavorite = useFavoriteStore((state) =>
-    musicVideoSongId ? state.songIds.has(musicVideoSongId) : false,
+    musicVideoSongId
+      ? state.songKeys.has(
+          librarySongKey(
+            musicVideoSongId,
+            props.menuContext?.kind === "video"
+              ? props.menuContext.sourceAlbumId
+              : undefined,
+          ),
+        )
+      : false,
   );
   const [isSuggestLess, setIsSuggestLess] = useState(false);
   useEffect(() => {
@@ -61,73 +74,7 @@ export default function CollectionCard(props: CollectionCardProps) {
         sync();
     });
   }, [cardId, props.resourceType]);
-  const libraryResourceType =
-    props.resourceType === "albums" || props.resourceType === "playlists"
-      ? props.resourceType
-      : null;
-  const collectionMenuContext =
-    libraryResourceType === "playlists" && props.playlistKind === "favorite"
-      ? {
-          kind: "collection" as const,
-          resourceId: props.resourceId,
-          resourceType: "playlists" as const,
-          sourceOrigin: "favorite" as const,
-          title: props.title,
-          subtitle: props.subtitle,
-          artworkUrl: props.imageUrl,
-          href: props.slug,
-          songIds: props.songIds,
-          userId,
-          inLibrary: true,
-        }
-      : libraryResourceType === "playlists" && props.isUserPlaylist
-        ? {
-            kind: "collection" as const,
-            resourceId: props.resourceId,
-            resourceType: "playlists" as const,
-            sourceOrigin: "user-playlist" as const,
-            isUserPlaylist: true as const,
-            title: props.title,
-            subtitle: props.subtitle,
-            artworkUrl: props.imageUrl,
-            href: props.slug,
-            songIds: props.songIds,
-            userId,
-            inLibrary: false,
-          }
-        : props.resourceType === "albums"
-          ? {
-              kind: "collection" as const,
-              resourceId: props.resourceId,
-              resourceType: "albums" as const,
-              sourceOrigin: "catalog" as const,
-              isUserPlaylist: false as const,
-              title: props.title,
-              subtitle: props.subtitle,
-              artworkUrl: props.imageUrl,
-              href: props.slug,
-              songIds: props.songIds,
-              userId,
-              isLibraryView:
-                props.slug?.startsWith("/library/albums/") ?? false,
-              inLibrary: false,
-            }
-          : props.resourceType === "playlists"
-            ? {
-                kind: "collection" as const,
-                resourceId: props.resourceId,
-                resourceType: "playlists" as const,
-                sourceOrigin: "catalog" as const,
-                isUserPlaylist: false as const,
-                title: props.title,
-                subtitle: props.subtitle,
-                artworkUrl: props.imageUrl,
-                href: props.slug,
-                songIds: props.songIds,
-                userId,
-                inLibrary: false,
-              }
-            : undefined;
+  const menuContext = getMediaCardMenuContext(props, userId);
 
   return (
     <MediaCardShell
@@ -179,6 +126,20 @@ export default function CollectionCard(props: CollectionCardProps) {
                 variant="cover"
                 onPlay={() => {
                   props.onPlay?.();
+                  if (
+                    props.resourceType === "albums" &&
+                    props.slug?.startsWith("/library/albums/")
+                  ) {
+                    void playLibraryAlbums([props.resourceId])
+                      .then((played) => {
+                        if (!played)
+                          notifyMenuError("No saved songs available to play.");
+                      })
+                      .catch(() =>
+                        notifyMenuError("Could not play your saved music."),
+                      );
+                    return;
+                  }
                   if (props.playlistKind === "favorite") {
                     void playFavoritePlaylist({
                       title: props.title,
@@ -212,12 +173,10 @@ export default function CollectionCard(props: CollectionCardProps) {
               />
             )}
 
-            {(props.menuContext ||
-              collectionMenuContext ||
-              props.menuItems) && (
+            {(menuContext || props.menuItems) && (
               <CardContextMenu
                 id={cardId}
-                context={props.menuContext ?? collectionMenuContext}
+                context={menuContext}
                 items={props.menuItems}
               />
             )}

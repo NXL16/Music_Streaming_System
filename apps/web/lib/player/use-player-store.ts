@@ -1,4 +1,5 @@
-﻿import { create } from "zustand";
+import { librarySongKey } from "@/lib/library/library-song-key";
+import { create } from "zustand";
 
 export type PlayerArtist = {
   id?: string;
@@ -147,6 +148,7 @@ type PlayerState = {
   cycleRepeatMode: () => void;
   toggleAutoplay: () => void;
   pause: () => void;
+  playQueueSong: (songId: string) => boolean;
   next: (stopAtEnd?: boolean) => boolean;
   previous: () => boolean;
   clear: () => void;
@@ -200,8 +202,16 @@ export function getNextQueuedSong(
     : null;
 }
 
+export function playerSongKey(
+  song: Pick<PlayerSong, "id" | "albumId" | "sourceAlbumId">,
+) {
+  return librarySongKey(song.id, song.sourceAlbumId ?? song.albumId);
+}
+
 function shuffleQueue(songs: PlayerSong[], currentSongId: string) {
-  const remaining = songs.filter((song) => song.id !== currentSongId);
+  const remaining = songs.filter(
+    (song) => playerSongKey(song) !== currentSongId,
+  );
   for (let index = remaining.length - 1; index > 0; index -= 1) {
     const targetIndex = Math.floor(Math.random() * (index + 1));
     [remaining[index], remaining[targetIndex]] = [
@@ -210,7 +220,9 @@ function shuffleQueue(songs: PlayerSong[], currentSongId: string) {
     ];
   }
 
-  const currentSong = songs.find((song) => song.id === currentSongId);
+  const currentSong = songs.find(
+    (song) => playerSongKey(song) === currentSongId,
+  );
   return currentSong ? [currentSong, ...remaining] : remaining;
 }
 
@@ -229,7 +241,7 @@ function shuffleAllSongs(songs: PlayerSong[]) {
 function samePlayback(left: PlayerSong, right: PlayerSong | null) {
   return Boolean(
     right &&
-    left.id === right.id &&
+    playerSongKey(left) === playerSongKey(right) &&
     left.releaseTrackId === right.releaseTrackId &&
     left.playbackKind === right.playbackKind &&
     left.video?.id === right.video?.id,
@@ -287,7 +299,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       const currentSong = state.currentSong;
       if (
         !currentSong ||
-        currentSong.id !== song.id ||
+        playerSongKey(currentSong) !== playerSongKey(song) ||
         currentSong.playbackKind !== song.playbackKind ||
         currentSong.video?.id !== song.video?.id
       ) {
@@ -295,7 +307,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       }
 
       const isCurrentPlayback = (item: PlayerSong) =>
-        item.id === currentSong.id &&
+        playerSongKey(item) === playerSongKey(currentSong) &&
         item.playbackKind === currentSong.playbackKind &&
         item.video?.id === currentSong.video?.id;
       // `originalQueue` can be in a different order when shuffle is enabled;
@@ -340,7 +352,9 @@ export const usePlayerStore = create<PlayerState>((set) => ({
     }),
   enqueue: (songs, position) =>
     set((state) => {
-      const activeSongId = state.currentSong?.id ?? null;
+      const activeSongId = state.currentSong
+        ? playerSongKey(state.currentSong)
+        : null;
       const hasActiveSong = activeSongId !== null && state.currentIndex >= 0;
       const requestedSongIds = new Set<string>();
       const queuedSongs: PlayerSong[] = [];
@@ -350,21 +364,21 @@ export const usePlayerStore = create<PlayerState>((set) => ({
         // entry is removed then inserted at the requested position below.
         if (
           !song.playbackUrl ||
-          song.id === activeSongId ||
-          requestedSongIds.has(song.id)
+          playerSongKey(song) === activeSongId ||
+          requestedSongIds.has(playerSongKey(song))
         ) {
           continue;
         }
-        requestedSongIds.add(song.id);
+        requestedSongIds.add(playerSongKey(song));
         queuedSongs.push(song);
       }
       if (!queuedSongs.length) return state;
 
-      // Queue rows and drag-and-drop identify a track by song id. Removing
+      // Queue rows and drag-and-drop identify a track by its release. Removing
       // existing targets first both prevents duplicate keys and lets repeated
       // Play Next/Last calls reposition already queued tracks.
       const withoutRequestedSongs = (queue: PlayerSong[]) =>
-        queue.filter((song) => !requestedSongIds.has(song.id));
+        queue.filter((song) => !requestedSongIds.has(playerSongKey(song)));
       const queueWithoutRequested = withoutRequestedSongs(state.queue);
       const originalQueueWithoutRequested = withoutRequestedSongs(
         state.originalQueue,
@@ -395,7 +409,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       }
 
       const currentIndex = queueWithoutRequested.findIndex(
-        (song) => song.id === activeSongId,
+        (song) => playerSongKey(song) === activeSongId,
       );
       const insertionBeforeAutoplay = (
         songs: PlayerSong[],
@@ -404,9 +418,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
         const firstUpcomingAutoplay = songs.findIndex(
           (song, index) => index > activeIndex && song.sourceAutoplay,
         );
-        return firstUpcomingAutoplay < 0
-          ? songs.length
-          : firstUpcomingAutoplay;
+        return firstUpcomingAutoplay < 0 ? songs.length : firstUpcomingAutoplay;
       };
       const queueInsertionIndex =
         position === "next" && currentIndex >= 0
@@ -417,7 +429,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
 
       const originalQueue = [...originalQueueWithoutRequested];
       const originalCurrentIndex = originalQueue.findIndex(
-        (song) => song.id === activeSongId,
+        (song) => playerSongKey(song) === activeSongId,
       );
       const originalInsertionIndex =
         position === "next" && originalCurrentIndex >= 0
@@ -441,10 +453,10 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       const upcomingStartIndex = Math.max(0, state.currentIndex + 1);
       const upcomingSongs = state.queue.slice(upcomingStartIndex);
       const activeIndex = upcomingSongs.findIndex(
-        (song) => song.id === activeSongId,
+        (song) => playerSongKey(song) === activeSongId,
       );
       const overIndex = upcomingSongs.findIndex(
-        (song) => song.id === overSongId,
+        (song) => playerSongKey(song) === overSongId,
       );
 
       if (activeIndex < 0 || overIndex < 0) return state;
@@ -454,8 +466,12 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       reorderedUpcomingSongs.splice(overIndex, 0, activeSong);
 
       const reorderById = (songs: PlayerSong[]) => {
-        const fromIndex = songs.findIndex((song) => song.id === activeSongId);
-        const toIndex = songs.findIndex((song) => song.id === overSongId);
+        const fromIndex = songs.findIndex(
+          (song) => playerSongKey(song) === activeSongId,
+        );
+        const toIndex = songs.findIndex(
+          (song) => playerSongKey(song) === overSongId,
+        );
         if (fromIndex < 0 || toIndex < 0) return songs;
 
         const reorderedSongs = [...songs];
@@ -480,14 +496,18 @@ export const usePlayerStore = create<PlayerState>((set) => ({
     set((state) => {
       if (state.stationMode) return state;
 
-      const songIndex = state.queue.findIndex((song) => song.id === songId);
+      const songIndex = state.queue.findIndex(
+        (song) => playerSongKey(song) === songId,
+      );
       if (songIndex <= state.currentIndex) return state;
 
-      const queue = state.queue.filter((song) => song.id !== songId);
+      const queue = state.queue.filter(
+        (song) => playerSongKey(song) !== songId,
+      );
       return {
         queue,
         originalQueue: state.shuffleEnabled
-          ? state.originalQueue.filter((song) => song.id !== songId)
+          ? state.originalQueue.filter((song) => playerSongKey(song) !== songId)
           : queue,
       };
     }),
@@ -504,7 +524,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
 
       if (!currentSongIsRemoved) {
         const currentIndex = state.currentSong
-          ? queue.findIndex((song) => song.id === state.currentSong?.id)
+          ? queue.findIndex((song) => samePlayback(song, state.currentSong))
           : -1;
         return {
           queue,
@@ -534,7 +554,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
         queue,
         originalQueue,
         currentSong: nextSong,
-        currentIndex: queue.findIndex((song) => song.id === nextSong.id),
+        currentIndex: queue.findIndex((song) => samePlayback(song, nextSong)),
         playbackTimeMs: 0,
         playing: true,
       };
@@ -558,12 +578,14 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       if (queue.length === state.queue.length) return state;
 
       const upcomingSongIds = new Set(
-        state.queue.slice(state.currentIndex + 1).map((song) => song.id),
+        state.queue.slice(state.currentIndex + 1).map(playerSongKey),
       );
       return {
         queue,
         originalQueue: state.shuffleEnabled
-          ? state.originalQueue.filter((song) => !upcomingSongIds.has(song.id))
+          ? state.originalQueue.filter(
+              (song) => !upcomingSongIds.has(playerSongKey(song)),
+            )
           : queue,
       };
     }),
@@ -717,8 +739,8 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       );
 
       if (state.shuffleEnabled) {
-        const restoredIndex = manualQueue.findIndex(
-          (song) => song.id === state.currentSong?.id,
+        const restoredIndex = manualQueue.findIndex((song) =>
+          samePlayback(song, state.currentSong),
         );
         return {
           shuffleEnabled: false,
@@ -730,7 +752,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       return {
         shuffleEnabled: true,
         queue: [
-          ...shuffleQueue(manualQueue, state.currentSong.id),
+          ...shuffleQueue(manualQueue, playerSongKey(state.currentSong)),
           ...autoplaySongs,
         ],
         currentIndex: 0,
@@ -796,6 +818,34 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       };
     }),
   pause: () => set({ playing: false }),
+  playQueueSong: (songId) => {
+    let didChangeTrack = false;
+
+    set((state) => {
+      const queueIndex = state.queue.findIndex(
+        (song) => playerSongKey(song) === songId && Boolean(song.playbackUrl),
+      );
+      if (queueIndex < 0 || queueIndex === state.currentIndex) return state;
+
+      didChangeTrack = true;
+      const nextSong = state.queue[queueIndex];
+      return {
+        currentIndex: queueIndex,
+        currentSong: nextSong,
+        playbackTimeMs: 0,
+        playing: true,
+        ...(nextSong.sourceAutoplay
+          ? { shuffleEnabled: false, repeatMode: 0 as RepeatMode }
+          : {}),
+        videoPlayerOpen:
+          state.videoPlayerOpen &&
+          state.currentSong?.playbackKind === "video" &&
+          nextSong.playbackKind === "video",
+      };
+    });
+
+    return didChangeTrack;
+  },
   next: (stopAtEnd = false) => {
     let didChangeTrack = false;
 

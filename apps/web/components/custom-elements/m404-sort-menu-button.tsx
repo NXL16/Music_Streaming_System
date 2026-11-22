@@ -8,6 +8,7 @@ export type SortDirection = "ascending" | "descending";
 
 type M404SortButtonProps = {
   sortBy?: LibrarySortBy;
+  sortOptions?: readonly LibrarySortBy[];
   direction?: SortDirection;
   onSortByChange?: (sortBy: LibrarySortBy) => void;
   onDirectionChange?: (direction: SortDirection) => void;
@@ -23,6 +24,7 @@ function CheckIcon() {
 
 export default function M404SortButton({
   sortBy,
+  sortOptions = ["title", "recently-added"],
   direction,
   onSortByChange,
   onDirectionChange,
@@ -33,22 +35,18 @@ export default function M404SortButton({
   const isMenuOpen = useMenuStore(
     (state) => state.isOpen && state.activeId === menuId,
   );
-  const isInteractive = Boolean(onSortByChange && onDirectionChange);
+  const isInteractive = Boolean(
+    onDirectionChange && (onSortByChange || sortOptions.length === 1),
+  );
 
   const menuItems: MenuItemData[] = isInteractive
     ? [
-        {
-          id: "sort-title",
-          label: "Title",
-          icon: sortBy === "title" ? <CheckIcon /> : undefined,
-          onClick: () => onSortByChange?.("title"),
-        },
-        {
-          id: "sort-recently-added",
-          label: "Recently Added",
-          icon: sortBy === "recently-added" ? <CheckIcon /> : undefined,
-          onClick: () => onSortByChange?.("recently-added"),
-        },
+        ...sortOptions.map((option) => ({
+          id: `sort-${option}`,
+          label: option === "title" ? "Title" : "Recently Added",
+          icon: sortBy === option ? <CheckIcon /> : undefined,
+          onClick: () => onSortByChange?.(option),
+        })),
         {
           id: "sort-ascending",
           label: "Ascending",

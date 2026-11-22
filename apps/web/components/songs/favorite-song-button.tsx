@@ -1,4 +1,5 @@
 "use client";
+import { librarySongKey } from "@/lib/library/library-song-key";
 
 import { type MouseEvent, useEffect, useState } from "react";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
@@ -22,10 +23,10 @@ export function FavoriteSongButton({
   ariaLabel,
   title,
 }: FavoriteSongButtonProps) {
-  const songIds = useFavoriteStore((state) => state.songIds);
+  const songKeys = useFavoriteStore((state) => state.songKeys);
   const hydrate = useFavoriteStore((state) => state.hydrate);
   const [saving, setSaving] = useState(false);
-  const isFavorite = songIds.has(songId);
+  const isFavorite = songKeys.has(librarySongKey(songId, sourceAlbumId));
 
   useEffect(() => {
     void hydrate();

@@ -3784,3 +3784,464 @@ input.search-input__text-field::-webkit-search-cancel-button {
   top: 0;
   z-index: 1;
 }
+
+/* ============== Library Artist Page ================= */
+.artists-container {
+  height: auto;
+  position: relative;
+  --selectionColor: #9c9c9c2b;
+}
+
+@media (prefers-color-scheme: dark) {
+  .artists-container {
+    --selectionColor: #9f9f9f2a;
+  }
+}
+
+@media (min-width: 1000px) {
+  .artists-container {
+    display: flex;
+    height: calc(100vh - 226px);
+  }
+}
+
+@media (min-width: 1600px) {
+  .artists-container {
+    height: calc(100vh - 188px);
+  }
+}
+
+.artist-list-container {
+  color: var(--systemPrimary);
+  font: var(--callout);
+  height: 100%;
+  min-width: 240px;
+  overflow-y: auto;
+  width: 100%;
+}
+
+@media (min-width: 1000px) {
+  .artist-list-container {
+    flex: 0;
+    width: 30%;
+  }
+}
+
+.artist-detail-container {
+  background-color: var(--pageBG);
+  height: auto;
+  overflow: visible;
+  padding-bottom: 20px;
+  position: relative;
+  width: 100%;
+  z-index: var(--z-default);
+}
+
+@media (min-width: 1000px) {
+  .artist-detail-container {
+    flex: 1;
+    height: 100%;
+    overflow-y: auto;
+  }
+}
+
+.scrollable-container-constrained-width {
+  border-inline-end: 1px solid var(--labelDivider);
+  height: 100%;
+  min-width: 240px;
+  position: relative;
+  width: 100%;
+  z-index: var(--z-default);
+}
+
+@media (max-width: 999px) {
+  .scrollable-container-constrained-width {
+    border-inline-end: none;
+    margin-inline: 25px;
+    width: auto;
+  }
+}
+
+@media (min-width: 1000px) {
+  .scrollable-container-constrained-width {
+    flex: 0;
+    width: 30%;
+  }
+}
+
+
+.scrollable-container {
+  height: calc(100% - var(--fixedHeaderHeight, 0px));
+  overflow-y: scroll;
+  position: absolute;
+  width: 100%;
+  z-index: var(--z-default);
+}
+
+@media (max-width: 999px) {
+
+  .artists-container .artist-list-container,
+  .artists-container .scrollable-container-constrained-width,
+  .artists-container .scrollable-container {
+    height: auto;
+    overflow: visible;
+  }
+
+  .artists-container .scrollable-container {
+    position: relative;
+  }
+
+  .artists-container .empty-state--artist {
+    position: static;
+    height: auto;
+    margin: 64px auto;
+  }
+}
+
+.library-artists-component {
+  border-bottom: var(--keyline-border-style);
+  display: flex;
+  line-height: 40px;
+  outline: none;
+  padding: 9px;
+  position: relative;
+  width: 100%;
+}
+
+
+@media (max-width: 999px) {
+  .library-artists-component {
+    align-items: center;
+    border-bottom: none;
+    line-height: 46px;
+    padding: 12px 0;
+  }
+
+  .library-artists {
+    border-radius: var(--global-border-radius-xsmall, 14px);
+    z-index: var(--z-default);
+    position: relative;
+  }
+
+  .library-artists:not(:first-child)::before {
+    border-top: var(--keyline-border-style);
+    content: "";
+    inset-inline-start: 58px;
+    inset-inline-end: -25px;
+    position: absolute;
+    top: 0;
+  }
+}
+
+.library-artists-component.is-selected {
+  --favoriteBadgeColor: var(--systemPrimary);
+  background-color: var(--selectionColor);
+}
+
+.artist-icon {
+  display: inline-block;
+  height: 40px;
+  line-height: 40px;
+  margin-inline-end: 9px;
+  text-align: center;
+  vertical-align: top;
+  width: 40px;
+  border-radius: 50%;
+}
+
+@media (max-width: 999px) {
+  .artist-icon {
+    height: 46px;
+    line-height: 46px;
+    margin-inline-end: 12px;
+    width: 46px;
+  }
+}
+
+.artist-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 999px) {
+  .artist-name {
+    font-size: 14px;
+  }
+}
+
+.artist-detail-header {
+  --playButtonSize: 28px;
+  --contextMenuButtonSize: 28px;
+  --button-action-border-radius: 50%;
+  --button-action-height: 28px;
+  --button-action-width: 28px;
+  --button-action-min-width: none;
+  --button-action-icon-top-offset: 0;
+  --linkHoverTextDecoration: none;
+  --playButtonIconColor: var(--systemPrimary);
+  --iconCircleFillBGOverride: var(--systemQuinary);
+  align-items: flex-start;
+  border-bottom: var(--keyline-border-style);
+  column-gap: 16px;
+  display: flex;
+  justify-content: space-between;
+  margin: 0 var(--bodyGutter) 32px;
+  padding-bottom: 9px;
+  padding-top: 10px;
+}
+
+.artist-detail-name {
+  font: var(--title-1-emphasized);
+}
+
+.artist-detail-name svg {
+  height: 13px;
+  fill: var(--systemSecondary);
+  vertical-align: 1px;
+  display: inline-block;
+  margin-left: 3px;
+}
+
+.click-action svg {
+  flex-shrink: 1;
+}
+
+.artist-detail-header__buttons {
+  --artist-button-hover-background: #000;
+  --artist-button-hover-color: #fff;
+  --button-action-color: var(--systemPrimary);
+  --favoriteButtonStarOutline: var(--systemPrimary);
+  --playButtonCircleHoverColor: var(--artist-button-hover-background);
+  --playButtonIconHoverColor: var(--artist-button-hover-color);
+  --contextMenuCircleHoverFill: var(--artist-button-hover-background);
+  --contextMenuEllipsisHoverFill: var(--artist-button-hover-color);
+  display: flex;
+  gap: 16px;
+}
+
+:root[data-app-theme="dark"] .artist-detail-header__buttons {
+  --artist-button-hover-background: #fff;
+  --artist-button-hover-color: #000;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-app-theme]) .artist-detail-header__buttons {
+    --artist-button-hover-background: #fff;
+    --artist-button-hover-color: #000;
+  }
+}
+
+@media (min-width: 1000px) {
+  .artist-detail-header__buttons {
+    gap: 10px;
+  }
+}
+
+.play-button--platter {
+  --iconCircleFillBG: var(--iconCircleFillBGOverride, var(--systemQuaternary));
+  --iconFillArrow: var(--playButtonIconColor, #fff);
+  border-radius: 50%;
+}
+
+.play-button--platter:not(.play-button--artwork-overlay) {
+  display: block;
+  line-height: 0;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .artist-detail-header__buttons .play-button--platter:hover {
+    --iconCircleFillBG: var(--playButtonCircleHoverColor, var(--keyColor, #000));
+    --iconFillArrow: var(--playButtonIconHoverColor, #fff);
+  }
+
+  .artist-detail-header__buttons .click-action:has(.shuffle):hover {
+    --button-action-color: var(--artist-button-hover-color);
+    --button-action-background-color: var(--artist-button-hover-background);
+  }
+}
+
+@media (pointer: coarse) {
+  .artist-detail-header__buttons .play-button--platter:enabled[data-pressed] {
+    --iconCircleFillBG: var(--playButtonCircleHoverColor, var(--keyColor, #000));
+    --iconFillArrow: var(--playButtonIconHoverColor, #fff);
+  }
+
+  .artist-detail-header__buttons .click-action:enabled:has(.shuffle)[data-pressed] {
+    --button-action-background-color: var(--artist-button-hover-background);
+    --button-action-color: var(--artist-button-hover-color);
+  }
+}
+
+.artist-detail-header__buttons svg {
+  fill: currentColor;
+}
+
+.play-button--platter.is-stand-alone .icon,
+.play-button--platter .icon {
+  height: var(--playButtonSize, 30px);
+  width: var(--playButtonSize, 30px);
+}
+
+.play-button--platter:not(.play-button--artwork-overlay) .icon {
+  background-color: var(--systemStandardThinMaterialSover-default_IC);
+  border-radius: 50%;
+  will-change: backdrop-filter;
+}
+
+@supports ((-webkit-backdrop-filter:blur(10px)) or (backdrop-filter:blur(10px))) {
+  .play-button--platter:not(.play-button--artwork-overlay) .icon {
+    -webkit-backdrop-filter: saturate(190%) blur(60px);
+    backdrop-filter: saturate(190%) blur(60px);
+    background-color: var(--systemStandardThinMaterialSover);
+  }
+}
+
+@supports ((-webkit-backdrop-filter:blur(10px)) or (backdrop-filter:blur(10px))) {
+  @media (prefers-color-scheme: dark) {
+    .play-button--platter:not(.play-button--artwork-overlay) .icon {
+      -webkit-backdrop-filter: saturate(180%) blur(60px);
+      backdrop-filter: saturate(180%) blur(60px);
+    }
+  }
+}
+
+.artist-detail-header .play-button .icon {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.artist-detail-header__buttons .click-action {
+  text-align: inherit;
+  align-items: center;
+  display: flex;
+  font: var(--body-emphasized);
+  height: var(--button-action-height, 36px);
+  justify-content: center;
+  min-width: var(--button-action-min-width-override, var(--button-action-min-width, none));
+  width: var(--button-action-width, 100%);
+  border-radius: var(--button-action-border-radius, 7px);
+  padding: var(--button-action-padding, 0 10px);
+  background-color: var(--button-action-background-color, var(--systemQuinary));
+  color: var(--button-action-color, var(--keyColor));
+}
+
+@media (min-width: 1260px) {
+
+  .artist-detail-header__buttons .click-action {
+    height: var(--button-action-height, 28px);
+    min-width: var(--button-action-min-width, 100px);
+    width: var(--button-action-width, auto);
+  }
+}
+
+.artist-detail-header__buttons .click-action svg {
+  flex-shrink: 0;
+  height: var(--button-action-icon-height, 12px);
+  position: relative;
+  top: var(--button-action-icon-top-offset, 1px);
+}
+
+.artist-detail-header__buttons .favorite-button:is([aria-pressed="true"], :enabled:hover:not([data-hover-suppressed])) {
+  background: transparent;
+}
+
+.artist-detail-header__buttons .favorite-icon__cutout {
+  fill: var(--artist-button-hover-background);
+}
+
+.artist-detail-header__buttons .favorite-icon__followed {
+  display: none;
+}
+
+.artist-detail-header__buttons .favorite-button:is([aria-pressed="true"], :enabled:hover:not([data-hover-suppressed])) .favorite-icon__unfollowed {
+  display: none;
+}
+
+.artist-detail-header__buttons .favorite-button:is([aria-pressed="true"], :enabled:hover:not([data-hover-suppressed])) .favorite-icon__followed {
+  display: inline;
+}
+
+.favorite-button {
+  align-items: center;
+  background: var(--favoriteButtonBackground, #0000);
+  display: flex;
+  height: var(--favoriteButtonSize, 100%);
+  justify-content: center;
+  line-height: 0;
+  width: var(--favoriteButtonSize, 100%);
+}
+
+.favorite-button--platter {
+  --favoriteIconStarOutline: var(--favoriteButtonStarOutline);
+  background: var(--favoriteButtonBackground, var(--systemQuinary));
+  border-radius: 50%;
+}
+
+.favorite-icon {
+  height: var(--favoriteIconSize, 28px);
+  width: var(--favoriteIconSize, 28px);
+}
+
+.favorite-icon__star {
+  fill: var(--favoriteIconStarOutline, var(--keyColor));
+}
+
+.artist-detail-header__buttons .more-button {
+  --contextMenuCircleFillOverride: var(--systemQuinary);
+  --contextMenuEllipsisFillOverride: var(--systemPrimary);
+}
+
+.empty-state--artist {
+  bottom: 0;
+  color: var(--systemSecondary);
+  height: 166px;
+  left: 0;
+  margin: auto;
+  max-width: 440px;
+  padding: 0 25px;
+  position: absolute;
+  right: 0;
+  text-align: center;
+  top: 0;
+  z-index: 1;
+}
+
+.artist-empty-state__artwork {
+  align-items: center;
+  display: flex;
+  height: 96px;
+  justify-content: center;
+  margin: 0 auto 20px;
+  width: 96px;
+}
+
+.empty-state__description {
+  font: var(--body);
+  margin-bottom: 5px;
+}
+
+@media (min-width: 1000px) {
+  .empty-state__description {
+    font: var(--title-3);
+  }
+}
+
+.artist-empty-state__cta {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+}
+
+.artist-empty-state__station-button {
+  align-items: center;
+  background: var(--systemQuinary);
+  border-radius: 6px;
+  color: var(--systemPrimary);
+  display: flex;
+  font: var(--body-emphasized);
+  gap: 4px;
+  height: 28px;
+  margin-top: 25px;
+  padding: 4px 16px;
+}

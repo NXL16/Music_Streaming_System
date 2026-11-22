@@ -101,7 +101,7 @@ export default function AppSidebar() {
       return {
         ...item,
         children: pinnedResources.map((resource) => ({
-          key: `pinned-${resource.resourceType}-${resource.resourceId}`,
+          key: `pinned-${resource.resourceType}-${resource.resourceId}-${resource.sourceAlbumId ?? ""}`,
           label: resource.title || resource.resourceId,
           subtitle: resource.subtitle,
           href:
@@ -120,6 +120,7 @@ export default function AppSidebar() {
           playbackSong: resource.playbackSong,
           resourceType: resource.resourceType,
           resourceId: resource.resourceId,
+          sourceAlbumId: resource.sourceAlbumId,
           isUserPlaylist:
             resource.resourceType === "playlists" &&
             (resource.resourceId === "favorite" ||

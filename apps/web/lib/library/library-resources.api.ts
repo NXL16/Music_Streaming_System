@@ -1,3 +1,5 @@
+import { librarySongKey } from "./library-song-key";
+import { invalidateCachedQueries } from "@/lib/api/query-cache";
 import { http } from "@/lib/api/http";
 import {
   removeRecentlyPlayedPlaylistSnapshot,
@@ -44,7 +46,7 @@ export type LibraryResource = LibraryResourceInput & {
 };
 
 export type OptimisticLibraryAddition = Array<
-  Pick<LibraryResource, "resourceType" | "resourceId">
+  Pick<LibraryResource, "resourceType" | "resourceId" | "sourceAlbumId">
 >;
 
 /** Enriched Library projection used by card and sidebar surfaces. */
@@ -56,7 +58,14 @@ export type LibraryMediaCardResource = {
   artworkUrl: string;
   catalogUrl: string;
   contentRating: string;
+  releaseDate?: string;
   artists: Array<{ id: string; name: string; url: string }>;
+  primaryArtists?: Array<{
+    id: string;
+    name: string;
+    url: string;
+    artwork?: CatalogArtwork;
+  }>;
   artwork?: CatalogArtwork;
   songIds?: string[];
   createdAt?: string;
@@ -64,7 +73,7 @@ export type LibraryMediaCardResource = {
 
 export type LibraryResourcesChange = Pick<
   LibraryResource,
-  "resourceType" | "resourceId"
+  "resourceType" | "resourceId" | "sourceAlbumId"
 > & {
   operation?:
     | "add"
@@ -117,6 +126,18 @@ const librarySyncChannel =
     : null;
 
 function notifyLibraryResourcesChanged(change?: LibraryResourcesChange) {
+  if (change?.operation !== "pin" && change?.operation !== "unpin") {
+    invalidateCachedQueries("library:song-pages:");
+    invalidateCachedQueries("library:music-videos:");
+    if (!change || change.resourceType === "playlists") {
+      invalidateCachedQueries("user-playlist-pages:");
+      invalidateCachedQueries(
+        change
+          ? `library:playlist-detail:${encodeURIComponent(change.resourceId)}:`
+          : "library:playlist-detail:",
+      );
+    }
+  }
   mediaCardsVersion += 1;
   libraryResourcesVersion += 1;
   cachedMediaCards = null;
@@ -160,7 +181,11 @@ if (librarySyncChannel) {
   ) => {
     const change = event.data;
     if (!change) return;
-    const key = resourceKey(change.resourceType, change.resourceId);
+    const key = resourceKey(
+      change.resourceType,
+      change.resourceId,
+      change.sourceAlbumId,
+    );
     if (change?.operation === "pending-remove") {
       pendingLibraryRemovalKeys.add(key);
       setPendingCascadeSongs(key, change.songIds);
@@ -279,8 +304,12 @@ function scheduleRemotePendingRemovalExpiry(
   remotePendingRemovalExpiries.set(key, cancel);
 }
 
-function resourceKey(resourceType: LibraryResourceType, resourceId: string) {
-  return `${resourceType}:${resourceId}`;
+function resourceKey(
+  resourceType: LibraryResourceType,
+  resourceId: string,
+  sourceAlbumId?: string,
+) {
+  return `${resourceType}:${resourceType === "songs" ? librarySongKey(resourceId, sourceAlbumId) : resourceId}`;
 }
 
 function uniqueSongIds(songIds?: string[]) {
@@ -303,7 +332,9 @@ async function resolvePendingCascadeSongIds(input: LibraryResourceInput) {
           resource.resourceType === "songs" &&
           resource.sourceAlbumId === input.resourceId,
       )
-      .map((resource) => resource.resourceId);
+      .map((resource) =>
+        librarySongKey(resource.resourceId, resource.sourceAlbumId),
+      );
   }
   return [];
 }
@@ -311,8 +342,11 @@ async function resolvePendingCascadeSongIds(input: LibraryResourceInput) {
 export function isLibraryResourcePendingRemoval(
   resourceType: LibraryResourceType,
   resourceId: string,
+  sourceAlbumId?: string,
 ) {
-  return pendingLibraryRemovalKeys.has(resourceKey(resourceType, resourceId));
+  return pendingLibraryRemovalKeys.has(
+    resourceKey(resourceType, resourceId, sourceAlbumId),
+  );
 }
 
 /**
@@ -323,9 +357,10 @@ export function isLibraryResourcePendingRemoval(
 function cancelPendingLibraryResourceRemoval(
   resourceType: LibraryResourceType,
   resourceId: string,
+  sourceAlbumId?: string,
 ) {
   const pendingRemoval = pendingLibraryRemovals.get(
-    resourceKey(resourceType, resourceId),
+    resourceKey(resourceType, resourceId, sourceAlbumId),
   );
   if (!pendingRemoval) return false;
 
@@ -403,17 +438,29 @@ export function optimisticallyAddLibraryResource(
   // Favourite also restores Library membership on the server. If the user
   // favourites during the Undo window, cancel the deferred removal first so
   // its timer cannot later delete the newly restored resource.
-  cancelPendingLibraryResourceRemoval(input.resourceType, input.resourceId);
+  cancelPendingLibraryResourceRemoval(
+    input.resourceType,
+    input.resourceId,
+    input.sourceAlbumId,
+  );
 
   const added: OptimisticLibraryAddition = [];
   const currentResources = [...(cachedResources ?? [])];
   const existingKeys = new Set(
     currentResources.map((resource) =>
-      resourceKey(resource.resourceType, resource.resourceId),
+      resourceKey(
+        resource.resourceType,
+        resource.resourceId,
+        resource.sourceAlbumId,
+      ),
     ),
   );
   const add = (resource: LibraryResource) => {
-    const key = resourceKey(resource.resourceType, resource.resourceId);
+    const key = resourceKey(
+      resource.resourceType,
+      resource.resourceId,
+      resource.sourceAlbumId,
+    );
     if (existingKeys.has(key)) return;
     existingKeys.add(key);
     currentResources.push(resource);
@@ -421,6 +468,7 @@ export function optimisticallyAddLibraryResource(
     added.push({
       resourceType: resource.resourceType,
       resourceId: resource.resourceId,
+      sourceAlbumId: resource.sourceAlbumId,
     });
   };
 
@@ -473,14 +521,24 @@ export function rollbackOptimisticLibraryAddition(
   if (!added.length) return;
   const addedKeys = new Set(
     added.map((resource) =>
-      resourceKey(resource.resourceType, resource.resourceId),
+      resourceKey(
+        resource.resourceType,
+        resource.resourceId,
+        resource.sourceAlbumId,
+      ),
     ),
   );
   addedKeys.forEach((key) => pendingOptimisticLibraryAdditions.delete(key));
   cachedResources =
     cachedResources?.filter(
       (resource) =>
-        !addedKeys.has(resourceKey(resource.resourceType, resource.resourceId)),
+        !addedKeys.has(
+          resourceKey(
+            resource.resourceType,
+            resource.resourceId,
+            resource.sourceAlbumId,
+          ),
+        ),
     ) ?? null;
   const change: LibraryResourcesChange = {
     resourceType: added[0].resourceType,
@@ -498,7 +556,7 @@ export async function getLibraryResources() {
   if (loadingResources) return loadingResources;
 
   const requestVersion = libraryResourcesVersion;
-  loadingResources = http
+  const request = http
     .get<{ resources: LibraryResource[] }>("/songs/library/resources")
     .then(({ data }) => {
       const resources = data.resources.filter(
@@ -506,15 +564,23 @@ export async function getLibraryResources() {
           !isLibraryResourcePendingRemoval(
             resource.resourceType,
             resource.resourceId,
+            resource.sourceAlbumId,
           ),
       );
 
       const serverKeys = new Set(
         resources.map((resource) =>
-          resourceKey(resource.resourceType, resource.resourceId),
+          resourceKey(
+            resource.resourceType,
+            resource.resourceId,
+            resource.sourceAlbumId,
+          ),
         ),
       );
-      for (const [key, optimisticResource] of pendingOptimisticLibraryAdditions) {
+      for (const [
+        key,
+        optimisticResource,
+      ] of pendingOptimisticLibraryAdditions) {
         if (serverKeys.has(key)) {
           pendingOptimisticLibraryAdditions.delete(key);
         } else {
@@ -535,10 +601,11 @@ export async function getLibraryResources() {
       return resources;
     })
     .finally(() => {
-      loadingResources = null;
+      if (loadingResources === request) loadingResources = null;
     });
 
-  return loadingResources;
+  loadingResources = request;
+  return request;
 }
 
 /**
@@ -547,12 +614,8 @@ export async function getLibraryResources() {
  * `/songs/library/media-cards` independently after the same mutation.
  */
 export async function getLibraryMediaCards() {
-  if (
-    cachedMediaCards &&
-    Date.now() - mediaCardsCachedAt < LIBRARY_CACHE_TTL_MS
-  ) {
-    return cachedMediaCards;
-  }
+  const cached = getLibraryMediaCardsSnapshot();
+  if (cached) return cached;
   if (loadingMediaCards) return loadingMediaCards;
 
   const requestVersion = mediaCardsVersion;
@@ -581,15 +644,24 @@ export async function getLibraryMediaCards() {
   return loadingMediaCards;
 }
 
+export function getLibraryMediaCardsSnapshot() {
+  return cachedMediaCards &&
+    Date.now() - mediaCardsCachedAt < LIBRARY_CACHE_TTL_MS
+    ? cachedMediaCards
+    : undefined;
+}
+
 export function isLibraryResource(
   resourceType: LibraryResourceType,
   resourceId: string,
+  sourceAlbumId?: string,
 ) {
   return Boolean(
     cachedResources?.some(
       (resource) =>
         resource.resourceType === resourceType &&
-        resource.resourceId === resourceId,
+        resource.resourceId === resourceId &&
+        (!sourceAlbumId || resource.sourceAlbumId === sourceAlbumId),
     ),
   );
 }
@@ -617,12 +689,14 @@ export function isLibraryAlbumComplete(albumId: string, songIds?: string[]) {
 export function isLibraryResourcePinned(
   resourceType: LibraryResourceType,
   resourceId: string,
+  sourceAlbumId?: string,
 ) {
   return Boolean(
     cachedResources?.find(
       (resource) =>
         resource.resourceType === resourceType &&
-        resource.resourceId === resourceId,
+        resource.resourceId === resourceId &&
+        (!sourceAlbumId || resource.sourceAlbumId === sourceAlbumId),
     )?.isPinned,
   );
 }
@@ -632,9 +706,14 @@ export function hasLibraryResourceMembership(input: {
   resourceId: string;
   songIds?: string[];
   isLibraryAlbumView?: boolean;
+  sourceAlbumId?: string;
 }) {
   if (input.resourceType !== "albums") {
-    return isLibraryResource(input.resourceType, input.resourceId);
+    return isLibraryResource(
+      input.resourceType,
+      input.resourceId,
+      input.sourceAlbumId,
+    );
   }
   if (input.isLibraryAlbumView) {
     return isLibraryResource("albums", input.resourceId);
@@ -653,7 +732,11 @@ async function addLibraryResourceInternal(
   sourceId?: string,
 ) {
   if (
-    cancelPendingLibraryResourceRemoval(input.resourceType, input.resourceId)
+    cancelPendingLibraryResourceRemoval(
+      input.resourceType,
+      input.resourceId,
+      input.sourceAlbumId,
+    )
   ) {
     return;
   }
@@ -668,6 +751,7 @@ async function addLibraryResourceInternal(
     // A saved track creates its parent Album; saving a catalog Album creates
     // every child Song. Always refetch this server-derived membership set so
     // Detail controls and every Context Menu read the exact same state.
+    libraryResourcesVersion += 1;
     cachedResources = null;
     cachedAt = 0;
     loadingResources = null;
@@ -675,7 +759,7 @@ async function addLibraryResourceInternal(
     await getLibraryResources();
 
     const mutationWasPersisted = savedSongAlbumId
-      ? isLibraryResource("songs", input.resourceId)
+      ? isLibraryResource("songs", input.resourceId, input.sourceAlbumId)
       : isLibraryAlbumComplete(input.resourceId, input.songIds);
     if (!mutationWasPersisted) {
       // Never leave the UI in a false "saved" state when a collection
@@ -707,6 +791,7 @@ async function addLibraryResourceInternal(
   const change = {
     resourceType: input.resourceType,
     resourceId: input.resourceId,
+    sourceAlbumId: input.sourceAlbumId,
     sourceId,
     operation: "add" as const,
   };
@@ -748,20 +833,30 @@ export function addLibraryResource(
 async function pinLibraryResourceInternal(
   resourceType: LibraryResourceType,
   resourceId: string,
+  sourceAlbumId?: string,
 ) {
-  await http.post(`/songs/library/resources/${resourceType}/${resourceId}/pin`);
+  await http.post(
+    `/songs/library/resources/${resourceType}/${resourceId}/pin`,
+    { sourceAlbumId },
+  );
 
   if (cachedResources) {
     const pinnedAt = Date.now();
     cachedResources = cachedResources.map((resource) =>
       resource.resourceType === resourceType &&
-      resource.resourceId === resourceId
+      resource.resourceId === resourceId &&
+      (!sourceAlbumId || resource.sourceAlbumId === sourceAlbumId)
         ? { ...resource, isPinned: true, pinnedAt }
         : resource,
     );
   }
 
-  const change = { resourceType, resourceId, operation: "pin" as const };
+  const change = {
+    resourceType,
+    resourceId,
+    sourceAlbumId,
+    operation: "pin" as const,
+  };
   notifyLibraryResourcesChanged(change);
   broadcastLibraryResourcesChanged(change);
 }
@@ -769,21 +864,29 @@ async function pinLibraryResourceInternal(
 async function unpinLibraryResourceInternal(
   resourceType: LibraryResourceType,
   resourceId: string,
+  sourceAlbumId?: string,
 ) {
   await http.delete(
     `/songs/library/resources/${resourceType}/${resourceId}/pin`,
+    { data: { sourceAlbumId } },
   );
 
   if (cachedResources) {
     cachedResources = cachedResources.map((resource) =>
       resource.resourceType === resourceType &&
-      resource.resourceId === resourceId
+      resource.resourceId === resourceId &&
+      (!sourceAlbumId || resource.sourceAlbumId === sourceAlbumId)
         ? { ...resource, isPinned: false, pinnedAt: 0 }
         : resource,
     );
   }
 
-  const change = { resourceType, resourceId, operation: "unpin" as const };
+  const change = {
+    resourceType,
+    resourceId,
+    sourceAlbumId,
+    operation: "unpin" as const,
+  };
   notifyLibraryResourcesChanged(change);
   broadcastLibraryResourcesChanged(change);
 }
@@ -791,22 +894,29 @@ async function unpinLibraryResourceInternal(
 export async function toggleLibraryResourcePin(
   resourceType: LibraryResourceType,
   resourceId: string,
+  sourceAlbumId?: string,
 ): Promise<boolean> {
   return withResourceMutation(resourceType, resourceId, async () => {
     const resources = await getLibraryResources();
     const resource = resources.find(
       (item) =>
-        item.resourceType === resourceType && item.resourceId === resourceId,
+        item.resourceType === resourceType &&
+        item.resourceId === resourceId &&
+        (!sourceAlbumId || item.sourceAlbumId === sourceAlbumId),
     );
 
     if (!resource) throw new Error("LIBRARY_RESOURCE_NOT_FOUND");
 
     if (resource.isPinned) {
-      await unpinLibraryResourceInternal(resourceType, resourceId);
+      await unpinLibraryResourceInternal(
+        resourceType,
+        resourceId,
+        sourceAlbumId,
+      );
       return false;
     }
 
-    await pinLibraryResourceInternal(resourceType, resourceId);
+    await pinLibraryResourceInternal(resourceType, resourceId, sourceAlbumId);
     return true;
   });
 }
@@ -846,9 +956,16 @@ async function removeLibraryResourceInternal(
   }
 
   if (data.removedFavoriteSongIds?.length) {
-    removeFavoriteSongsFromStore(data.removedFavoriteSongIds);
+    removeFavoriteSongsFromStore(
+      data.removedFavoriteSongIds,
+      resourceType === "albums" ? resourceId : (cascade?.sourceAlbumId ?? ""),
+    );
     for (const songId of data.removedFavoriteSongIds) {
-      notifyFavoriteChanged(songId, false);
+      notifyFavoriteChanged(
+        songId,
+        false,
+        resourceType === "albums" ? resourceId : (cascade?.sourceAlbumId ?? ""),
+      );
     }
   }
 
@@ -876,13 +993,17 @@ async function removeLibraryResourceInternal(
     cachedResources = cachedResources.filter(
       (resource) =>
         resource.resourceType !== resourceType ||
-        resource.resourceId !== resourceId,
+        resource.resourceId !== resourceId ||
+        (resourceType === "songs" &&
+          !!cascade?.sourceAlbumId &&
+          resource.sourceAlbumId !== cascade.sourceAlbumId),
     );
   }
 
   const change = {
     resourceType,
     resourceId,
+    sourceAlbumId: cascade?.sourceAlbumId,
     sourceId,
     sourceOrigin: cascade?.sourceOrigin,
     operation: "remove" as const,
@@ -923,7 +1044,11 @@ export async function beginLibraryResourceRemoval(
     );
   }
 
-  const pendingKey = resourceKey(input.resourceType, input.resourceId);
+  const pendingKey = resourceKey(
+    input.resourceType,
+    input.resourceId,
+    input.sourceAlbumId,
+  );
   // A second delete of the same item should start from a clean, saved state.
   pendingLibraryRemovals.get(pendingKey)?.undo();
 
@@ -941,13 +1066,23 @@ export async function beginLibraryResourceRemoval(
       ? new Set(pendingSongIds)
       : new Set<string>();
   const removedSongIds =
-    input.resourceType === "albums" ? [...cascadedSongIds] : [input.resourceId];
+    input.resourceType === "albums"
+      ? resources
+          .filter(
+            (r) =>
+              r.resourceType === "songs" &&
+              r.sourceAlbumId === input.resourceId,
+          )
+          .map((r) => r.resourceId)
+      : [input.resourceId];
   const sourceAlbumId =
     input.resourceType === "songs"
       ? resources.find(
           (resource) =>
             resource.resourceType === "songs" &&
-            resource.resourceId === input.resourceId,
+            resource.resourceId === input.resourceId &&
+            (!input.sourceAlbumId ||
+              resource.sourceAlbumId === input.sourceAlbumId),
         )?.sourceAlbumId
       : undefined;
   const removedEmptyAlbumId =
@@ -961,20 +1096,25 @@ export async function beginLibraryResourceRemoval(
       : undefined;
   const cascadeAlbumId =
     input.resourceType === "albums" ? input.resourceId : removedEmptyAlbumId;
-  const cascadedMusicVideoIds = new Set(
-    [
-      ...linkedMusicVideoIds,
-      ...(cascadeAlbumId
-        ? resources
-            .filter(
-              (resource) =>
-                resource.resourceType === "music-videos" &&
-                resource.sourceAlbumId === cascadeAlbumId,
-            )
-            .map((resource) => resource.resourceId)
-        : []),
-    ],
-  );
+  const cascadedMusicVideoIds = new Set([
+    ...linkedMusicVideoIds.filter((id) =>
+      resources.some(
+        (resource) =>
+          resource.resourceType === "music-videos" &&
+          resource.resourceId === id &&
+          resource.sourceAlbumId === sourceAlbumId,
+      ),
+    ),
+    ...(cascadeAlbumId
+      ? resources
+          .filter(
+            (resource) =>
+              resource.resourceType === "music-videos" &&
+              resource.sourceAlbumId === cascadeAlbumId,
+          )
+          .map((resource) => resource.resourceId)
+      : []),
+  ]);
   const favoriteAlbumId =
     input.resourceType === "albums" ? input.resourceId : removedEmptyAlbumId;
   const [wasAlbumFavorite] = await Promise.all([
@@ -993,15 +1133,22 @@ export async function beginLibraryResourceRemoval(
     input.resourceType === "playlists" &&
     usePlaylistFavoriteStore.getState().playlistIds.has(input.resourceId);
   const favoriteSongs = useFavoriteStore.getState().songs;
-  const removedFavoriteSongs = favoriteSongs.filter((song) =>
-    removedSongIds.includes(song.id),
+  const removedFavoriteSongs = favoriteSongs.filter(
+    (song) =>
+      removedSongIds.includes(song.id) &&
+      song.albumId ===
+        (input.resourceType === "albums" ? input.resourceId : sourceAlbumId),
   );
   const removedResources = resources.filter(
     (resource) =>
       (resource.resourceType === input.resourceType &&
-        resource.resourceId === input.resourceId) ||
+        resource.resourceId === input.resourceId &&
+        (input.resourceType !== "songs" ||
+          resource.sourceAlbumId === sourceAlbumId)) ||
       (resource.resourceType === "songs" &&
-        cascadedSongIds.has(resource.resourceId)) ||
+        cascadedSongIds.has(
+          librarySongKey(resource.resourceId, resource.sourceAlbumId),
+        )) ||
       (resource.resourceType === "music-videos" &&
         cascadedMusicVideoIds.has(resource.resourceId)) ||
       (resource.resourceType === "albums" &&
@@ -1016,7 +1163,11 @@ export async function beginLibraryResourceRemoval(
   // stale Library response could merge that row back into the local snapshot.
   for (const resource of removedResources) {
     pendingOptimisticLibraryAdditions.delete(
-      resourceKey(resource.resourceType, resource.resourceId),
+      resourceKey(
+        resource.resourceType,
+        resource.resourceId,
+        resource.sourceAlbumId,
+      ),
     );
   }
   cachedResources = resources.filter(
@@ -1035,6 +1186,7 @@ export async function beginLibraryResourceRemoval(
   const pendingChange: LibraryResourcesChange = {
     resourceType: input.resourceType,
     resourceId: input.resourceId,
+    sourceAlbumId: input.sourceAlbumId,
     sourceId,
     sourceOrigin: input.sourceOrigin,
     operation: "pending-remove",
@@ -1064,9 +1216,14 @@ export async function beginLibraryResourceRemoval(
     notifyPlaylistFavoriteChanged(input.resourceId, false);
   }
   if (removedFavoriteSongs.length) {
-    removeFavoriteSongsFromStore(removedFavoriteSongs.map((song) => song.id));
+    removeFavoriteSongsFromStore(
+      removedFavoriteSongs.map((song) => song.id),
+      input.resourceType === "albums"
+        ? input.resourceId
+        : (sourceAlbumId ?? ""),
+    );
     for (const song of removedFavoriteSongs) {
-      notifyFavoriteChanged(song.id, false);
+      notifyFavoriteChanged(song.id, false, song.albumId ?? "", true);
     }
   }
   if (cascadedSongIds.size) {
@@ -1099,7 +1256,11 @@ export async function beginLibraryResourceRemoval(
     const current = cachedResources ?? [];
     const currentKeys = new Set(
       current.map((resource) =>
-        resourceKey(resource.resourceType, resource.resourceId),
+        resourceKey(
+          resource.resourceType,
+          resource.resourceId,
+          resource.sourceAlbumId,
+        ),
       ),
     );
     cachedResources = [
@@ -1107,13 +1268,18 @@ export async function beginLibraryResourceRemoval(
       ...removedResources.filter(
         (resource) =>
           !currentKeys.has(
-            resourceKey(resource.resourceType, resource.resourceId),
+            resourceKey(
+              resource.resourceType,
+              resource.resourceId,
+              resource.sourceAlbumId,
+            ),
           ),
       ),
     ];
     const restoreChange: LibraryResourcesChange = {
       resourceType: input.resourceType,
       resourceId: input.resourceId,
+      sourceAlbumId: input.sourceAlbumId,
       sourceId,
       sourceOrigin: input.sourceOrigin,
       operation: "restore",
@@ -1139,7 +1305,7 @@ export async function beginLibraryResourceRemoval(
     if (removedFavoriteSongs.length) {
       restoreFavoriteSongsToStore(removedFavoriteSongs);
       for (const song of removedFavoriteSongs) {
-        notifyFavoriteChanged(song.id, true);
+        notifyFavoriteChanged(song.id, true, song.albumId ?? "");
       }
     }
     if (cascadedSongIds.size) {

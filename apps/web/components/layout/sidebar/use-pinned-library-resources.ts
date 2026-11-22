@@ -1,3 +1,4 @@
+import { librarySongKey } from "@/lib/library/library-song-key";
 import { useEffect, useState } from "react";
 import { catalogArtworkSrcSet } from "@/lib/catalog/catalog.mapper";
 import type { CatalogArtwork } from "@/lib/catalog/catalog.types";
@@ -5,7 +6,7 @@ import { THUMBNAIL_ARTWORK_WIDTHS } from "@/lib/media/artwork-slots";
 import { getArtworkSrcSet } from "@/lib/media/artwork";
 import { playlistArtworkVariants } from "@/lib/playlists/generated-playlist-cover";
 import type { SongSummary } from "@/lib/songs/song.types";
-import { listFavoriteSongs, listLibrarySongs } from "@/lib/songs/song.api";
+import { listFavoriteSongs, getAllLibrarySongs } from "@/lib/songs/song.api";
 import {
   getLibraryResources,
   getLibraryMediaCards,
@@ -58,10 +59,9 @@ export function usePinnedLibraryResources(userId?: string) {
         );
         const [mediaCards, librarySongs, favoriteResponse] = await Promise.all([
           getLibraryMediaCards(),
-          listLibrarySongs({
-            songIds: pinnedSongIds,
-            limit: pinnedSongIds.length || 1,
-          }),
+          pinnedSongIds.length
+            ? getAllLibrarySongs({ songIds: pinnedSongIds })
+            : Promise.resolve([]),
           hasPinnedFavoriteCollection
             ? listFavoriteSongs({ limit: 1 })
             : Promise.resolve(undefined),
@@ -76,12 +76,17 @@ export function usePinnedLibraryResources(userId?: string) {
           ]),
         );
         const songById = new Map(
-          (librarySongs.songs ?? []).map((song) => [song.id, song]),
+          librarySongs.map((song) => [
+            librarySongKey(song.id, song.albumId),
+            song,
+          ]),
         );
         const resourcesWithMetadata = pinnedResources.map((resource) => {
           const song =
             resource.resourceType === "songs"
-              ? songById.get(resource.resourceId)
+              ? songById.get(
+                  librarySongKey(resource.resourceId, resource.sourceAlbumId),
+                )
               : undefined;
           if (song) {
             return {
@@ -151,6 +156,7 @@ export function usePinnedLibraryResources(userId?: string) {
           !isLibraryResourcePendingRemoval(
             resource.resourceType,
             resource.resourceId,
+            resource.sourceAlbumId,
           ),
       )
     : [];

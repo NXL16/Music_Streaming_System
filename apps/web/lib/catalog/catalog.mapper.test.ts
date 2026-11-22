@@ -74,7 +74,7 @@ describe("mapCatalogTracks", () => {
       sourceAlbumId: "album-context",
       albumUrl: "/album/context-album/album-context",
       durationSec: 180,
-      playbackUrl: "mse:song-1",
+      playbackUrl: "stream:song-1",
       artworkBgColor: "#112233",
     });
     expect(track.artists).toEqual([
@@ -155,6 +155,8 @@ describe("mapCatalogTracks", () => {
   });
 
   it("does not fall back when a requested album does not contain the song", () => {
-    expect(mapCatalogTracks(response, { albumId: "missing-album" })).toEqual([]);
+    expect(mapCatalogTracks(response, { albumId: "missing-album" })).toEqual(
+      [],
+    );
   });
 });

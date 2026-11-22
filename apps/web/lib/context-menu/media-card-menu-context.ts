@@ -3,6 +3,7 @@ import type { ContextMenuContext } from "./types";
 
 export function getMediaCardMenuContext(
   card: MediaCardProps,
+  userId?: string,
 ): ContextMenuContext | undefined {
   if (card.menuContext) return card.menuContext;
 
@@ -28,6 +29,8 @@ export function getMediaCardMenuContext(
       artworkUrl: card.imageUrl,
       href: card.slug,
       songIds: card.songIds,
+      userId,
+      isLibraryView: card.slug?.startsWith("/library/albums/") ?? false,
       inLibrary: false,
     };
   }
@@ -45,6 +48,7 @@ export function getMediaCardMenuContext(
       artworkUrl: card.imageUrl,
       href: card.slug,
       songIds: card.songIds,
+      userId,
       inLibrary: true,
     };
   }
@@ -61,6 +65,7 @@ export function getMediaCardMenuContext(
       artworkUrl: card.imageUrl,
       href: card.slug,
       songIds: card.songIds,
+      userId,
       inLibrary: false,
     };
   }
@@ -76,6 +81,7 @@ export function getMediaCardMenuContext(
     artworkUrl: card.imageUrl,
     href: card.slug,
     songIds: card.songIds,
+    userId,
     inLibrary: false,
   };
 }

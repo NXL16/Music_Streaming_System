@@ -1,3 +1,5 @@
+import { useAuthStore } from "@/lib/auth/auth-store";
+import { librarySongKey } from "@/lib/library/library-song-key";
 import {
   notifyMenuError,
   notifyMenuSuccess,
@@ -8,13 +10,17 @@ const pendingToggles = new Map<string, Promise<boolean | null>>();
 
 /** Toggles a song once across all UI surfaces and reports the shared outcome. */
 export function toggleSongFavorite(songId: string, sourceAlbumId?: string) {
-  const pending = pendingToggles.get(songId);
+  const session = useAuthStore.getState().sessionVersion;
+  const key = JSON.stringify([session, librarySongKey(songId, sourceAlbumId)]);
+  const isCurrent = () => useAuthStore.getState().sessionVersion === session;
+  const pending = pendingToggles.get(key);
   if (pending) return pending;
 
   const request = useFavoriteStore
     .getState()
     .toggle(songId, sourceAlbumId)
     .then((isFavorite) => {
+      if (!isCurrent()) return null;
       notifyMenuSuccess(
         isFavorite
           ? "Added to Favourite Songs"
@@ -23,15 +29,15 @@ export function toggleSongFavorite(songId: string, sourceAlbumId?: string) {
       return isFavorite;
     })
     .catch(() => {
-      notifyMenuError("Couldn't update Favourite Songs");
+      if (isCurrent()) notifyMenuError("Couldn't update Favourite Songs");
       return null;
     })
     .finally(() => {
-      if (pendingToggles.get(songId) === request) {
-        pendingToggles.delete(songId);
+      if (pendingToggles.get(key) === request) {
+        pendingToggles.delete(key);
       }
     });
 
-  pendingToggles.set(songId, request);
+  pendingToggles.set(key, request);
   return request;
 }

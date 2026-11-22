@@ -3,8 +3,10 @@ const FAVORITES_SYNC_CHANNEL = "favorite-changes";
 
 export type FavoriteChange = {
   songId: string;
+  sourceAlbumId: string;
   isFavorite: boolean;
   remote: boolean;
+  pending?: boolean;
 };
 
 const favoritesSyncChannel =
@@ -33,11 +35,16 @@ if (favoritesSyncChannel) {
   };
 }
 
-/** Broadcasts a completed favorite mutation; remote tabs rehydrate from API. */
-export function notifyFavoriteChanged(songId: string, isFavorite: boolean) {
-  const change = { songId, isFavorite };
+/** Other tabs revalidate only after the release-specific mutation commits. */
+export function notifyFavoriteChanged(
+  songId: string,
+  isFavorite: boolean,
+  sourceAlbumId: string,
+  pending = false,
+) {
+  const change = { songId, isFavorite, sourceAlbumId, pending };
   dispatchFavoriteChange(change, false);
-  favoritesSyncChannel?.postMessage(change);
+  if (!pending) favoritesSyncChannel?.postMessage(change);
 }
 
 export function subscribeFavoriteChanges(

@@ -34,11 +34,7 @@ const artistResources: Record<string, CatalogArtistResource> = {
 
 describe("mapCatalogAlbumResources", () => {
   it("keeps linked artists when album resources are mapped outside a catalog response", () => {
-    const [card] = mapCatalogAlbumResources(
-      [album],
-      {},
-      artistResources,
-    );
+    const [card] = mapCatalogAlbumResources([album], {}, artistResources);
 
     expect(card.artists).toEqual([
       {
@@ -51,6 +47,37 @@ describe("mapCatalogAlbumResources", () => {
 });
 
 describe("mapSearchResults", () => {
+  it("does not discard results containing only music videos", () => {
+    const results = mapSearchResults({
+      data: [],
+      resources: { albums: {}, artists: {}, playlists: {}, songs: {} },
+      musicVideos: [
+        {
+          id: "v1",
+          songId: "s1",
+          videoAssetId: "asset-1",
+          durationMillis: 180000,
+          width: 1920,
+          height: 1080,
+          albumName: "Album",
+          genreNames: [],
+          releaseTrackId: "release-1",
+          songTitle: "Video",
+          artistName: "Artist",
+          artists: [],
+          kind: "official",
+          publishedAt: "2026-01-01",
+          releaseDate: "2026-01-01",
+          contentRating: "clean",
+          posterSrcSet: "",
+          posterUrl: "",
+          posterBgColor: "",
+        },
+      ],
+    });
+    expect(results.musicVideos).toHaveLength(1);
+    expect(results.isEmpty).toBe(false);
+  });
   it("maps public playlist resources into the playlist result group", () => {
     const playlist = {
       id: "playlist-1",

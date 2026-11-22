@@ -19,7 +19,7 @@ const CardPlayButton = memo(function CardPlayButton({
 
   if (variant === "hero") {
     return (
-      <div className="absolute bottom-20.5 inset-s-auto inset-e-(--badge-x-inset) z-(--z-default) opacity-0 group-hover:opacity-100 transition-all duration-300 ease-in-out">
+      <div className="absolute bottom-20.5 inset-s-auto inset-e-(--badge-x-inset) z-(--z-default) opacity-0 group-hover:opacity-100 transition-all duration-300 ease-in-out pointer-coarse:invisible">
         <button
           aria-label={ariaLabel}
           onClick={handlePlay}

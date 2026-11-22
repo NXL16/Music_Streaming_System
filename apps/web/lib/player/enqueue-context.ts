@@ -18,6 +18,7 @@ import { getMySong } from "@/lib/songs/song.api";
 import { getCatalogMusicVideo } from "@/lib/catalog/music-videos.api";
 import { toVideoPlayerSong } from "@/lib/catalog/play-catalog-music-video";
 import { getLibraryResources } from "@/lib/library/library-resources.api";
+import { libraryAlbumSongIds } from "@/lib/library/library-album-song-ids";
 import { projectSongSummary } from "@/lib/songs/project-song-summary";
 import { withPlaylistPlaybackSource } from "./playlist-playback-source";
 import {
@@ -103,11 +104,20 @@ async function resolveFavoriteTracks(context: ContextMenuContext) {
   });
 }
 
-async function resolveSongTracks(songId: string): Promise<PlayerSong[]> {
+async function resolveSongTracks(
+  songId: string,
+  sourceAlbumId?: string,
+): Promise<PlayerSong[]> {
   try {
     const catalogTracks = mapCatalogTracks(
-      await getCatalogResources([{ id: songId, type: "songs" }]),
-    );
+      await getCatalogResources([
+        {
+          id: sourceAlbumId ?? songId,
+          type: sourceAlbumId ? "albums" : "songs",
+        },
+      ]),
+      sourceAlbumId ? { albumId: sourceAlbumId } : undefined,
+    ).filter((track) => track.id === songId);
     if (catalogTracks.length) return catalogTracks;
   } catch {
     // Fall through to the authenticated private-song lookup below.
@@ -130,7 +140,7 @@ async function resolveVideoTracks(
 ): Promise<PlayerSong[]> {
   const [video, songs] = await Promise.all([
     getCatalogMusicVideo(context.videoId),
-    resolveSongTracks(context.songId),
+    resolveSongTracks(context.songId, context.sourceAlbumId),
   ]);
   const song = songs.find((item) => item.id === context.songId) ?? songs[0];
   return song && video.videoAssetId ? [toVideoPlayerSong(video, song)] : [];
@@ -139,7 +149,8 @@ async function resolveVideoTracks(
 async function resolveContextTracks(
   context: ContextMenuContext,
 ): Promise<PlayerSong[]> {
-  if (context.kind === "song") return resolveSongTracks(context.songId);
+  if (context.kind === "song")
+    return resolveSongTracks(context.songId, context.sourceAlbumId);
   if (context.kind === "video") return resolveVideoTracks(context);
   if (context.kind !== "collection") return [];
 
@@ -159,13 +170,7 @@ async function resolveContextTracks(
   // A Library Album can be created by saving only some of a release's songs.
   // Queue only those persisted Library Songs, never the hidden catalog tracks.
   const savedSongIds = new Set(
-    (await getLibraryResources())
-      .filter(
-        (resource) =>
-          resource.resourceType === "songs" &&
-          resource.sourceAlbumId === context.resourceId,
-      )
-      .map((resource) => resource.resourceId),
+    libraryAlbumSongIds(await getLibraryResources(), [context.resourceId]),
   );
   return tracks.filter((track) => savedSongIds.has(track.id));
 }

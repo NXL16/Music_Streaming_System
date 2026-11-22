@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  getCachedQuery,
+  getCachedQuerySnapshot,
+  invalidateCachedQuery,
+} from "@/lib/api/query-cache";
+import { useAuthStore } from "@/lib/auth/auth-store";
 import EmptyState from "@/components/layout/empty-state";
 import HeaderWithSort from "@/components/layout/header-with-sort";
 import CatalogPageLoading from "@/components/loading/catalog-page-loading";
@@ -26,9 +32,19 @@ type LibraryMusicVideo = {
 };
 
 export default function MusicVideosPage() {
+  const userId = useAuthStore((state) => state.user?.userId);
+  return <MusicVideosContent key={userId ?? "guest"} userId={userId} />;
+}
+
+function MusicVideosContent({ userId }: { userId?: string }) {
   const revision = useLibraryResourcesRevision();
-  const [videos, setVideos] = useState<LibraryMusicVideo[]>();
-  const [loading, setLoading] = useState(true);
+  const cacheKey = `library:music-videos:${userId ?? "guest"}`;
+  const cachedVideos = useMemo(
+    () => getCachedQuerySnapshot<LibraryMusicVideo[]>(cacheKey),
+    [cacheKey],
+  );
+  const [videos, setVideos] = useState(cachedVideos);
+  const [loading, setLoading] = useState(!cachedVideos);
   const [error, setError] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
   const [sortBy, setSortBy] = useState<LibrarySortBy>("recently-added");
@@ -37,10 +53,10 @@ export default function MusicVideosPage() {
   const visibleLoading = useMinimumLoadingDuration(loading);
 
   useEffect(() => {
+    if (!userId) return;
     let active = true;
-    setError(false);
-    void getLibraryResources()
-      .then(async (resources) => {
+    void getCachedQuery(cacheKey, () =>
+      getLibraryResources().then(async (resources) => {
         const videoResources = resources
           .filter((resource) => resource.resourceType === "music-videos")
           .map((resource, index) => ({
@@ -58,9 +74,11 @@ export default function MusicVideosPage() {
         return resolvedVideos.filter(
           (entry): entry is LibraryMusicVideo => entry !== null,
         );
-      })
+      }),
+    )
       .then((libraryVideos) => {
         if (!active) return;
+        setError(false);
         setVideos(libraryVideos);
       })
       .catch(() => {
@@ -75,7 +93,7 @@ export default function MusicVideosPage() {
     return () => {
       active = false;
     };
-  }, [revision, retryKey]);
+  }, [cacheKey, revision, retryKey, userId]);
 
   const cards = useMemo(() => {
     const sort = [...(videos ?? [])].sort((left, right) => {
@@ -85,9 +103,12 @@ export default function MusicVideosPage() {
           : left.createdAt - right.createdAt;
       return sortDirection === "ascending" ? comparison : -comparison;
     });
-    return mapCatalogMusicVideoCards(sort.map(({ video }) => video), {
-      artistShelf: false,
-    });
+    return mapCatalogMusicVideoCards(
+      sort.map(({ video }) => video),
+      {
+        artistShelf: false,
+      },
+    );
   }, [sortBy, sortDirection, videos]);
 
   if (visibleLoading) {
@@ -95,7 +116,16 @@ export default function MusicVideosPage() {
   }
 
   if (error) {
-    return <RequestErrorState onRetry={() => setRetryKey((key) => key + 1)} />;
+    return (
+      <RequestErrorState
+        onRetry={() => {
+          invalidateCachedQuery(cacheKey);
+          setLoading(true);
+          setError(false);
+          setRetryKey((key) => key + 1);
+        }}
+      />
+    );
   }
 
   if (!cards.length) {

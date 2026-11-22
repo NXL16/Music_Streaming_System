@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { PlayerSong } from "./use-player-store";
-import { usePlayerStore } from "./use-player-store";
+import { playerSongKey, usePlayerStore } from "./use-player-store";
 
 function song(id: string): PlayerSong {
   return {
@@ -10,13 +10,30 @@ function song(id: string): PlayerSong {
     album: "Album",
     durationSec: 180,
     artworkUrl: "",
-    playbackUrl: `mse:${id}`,
+    playbackUrl: `stream:${id}`,
   };
 }
 
 afterEach(() => usePlayerStore.getState().clear());
 
 describe("player queue insertion", () => {
+  it("keeps release copies independent when enqueueing, shuffling, selecting and removing", () => {
+    const large = { ...song("b"), albumId: "large" };
+    const single = { ...song("b"), albumId: "single" };
+    const player = usePlayerStore.getState();
+    player.setQueue([large]);
+    player.enqueue([single, song("c")], "last");
+    expect(usePlayerStore.getState().queue).toHaveLength(3);
+    player.toggleShuffle();
+    expect(usePlayerStore.getState().queue).toHaveLength(3);
+    player.toggleShuffle();
+    expect(usePlayerStore.getState().queue).toEqual([large, single, song("c")]);
+    player.removeUpcomingSong(playerSongKey(single));
+    expect(usePlayerStore.getState().queue).toEqual([large, song("c")]);
+    player.enqueue([single], "last");
+    expect(player.playQueueSong(playerSongKey(single))).toBe(true);
+    expect(usePlayerStore.getState().currentSong?.albumId).toBe("single");
+  });
   it("inserts Play Next after the active track and Play Last at the end", () => {
     const player = usePlayerStore.getState();
     player.setQueue([song("a"), song("b")]);
@@ -67,6 +84,26 @@ describe("player queue insertion", () => {
 
     player.enqueue([song("c")], "last");
 
+    expect(usePlayerStore.getState().queue.map((item) => item.id)).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
+  });
+});
+
+describe("queue playback selection", () => {
+  it("plays the selected queued song without replacing the queue", () => {
+    const player = usePlayerStore.getState();
+    player.setQueue([song("a"), song("b"), song("c")]);
+
+    expect(player.playQueueSong("c")).toBe(true);
+    expect(usePlayerStore.getState()).toMatchObject({
+      currentIndex: 2,
+      playbackTimeMs: 0,
+      playing: true,
+    });
+    expect(usePlayerStore.getState().currentSong?.id).toBe("c");
     expect(usePlayerStore.getState().queue.map((item) => item.id)).toEqual([
       "a",
       "b",
@@ -194,10 +231,12 @@ describe("Autoplay and Repeat", () => {
 
     player.toggleShuffle();
     expect(usePlayerStore.getState().queue[0]?.id).toBe("a");
-    expect(usePlayerStore.getState().queue.slice(-2).map((item) => item.id)).toEqual([
-      "d",
-      "e",
-    ]);
+    expect(
+      usePlayerStore
+        .getState()
+        .queue.slice(-2)
+        .map((item) => item.id),
+    ).toEqual(["d", "e"]);
 
     player.toggleShuffle();
     expect(usePlayerStore.getState().queue.map((item) => item.id)).toEqual([
@@ -306,7 +345,10 @@ describe("video playback state", () => {
 
   it("keeps the video player open when queueing directly into another video", () => {
     const player = usePlayerStore.getState();
-    player.setQueue([videoSong("song-a", "video-a"), videoSong("song-b", "video-b")]);
+    player.setQueue([
+      videoSong("song-a", "video-a"),
+      videoSong("song-b", "video-b"),
+    ]);
     player.setVideoPlayerOpen(true);
 
     player.next();
@@ -351,14 +393,19 @@ describe("video playback state", () => {
     expect(usePlayerStore.getState().originalQueue[1]?.title).toBe(
       "Canonical Song",
     );
-    expect(usePlayerStore.getState().originalQueue[0]?.title).toBe("Song song-b");
+    expect(usePlayerStore.getState().originalQueue[0]?.title).toBe(
+      "Song song-b",
+    );
   });
 });
 
 describe("Song Station queue refill", () => {
   const stationId = "song-station-0123456789abcdef0123456789abcdef";
 
-  const stationSong = (id: string, sourceStationId = stationId): PlayerSong => ({
+  const stationSong = (
+    id: string,
+    sourceStationId = stationId,
+  ): PlayerSong => ({
     ...song(id),
     sourceStation: {
       id: sourceStationId,
@@ -371,10 +418,7 @@ describe("Song Station queue refill", () => {
     const player = usePlayerStore.getState();
     player.startStation([stationSong("a"), stationSong("b")], "a");
 
-    player.appendStationTracks(stationId, [
-      stationSong("b"),
-      stationSong("c"),
-    ]);
+    player.appendStationTracks(stationId, [stationSong("b"), stationSong("c")]);
 
     expect(usePlayerStore.getState().queue.map((item) => item.id)).toEqual([
       "a",

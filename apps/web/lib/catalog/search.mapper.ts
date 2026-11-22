@@ -44,31 +44,31 @@ function mapSong(
 
   return {
     card: createMediaResourceCard(
-    {
-      id: song.id,
-      type: "songs",
-      name: song.attributes.name,
-      artistName: formatArtistNames(song.attributes.artistName),
-      artwork: song.attributes.artwork,
-    },
-    {
-      cardType: "collection",
-      artists,
-      slug: releaseTrackId
-        ? songRoute(song.attributes.name, releaseTrackId)
-        : undefined,
-      onPlay: () => playSong(playbackSong),
-      menuContext: {
-        kind: "song",
-        songId: song.id,
-        releaseTrackId,
-        title: song.attributes.name,
-        subtitle: formatArtistNames(song.attributes.artistName),
-        artworkUrl: playbackSong.artworkUrl,
-        sourceAlbumId: albumReference?.id,
-        albumHref: playbackSong.albumUrl,
+      {
+        id: song.id,
+        type: "songs",
+        name: song.attributes.name,
+        artistName: formatArtistNames(song.attributes.artistName),
+        artwork: song.attributes.artwork,
       },
-    },
+      {
+        cardType: "collection",
+        artists,
+        slug: releaseTrackId
+          ? songRoute(song.attributes.name, releaseTrackId)
+          : undefined,
+        onPlay: () => playSong(playbackSong),
+        menuContext: {
+          kind: "song",
+          songId: song.id,
+          releaseTrackId,
+          title: song.attributes.name,
+          subtitle: formatArtistNames(song.attributes.artistName),
+          artworkUrl: playbackSong.artworkUrl,
+          sourceAlbumId: albumReference?.id,
+          albumHref: playbackSong.albumUrl,
+        },
+      },
     ),
     track: playbackSong,
   };
@@ -258,6 +258,10 @@ export function mapSearchResults(
     hasMore: response.hasMore ?? false,
     shelfHasMore: response.shelfHasMore ?? {},
     isEmpty:
-      !songs.length && !artists.length && !albums.length && !playlists.length,
+      !songs.length &&
+      !artists.length &&
+      !albums.length &&
+      !playlists.length &&
+      !musicVideos.length,
   };
 }

@@ -18,7 +18,8 @@ export function usePinnedSidebarPlayback(item: SidebarItem, enabled = false) {
     enabled &&
     !!resourceId &&
     (resourceType === "songs"
-      ? currentSong?.id === resourceId
+      ? currentSong?.id === resourceId &&
+        currentSong?.sourceAlbumId === resource?.sourceAlbumId
       : resourceType === "albums"
         ? currentSong?.albumId === resourceId
         : resourceType === "playlists"
@@ -39,6 +40,7 @@ export function usePinnedSidebarPlayback(item: SidebarItem, enabled = false) {
           ? projectSongSummary(resource.playbackSong)
           : {
               id: resourceId,
+              sourceAlbumId: resource?.sourceAlbumId,
               title: item.label,
               artist: resource?.subtitle || "Unknown Artist",
               album: "",
@@ -48,7 +50,7 @@ export function usePinnedSidebarPlayback(item: SidebarItem, enabled = false) {
               thumbnailArtworkSrcSet: resource?.artworkSrcSet,
               contentRating: resource?.isExplicit ? "explicit" : undefined,
               url: resource?.href,
-              playbackUrl: `mse:${resourceId}`,
+              playbackUrl: `stream:${resourceId}`,
             },
       );
       return;

@@ -16,6 +16,7 @@ export type SidebarNavigationItem = {
   playbackSong?: SongSummary;
   resourceType?: LibraryResourceType;
   resourceId?: string;
+  sourceAlbumId?: string;
   isUserPlaylist?: boolean;
 };
 

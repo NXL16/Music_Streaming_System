@@ -33,7 +33,7 @@ export type SongSummaryProjectionSource = {
 /**
  * The one projection from normalized song metadata to the player contract.
  * Source adapters may add their own playback context before calling this
- * function, but routes, fallbacks and the `mse:` transport stay identical.
+ * function, but routes, fallbacks and the segmented stream reference stay identical.
  */
 export type PlayerSongProjectionSource = {
   id: string;
@@ -73,7 +73,9 @@ export function projectPlayerSong(
     id: song.id,
     releaseTrackId: song.releaseTrackId,
     title: song.title,
-    url: song.releaseTrackId ? songRoute(song.title, song.releaseTrackId) : undefined,
+    url: song.releaseTrackId
+      ? songRoute(song.title, song.releaseTrackId)
+      : undefined,
     artist,
     songArtistName: song.songArtistName,
     artists: song.artists,
@@ -97,7 +99,7 @@ export function projectPlayerSong(
     releaseDate: song.releaseDate,
     contentRating: song.contentRating,
     audioMode: song.audioMode,
-    playbackUrl: `mse:${song.id}`,
+    playbackUrl: `stream:${song.id}`,
   };
 }
 

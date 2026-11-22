@@ -1,5 +1,9 @@
 const STORAGE_PREFIX = "musical:library-album-origin:";
-const ALLOWED_ORIGINS = new Set(["/library/albums", "/library/recently-added"]);
+const ALLOWED_ORIGINS = new Set([
+  "/library/albums",
+  "/library/recently-added",
+  "/library/artists",
+]);
 
 function key(albumId: string) {
   return `${STORAGE_PREFIX}${albumId}`;

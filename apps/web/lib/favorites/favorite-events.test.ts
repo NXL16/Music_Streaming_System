@@ -29,12 +29,19 @@ describe("favorite change events", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("publishes a completed mutation locally and to other tabs", () => {
-    notifyFavoriteChanged("song-1", true);
+    notifyFavoriteChanged("song-1", true, "single");
 
     expect(browser.dispatchEvent).toHaveBeenCalledTimes(1);
     expect(browser.postMessage).toHaveBeenCalledWith({
       songId: "song-1",
+      sourceAlbumId: "single",
+      pending: false,
       isFavorite: true,
     });
+  });
+  it("keeps an optimistic change local until the server commits it", () => {
+    notifyFavoriteChanged("song-1", true, "single", true);
+    expect(browser.dispatchEvent).toHaveBeenCalledTimes(1);
+    expect(browser.postMessage).not.toHaveBeenCalled();
   });
 });

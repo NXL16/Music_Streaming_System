@@ -32,6 +32,7 @@ export function AddSongToLibraryButton({
   const inLibrary = useLibraryResourceMembership({
     resourceType: "songs",
     resourceId: songId,
+    sourceAlbumId,
   });
   const loadingDelay = () =>
     new Promise<void>((resolve) => window.setTimeout(resolve, 300));

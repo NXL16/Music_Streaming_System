@@ -72,4 +72,17 @@ describe("Library song playback pagination", () => {
       "INVALID_LIBRARY_SONG_CURSOR",
     );
   });
+
+  it("keeps the same recording from different releases while deduplicating overlapping cursor pages", async () => {
+    const large = { id: "b", albumId: "large", releaseTrackId: "large-b" };
+    const single = { id: "b", albumId: "single", releaseTrackId: "single-b" };
+    api.get
+      .mockResolvedValueOnce({
+        data: { songs: [large], hasMore: true, nextCursor: "next" },
+      })
+      .mockResolvedValueOnce({
+        data: { songs: [large, single], hasMore: false },
+      });
+    await expect(getAllLibrarySongs()).resolves.toEqual([large, single]);
+  });
 });

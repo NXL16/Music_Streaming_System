@@ -14,6 +14,7 @@ type Options = {
   resourceId: string;
   requiredSongIds?: string[];
   isLibraryAlbumView?: boolean;
+  sourceAlbumId?: string;
 };
 
 /**
@@ -26,6 +27,7 @@ export function useLibraryResourceMembership({
   resourceId,
   requiredSongIds = [],
   isLibraryAlbumView = false,
+  sourceAlbumId,
 }: Options) {
   const revision = useLibraryResourcesRevision();
   const resources = getLibraryResourcesSnapshot();
@@ -52,9 +54,11 @@ export function useLibraryResourceMembership({
       resourceId,
       songIds: requiredSongIds,
       isLibraryAlbumView,
+      sourceAlbumId,
     });
   }, [
     isLibraryAlbumView,
+    sourceAlbumId,
     loaded,
     requiredSongIds,
     resourceId,

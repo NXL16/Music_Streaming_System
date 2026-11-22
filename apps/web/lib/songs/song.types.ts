@@ -59,7 +59,3 @@ export type ListFavoriteSongsResponse = ListSongsResponse & {
 export type GetSongResponse = {
   song: SongDetail;
 };
-
-export type DeleteSongResponse = {
-  success: boolean;
-};

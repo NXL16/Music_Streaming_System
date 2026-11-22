@@ -1,5 +1,8 @@
 "use client";
 
+import { librarySongKey } from "@/lib/library/library-song-key";
+import { getCachedQuerySnapshot, setCachedQuery } from "@/lib/api/query-cache";
+
 import AmpContextMenuButton from "@/components/custom-elements/AmpContextMenuButton";
 import { ExplicitBadgeIcon } from "@/components/icons/explicit-badge-icon";
 import EmptyState from "@/components/layout/empty-state";
@@ -23,8 +26,7 @@ import {
 import { getAllLibrarySongs, listLibrarySongs } from "@/lib/songs/song.api";
 import type { SongSummary } from "@/lib/songs/song.types";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
-import { usePlayerStore } from "@/lib/player/use-player-store";
-import { playbackIntentProps } from "@/lib/player/playback-intent";
+import { playerSongKey, usePlayerStore } from "@/lib/player/use-player-store";
 import { projectSongSummary } from "@/lib/songs/project-song-summary";
 import {
   isLibraryResourcePendingRemoval,
@@ -54,24 +56,62 @@ import PauseIcon from "@/components/icons/pause-icon";
 import PlayIcon from "@/components/icons/play-icon";
 
 const LIBRARY_SONG_PAGE_SIZE = 40;
+type LibrarySongListSnapshot = {
+  songs: SongSummary[];
+  nextCursor: string;
+  seenCursors: Set<string>;
+};
+type SongSort = { sortBy: LibrarySortBy; direction: SortDirection };
 
 export default function SongsPage() {
   const userId = useAuthStore((state) => state.user?.userId);
-  const [songs, setSongs] = useState<SongSummary[]>([]);
-  const [sortBy, setSortBy] = useState<LibrarySortBy>("recently-added");
-  const [sortDirection, setSortDirection] =
-    useState<SortDirection>("descending");
-  const [nextCursor, setNextCursor] = useState("");
-  const [initialLoading, setInitialLoading] = useMinimumLoadingState(true);
+  return <SongsContent key={userId ?? "guest"} userId={userId} />;
+}
+
+function SongsContent({ userId }: { userId: string | undefined }) {
+  const sortKey = `library:song-sort:${userId ?? "guest"}`;
+  const savedSort = useMemo(
+    () => getCachedQuerySnapshot<SongSort>(sortKey),
+    [sortKey],
+  );
+  const [sortBy, setSortBy] = useState<LibrarySortBy>(
+    savedSort?.sortBy ?? "recently-added",
+  );
+  const [sortDirection, setSortDirection] = useState<SortDirection>(
+    savedSort?.direction ?? "descending",
+  );
+  const cacheKey = `library:song-pages:${userId ?? "guest"}:${sortBy}:${sortDirection}`;
+  const cachedPage = useMemo(
+    () => getCachedQuerySnapshot<LibrarySongListSnapshot>(cacheKey),
+    [cacheKey],
+  );
+  const [songs, setSongs] = useState<SongSummary[]>(cachedPage?.songs ?? []);
+  const [nextCursor, setNextCursor] = useState(cachedPage?.nextCursor ?? "");
+  const [initialLoading, setInitialLoading] =
+    useMinimumLoadingState(!cachedPage);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(false);
   const [songTableElement, setSongTableElement] =
     useState<HTMLDivElement | null>(null);
   const pageRequestIdRef = useRef(0);
   const loadingPageRef = useRef(false);
-  const hasLoadedRef = useRef(false);
-  const seenCursorsRef = useRef(new Set<string>());
-  const favoriteSongIds = useFavoriteStore((state) => state.songIds);
+  const hasLoadedRef = useRef(Boolean(cachedPage));
+  const pageStateRef = useRef<LibrarySongListSnapshot>(
+    cachedPage ?? { songs: [], nextCursor: "", seenCursors: new Set() },
+  );
+  const commitPage = useCallback(
+    (page: LibrarySongListSnapshot) => {
+      pageStateRef.current = page;
+      setSongs(page.songs);
+      setNextCursor(page.nextCursor);
+      setCachedQuery(cacheKey, page);
+    },
+    [cacheKey],
+  );
+  useEffect(() => {
+    if (userId) setCachedQuery(sortKey, { sortBy, direction: sortDirection });
+  }, [userId, sortKey, sortBy, sortDirection]);
+  const favoriteSongKeys = useFavoriteStore((state) => state.songKeys);
   const currentSong = usePlayerStore((state) => state.currentSong);
   const playing = usePlayerStore((state) => state.playing);
   const togglePlayback = usePlayerStore((state) => state.togglePlayback);
@@ -86,12 +126,13 @@ export default function SongsPage() {
   const sortedSongs = useMemo(
     () =>
       songs.filter(
-        (song) => !isLibraryResourcePendingRemoval("songs", song.id),
+        (song) =>
+          !isLibraryResourcePendingRemoval("songs", song.id, song.albumId),
       ),
     [songs],
   );
   const playLibrarySong = useCallback(
-    async (songId: string) => {
+    async (songId: string, albumId?: string) => {
       try {
         const queue = (
           await getAllLibrarySongs({
@@ -99,9 +140,14 @@ export default function SongsPage() {
             direction: sortDirection,
           })
         )
-          .filter((song) => !isLibraryResourcePendingRemoval("songs", song.id))
+          .filter(
+            (song) =>
+              !isLibraryResourcePendingRemoval("songs", song.id, song.albumId),
+          )
           .map(projectSongSummary);
-        const index = queue.findIndex((song) => song.id === songId);
+        const index = queue.findIndex(
+          (song) => song.id === songId && song.albumId === albumId,
+        );
         if (index >= 0) setQueue(queue, index);
       } catch {
         // Keep the current queue intact when a playback-page load fails.
@@ -110,32 +156,52 @@ export default function SongsPage() {
     [setQueue, sortBy, sortDirection],
   );
 
-  const loadFirstPage = useCallback(async () => {
-    const requestId = ++pageRequestIdRef.current;
-    loadingPageRef.current = true;
-    seenCursorsRef.current = new Set();
-    setLoadingMore(true);
-    setError(false);
-    try {
-      const page = await listLibrarySongs({
-        limit: LIBRARY_SONG_PAGE_SIZE,
-        sortBy,
-        direction: sortDirection,
-      });
-      if (requestId !== pageRequestIdRef.current) return;
-      setSongs(page.songs ?? []);
-      setNextCursor(getSafeNextCursor(page, seenCursorsRef.current));
-      hasLoadedRef.current = true;
-    } catch {
-      if (!hasLoadedRef.current) setError(true);
-    } finally {
-      if (requestId === pageRequestIdRef.current) {
-        loadingPageRef.current = false;
-        setLoadingMore(false);
-        setInitialLoading(false);
+  const loadFirstPage = useCallback(
+    async (force = false) => {
+      if (!userId || useAuthStore.getState().user?.userId !== userId) return;
+      const requestId = ++pageRequestIdRef.current;
+      loadingPageRef.current = true;
+      setLoadingMore(true);
+      setError(false);
+      try {
+        const cached = force
+          ? undefined
+          : getCachedQuerySnapshot<LibrarySongListSnapshot>(cacheKey);
+        const page =
+          cached ??
+          (await listLibrarySongs({
+            limit: LIBRARY_SONG_PAGE_SIZE,
+            sortBy,
+            direction: sortDirection,
+          }));
+        if (
+          requestId !== pageRequestIdRef.current ||
+          useAuthStore.getState().user?.userId !== userId
+        )
+          return;
+        const seenCursors = cached
+          ? new Set(cached.seenCursors)
+          : new Set<string>();
+        commitPage({
+          songs: page.songs ?? [],
+          nextCursor:
+            cached?.nextCursor ?? getSafeNextCursor(page, seenCursors),
+          seenCursors,
+        });
+        hasLoadedRef.current = true;
+      } catch {
+        if (requestId === pageRequestIdRef.current && !hasLoadedRef.current)
+          setError(true);
+      } finally {
+        if (requestId === pageRequestIdRef.current) {
+          loadingPageRef.current = false;
+          setLoadingMore(false);
+          setInitialLoading(false);
+        }
       }
-    }
-  }, [setInitialLoading, sortBy, sortDirection]);
+    },
+    [cacheKey, commitPage, userId, setInitialLoading, sortBy, sortDirection],
+  );
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadingPageRef.current) return;
@@ -149,9 +215,21 @@ export default function SongsPage() {
         sortBy,
         direction: sortDirection,
       });
-      if (requestId !== pageRequestIdRef.current) return;
-      setSongs((current) => appendUniqueById(current, page.songs));
-      setNextCursor(getSafeNextCursor(page, seenCursorsRef.current));
+      if (
+        requestId !== pageRequestIdRef.current ||
+        useAuthStore.getState().user?.userId !== userId
+      )
+        return;
+      const seenCursors = new Set(pageStateRef.current.seenCursors);
+      commitPage({
+        songs: appendUniqueById(
+          pageStateRef.current.songs,
+          page.songs,
+          (song) => librarySongKey(song.id, song.albumId),
+        ),
+        nextCursor: getSafeNextCursor(page, seenCursors),
+        seenCursors,
+      });
     } catch {
       // Keep the cursor so the intersection observer can retry later.
     } finally {
@@ -160,13 +238,16 @@ export default function SongsPage() {
         setLoadingMore(false);
       }
     }
-  }, [nextCursor, sortBy, sortDirection]);
+  }, [commitPage, nextCursor, userId, sortBy, sortDirection]);
 
   useEffect(() => {
-    queueMicrotask(() => void loadFirstPage());
-    return subscribeLibraryResourcesChanged((change) => {
+    let active = true;
+    queueMicrotask(() => {
+      if (active) void loadFirstPage();
+    });
+    const unsubscribe = subscribeLibraryResourcesChanged((change) => {
       if (!change) {
-        void loadFirstPage();
+        void loadFirstPage(true);
         return;
       }
       if (change.resourceType !== "songs") return;
@@ -179,15 +260,33 @@ export default function SongsPage() {
         change.operation === "pending-remove" ||
         change.operation === "remove"
       ) {
-        setSongs((current) =>
-          current.filter((song) => song.id !== change.resourceId),
-        );
+        if (!hasLoadedRef.current) {
+          void loadFirstPage(true);
+          return;
+        }
+        pageRequestIdRef.current += 1;
+        loadingPageRef.current = false;
+        setLoadingMore(false);
+        commitPage({
+          ...pageStateRef.current,
+          songs: pageStateRef.current.songs.filter(
+            (song) =>
+              song.id !== change.resourceId ||
+              (!!change.sourceAlbumId && song.albumId !== change.sourceAlbumId),
+          ),
+        });
         return;
       }
 
-      void loadFirstPage();
+      void loadFirstPage(true);
     });
-  }, [loadFirstPage]);
+    return () => {
+      active = false;
+      unsubscribe();
+      pageRequestIdRef.current += 1;
+      loadingPageRef.current = false;
+    };
+  }, [commitPage, loadFirstPage]);
 
   const { sentinelRef: loadMoreSentinelRef, showLoadingMore } =
     useInfiniteScrollLoadMore({
@@ -216,7 +315,8 @@ export default function SongsPage() {
     return <CatalogPageLoading />;
   }
 
-  if (error) return <RequestErrorState onRetry={() => void loadFirstPage()} />;
+  if (error)
+    return <RequestErrorState onRetry={() => void loadFirstPage(true)} />;
 
   // Match the other Library surfaces: an optimistic pending deletion is no
   // longer visible content, so the final-song state renders Empty immediately
@@ -276,15 +376,18 @@ export default function SongsPage() {
             />
 
             {visibleSongs.map((track) => {
-              const isCurrentTrack = currentSong?.id === track.id;
+              const trackKey = librarySongKey(track.id, track.albumId);
+              const isCurrentTrack =
+                currentSong?.id === track.id &&
+                currentSong?.albumId === track.albumId;
               const isTrackPlaying = isCurrentTrack && playing;
 
               return (
                 <div
-                  key={track.id}
-                  onClick={() => selectTrack(track.id)}
+                  key={trackKey}
+                  onClick={() => selectTrack(trackKey)}
                   className={`group text-(--systemSecondary) table-row relative z-(--z-default) [--platterBorderColor:var(--pageBG)] bg-(--rowBackgroundColor,transparent) h-13.5 hover:[--playButtonOpacity:1] hover:[--addToLibraryOpacity:1] last:[&>div]:after:[border-bottom:.5px_solid_var(--labelDivider)] last:[&>div]:after:h-full last:[&>div]:after:pointer-events-none ${
-                    selectedTrackId === track.id
+                    selectedTrackId === trackKey
                       ? "songs-list-row--selected [&>div]:after:opacity-0 [&+_.group>div]:after:border-t-transparent"
                       : "hover:[--rowBackgroundColor:var(--tracklistHoverColor)] hover:[--platterBorderColor:#f0f0f0] hover:[&+_.group>div]:after:border-t-transparent"
                   }`}
@@ -295,7 +398,7 @@ export default function SongsPage() {
                         <FavoriteSongButton
                           ariaLabel="Favourite"
                           className={`group-hover:[--favoriteIconStarOutline:var(--favoriteButtonStarOutline-hover,var(--keyColor))] ${
-                            activeTrackId === track.id
+                            activeTrackId === trackKey
                               ? "[--favoriteIconStarOutlineOverride:var(--favoriteButtonStarOutline-hover,var(--keyColor))]"
                               : ""
                           }`}
@@ -347,18 +450,15 @@ export default function SongsPage() {
                           <div className="[--nonPlatterIconFill:var(--nonPlatterOverrideIconColor,var(--keyColor))] h-full align-top w-full">
                             <button
                               disabled={track.status !== 3}
-                              {...playbackIntentProps(
-                                projectSongSummary(track),
-                              )}
                               onClick={(event) => {
                                 if (selectedTrackId !== null) {
-                                  activateTrack(track.id);
+                                  activateTrack(trackKey);
                                   event.stopPropagation();
                                 }
                                 if (isCurrentTrack) {
                                   togglePlayback();
                                 } else {
-                                  void playLibrarySong(track.id);
+                                  void playLibrarySong(track.id, track.albumId);
                                 }
                               }}
                               className="[--nonPlatterIconFill:var(--playButtonIconColor,#fff)] [--playingBarColor:var(--nonPlatterIconFill,#fff)] leading-0 pointer-events-auto relative z-(--z-default) h-full align-top w-full"
@@ -468,7 +568,7 @@ export default function SongsPage() {
                       </time>
 
                       <div
-                        className={`[grid-area:song-controls-context] ms-1.75 [--contextMenuButtonSize:28px] ${selectedTrackId === track.id ? "[--contextMenuEllipsisFillOverride:#fff]" : "[--contextMenuEllipsisFillOverride:var(--systemSecondary)] hover:[--contextMenuEllipsisFillOverride:var(--keyColor)]"}`}
+                        className={`[grid-area:song-controls-context] ms-1.75 [--contextMenuButtonSize:28px] ${selectedTrackId === trackKey ? "[--contextMenuEllipsisFillOverride:#fff]" : "[--contextMenuEllipsisFillOverride:var(--systemSecondary)] hover:[--contextMenuEllipsisFillOverride:var(--keyColor)]"}`}
                       >
                         <AmpContextMenuButton
                           id={`song-${track.id}`}
@@ -481,7 +581,9 @@ export default function SongsPage() {
                             subtitle: track.artist,
                             artworkUrl: track.coverUrl,
                             userId,
-                            isFavorite: favoriteSongIds.has(track.id),
+                            isFavorite: favoriteSongKeys.has(
+                              playerSongKey(track),
+                            ),
                           }}
                         />
                       </div>

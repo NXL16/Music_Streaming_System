@@ -1,8 +1,8 @@
+import { librarySongKey } from "@/lib/library/library-song-key";
 import { http } from "@/lib/api/http";
 import { getCachedQuery } from "@/lib/api/query-cache";
 import { notifyHomeRecommendationsStale } from "@/lib/recommendations/home-revalidation";
 import type {
-  DeleteSongResponse,
   GetSongResponse,
   ListFavoriteSongsResponse,
   ListSongsResponse,
@@ -24,24 +24,6 @@ function favoriteCacheKey(params?: { cursor?: string; limit?: number }) {
 
 function invalidateFavoriteSongsCache() {
   favoritesCacheVersion += 1;
-}
-
-export async function listMySongs(params?: {
-  cursor?: string;
-  limit?: number;
-  search?: string;
-  artist?: string;
-}) {
-  const response = await http.get<ListSongsResponse>("/songs/me", {
-    params: {
-      cursor: params?.cursor,
-      limit: params?.limit ?? 20,
-      search: params?.search,
-      artist: params?.artist,
-    },
-  });
-
-  return response.data;
 }
 
 export async function listLibrarySongs(params?: {
@@ -77,8 +59,9 @@ export async function getAllLibrarySongs(params?: {
   while (true) {
     const page = await listLibrarySongs({ ...params, cursor, limit: 100 });
     for (const song of page.songs ?? []) {
-      if (songIds.has(song.id)) continue;
-      songIds.add(song.id);
+      const key = librarySongKey(song.id, song.albumId);
+      if (songIds.has(key)) continue;
+      songIds.add(key);
       songs.push(song);
     }
     if (!page.hasMore) return songs;
@@ -125,9 +108,13 @@ export async function addFavoriteSong(songId: string, sourceAlbumId: string) {
   return response.data;
 }
 
-export async function removeFavoriteSong(songId: string) {
+export async function removeFavoriteSong(
+  songId: string,
+  sourceAlbumId: string,
+) {
   const response = await http.delete<{ success: boolean }>(
     `/songs/${encodeURIComponent(songId)}/favorite`,
+    { data: { sourceAlbumId } },
   );
   invalidateFavoriteSongsCache();
   notifyHomeRecommendationsStale();
@@ -136,12 +123,6 @@ export async function removeFavoriteSong(songId: string) {
 
 export async function getMySong(songId: string) {
   const response = await http.get<GetSongResponse>(`/songs/private/${songId}`);
-
-  return response.data;
-}
-
-export async function deleteMySong(songId: string) {
-  const response = await http.delete<DeleteSongResponse>(`/songs/${songId}`);
 
   return response.data;
 }
