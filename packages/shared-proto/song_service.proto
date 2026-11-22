@@ -109,19 +109,19 @@ message GetSongLyricsRequest {
 }
 
 message UpsertSongLyricsRequest {
-  string                 song_id              = 1;
-  string                 language             = 2;
-  bool                   publish              = 4;
-  string                 actor_user_id        = 7;
-  bool                   can_manage_all_songs = 8;
-  string                 source_ttml          = 9;
+  string song_id              = 1;
+  string language             = 2;
+  bool   publish              = 4;
+  string actor_user_id        = 7;
+  bool   can_manage_all_songs = 8;
+  string source_ttml          = 9;
 }
 
 message SongLyricsResponse {
-  string                 song_id        = 1;
-  string                 language       = 2;
-  bool                   published      = 5;
-  string                 source_ttml    = 8;
+  string song_id     = 1;
+  string language    = 2;
+  bool   published   = 5;
+  string source_ttml = 8;
 }
 
 message StaticLyricLine {
@@ -134,14 +134,14 @@ message GetSongStaticLyricsRequest {
 }
 
 message UpsertSongStaticLyricsRequest {
-  string                  song_id              = 1;
+  string                   song_id              = 1;
   repeated StaticLyricLine lines                = 2;
-  string                  actor_user_id        = 3;
-  bool                    can_manage_all_songs = 4;
+  string                   actor_user_id        = 3;
+  bool                     can_manage_all_songs = 4;
 }
 
 message SongStaticLyricsResponse {
-  string                  song_id = 1;
+  string                   song_id = 1;
   repeated StaticLyricLine lines   = 2;
 }
 
@@ -585,8 +585,8 @@ message PlaylistTrackResponse {
 }
 
 message GetCatalogAlbumRequest {
-  string storefront = 1;
-  string album_id   = 2;
+  string          storefront            = 1;
+  string          album_id              = 2;
   repeated string recommended_album_ids = 3;
 }
 
@@ -677,7 +677,7 @@ message CatalogSongVideo {
   string                     release_track_id = 18;
   repeated CatalogSongCredit artists          = 19;
   string                     poster_src_set   = 20;
-  string                     poster_bg_color = 21;
+  string                     poster_bg_color  = 21;
 }
 
 message GetCatalogSongVideosResponse {
@@ -727,7 +727,6 @@ message GetCatalogAlbumRelatedResponse {
   bool            you_might_also_like_has_more = 7;
   string          next_cursor                  = 8;
 }
-
 
 message CatalogResourceIdentifier {
   string type = 1;
@@ -901,8 +900,8 @@ message DeleteCatalogSongVideoRequest {
 }
 
 message DeleteCatalogSongVideoResponse {
-  string video_asset_id       = 1;
-  bool   asset_usage_pending  = 2;
+  string video_asset_id      = 1;
+  bool   asset_usage_pending = 2;
 }
 
 message CatalogDraftInfo {
@@ -1194,6 +1193,8 @@ message CatalogAlbumAttributes {
   double          audio_bpm               = 30;
   double          audio_energy            = 31;
   repeated string audio_tags              = 32;
+  // Canonical album owners; excludes featured artists and other contributors.
+  repeated string primary_artist_ids = 33;
 }
 
 message CatalogAlbumRelatedShelfHints {
@@ -1292,14 +1293,14 @@ message SearchCatalogRequest {
 
   int32 limit = 3;
 
-  repeated string types = 4;
-  bool include_music_videos = 5;
-  bool include_related_candidates = 6;
-  map<string, int32> related_candidate_limits = 7;
+  repeated string    types                      = 4;
+  bool               include_music_videos       = 5;
+  bool               include_related_candidates = 6;
+  map<string, int32> related_candidate_limits   = 7;
 }
 
 message SearchCatalogResponse {
-  repeated CatalogReference data      = 1;
-  CatalogResources          resources = 2;
+  repeated CatalogReference data         = 1;
+  CatalogResources          resources    = 2;
   repeated CatalogSongVideo music_videos = 3;
 }

@@ -314,13 +314,56 @@ describe('SongsService.addTrackToPlaylist', () => {
 });
 
 describe('SongsService.removeLibraryResource', () => {
+  it('deletes only the requested release of a shared recording', async () => {
+    const deleteMany = jest.fn().mockResolvedValue({ count: 1 });
+    const tx = {
+      $executeRaw: jest.fn().mockResolvedValue([]),
+      userLibraryResource: {
+        findFirst: jest.fn().mockResolvedValue({ sourceAlbumId: 'single' }),
+        deleteMany,
+        count: jest.fn().mockResolvedValue(1),
+      },
+      songVideo: { findMany: jest.fn().mockResolvedValue([]) },
+      favorite: { findFirst: jest.fn().mockResolvedValue(null) },
+      preferenceOutbox: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const service = Object.create(SongsService.prototype) as SongsService;
+    Object.assign(service, {
+      prisma: {
+        $transaction: (callback: (value: typeof tx) => unknown) => callback(tx),
+      },
+    });
+    await service.removeLibraryResource({
+      userId: 'listener',
+      resourceType: 'songs',
+      resourceId: 'b',
+      sourceAlbumId: 'single',
+      title: '',
+      subtitle: '',
+      artworkUrl: '',
+    });
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: {
+        userId: 'listener',
+        resourceType: 'songs',
+        resourceId: 'b',
+        sourceAlbumId: 'single',
+      },
+    });
+    expect(tx.favorite.findFirst).toHaveBeenCalledWith({
+      where: { userId: 'listener', songId: 'b', sourceAlbumId: 'single' },
+      select: { id: true, songId: true },
+    });
+  });
   it('reports a removed playlist favourite in the same transaction', async () => {
     const tx = {
       userPlaylist: { findFirst: jest.fn().mockResolvedValue(null) },
       userLibraryResource: {
         deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
-      playlistFavorite: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      playlistFavorite: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       preferenceOutbox: { create: jest.fn().mockResolvedValue({}) },
     };
     const service = Object.create(SongsService.prototype) as SongsService;
@@ -350,6 +393,111 @@ describe('SongsService.removeLibraryResource', () => {
     expect(tx.playlistFavorite.deleteMany).toHaveBeenCalledWith({
       where: { userId: 'user', playlistId: 'playlist' },
     });
+  });
+});
+
+describe('release-specific song favourites', () => {
+  it.each([0, 1])(
+    'removes one release and updates recommendations only when %i other favourites remain',
+    async (remaining) => {
+      const tx = {
+        $executeRaw: jest.fn().mockResolvedValue([]),
+        favorite: {
+          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+          findMany: jest
+            .fn()
+            .mockResolvedValue(remaining ? [{ songId: 'b' }] : []),
+        },
+        preferenceOutbox: { create: jest.fn().mockResolvedValue({}) },
+      };
+      const service = Object.create(SongsService.prototype) as SongsService;
+      Object.assign(service, {
+        prisma: {
+          $transaction: (callback: (value: typeof tx) => unknown) =>
+            callback(tx),
+        },
+      });
+      await service.removeFavorite({
+        userId: 'listener',
+        songId: 'b',
+        sourceAlbumId: 'single',
+      });
+      expect(tx.favorite.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'listener', songId: 'b', sourceAlbumId: 'single' },
+      });
+      expect(tx.preferenceOutbox.create).toHaveBeenCalledTimes(
+        remaining === 0 ? 1 : 0,
+      );
+      expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+    },
+  );
+});
+
+describe('SongsService release-specific Library additions', () => {
+  it('persists a second release of the same recording and treats repeated saves as idempotent', async () => {
+    const rows = new Map<string, object>();
+    const key = (value: {
+      resourceType: string;
+      resourceId: string;
+      releaseTrackId?: string;
+    }) =>
+      JSON.stringify([
+        value.resourceType,
+        value.resourceId,
+        value.releaseTrackId ?? '',
+      ]);
+    const tx = {
+      userLibraryResource: {
+        upsert: jest.fn().mockResolvedValue({}),
+        findUnique: jest.fn(
+          ({
+            where,
+          }: {
+            where: {
+              userId_resourceType_resourceId_releaseTrackId: Parameters<
+                typeof key
+              >[0];
+            };
+          }) =>
+            rows.get(
+              key(where.userId_resourceType_resourceId_releaseTrackId),
+            ) ?? null,
+        ),
+        create: jest.fn(({ data }: { data: Parameters<typeof key>[0] }) => {
+          rows.set(key(data), data);
+          return data;
+        }),
+      },
+      songVideo: { findMany: jest.fn().mockResolvedValue([]) },
+      preferenceOutbox: { create: jest.fn().mockResolvedValue({}) },
+    };
+    const service = Object.create(SongsService.prototype) as SongsService;
+    Object.assign(service, {
+      prisma: {
+        albumTrack: {
+          findUnique: ({
+            where,
+          }: {
+            where: { albumId_songId: { albumId: string } };
+          }) => ({ id: `track-${where.albumId_songId.albumId}`, songId: 'b' }),
+        },
+        $transaction: (callback: (value: typeof tx) => unknown) => callback(tx),
+      },
+    });
+    const save = (sourceAlbumId: string) =>
+      service.addLibraryResource({
+        userId: 'listener',
+        resourceType: 'songs',
+        resourceId: 'b',
+        sourceAlbumId,
+        title: 'B',
+        subtitle: '',
+        artworkUrl: '',
+      });
+    expect(await save('large')).toMatchObject({ created: true });
+    expect(await save('single')).toMatchObject({ created: true });
+    expect(await save('single')).toMatchObject({ created: false });
+    expect(rows.size).toBe(2);
   });
 });
 

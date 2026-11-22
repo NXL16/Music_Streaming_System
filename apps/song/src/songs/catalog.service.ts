@@ -856,7 +856,7 @@ export class CatalogService {
   }
 
   private primaryAlbumArtists(
-    album: CatalogAlbumEntity,
+    album: Pick<CatalogAlbumEntity, 'artistCredits' | 'artistName'>,
   ): CatalogArtistEntity[] {
     const primaryCredits = album.artistCredits
       .filter(({ isPrimary }) => isPrimary)
@@ -1984,6 +1984,7 @@ export class CatalogService {
       attributes: {
         artistName: album.artistName,
         artworkAssetId: album.artworkAssetId,
+        primaryArtistIds: this.primaryAlbumArtists(album).map(({ id }) => id),
         editorialArtworkAssetId: album.editorialArtworkAssetId,
         editorialVideoAssetId: album.editorialVideoAssetId,
         artwork: this.artwork(album.artwork),
@@ -2689,7 +2690,9 @@ export class CatalogService {
     request: SearchCatalogRequest,
   ): Promise<SearchCatalogResponse> {
     const storefront = this.storefront(request.storefront);
-    const query = request.query.trim().slice(0, CATALOG_SEARCH_QUERY_MAX_LENGTH);
+    const query = request.query
+      .trim()
+      .slice(0, CATALOG_SEARCH_QUERY_MAX_LENGTH);
     const includeMusicVideos = request.includeMusicVideos;
     const includeRelatedCandidates = request.includeRelatedCandidates;
     const limit = Math.min(Math.max(request.limit || 20, 1), 100);

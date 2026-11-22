@@ -725,6 +725,18 @@ export class SongsService {
     };
   }
 
+  private async lockSongFavorites(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    songIds: string[],
+  ) {
+    for (const songId of [...new Set(songIds)].sort()) {
+      await tx.$executeRaw(Prisma.sql`
+        SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify([userId, songId])}, 0))
+      `);
+    }
+  }
+
   async addFavorite(request: FavoriteRequest): Promise<FavoriteResponse> {
     if (!request.userId) this.throwInvalidArgument('USER_ID_REQUIRED');
     if (!request.songId) this.throwInvalidArgument('SONG_ID_REQUIRED');
@@ -738,15 +750,17 @@ export class SongsService {
           songId: request.songId,
         },
       },
-      select: { songId: true },
+      select: { id: true, songId: true },
     });
     if (!albumTrack) this.throwInvalidArgument('SOURCE_ALBUM_TRACK_MISMATCH');
 
     try {
       const created = await this.prisma.$transaction(async (tx) => {
+        await this.lockSongFavorites(tx, request.userId, [request.songId]);
         const existingFavorite = await tx.favorite.findUnique({
           where: {
-            userId_songId: {
+            userId_songId_releaseTrackId: {
+              releaseTrackId: albumTrack.id,
               userId: request.userId,
               songId: request.songId,
             },
@@ -756,7 +770,8 @@ export class SongsService {
 
         await tx.favorite.upsert({
           where: {
-            userId_songId: {
+            userId_songId_releaseTrackId: {
+              releaseTrackId: albumTrack.id,
               userId: request.userId,
               songId: request.songId,
             },
@@ -765,6 +780,7 @@ export class SongsService {
             userId: request.userId,
             songId: request.songId,
             sourceAlbumId: request.sourceAlbumId,
+            releaseTrackId: albumTrack.id,
           },
           update: {},
         });
@@ -774,7 +790,8 @@ export class SongsService {
         // mutations that could diverge after a reload.
         await tx.userLibraryResource.upsert({
           where: {
-            userId_resourceType_resourceId: {
+            userId_resourceType_resourceId_releaseTrackId: {
+              releaseTrackId: '',
               userId: request.userId,
               resourceType: 'albums',
               resourceId: request.sourceAlbumId,
@@ -793,7 +810,8 @@ export class SongsService {
 
         await tx.userLibraryResource.upsert({
           where: {
-            userId_resourceType_resourceId: {
+            userId_resourceType_resourceId_releaseTrackId: {
+              releaseTrackId: albumTrack.id,
               userId: request.userId,
               resourceType: 'songs',
               resourceId: request.songId,
@@ -804,6 +822,7 @@ export class SongsService {
             resourceType: 'songs',
             resourceId: request.songId,
             sourceAlbumId: request.sourceAlbumId,
+            releaseTrackId: albumTrack.id,
             title: '',
             subtitle: '',
             artworkUrl: '',
@@ -824,7 +843,12 @@ export class SongsService {
           '',
         );
 
-        if (!existingFavorite) {
+        if (
+          !existingFavorite &&
+          (await tx.favorite.count({
+            where: { userId: request.userId, songId: request.songId },
+          })) === 1
+        ) {
           await this.enqueuePreferenceOutbox(
             tx,
             request.userId,
@@ -844,27 +868,51 @@ export class SongsService {
     }
   }
 
+  private async notifyUnfavoritedSongsIfUnused(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    songIds: string[],
+  ) {
+    const ids = [...new Set(songIds)];
+    if (!ids.length) return;
+    const favorites = await tx.favorite.findMany({
+      where: { userId, songId: { in: ids } },
+      select: { songId: true },
+      distinct: ['songId'],
+    });
+    const stillFavorite = new Set(favorites.map(({ songId }) => songId));
+    for (const songId of ids) {
+      if (stillFavorite.has(songId)) continue;
+      await this.enqueuePreferenceOutbox(
+        tx,
+        userId,
+        PreferenceEventType.PREFERENCE_EVENT_TYPE_SONG_UNFAVOURITED,
+        'songs',
+        songId,
+        PREFERENCE_SIGNAL_WEIGHT.SONG_UNFAVOURITED,
+      );
+    }
+  }
+
   async removeFavorite(request: FavoriteRequest): Promise<FavoriteResponse> {
     if (!request.userId) this.throwInvalidArgument('USER_ID_REQUIRED');
     if (!request.songId) this.throwInvalidArgument('SONG_ID_REQUIRED');
 
+    if (!request.sourceAlbumId)
+      this.throwInvalidArgument('SOURCE_ALBUM_ID_REQUIRED');
     const removed = await this.prisma.$transaction(async (tx) => {
+      await this.lockSongFavorites(tx, request.userId, [request.songId]);
       const result = await tx.favorite.deleteMany({
         where: {
           userId: request.userId,
           songId: request.songId,
+          sourceAlbumId: request.sourceAlbumId,
         },
       });
-      if (result.count) {
-        await this.enqueuePreferenceOutbox(
-          tx,
-          request.userId,
-          PreferenceEventType.PREFERENCE_EVENT_TYPE_SONG_UNFAVOURITED,
-          'songs',
+      if (result.count)
+        await this.notifyUnfavoritedSongsIfUnused(tx, request.userId, [
           request.songId,
-          PREFERENCE_SIGNAL_WEIGHT.SONG_UNFAVOURITED,
-        );
-      }
+        ]);
       return result.count > 0;
     });
 
@@ -886,7 +934,7 @@ export class SongsService {
     await this.prisma.$transaction(async (tx) => {
       const albumTracks = await tx.albumTrack.findMany({
         where: { albumId: album.id },
-        select: { songId: true },
+        select: { id: true, songId: true },
       });
       const existing = await tx.albumFavorite.findUnique({
         where: {
@@ -899,7 +947,8 @@ export class SongsService {
       // without its Library membership.
       await tx.userLibraryResource.upsert({
         where: {
-          userId_resourceType_resourceId: {
+          userId_resourceType_resourceId_releaseTrackId: {
+            releaseTrackId: '',
             userId: request.userId,
             resourceType: 'albums',
             resourceId: album.id,
@@ -920,10 +969,11 @@ export class SongsService {
       // album. Do it in this transaction rather than depending on a client
       // follow-up request, otherwise a revalidation can see only the parent
       // Album row and make the UI revert to “Add to Library”.
-      for (const { songId } of albumTracks) {
+      for (const { id: releaseTrackId, songId } of albumTracks) {
         const existingSong = await tx.userLibraryResource.findUnique({
           where: {
-            userId_resourceType_resourceId: {
+            userId_resourceType_resourceId_releaseTrackId: {
+              releaseTrackId,
               userId: request.userId,
               resourceType: 'songs',
               resourceId: songId,
@@ -938,6 +988,7 @@ export class SongsService {
               resourceType: 'songs',
               resourceId: songId,
               sourceAlbumId: album.id,
+              releaseTrackId,
               title: '',
               subtitle: '',
               artworkUrl: '',
@@ -1220,22 +1271,23 @@ export class SongsService {
     request: ListPlaylistFavoriteIdsRequest,
   ): Promise<ListPlaylistFavoriteIdsResponse> {
     if (!request.userId) this.throwInvalidArgument('USER_ID_REQUIRED');
-    const [favorites, systemFavorite, userPlaylistFavorites] = await Promise.all([
-      this.prisma.playlistFavorite.findMany({
-        where: { userId: request.userId },
-        orderBy: { createdAt: 'desc' },
-        select: { playlistId: true },
-      }),
-      this.prisma.systemPlaylistFavorite.findUnique({
-        where: { userId: request.userId },
-        select: { id: true },
-      }),
-      this.prisma.userPlaylistFavorite.findMany({
-        where: { userId: request.userId },
-        orderBy: { createdAt: 'desc' },
-        select: { playlistId: true },
-      }),
-    ]);
+    const [favorites, systemFavorite, userPlaylistFavorites] =
+      await Promise.all([
+        this.prisma.playlistFavorite.findMany({
+          where: { userId: request.userId },
+          orderBy: { createdAt: 'desc' },
+          select: { playlistId: true },
+        }),
+        this.prisma.systemPlaylistFavorite.findUnique({
+          where: { userId: request.userId },
+          select: { id: true },
+        }),
+        this.prisma.userPlaylistFavorite.findMany({
+          where: { userId: request.userId },
+          orderBy: { createdAt: 'desc' },
+          select: { playlistId: true },
+        }),
+      ]);
     return {
       playlistIds: [
         ...(systemFavorite ? [SYSTEM_FAVORITE_PLAYLIST_ID] : []),
@@ -1252,7 +1304,8 @@ export class SongsService {
   ): Promise<void> {
     await tx.userLibraryResource.upsert({
       where: {
-        userId_resourceType_resourceId: {
+        userId_resourceType_resourceId_releaseTrackId: {
+          releaseTrackId: '',
           userId,
           resourceType: 'playlists',
           resourceId: playlistId,
@@ -1298,7 +1351,10 @@ export class SongsService {
     const requestedLimit = request.limit || 20;
     const limit = Math.min(Math.max(requestedLimit, 1), MAX_LIST_LIMIT);
     const cursor = this.parseCursor(request.cursor);
-    const where: Prisma.FavoriteWhereInput = { userId: request.userId };
+    const where: Prisma.FavoriteWhereInput = {
+      userId: request.userId,
+      releaseTrackId: { not: '' },
+    };
 
     if (cursor) {
       where.OR = [
@@ -1432,7 +1488,7 @@ export class SongsService {
             songId: request.resourceId,
           },
         },
-        select: { songId: true },
+        select: { id: true, songId: true },
       });
       if (!albumTrack) {
         this.throwInvalidArgument('SOURCE_ALBUM_TRACK_MISMATCH');
@@ -1444,7 +1500,8 @@ export class SongsService {
           // this row only establishes the listener's Library membership.
           await tx.userLibraryResource.upsert({
             where: {
-              userId_resourceType_resourceId: {
+              userId_resourceType_resourceId_releaseTrackId: {
+                releaseTrackId: '',
                 userId: request.userId,
                 resourceType: 'albums',
                 resourceId: request.sourceAlbumId,
@@ -1463,7 +1520,8 @@ export class SongsService {
 
           const existingSong = await tx.userLibraryResource.findUnique({
             where: {
-              userId_resourceType_resourceId: {
+              userId_resourceType_resourceId_releaseTrackId: {
+                releaseTrackId: albumTrack.id,
                 userId: request.userId,
                 resourceType: 'songs',
                 resourceId: request.resourceId,
@@ -1478,6 +1536,7 @@ export class SongsService {
                 resourceType: request.resourceType,
                 resourceId: request.resourceId,
                 sourceAlbumId: request.sourceAlbumId,
+                releaseTrackId: albumTrack.id,
                 title,
                 subtitle,
                 artworkUrl,
@@ -1536,7 +1595,8 @@ export class SongsService {
 
     const existing = await this.prisma.userLibraryResource.findUnique({
       where: {
-        userId_resourceType_resourceId: {
+        userId_resourceType_resourceId_releaseTrackId: {
+          releaseTrackId: '',
           userId: request.userId,
           resourceType: request.resourceType,
           resourceId: request.resourceId,
@@ -1695,8 +1755,8 @@ export class SongsService {
     const rows = await this.prisma.userLibraryResource.findMany({
       where: cursorWhere ? { AND: [baseWhere, cursorWhere] } : baseWhere,
       orderBy: isTitleSort
-        ? [{ title: direction }, { resourceId: direction }]
-        : [{ createdAt: direction }, { resourceId: direction }],
+        ? [{ title: direction }, { id: direction }]
+        : [{ createdAt: direction }, { id: direction }],
       take: limit + 1,
     });
     const hasMore = rows.length > limit;
@@ -1752,7 +1812,7 @@ export class SongsService {
           { title: { [comparison]: payload!.key } },
           {
             title: payload!.key,
-            resourceId: { [comparison]: payload!.resourceId },
+            id: { [comparison]: payload!.resourceId },
           },
         ],
       };
@@ -1770,20 +1830,20 @@ export class SongsService {
         { createdAt: { [comparison]: createdAt } },
         {
           createdAt,
-          resourceId: { [comparison]: payload!.resourceId },
+          id: { [comparison]: payload!.resourceId },
         },
       ],
     };
   }
 
   private buildLibrarySongsCursor(
-    resource: { title: string; createdAt: Date; resourceId: string },
+    resource: { title: string; createdAt: Date; id: string },
     isTitleSort: boolean,
   ) {
     return Buffer.from(
       JSON.stringify({
         key: isTitleSort ? resource.title : resource.createdAt.getTime(),
-        resourceId: resource.resourceId,
+        resourceId: resource.id,
       }),
     ).toString('base64url');
   }
@@ -1791,6 +1851,9 @@ export class SongsService {
   async removeLibraryResource(
     request: LibraryResourceRequest,
   ): Promise<LibraryResourceResponse> {
+    if (request.resourceType === 'songs' && !request.sourceAlbumId) {
+      this.throwInvalidArgument('SOURCE_ALBUM_ID_REQUIRED');
+    }
     if (request.resourceType === 'music-videos') {
       const video = await this.prisma.songVideo.findUnique({
         where: { id: request.resourceId },
@@ -1811,6 +1874,19 @@ export class SongsService {
     let removedEmptyAlbumFavorite = false;
     let favoriteRemoved = false;
     await this.prisma.$transaction(async (tx) => {
+      if (request.resourceType === 'songs') {
+        await this.lockSongFavorites(tx, request.userId, [request.resourceId]);
+      } else if (request.resourceType === 'albums') {
+        const tracks = await tx.albumTrack.findMany({
+          where: { albumId: request.resourceId },
+          select: { songId: true },
+        });
+        await this.lockSongFavorites(
+          tx,
+          request.userId,
+          tracks.map(({ songId }) => songId),
+        );
+      }
       if (request.resourceType === 'playlists') {
         const ownedPlaylist = await tx.userPlaylist.findFirst({
           where: { id: request.resourceId, userId: request.userId },
@@ -1825,13 +1901,12 @@ export class SongsService {
 
       const librarySong =
         request.resourceType === 'songs'
-          ? await tx.userLibraryResource.findUnique({
+          ? await tx.userLibraryResource.findFirst({
               where: {
-                userId_resourceType_resourceId: {
-                  userId: request.userId,
-                  resourceType: 'songs',
-                  resourceId: request.resourceId,
-                },
+                userId: request.userId,
+                resourceType: 'songs',
+                resourceId: request.resourceId,
+                sourceAlbumId: request.sourceAlbumId,
               },
               select: { sourceAlbumId: true },
             })
@@ -1841,6 +1916,9 @@ export class SongsService {
           userId: request.userId,
           resourceType: request.resourceType,
           resourceId: request.resourceId,
+          ...(request.resourceType === 'songs'
+            ? { sourceAlbumId: request.sourceAlbumId }
+            : {}),
         },
       });
       removed = deletion.count > 0;
@@ -1875,17 +1953,10 @@ export class SongsService {
               sourceAlbumId: request.resourceId,
             },
           });
-          await Promise.all(
-            removedFavoriteSongIds.map((songId) =>
-              this.enqueuePreferenceOutbox(
-                tx,
-                request.userId,
-                PreferenceEventType.PREFERENCE_EVENT_TYPE_SONG_UNFAVOURITED,
-                'songs',
-                songId,
-                PREFERENCE_SIGNAL_WEIGHT.SONG_UNFAVOURITED,
-              ),
-            ),
+          await this.notifyUnfavoritedSongsIfUnused(
+            tx,
+            request.userId,
+            removedFavoriteSongIds,
           );
         }
         await tx.userLibraryResource.deleteMany({
@@ -1915,36 +1986,24 @@ export class SongsService {
               userId: request.userId,
               resourceType: 'music-videos',
               resourceId: { in: songVideos.map((video) => video.id) },
+              sourceAlbumId: request.sourceAlbumId,
             },
           });
         }
-        const favorite = await tx.favorite.findUnique({
+        const favorite = await tx.favorite.findFirst({
           where: {
-            userId_songId: {
-              userId: request.userId,
-              songId: request.resourceId,
-            },
+            userId: request.userId,
+            songId: request.resourceId,
+            sourceAlbumId: request.sourceAlbumId,
           },
-          select: { songId: true },
+          select: { id: true, songId: true },
         });
         if (favorite) {
           removedFavoriteSongIds = [favorite.songId];
-          await tx.favorite.delete({
-            where: {
-              userId_songId: {
-                userId: request.userId,
-                songId: request.resourceId,
-              },
-            },
-          });
-          await this.enqueuePreferenceOutbox(
-            tx,
-            request.userId,
-            PreferenceEventType.PREFERENCE_EVENT_TYPE_SONG_UNFAVOURITED,
-            'songs',
+          await tx.favorite.delete({ where: { id: favorite.id } });
+          await this.notifyUnfavoritedSongsIfUnused(tx, request.userId, [
             favorite.songId,
-            PREFERENCE_SIGNAL_WEIGHT.SONG_UNFAVOURITED,
-          );
+          ]);
         }
 
         const sourceAlbumId = librarySong?.sourceAlbumId;
@@ -2040,6 +2099,9 @@ export class SongsService {
         userId: request.userId,
         resourceType: request.resourceType,
         resourceId: request.resourceId,
+        ...(request.resourceType === 'songs'
+          ? { sourceAlbumId: request.sourceAlbumId }
+          : {}),
       },
       data: { isPinned: true, pinnedAt: new Date() },
     });
@@ -2064,6 +2126,9 @@ export class SongsService {
         userId: request.userId,
         resourceType: request.resourceType,
         resourceId: request.resourceId,
+        ...(request.resourceType === 'songs'
+          ? { sourceAlbumId: request.sourceAlbumId }
+          : {}),
       },
       data: { isPinned: false, pinnedAt: null },
     });

@@ -523,16 +523,17 @@ model TranscodeOutbox {
 }
 
 model Favorite {
-  id            String   @id @default(uuid())
-  userId        String   @db.VarChar(128)
-  songId        String   @db.VarChar(128)
-  sourceAlbumId String?  @db.VarChar(128)
-  createdAt     DateTime @default(now()) @db.Timestamptz
+  id             String   @id @default(uuid())
+  userId         String   @db.VarChar(128)
+  songId         String   @db.VarChar(128)
+  sourceAlbumId  String?  @db.VarChar(128)
+  releaseTrackId String   @default("") @db.VarChar(128)
+  createdAt      DateTime @default(now()) @db.Timestamptz
 
   song        Song   @relation(fields: [songId], references: [id], onDelete: Cascade)
   sourceAlbum Album? @relation("FavoriteSourceAlbum", fields: [sourceAlbumId], references: [id], onDelete: SetNull)
 
-  @@unique([userId, songId])
+  @@unique([userId, songId, releaseTrackId], map: "favorite_release_key")
   @@index([userId, createdAt])
   @@index([songId])
   @@index([sourceAlbumId])
@@ -645,21 +646,22 @@ model SystemPlaylistFavorite {
 }
 
 model UserLibraryResource {
-  id            String    @id @default(uuid())
-  userId        String    @db.VarChar(128)
-  resourceType  String    @db.VarChar(32)
-  resourceId    String    @db.VarChar(128)
-  sourceAlbumId String?   @db.VarChar(128)
-  title         String    @default("") @db.VarChar(255)
-  subtitle      String    @default("") @db.VarChar(255)
-  artworkUrl    String    @default("") @db.VarChar(1000)
-  isPinned      Boolean   @default(false)
-  pinnedAt      DateTime? @db.Timestamptz
-  createdAt     DateTime  @default(now()) @db.Timestamptz
+  id             String    @id @default(uuid())
+  userId         String    @db.VarChar(128)
+  resourceType   String    @db.VarChar(32)
+  resourceId     String    @db.VarChar(128)
+  sourceAlbumId  String?   @db.VarChar(128)
+  releaseTrackId String    @default("") @db.VarChar(128)
+  title          String    @default("") @db.VarChar(255)
+  subtitle       String    @default("") @db.VarChar(255)
+  artworkUrl     String    @default("") @db.VarChar(1000)
+  isPinned       Boolean   @default(false)
+  pinnedAt       DateTime? @db.Timestamptz
+  createdAt      DateTime  @default(now()) @db.Timestamptz
 
   sourceAlbum Album? @relation("LibraryResourceSourceAlbum", fields: [sourceAlbumId], references: [id], onDelete: SetNull)
 
-  @@unique([userId, resourceType, resourceId])
+  @@unique([userId, resourceType, resourceId, releaseTrackId], map: "user_library_resource_release_key")
   @@index([userId, createdAt])
   @@index([userId, resourceType, createdAt, resourceId])
   @@index([userId, resourceType, title, resourceId])

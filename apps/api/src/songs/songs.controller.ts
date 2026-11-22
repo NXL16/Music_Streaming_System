@@ -363,6 +363,7 @@ export class SongsController {
     @Param('resourceId') resourceId: string,
     @Body()
     body: {
+      sourceAlbumId?: string;
       sourceOrigin?: 'catalog' | 'favorite' | 'user-playlist';
       songIds?: string[];
       trackSources?: Array<{ songId: string; sourceAlbumId: string }>;
@@ -376,7 +377,7 @@ export class SongsController {
       title: '',
       subtitle: '',
       artworkUrl: '',
-      sourceAlbumId: '',
+      sourceAlbumId: body?.sourceAlbumId || '',
       sourceOrigin: body?.sourceOrigin,
       songIds: body?.songIds,
       trackSources: body?.trackSources,
@@ -396,6 +397,7 @@ export class SongsController {
     @Req() req: Request,
     @Param('resourceType') resourceType: string,
     @Param('resourceId') resourceId: string,
+    @Body() body: { sourceAlbumId?: string },
   ) {
     const user = req.user as JwtUser;
     return this.songsService.pinLibraryResource({
@@ -405,7 +407,7 @@ export class SongsController {
       title: '',
       subtitle: '',
       artworkUrl: '',
-      sourceAlbumId: '',
+      sourceAlbumId: body?.sourceAlbumId || '',
     });
   }
 
@@ -415,6 +417,7 @@ export class SongsController {
     @Req() req: Request,
     @Param('resourceType') resourceType: string,
     @Param('resourceId') resourceId: string,
+    @Body() body: { sourceAlbumId?: string },
   ) {
     const user = req.user as JwtUser;
     return this.songsService.unpinLibraryResource({
@@ -424,7 +427,7 @@ export class SongsController {
       title: '',
       subtitle: '',
       artworkUrl: '',
-      sourceAlbumId: '',
+      sourceAlbumId: body?.sourceAlbumId || '',
     });
   }
 
@@ -481,12 +484,16 @@ export class SongsController {
 
   @Delete(':id/favorite')
   @UseGuards(StrictJwtAuthGuard)
-  async unfavorite(@Req() req: Request, @Param('id') songId: string) {
+  async unfavorite(
+    @Req() req: Request,
+    @Param('id') songId: string,
+    @Body() body: { sourceAlbumId?: string },
+  ) {
     const user = req.user as JwtUser;
     const result = await this.songsService.removeFavorite({
       userId: user.userId,
       songId,
-      sourceAlbumId: '',
+      sourceAlbumId: body?.sourceAlbumId || '',
     });
     return result;
   }

@@ -567,6 +567,7 @@ export class SongsService {
             title: song.title || resource.title,
             artist: song.artist || resource.subtitle,
             album: song.album,
+            albumId: resource.sourceAlbumId || '',
             isPublic: song.isPublic,
             status: song.status,
             durationSec: song.durationSec,
@@ -632,6 +633,19 @@ export class SongsService {
       }
     }
 
+    const projectArtist = (id: string) => {
+      const artist = catalog?.resources?.artists[id];
+      if (!artist?.attributes?.name) return [];
+      return [
+        {
+          id: artist.id,
+          name: artist.attributes.name,
+          url: artist.attributes.url,
+          artwork: artist.attributes.artwork,
+        },
+      ];
+    };
+
     return {
       resources: collectionResources.map((resource) => {
         const userPlaylist =
@@ -670,22 +684,15 @@ export class SongsService {
           album?.relationships?.tracks?.data ??
           playlist?.relationships?.tracks?.data ??
           [];
-        const artists = artistReferences.flatMap((reference) => {
-          const artist = catalog?.resources?.artists[reference.id];
-          if (!artist?.attributes?.name || !artist.attributes.url) return [];
-          return [
-            {
-              id: artist.id,
-              name: artist.attributes.name,
-              url: artist.attributes.url,
-            },
-          ];
-        });
+        const artists = artistReferences
+          .flatMap(({ id }) => projectArtist(id))
+          .filter((artist) => artist.url);
 
         return {
           resourceType: resource.resourceType,
           resourceId: resource.resourceId,
           title: attributes?.name || resource.title,
+          releaseDate: album?.attributes?.releaseDate || undefined,
           subtitle:
             album?.attributes?.artistName ||
             playlist?.attributes?.curatorName ||
@@ -698,6 +705,9 @@ export class SongsService {
               ? album?.attributes?.contentRating || ''
               : '',
           artists,
+          primaryArtists: (album?.attributes?.primaryArtistIds ?? []).flatMap(
+            projectArtist,
+          ),
           // The Library card already has the Catalog collection response in
           // hand. Preserve its track ids so an optimistic remove can hide the
           // derived Library Songs during the Undo window without another
