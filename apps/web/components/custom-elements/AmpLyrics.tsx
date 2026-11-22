@@ -1,5 +1,7 @@
 "use client";
 
+import type { PlaybackAudio } from "@/lib/player/playback-audio";
+
 import {
   ComponentType,
   CSSProperties,
@@ -17,6 +19,10 @@ import {
   getSongStaticLyrics,
   type StaticLyricLine,
 } from "@/lib/lyrics/static-lyrics.api";
+import {
+  bindNativePullToDismiss,
+  type PullToDismissCallbacks,
+} from "@/lib/gestures/native-pull-to-dismiss";
 
 type LoadedLyrics = {
   songId: string;
@@ -44,6 +50,8 @@ type TimeSyncedLyricsDisplay = HTMLElement & {
 type StaticLyricsDisplay = HTMLElement & {
   setLines(lines: readonly StaticLyricLine[]): void;
 };
+
+type OptionalPullToDismissCallbacks = Partial<PullToDismissCallbacks>;
 
 const MANUAL_SCROLL_RESUME_MS = 4_000;
 const LINE_SEEK_SCROLL_LOCK_MS = 450;
@@ -74,6 +82,20 @@ function getLyricsContainer(host: HTMLElement): HTMLElement {
   return lyricsContainer;
 }
 
+function bindPullToDismiss(
+  scroller: HTMLElement,
+  callbacksRef: RefObject<OptionalPullToDismissCallbacks>,
+) {
+  if (!callbacksRef.current.onPullDown || !callbacksRef.current.onPullEnd) {
+    return;
+  }
+
+  return bindNativePullToDismiss(scroller, () => ({
+    onPullDown: (offset) => callbacksRef.current?.onPullDown?.(offset),
+    onPullEnd: () => callbacksRef.current?.onPullEnd?.(),
+  }));
+}
+
 function findActiveLineIndex(lines: LyricLine[], timeMs: number) {
   let low = 0;
   let high = lines.length - 1;
@@ -99,25 +121,34 @@ function findActiveLineIndex(lines: LyricLine[], timeMs: number) {
 
 interface AmpLyricsProps {
   songId?: string;
-  audioRef?: RefObject<HTMLAudioElement | null>;
+  audioRef?: RefObject<PlaybackAudio | null>;
   inDetailView?: boolean;
+  activeLineTopRatio?: number;
   staticLines?: readonly StaticLyricLine[];
   staticOnly?: boolean;
   emptyTitle?: string;
   emptyDescription?: string;
+  onPullDown?: (offset: number) => void;
+  onPullEnd?: () => void;
 }
 
 export default function AmpLyrics({
   songId,
   audioRef,
   inDetailView,
+  activeLineTopRatio = inDetailView ? 0.32 : 0.18,
   staticLines: suppliedStaticLines,
   staticOnly = false,
   emptyTitle = "No lyrics available",
   emptyDescription = "There are no lyrics available for this song.",
+  onPullDown,
+  onPullEnd,
 }: AmpLyricsProps) {
   const containerRef = useRef<HTMLElement>(null);
-  const activeLineTopRatio = inDetailView ? 0.32 : 0.18;
+  const pullCallbacksRef = useRef<OptionalPullToDismissCallbacks>({
+    onPullDown,
+    onPullEnd,
+  });
   const [loadedLyrics, setLoadedLyrics] = useState<LoadedLyrics | null>(null);
   const [loadedStaticLyrics, setLoadedStaticLyrics] =
     useState<LoadedStaticLyrics | null>(null);
@@ -125,6 +156,9 @@ export default function AmpLyrics({
     songId?: string;
     status: LyricsLoadStatus;
   }>({ status: "pending" });
+  useEffect(() => {
+    pullCallbacksRef.current = { onPullDown, onPullEnd };
+  }, [onPullDown, onPullEnd]);
   const lines = useMemo<LyricLine[]>(() => {
     if (!loadedLyrics || loadedLyrics.songId !== songId) return [];
     return loadedLyrics.lines;
@@ -245,6 +279,7 @@ export default function AmpLyrics({
     if (lines.length) {
       let cancelled = false;
       let display: TimeSyncedLyricsDisplay | undefined;
+      let releasePullToDismiss: (() => void) | undefined;
       let resumeTimer: number | undefined;
       let animationFrame: number | undefined;
       let lineBoundaryTimer: number | undefined;
@@ -490,6 +525,7 @@ export default function AmpLyrics({
         display.setLines(lines);
         display.setActiveLineTopRatio(activeLineTopRatio);
         display.setLineStaggerEnabled(Boolean(inDetailView));
+        releasePullToDismiss = bindPullToDismiss(display, pullCallbacksRef);
         display.addEventListener("lyrics-line-seek", handleSeek);
         display.addEventListener("wheel", handleManualScroll, {
           capture: true,
@@ -526,6 +562,7 @@ export default function AmpLyrics({
         display?.removeEventListener("lyrics-line-seek", handleSeek);
         display?.removeEventListener("wheel", handleManualScroll, true);
         display?.removeEventListener("touchmove", handleManualScroll, true);
+        releasePullToDismiss?.();
         audio?.removeEventListener("timeupdate", handleAudioSync);
         audio?.removeEventListener("play", startFrameSync);
         audio?.removeEventListener("pause", handlePause);
@@ -537,6 +574,7 @@ export default function AmpLyrics({
 
     if (staticLines.length) {
       let cancelled = false;
+      let releasePullToDismiss: (() => void) | undefined;
       lyricsContainer.classList.remove("auto-scrolling");
 
       void import("./m404-lyrics-display-static").then(() => {
@@ -545,11 +583,13 @@ export default function AmpLyrics({
           "m404-lyrics-display-static",
         ) as StaticLyricsDisplay;
         display.setLines(staticLines);
+        releasePullToDismiss = bindPullToDismiss(display, pullCallbacksRef);
         lyricsContainer.replaceChildren(display);
       });
 
       return () => {
         cancelled = true;
+        releasePullToDismiss?.();
       };
     }
 

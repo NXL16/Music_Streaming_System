@@ -9,15 +9,17 @@ import {
   useMemo,
 } from "react";
 import {
+  playerSongKey,
   usePlayerStore,
   type PlayerSong,
 } from "@/lib/player/use-player-store";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { useShallow } from "zustand/react/shallow";
-import { useMsePlayback } from "@/lib/player/use-mse-playback";
+import { useWebAudioPlayback } from "@/lib/player/use-web-audio-playback";
+import type { PlaybackAudio } from "@/lib/player/playback-audio";
 import { usePersistentVolume } from "@/lib/player/use-persistent-volume";
-import { resumeAudioContext } from "@/lib/player/audio-context";
 import { syncPlaybackClock } from "@/lib/player/playback-clock";
+import { bindAudioMediaSession } from "@/lib/player/audio-media-session";
 import {
   flushQueuedListeningEvents,
   queueListeningEvent,
@@ -58,57 +60,6 @@ const SONG_STATION_REFILL_THRESHOLD = 8;
 const SONG_STATION_REFILL_RETRY_DELAY_MS = 15_000;
 const AUTOPLAY_QUEUE_SIZE = 10;
 const AUTOPLAY_REFILL_RETRY_DELAY_MS = 15_000;
-
-function resetAudioToStart(audio: HTMLAudioElement | null): void {
-  if (audio) {
-    audio.currentTime = 0;
-  }
-}
-
-/**
- * An MSE stream can still be at its terminal media timeline immediately after
- * assigning `currentTime = 0`. Calling play in that small window is ignored by
- * some browsers, leaving the UI at the start while the element remains ended.
- * Wait for its seek to settle before resuming. A short fallback keeps ordinary
- * media elements and browsers that omit `seeked` from getting stuck.
- */
-function replayAudioFromStart(
-  audio: HTMLAudioElement,
-  vocal: HTMLAudioElement | null,
-  waitForSeek: boolean,
-  isCurrentPlayback: () => boolean,
-  onReadyToPlay: () => void,
-  onFailure: () => void,
-): void {
-  let started = false;
-  let fallbackTimer: number | null = null;
-
-  const startPlayback = () => {
-    if (started) return;
-    started = true;
-    if (fallbackTimer !== null) window.clearTimeout(fallbackTimer);
-    // A listener can skip to another track while the MSE seek is pending.
-    // Never let that old request start (or pause) the newly selected track.
-    if (!isCurrentPlayback()) return;
-
-    onReadyToPlay();
-    const plays = [audio.play()];
-    if (vocal) plays.push(vocal.play());
-    void Promise.all(plays).catch(onFailure);
-  };
-
-  if (waitForSeek) {
-    audio.addEventListener("seeked", startPlayback, { once: true });
-    fallbackTimer = window.setTimeout(startPlayback, 1_000);
-    audio.currentTime = 0;
-    resetAudioToStart(vocal);
-    return;
-  }
-
-  audio.currentTime = 0;
-  resetAudioToStart(vocal);
-  startPlayback();
-}
 
 function getAbsoluteArtworkUrl(artworkUrl: string): string {
   try {
@@ -264,12 +215,8 @@ function playbackSessionKey(song: PlayerSong): string {
 }
 
 export function AppPlayerBar() {
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const vocalAudioRef = useRef<HTMLAudioElement>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const masterGainRef = useRef<GainNode | null>(null);
-  const vocalGainRef = useRef<GainNode | null>(null);
-  const audioContextCloseTimerRef = useRef<number | null>(null);
+  const [vocalVolume, setVocalVolume] = useState(1);
+  const { volume, lastAudibleVolume, setVolume } = usePersistentVolume();
   const playbackTimeSessionRef = useRef<string | undefined>(undefined);
   const {
     currentSong,
@@ -314,36 +261,41 @@ export function AppPlayerBar() {
       setVideoPlayerOpen: state.setVideoPlayerOpen,
     })),
   );
-  const { isMseActive, isStemActive } = useMsePlayback(audioRef, vocalAudioRef);
+  const { transport, isStemActive } = useWebAudioPlayback(volume, vocalVolume);
+  const audioRef = useMemo<React.RefObject<PlaybackAudio | null>>(
+    () => ({ current: transport }),
+    [transport],
+  );
+  const getPlaybackAudio = useCallback(
+    (): PlaybackAudio | null => transport,
+    [transport],
+  );
   const currentPlaybackSessionKey = currentSong
     ? playbackSessionKey(currentSong)
     : undefined;
   const isPlaying = Boolean(currentSong && playing);
   const isVideoPlayback = currentSong?.playbackKind === "video";
-  const currentArtworkSrcSet =
-    isVideoPlayback
-      ? (currentSong?.video?.posterSrcSet ??
-        currentSong?.video?.poster ??
-        currentSong?.thumbnailArtworkSrcSet ??
-        currentSong?.artworkSrcSet)
-      : (currentSong?.thumbnailArtworkSrcSet ?? currentSong?.artworkSrcSet);
+  const currentArtworkSrcSet = isVideoPlayback
+    ? (currentSong?.video?.posterSrcSet ??
+      currentSong?.video?.poster ??
+      currentSong?.thumbnailArtworkSrcSet ??
+      currentSong?.artworkSrcSet)
+    : (currentSong?.thumbnailArtworkSrcSet ?? currentSong?.artworkSrcSet);
   const playableSongCount = useMemo(
     () => queue.filter((song) => song.playbackUrl).length,
     [queue],
   );
-  const favoriteSongIds = useFavoriteStore((state) => state.songIds);
+  const favoriteSongKeys = useFavoriteStore((state) => state.songKeys);
   const isCurrentSongFavorite = Boolean(
-    currentSong && favoriteSongIds.has(currentSong.id),
+    currentSong && favoriteSongKeys.has(playerSongKey(currentSong)),
   );
 
   const [isExpanded, setIsExpanded] = useState(false);
   const [isProgressExpanded, setIsProgressExpanded] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [vocalVolume, setVocalVolume] = useState(1);
   const [isVocalControlExpanded, setIsVocalControlExpanded] = useState(false);
   const [autoplayRetryNonce, setAutoplayRetryNonce] = useState(0);
   const useCompactPlayer = useMediaQuery("(max-width: 739px)");
-  const { volume, lastAudibleVolume, setVolume } = usePersistentVolume();
   const trackedSongRef = useRef<string | null>(null);
   const pendingStationQualifiedPlayRef = useRef<{
     stationId: string;
@@ -363,58 +315,30 @@ export function AppPlayerBar() {
   const autoplayRetryTimerRef = useRef<number | null>(null);
   const autoplayGenerationRef = useRef(0);
 
-  const previewVocalVolume = useCallback((nextVolume: number) => {
-    const vocalGain = vocalGainRef.current;
-    const audioContext = audioContextRef.current;
-    if (!vocalGain || !audioContext) return;
-    vocalGain.gain.setTargetAtTime(
-      Math.min(1, Math.max(0, nextVolume)),
-      audioContext.currentTime,
-      0.015,
-    );
-  }, []);
+  const previewVocalVolume = useCallback(
+    (nextVolume: number) => transport?.setVocalVolume(nextVolume),
+    [transport],
+  );
+
+  const handleSetVolume = useCallback(
+    (nextVolume: number) => {
+      const normalizedVolume = Math.min(1, Math.max(0, nextVolume));
+      const audio = getPlaybackAudio();
+      if (audio) audio.volume = normalizedVolume;
+      videoPlaybackController.setVolume(normalizedVolume);
+      setVolume(normalizedVolume);
+    },
+    [setVolume, getPlaybackAudio],
+  );
 
   const handleTogglePlayback = useCallback(() => {
-    if (isVideoPlayback) {
-      if (!playing) setVideoPlayerOpen(true);
-      togglePlayback();
-      return;
-    }
-    resumeAudioContext(audioContextRef.current);
-
-    const audio = audioRef.current;
-    const hasReachedEnd =
-      audio?.ended ||
-      (audio &&
-        Number.isFinite(audio.duration) &&
-        audio.currentTime >= audio.duration);
-
-    // The store stops at the end of a queue, but retains the same song and
-    // MediaSource. A plain `play()` would therefore run with currentTime at
-    // the end and immediately remain ended.
-    if (hasReachedEnd && audio) {
-      setPlaybackTimeMs(0);
-      replayAudioFromStart(
-        audio,
-        isStemActive ? vocalAudioRef.current : null,
-        isMseActive,
-        () => playbackTimeSessionRef.current === currentPlaybackSessionKey,
-        () => {
-          if (!usePlayerStore.getState().playing) togglePlayback();
-        },
-        pause,
-      );
-      return;
-    }
-
+    if (isVideoPlayback && !playing) setVideoPlayerOpen(true);
+    if (transport?.ended) setPlaybackTimeMs(0);
     togglePlayback();
   }, [
-    isStemActive,
-    isMseActive,
     isVideoPlayback,
-    pause,
     playing,
-    currentPlaybackSessionKey,
+    transport,
     setVideoPlayerOpen,
     setPlaybackTimeMs,
     togglePlayback,
@@ -430,18 +354,22 @@ export function AppPlayerBar() {
       // A Song Station is only a valid Recently Played resource after its
       // dedicated artwork has been generated. This guards every PLAY_START
       // path, including a deferred event that outlives the player callback.
-      if (eventType === "PLAY_START" && song.sourceStation?.artworkReady === false) {
+      if (
+        eventType === "PLAY_START" &&
+        song.sourceStation?.artworkReady === false
+      ) {
         return;
       }
       // Media clocks can run a fraction past the catalog duration (notably
-      // after MSE buffering or a delayed `ended` event). Keep telemetry within
+      // after buffering or a delayed `ended` event). Keep telemetry within
       // the server-side validity invariant instead of losing the whole event.
       const totalSec = telemetryDurationSeconds(song.durationSec);
       const durationSec = telemetryDurationSeconds(elapsed);
       const payload = {
         songId: song.id,
         eventType,
-        durationSec: totalSec > 0 ? Math.min(durationSec, totalSec) : durationSec,
+        durationSec:
+          totalSec > 0 ? Math.min(durationSec, totalSec) : durationSec,
         totalSec,
         songTitle: song.title,
         artistName: song.artist,
@@ -528,7 +456,11 @@ export function AppPlayerBar() {
 
   useEffect(() => {
     return videoPlaybackController.subscribe((event) => {
-      if (!isVideoPlayback || !currentSong || event.src !== currentSong.playbackUrl)
+      if (
+        !isVideoPlayback ||
+        !currentSong ||
+        event.src !== currentSong.playbackUrl
+      )
         return;
       if (event.type === "timeupdate") {
         const currentTime = Math.max(0, event.currentTime);
@@ -611,9 +543,11 @@ export function AppPlayerBar() {
     const isArtistStation =
       station.id.startsWith("artist-station-") ||
       station.id.startsWith("artist-play-station-");
-    void (isArtistStation
-      ? refillArtistStation(station, excludedSongIds)
-      : refillSongStation(station, excludedSongIds))
+    void (
+      isArtistStation
+        ? refillArtistStation(station, excludedSongIds)
+        : refillSongStation(station, excludedSongIds)
+    )
       .then((addedTracks) => {
         refill.exhausted = addedTracks === 0;
       })
@@ -639,8 +573,8 @@ export function AppPlayerBar() {
   useEffect(() => {
     if (!autoplayEnabled || stationMode || !currentSong) return;
 
-    const queuedAutoplaySongs = queue.filter((song, index) =>
-      index > currentIndex && song.sourceAutoplay,
+    const queuedAutoplaySongs = queue.filter(
+      (song, index) => index > currentIndex && song.sourceAutoplay,
     );
     const needed = AUTOPLAY_QUEUE_SIZE - queuedAutoplaySongs.length;
     const seedKey = playbackSessionKey(currentSong);
@@ -701,21 +635,19 @@ export function AppPlayerBar() {
   useLayoutEffect(() => {
     playbackTimeSessionRef.current = currentPlaybackSessionKey;
     setPlaybackTimeMs(0);
-    resetAudioToStart(audioRef.current);
-    resetAudioToStart(vocalAudioRef.current);
   }, [currentPlaybackSessionKey, setPlaybackTimeMs]);
 
   const handleLoadedMetadata = useCallback(() => {
-    const audio = audioRef.current;
+    const audio = getPlaybackAudio();
     if (!audio || !currentPlaybackSessionKey) return;
 
     playbackTimeSessionRef.current = currentPlaybackSessionKey;
     lastObservedPlaybackTimeRef.current = audio.currentTime;
     syncPlaybackClock(audio, setPlaybackTimeMs);
-  }, [currentPlaybackSessionKey, setPlaybackTimeMs]);
+  }, [currentPlaybackSessionKey, setPlaybackTimeMs, getPlaybackAudio]);
 
   const handleTimeUpdate = useCallback(() => {
-    const audio = audioRef.current;
+    const audio = getPlaybackAudio();
     if (!audio || playbackTimeSessionRef.current !== currentPlaybackSessionKey)
       return;
 
@@ -732,10 +664,11 @@ export function AppPlayerBar() {
     markQualifiedPlay,
     playing,
     setPlaybackTimeMs,
+    getPlaybackAudio,
   ]);
 
   const handleSeeking = useCallback(() => {
-    const audio = audioRef.current;
+    const audio = getPlaybackAudio();
     if (!audio || playbackTimeSessionRef.current !== currentPlaybackSessionKey)
       return;
 
@@ -758,88 +691,20 @@ export function AppPlayerBar() {
     // clock here so progress, lyrics, and the audio element stay aligned
     // throughout a seek instead of briefly showing the old lyric line.
     syncPlaybackClock(audio, setPlaybackTimeMs);
-  }, [currentPlaybackSessionKey, setPlaybackTimeMs]);
+  }, [currentPlaybackSessionKey, setPlaybackTimeMs, getPlaybackAudio]);
 
   useEffect(() => {
-    if (audioContextCloseTimerRef.current !== null) {
-      window.clearTimeout(audioContextCloseTimerRef.current);
-      audioContextCloseTimerRef.current = null;
-    }
-
-    let context = audioContextRef.current;
-    if (!context) {
-      const instrumental = audioRef.current;
-      const vocal = vocalAudioRef.current;
-      if (!instrumental || !vocal) return;
-
-      context = new AudioContext();
-      const masterGain = context.createGain();
-      const vocalGain = context.createGain();
-      context.createMediaElementSource(instrumental).connect(masterGain);
-      context
-        .createMediaElementSource(vocal)
-        .connect(vocalGain)
-        .connect(masterGain);
-      masterGain.connect(context.destination);
-      audioContextRef.current = context;
-      masterGainRef.current = masterGain;
-      vocalGainRef.current = vocalGain;
-    }
-
-    return () => {
-      // React Strict Mode temporarily remounts effects in development. Delaying
-      // teardown lets that remount reuse the MediaElementSource nodes, while a
-      // real unmount still closes the context and releases its audio resources.
-      audioContextCloseTimerRef.current = window.setTimeout(() => {
-        if (audioContextRef.current !== context) return;
-        audioContextRef.current = null;
-        masterGainRef.current = null;
-        vocalGainRef.current = null;
-        void context.close();
-      }, 0);
-    };
-  }, []);
-
-  useEffect(() => {
-    const masterGain = masterGainRef.current;
-    if (masterGain)
-      masterGain.gain.setTargetAtTime(
-        volume,
-        audioContextRef.current!.currentTime,
-        0.02,
-      );
-    else if (audioRef.current) audioRef.current.volume = volume;
     videoPlaybackController.setVolume(volume);
   }, [volume]);
 
   useEffect(() => {
-    const vocalGain = vocalGainRef.current;
-    if (vocalGain && audioContextRef.current) {
-      vocalGain.gain.setTargetAtTime(
-        vocalVolume,
-        audioContextRef.current.currentTime,
-        0.02,
-      );
-    }
-  }, [vocalVolume]);
-
-  useEffect(() => {
-    if (playing) resumeAudioContext(audioContextRef.current);
-  }, [playing]);
-
-  useEffect(() => {
-    for (const audio of [audioRef.current, vocalAudioRef.current]) {
-      if (!audio) continue;
-      audio.playbackRate = playbackRate;
-      audio.defaultPlaybackRate = playbackRate;
-    }
     videoPlaybackController.setPlaybackRate(playbackRate);
   }, [playbackRate]);
 
   useEffect(() => {
     const seekFromEditor = (event: Event) => {
       const timeMs = (event as CustomEvent<{ timeMs?: number }>).detail?.timeMs;
-      const audio = audioRef.current;
+      const audio = getPlaybackAudio();
       if (!audio || !Number.isFinite(timeMs)) return;
       const maxTimeMs = Number.isFinite(audio.duration)
         ? Math.max(0, audio.duration * 1000)
@@ -851,36 +716,10 @@ export function AppPlayerBar() {
 
     window.addEventListener("musical:seek", seekFromEditor);
     return () => window.removeEventListener("musical:seek", seekFromEditor);
-  }, [setPlaybackTimeMs]);
+  }, [setPlaybackTimeMs, getPlaybackAudio]);
 
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio || isMseActive) return;
-    if (isVideoPlayback) {
-      audio.pause();
-      vocalAudioRef.current?.pause();
-      return;
-    }
-
-    if (!currentSong?.playbackUrl || !playing) {
-      audio.pause();
-      return;
-    }
-
-    void audio.play().catch(() => {
-      pause();
-    });
-  }, [
-    currentPlaybackSessionKey,
-    currentSong?.playbackUrl,
-    pause,
-    playing,
-    isMseActive,
-    isVideoPlayback,
-  ]);
-
-  const handleEnded = () => {
-    const audio = audioRef.current;
+  const handleEnded = useCallback(() => {
+    const audio = getPlaybackAudio();
     if (currentSong) {
       markQualifiedPlay();
       if (
@@ -898,22 +737,24 @@ export function AppPlayerBar() {
       (repeatMode === 1 || (repeatMode === 2 && playableSongCount === 1))
     ) {
       setPlaybackTimeMs(0);
-      const vocal = isStemActive ? vocalAudioRef.current : null;
-      replayAudioFromStart(
-        audio,
-        vocal,
-        isMseActive,
-        () => playbackTimeSessionRef.current === currentPlaybackSessionKey,
-        () => {
-          const state = usePlayerStore.getState();
-          if (!state.playing) state.togglePlayback();
-        },
-        pause,
-      );
+      audio.currentTime = 0;
+      const state = usePlayerStore.getState();
+      if (!state.playing) state.togglePlayback();
+      else void audio.play().catch(pause);
       return;
     }
     next(true);
-  };
+  }, [
+    getPlaybackAudio,
+    currentSong,
+    markQualifiedPlay,
+    emitEvent,
+    repeatMode,
+    playableSongCount,
+    setPlaybackTimeMs,
+    pause,
+    next,
+  ]);
 
   const handleNext = useCallback(() => {
     const elapsed = listenedSecondsRef.current;
@@ -942,6 +783,28 @@ export function AppPlayerBar() {
   }, [currentSong, emitEvent, previous]);
 
   useEffect(() => {
+    const audio = getPlaybackAudio();
+    if (!audio) return;
+    audio.addEventListener("loadedmetadata", handleLoadedMetadata);
+    audio.addEventListener("timeupdate", handleTimeUpdate);
+    audio.addEventListener("seeking", handleSeeking);
+    audio.addEventListener("ended", handleEnded);
+    if (audio.duration > 0) handleLoadedMetadata();
+    return () => {
+      audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      audio.removeEventListener("timeupdate", handleTimeUpdate);
+      audio.removeEventListener("seeking", handleSeeking);
+      audio.removeEventListener("ended", handleEnded);
+    };
+  }, [
+    getPlaybackAudio,
+    handleLoadedMetadata,
+    handleTimeUpdate,
+    handleSeeking,
+    handleEnded,
+  ]);
+
+  useEffect(() => {
     if (
       !("mediaSession" in navigator) ||
       typeof MediaMetadata === "undefined"
@@ -950,44 +813,33 @@ export function AppPlayerBar() {
     }
 
     const mediaSession = navigator.mediaSession;
-    const syncMediaSession = () => {
-      const mediaSessionArtworkUrl = isVideoPlayback
-        ? currentSong?.video?.poster ?? currentSong?.artworkUrl
-        : currentSong?.mediaSessionArtworkUrl ?? currentSong?.artworkUrl;
-      const isManagedArtwork = Boolean(
-        !isVideoPlayback && currentSong?.mediaSessionArtworkUrl,
-      );
-      mediaSession.metadata = currentSong
-        ? new MediaMetadata({
-            title: currentSong.title,
-            artist: currentSong.artist,
-            album: currentSong.album,
-            artwork: mediaSessionArtworkUrl
-              ? [
-                  {
-                    src: getAbsoluteArtworkUrl(mediaSessionArtworkUrl),
-                    // Desktop Chrome is more reliable when the rendition's
-                    // dimensions and MIME type are explicit. Only declare it
-                    // for our managed square WebP artwork, not video posters
-                    // or external/library originals whose format is unknown.
-                    ...(isManagedArtwork
-                      ? { sizes: "632x632", type: "image/webp" }
-                      : {}),
-                  },
-                ]
-              : [],
-          })
-        : null;
-      // A SING pair pauses both native media elements briefly while it seeks
-      // or waits for one stem to buffer. Media Session must reflect the
-      // player's intent, not that transient implementation detail; otherwise
-      // the iPhone lock screen flickers from Pause to Play during recovery.
-      mediaSession.playbackState = usePlayerStore.getState().playing
-        ? "playing"
-        : "paused";
-    };
-
-    syncMediaSession();
+    const mediaSessionArtworkUrl = isVideoPlayback
+      ? (currentSong?.video?.poster ?? currentSong?.artworkUrl)
+      : (currentSong?.mediaSessionArtworkUrl ?? currentSong?.artworkUrl);
+    const isManagedArtwork = Boolean(
+      !isVideoPlayback && currentSong?.mediaSessionArtworkUrl,
+    );
+    mediaSession.metadata = currentSong
+      ? new MediaMetadata({
+          title: currentSong.title,
+          artist: currentSong.artist,
+          album: currentSong.album,
+          artwork: mediaSessionArtworkUrl
+            ? [
+                {
+                  src: getAbsoluteArtworkUrl(mediaSessionArtworkUrl),
+                  // Desktop Chrome is more reliable when the rendition's
+                  // dimensions and MIME type are explicit. Only declare it
+                  // for our managed square WebP artwork, not video posters
+                  // or external/library originals whose format is unknown.
+                  ...(isManagedArtwork
+                    ? { sizes: "632x632", type: "image/webp" }
+                    : {}),
+                },
+              ]
+            : [],
+        })
+      : null;
 
     const setAction = (
       action: MediaSessionAction,
@@ -1000,7 +852,7 @@ export function AppPlayerBar() {
       }
     };
 
-    setAction("play", () => {
+    const hardwarePlay = () => {
       if (isVideoPlayback) {
         const playerState = usePlayerStore.getState();
         if (!playerState.playing) playerState.togglePlayback();
@@ -1009,89 +861,99 @@ export function AppPlayerBar() {
         void videoPlaybackController.play();
         return;
       }
-      const audio = audioRef.current;
-      const vocal = isStemActive ? vocalAudioRef.current : null;
-      const playerState = usePlayerStore.getState();
+      const audio = getPlaybackAudio();
       if (!audio) return;
-
-      resumeAudioContext(audioContextRef.current);
-
-      const hasReachedEnd =
-        audio.ended ||
-        (Number.isFinite(audio.duration) &&
-          audio.currentTime >= audio.duration);
-
-      if (hasReachedEnd) {
-        playerState.setPlaybackTimeMs(0);
-        replayAudioFromStart(
-          audio,
-          vocal,
-          isMseActive,
-          () => playbackTimeSessionRef.current === currentPlaybackSessionKey,
-          () => {
-            const state = usePlayerStore.getState();
-            if (!state.playing) state.togglePlayback();
-          },
-          () => usePlayerStore.getState().pause(),
-        );
-        return;
-      }
-
-      if (!playerState.playing) {
-        playerState.togglePlayback();
-      }
-
-      // Invoke play from the Media Session action itself. Safari can defer the
-      // React effect that normally calls play while the device is locked.
-      if (audio.paused || hasReachedEnd) {
-        const plays = [audio.play()];
-        if (vocal) plays.push(vocal.play());
-        void Promise.all(plays).catch(() => usePlayerStore.getState().pause());
-      }
-    });
-    setAction("pause", () => {
-      if (isVideoPlayback) videoPlaybackController.pause();
+      const state = usePlayerStore.getState();
+      if (!state.playing) state.togglePlayback();
+      else
+        void audio.play().catch(() => {
+          if (audio === getPlaybackAudio()) usePlayerStore.getState().pause();
+        });
+    };
+    const hardwarePause = () => {
       usePlayerStore.getState().pause();
-    });
+      if (isVideoPlayback) videoPlaybackController.pause();
+    };
+    setAction("play", hardwarePlay);
+    setAction("pause", hardwarePause);
     setAction("nexttrack", handleNext);
     setAction("previoustrack", handlePrevious);
-
-    const audio = audioRef.current;
-    // iOS can replace the lock-screen metadata while a MediaSource URL is
-    // attached. Reapply it when the media element is actually ready or starts.
-    audio?.addEventListener("loadedmetadata", syncMediaSession);
-    audio?.addEventListener("playing", syncMediaSession);
-    audio?.addEventListener("pause", syncMediaSession);
-    audio?.addEventListener("ended", syncMediaSession);
-
+    for (const action of ["seekto", "seekbackward", "seekforward"] as const)
+      setAction(action, null);
+    const audio = isVideoPlayback ? null : getPlaybackAudio();
+    const audioSession = audio
+      ? bindAudioMediaSession(mediaSession, audio, {
+          isPlaying: () => usePlayerStore.getState().playing,
+        })
+      : undefined;
+    const syncState = () => {
+      if (audioSession) audioSession.sync();
+      else
+        mediaSession.playbackState = usePlayerStore.getState().playing
+          ? "playing"
+          : "paused";
+    };
+    const unsubscribeState = usePlayerStore.subscribe((state, previous) => {
+      const nextSession = state.currentSong
+        ? playbackSessionKey(state.currentSong)
+        : undefined;
+      const previousSession = previous.currentSong
+        ? playbackSessionKey(previous.currentSong)
+        : undefined;
+      if (
+        nextSession !== previousSession ||
+        state.currentSong?.playbackUrl !== previous.currentSong?.playbackUrl
+      ) {
+        audioSession?.dispose();
+        return;
+      }
+      if (state.playing !== previous.playing) syncState();
+    });
+    syncState();
+    const unsubscribeVideo = isVideoPlayback
+      ? videoPlaybackController.subscribe((event) => {
+          if (
+            event.type !== "timeupdate" ||
+            event.src !== currentSong?.playbackUrl ||
+            !Number.isFinite(event.duration) ||
+            event.duration <= 0 ||
+            !Number.isFinite(event.currentTime)
+          )
+            return;
+          try {
+            mediaSession.setPositionState?.({
+              duration: event.duration,
+              position: Math.max(
+                0,
+                Math.min(event.currentTime, event.duration),
+              ),
+              playbackRate: usePlayerStore.getState().playbackRate,
+            });
+          } catch {
+            /* Position reporting is optional. */
+          }
+        })
+      : undefined;
     return () => {
-      audio?.removeEventListener("loadedmetadata", syncMediaSession);
-      audio?.removeEventListener("playing", syncMediaSession);
-      audio?.removeEventListener("pause", syncMediaSession);
-      audio?.removeEventListener("ended", syncMediaSession);
+      unsubscribeState();
+      unsubscribeVideo?.();
+      audioSession?.dispose();
       for (const action of [
         "play",
         "pause",
         "nexttrack",
         "previoustrack",
-      ] as const) {
+      ] as const)
         setAction(action, null);
-      }
     };
   }, [
     currentPlaybackSessionKey,
     currentSong,
     handleNext,
     handlePrevious,
-    isStemActive,
-    isMseActive,
     isVideoPlayback,
+    getPlaybackAudio,
   ]);
-
-  useEffect(() => {
-    if (!("mediaSession" in navigator)) return;
-    navigator.mediaSession.playbackState = playing ? "playing" : "paused";
-  }, [playing]);
 
   const toggleMute = () => {
     if (!isExpanded) {
@@ -1100,9 +962,9 @@ export function AppPlayerBar() {
     }
 
     if (volume > 0) {
-      setVolume(0);
+      handleSetVolume(0);
     } else {
-      setVolume(lastAudibleVolume);
+      handleSetVolume(lastAudibleVolume);
     }
   };
 
@@ -1110,31 +972,18 @@ export function AppPlayerBar() {
     <div
       className={`bottom-0 shrink-0 h-13.5 w-full inset-e-0 fixed z-[calc(var(--z-web-chrome)-1)] min-[484px]:self-end min-[484px]:[grid-area:structure-main-section] min-[484px]:inset-s-[unset] min-[484px]:mb-5 min-[484px]:ps-5 min-[484px]:sticky min-[484px]:max-[999px]:[--contextMenuPosition:fixed] max-[483px]:h-15.25 min-[484px]:w-[calc(100vw-var(--web-navigation-width))] motion-safe:[transition:padding-inline-end_0.3s_cubic-bezier(0.215,0.61,0.355,1)] will-change-[padding-inline-end] ${isSidebarOpen ? "min-[484px]:pe-80" : "min-[484px]:pe-5"}`}
     >
-      <audio
-        ref={audioRef}
-        src={
-          isMseActive || isVideoPlayback
-            ? undefined
-            : currentSong?.playbackUrl || undefined
-        }
-        preload="metadata"
-        onEnded={handleEnded}
-        onError={() => {
-          if (!isVideoPlayback) pause();
-        }}
-        onLoadedMetadata={handleLoadedMetadata}
-        onSeeking={handleSeeking}
-        onTimeUpdate={handleTimeUpdate}
-      />
-      <audio ref={vocalAudioRef} preload="metadata" aria-hidden />
       {useCompactPlayer ? (
         <CompactPlayerBar
+          audioRef={audioRef}
           currentSong={currentSong}
           currentArtworkSrcSet={currentArtworkSrcSet}
           isPlaying={isPlaying}
           isVideoPlayback={isVideoPlayback}
+          volume={volume}
+          onSetVolume={handleSetVolume}
           onOpenVideoPlayer={() => setVideoPlayerOpen(true)}
           onTogglePlayback={handleTogglePlayback}
+          onPrevious={handlePrevious}
           onNext={handleNext}
         />
       ) : (
@@ -1154,7 +1003,7 @@ export function AppPlayerBar() {
           isProgressExpanded={isProgressExpanded}
           setIsProgressExpanded={setIsProgressExpanded}
           volume={volume}
-          onSetVolume={setVolume}
+          onSetVolume={handleSetVolume}
           onToggleMute={toggleMute}
           onTogglePlayback={handleTogglePlayback}
           onToggleShuffle={toggleShuffle}

@@ -1,5 +1,7 @@
 "use client";
 
+import type { PlaybackAudio } from "@/lib/player/playback-audio";
+
 import AmpChromeVolume from "@/components/custom-elements/AmpChromeVolume";
 import AmpContextMenuButton from "@/components/custom-elements/AmpContextMenuButton";
 import { M404ContextualMenuPortalHost } from "@/components/custom-elements/m404-contextual-menu";
@@ -13,7 +15,11 @@ import { useAuthStore } from "@/lib/auth/auth-store";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { toggleSongFavorite } from "@/lib/favorites/toggle-song-favorite";
 import { FavoriteActionButton } from "@/components/songs/favorite-action-button";
-import { usePlayerStore, type PlayerSong } from "@/lib/player/use-player-store";
+import {
+  playerSongKey,
+  usePlayerStore,
+  type PlayerSong,
+} from "@/lib/player/use-player-store";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
@@ -32,7 +38,7 @@ const AmbientVideo = dynamic(
 );
 
 type MusicPlayDetailProps = {
-  audioRef: React.RefObject<HTMLAudioElement | null>;
+  audioRef: React.RefObject<PlaybackAudio | null>;
   currentSong: PlayerSong;
   initialLyricOpen?: boolean;
   onClose: (value: boolean) => void;
@@ -79,7 +85,7 @@ export default function MusicPlayDetail({
   const playing = usePlayerStore((state) => state.playing);
   const userId = useAuthStore((state) => state.user?.userId);
   const isCurrentSongFavorite = useFavoriteStore((state) =>
-    state.songIds.has(currentSong.id),
+    state.songKeys.has(playerSongKey(currentSong)),
   );
   const markArtworkLoaded = (loadedArtworkSrcSet: string) => {
     requestAnimationFrame(() => {
@@ -204,6 +210,7 @@ export default function MusicPlayDetail({
                     <path d="M1.2 18C.6 18 0 17.5 0 16.8c0-.4.1-.6.4-.8l7-7-7-7c-.3-.2-.4-.5-.4-.8C0 .5.6 0 1.2 0c.3 0 .6.1.8.3l7 7 7-7c.2-.2.5-.3.8-.3.6 0 1.2.5 1.2 1.2 0 .3-.1.6-.4.8l-7 7 7 7c.2.2.4.5.4.8 0 .7-.6 1.2-1.2 1.2-.3 0-.6-.1-.8-.3l-7-7-7 7c-.2.1-.5.3-.8.3z"></path>
                   </svg>
                 </button>
+
                 {isStemActive && isOpenLyric && (
                   <VocalVolumeControl
                     value={vocalVolume}
@@ -213,6 +220,7 @@ export default function MusicPlayDetail({
                     onPreviewValueChange={onPreviewVocalVolume}
                   />
                 )}
+
                 <div className="grid [grid-area:controls] grid-rows-[auto_55px_65px_55px_26px] grid-cols-none [grid-template-areas:'artwork'_'metadata'_'scrubber'_'controls'_'volume'] h-fit mt-5 max-w-150 place-items-center place-self-center w-full z-[calc(var(--z-default)+1)]">
                   <div className="shadow-[0_20px_25px_rgba(0,0,0,.1),0_10px_25px_rgba(0,0,0,.1)] opacity-100 [grid-area:artwork] h-full transform-[scale(.92)] origin-[bottom_center] [--global-transition-duration:1s] [transition:var(--global-transition)]">
                     {isBlurArtworkVisible && (
@@ -227,6 +235,7 @@ export default function MusicPlayDetail({
                       </div>
                     )}
                   </div>
+
                   <div
                     className={`bg-(--artwork-bg-color) items-center rounded-lg flex [grid-area:artwork] aspect-[1] h-full justify-center w-full [transition:var(--global-transition)] min-[1320px]:rounded-[10px] min-[1680px]:rounded-xl ${isArtworkLoading ? "" : "shadow-[0_4px_10px_rgba(0,0,0,.1)]"}`}
                     style={
@@ -239,7 +248,7 @@ export default function MusicPlayDetail({
                       <div className="w-[inherit] rounded-[inherit] relative z-(--z-default)">
                         {mainArtwork}
 
-                        <div className="rounded-[inherit] size-full pointer-events-none absolute top-0 z-(--z-default)">
+                        <div className="video-artwork__container">
                           <AmbientVideo
                             src={currentSong.albumVideoSrc}
                             variant="artist"
@@ -255,9 +264,11 @@ export default function MusicPlayDetail({
                   <div className="items-center flex justify-between w-full min-w-0 overflow-hidden">
                     <AmpLcdMetadata
                       currentSong={currentSong}
+                      containerClassName="lcd-metadata__dt"
                       isPlaying={playing}
                       onCloseModal={() => onClose(false)}
                     />
+
                     <div className="items-center flex gap-4 justify-end  pt-5.5 ps-1 [--contextMenuCircleFillOverride:var(--systemQuaternary-onDark)] [--favoriteButtonSize:28px] [--favoriteButtonBackground:var(--systemQuaternary-onDark)] [--favoriteButtonStarOutline:var(--systemPrimary-onDark)] [--favoriteButtonStarCutout:var(--systemSecondary-onDark)] [--favoriteButtonStarFill:transparent] [--favoriteButtonBackground-hover:var(--favoriteButtonBackground)] [--favoriteButtonStarOutline-hover:var(--favoriteButtonStarOutline)] [--favoriteButtonStarCutout-hover:var(--favoriteButtonStarCutout)] [--favoriteButtonStarFill-hover:var(--favoriteButtonStarFill)] [--contextMenuButtonSize:28px]">
                       <FavoriteActionButton
                         ariaLabel={
@@ -286,12 +297,14 @@ export default function MusicPlayDetail({
                       />
                     </div>
                   </div>
+
                   <div className="p-[20px_0_0] w-full">
                     <AmpPlaybackControlsProgress
                       inDetailView
                       audioRef={audioRef}
                     />
                   </div>
+
                   <AmpPlaybackControls onTogglePlayback={onTogglePlayback} />
 
                   <AmpChromeVolume volume={volume} onSetVolume={onSetVolume} />

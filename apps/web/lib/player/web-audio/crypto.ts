@@ -8,13 +8,9 @@ export function hexToBytes(hex: string): Uint8Array<ArrayBuffer> {
 
 export async function importAesKey(keyHex: string): Promise<CryptoKey> {
   const keyBytes = hexToBytes(keyHex);
-  return crypto.subtle.importKey(
-    "raw",
-    keyBytes,
-    { name: "AES-CTR" },
-    false,
-    ["decrypt"],
-  );
+  return crypto.subtle.importKey("raw", keyBytes, { name: "AES-CTR" }, false, [
+    "decrypt",
+  ]);
 }
 
 export function incrementBigEndian128(

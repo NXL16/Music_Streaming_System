@@ -46,30 +46,3 @@ export type HighPlaybackManifest =
       mode: "SING";
       high: { instrumental: StemPlayback; vocal: StemPlayback };
     };
-
-export type AttachedStream = {
-  streamInfo: StreamInfo;
-  metadata: StreamMetadata;
-};
-
-export type PreloadedSong = {
-  songId: string;
-  streamInfo: StreamInfo;
-  metadata: StreamMetadata;
-  cryptoKey: CryptoKey;
-  ivBytes: Uint8Array;
-  initSegment: ArrayBuffer;
-  firstSegmentsBatch: ArrayBuffer;
-  preloadedCount: number;
-};
-
-export type PreloadedPlayback =
-  | {
-      mode: "STANDARD";
-      main: PreloadedSong;
-    }
-  | {
-      mode: "SING";
-      instrumental: PreloadedSong;
-      vocal: PreloadedSong;
-    };

@@ -1,5 +1,5 @@
 import { http } from "@/lib/api/http";
-import type { HighPlaybackManifest, PlaybackManifest } from "./mse/types";
+import type { HighPlaybackManifest, PlaybackManifest } from "./web-audio/types";
 
 // A high rendition is optional. Waiting longer than this harms tap-to-play
 // more than the extra bitrate helps, so slow networks fall back to 128.

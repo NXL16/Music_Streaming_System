@@ -1,5 +1,3 @@
-const RETRYABLE_RANGE_FETCH_ATTEMPTS = 2;
-const RANGE_FETCH_RETRY_DELAY_MS = 150;
 // Playback ranges are small. A response that trickles bytes for several
 // seconds is not useful once the audio buffer is draining, so give every
 // attempt one short, absolute deadline instead of accepting slow progress
@@ -10,7 +8,7 @@ const RANGE_FETCH_TOTAL_TIMEOUT_MS = 4_000;
 
 type RangeFetchTimeoutReason = "header" | "body-stall" | "total";
 
-class RangeFetchResponseError extends Error {
+export class RangeFetchResponseError extends Error {
   constructor(
     readonly retryable: boolean,
     status: number,
@@ -31,7 +29,7 @@ function hasExpectedContentRange(
   end: number,
 ): boolean {
   // The player decrypts based on `start`, so accepting a 200 response (or a
-  // mismatched 206 response) corrupts the fragment before it reaches MSE.
+  // mismatched 206 response) corrupts the fragment before decoding.
   // The total file length is deliberately not constrained: a representation
   // can be replaced only between playback sessions, while this request must
   // still describe exactly the bytes we asked to decrypt.
@@ -40,35 +38,13 @@ function hasExpectedContentRange(
   );
 }
 
-function waitForRetry(
-  signal: AbortSignal | undefined,
-  attempt: number,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new DOMException("Range fetch aborted", "AbortError"));
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, RANGE_FETCH_RETRY_DELAY_MS * (attempt + 1));
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(new DOMException("Range fetch aborted", "AbortError"));
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
-}
-
 async function readRangeBody(
   response: Response,
   expectedLength: number,
   resetBodyStallTimeout: () => void,
 ): Promise<ArrayBuffer> {
   if (!response.body) {
-    // Fetch streams are available in every browser we support for MSE/MMS.
+    // Fetch streams are available in every browser we support for playback.
     // Do not fall back to arrayBuffer(): that would make a body stall
     // invisible and reintroduce the unbounded wait this guard prevents.
     throw new Error("Range response body is unavailable");
@@ -84,8 +60,10 @@ async function readRangeBody(
       if (done) break;
       if (!value?.byteLength) continue;
 
-      chunks.push(value);
       receivedLength += value.byteLength;
+      if (receivedLength > expectedLength)
+        throw new RangeFetchResponseError(true, response.status);
+      chunks.push(value);
       resetBodyStallTimeout();
     }
   } finally {
@@ -105,7 +83,7 @@ async function readRangeBody(
   return result.buffer;
 }
 
-async function fetchRangeAttempt(
+export async function fetchRange(
   url: string,
   start: number,
   end: number,
@@ -165,7 +143,9 @@ async function fetchRangeAttempt(
     // is commonly caused by an edge cache temporarily serving a non-range
     // representation.
     throw new RangeFetchResponseError(
-      response.status === 200 || response.status >= 500 || response.status === 206,
+      response.status === 200 ||
+        response.status >= 500 ||
+        response.status === 206,
       response.status,
     );
   } catch (error) {
@@ -177,40 +157,6 @@ async function fetchRangeAttempt(
     if (headerTimeout) clearTimeout(headerTimeout);
     if (bodyStallTimeout) clearTimeout(bodyStallTimeout);
     signal?.removeEventListener("abort", abortForParent);
+    controller.abort();
   }
-}
-
-export async function fetchRange(
-  url: string,
-  start: number,
-  end: number,
-  signal?: AbortSignal,
-): Promise<ArrayBuffer> {
-  let lastError: unknown;
-
-  for (
-    let attempt = 0;
-    attempt < RETRYABLE_RANGE_FETCH_ATTEMPTS;
-    attempt += 1
-  ) {
-    try {
-      return await fetchRangeAttempt(url, start, end, signal);
-    } catch (error) {
-      if (
-        signal?.aborted ||
-        (error instanceof RangeFetchResponseError && !error.retryable)
-      ) {
-        throw error;
-      }
-      lastError = error;
-    }
-
-    if (attempt + 1 < RETRYABLE_RANGE_FETCH_ATTEMPTS) {
-      await waitForRetry(signal, attempt);
-    }
-  }
-
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("Range fetch failed after retry");
 }
