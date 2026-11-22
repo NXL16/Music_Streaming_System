@@ -134,10 +134,9 @@
 
       .panel-body {
         display: grid;
-        grid-template-columns: minmax(300px, 0.9fr) minmax(
-            540px,
-            1.65fr
-          ) minmax(360px, 1.05fr);
+        grid-template-columns:
+          minmax(300px, 0.9fr) minmax(540px, 1.65fr)
+          minmax(360px, 1.05fr);
         gap: 24px;
       }
 
@@ -2300,11 +2299,13 @@
         <section class="theme-refresh-page music-video-page">
           <div class="section-label">
             <span>Music video</span
-            ><span id="music-video-status" class="music-video-status">Sẵn sàng</span>
+            ><span id="music-video-status" class="music-video-status"
+              >Sẵn sàng</span
+            >
           </div>
           <p class="theme-refresh-copy">
-            Upload video mới hoặc thay poster cho video đã phát hành. Hai thao tác
-            này độc lập để tránh upload hoặc xóa nhầm video.
+            Upload video mới hoặc thay poster cho video đã phát hành. Hai thao
+            tác này độc lập để tránh upload hoặc xóa nhầm video.
           </p>
           <section class="music-video-panel">
             <div class="music-video-panel-heading">
@@ -2339,7 +2340,8 @@
                   />
                   <strong id="music-video-file-name">Chọn video</strong>
                   <span class="muted"
-                    >MP4, WebM, MOV hoặc MKV · tự thêm nền đen thành 16:9 · tối đa 500 MB</span
+                    >MP4, WebM, MOV hoặc MKV · tự thêm nền đen thành 16:9 · tối
+                    đa 500 MB</span
                   >
                 </label>
               </div>
@@ -2353,8 +2355,15 @@
               >
                 Tiếp tục theo dõi xử lý
               </button>
-              <div id="music-video-progress" class="music-video-progress hidden">
-                <progress id="music-video-progress-bar" max="100" value="0"></progress>
+              <div
+                id="music-video-progress"
+                class="music-video-progress hidden"
+              >
+                <progress
+                  id="music-video-progress-bar"
+                  max="100"
+                  value="0"
+                ></progress>
                 <span id="music-video-progress-label">Đang chờ upload</span>
               </div>
               <p id="music-video-result" class="theme-refresh-result">
@@ -2362,55 +2371,89 @@
               </p>
             </div>
             <aside class="music-video-tools">
-              <div id="music-video-poster-picker" class="music-video-poster-picker hidden">
-                <div class="music-video-preview-label">Poster frame đã chọn</div>
-                <video id="music-video-poster-preview" class="music-video-poster-preview" muted playsinline preload="metadata"></video>
+              <div
+                id="music-video-poster-picker"
+                class="music-video-poster-picker hidden"
+              >
+                <div class="music-video-preview-label">
+                  Poster frame đã chọn
+                </div>
+                <video
+                  id="music-video-poster-preview"
+                  class="music-video-poster-preview"
+                  muted
+                  playsinline
+                  preload="metadata"
+                ></video>
                 <div class="music-video-poster-controls">
                   <label for="music-video-poster-timestamp">
                     <span>Poster frame</span>
                     <output id="music-video-poster-time">0:00</output>
                   </label>
-                  <input id="music-video-poster-timestamp" type="range" min="0" max="0" step="0.1" value="0" />
-                  <span class="muted">Drag to preview the exact video frame used as the poster.</span>
+                  <input
+                    id="music-video-poster-timestamp"
+                    type="range"
+                    min="0"
+                    max="0"
+                    step="0.1"
+                    value="0"
+                  />
+                  <span class="muted"
+                    >Drag to preview the exact video frame used as the
+                    poster.</span
+                  >
                 </div>
               </div>
               <div class="music-video-management">
-              <div class="music-video-management-heading">
-                <strong>Poster và quản lý video</strong>
-                <span>Đổi poster không upload hoặc transcode lại video.</span>
-              </div>
-              <div class="search-row">
-                <input
-                  id="music-video-id"
-                  class="field"
-                  autocomplete="off"
-                  placeholder="Music Video ID (UUID cuối URL)"
-                />
-                <button
-                  id="music-video-replace-poster-button"
-                  class="btn"
-                  type="button"
-                >
-                  Cập nhật poster
-                </button>
-              </div>
-            <p class="music-video-hint">
-              Dùng frame đã chọn ở trên. File chỉ phục vụ preview, không được upload lại.
-            </p>
-            <p id="music-video-unlink-result" class="theme-refresh-result">
-              Nhập Music Video ID ở cuối URL trang video.
-            </p>
-          <details class="music-video-danger">
-            <summary>Gỡ liên kết hoặc xóa video</summary>
-            <p>Chỉ dùng khi muốn xóa video khỏi bài hát. Thao tác này cần xác nhận.</p>
-            <label class="muted"
-              ><input id="music-video-delete-asset" type="checkbox" checked />
-              Xóa cả file video nếu asset không còn được dùng ở đâu khác</label
-            >
-            <button id="music-video-unlink-button" class="btn btn-danger" type="button">
-              Gỡ liên kết video
-            </button>
-          </details>
+                <div class="music-video-management-heading">
+                  <strong>Poster và quản lý video</strong>
+                  <span>Đổi poster không upload hoặc transcode lại video.</span>
+                </div>
+                <div class="search-row">
+                  <input
+                    id="music-video-id"
+                    class="field"
+                    autocomplete="off"
+                    placeholder="Music Video ID (UUID cuối URL)"
+                  />
+                  <button
+                    id="music-video-replace-poster-button"
+                    class="btn"
+                    type="button"
+                  >
+                    Cập nhật poster
+                  </button>
+                </div>
+                <p class="music-video-hint">
+                  Dùng frame đã chọn ở trên. File chỉ phục vụ preview, không
+                  được upload lại.
+                </p>
+                <p id="music-video-unlink-result" class="theme-refresh-result">
+                  Nhập Music Video ID ở cuối URL trang video.
+                </p>
+                <details class="music-video-danger">
+                  <summary>Gỡ liên kết hoặc xóa video</summary>
+                  <p>
+                    Chỉ dùng khi muốn xóa video khỏi bài hát. Thao tác này cần
+                    xác nhận.
+                  </p>
+                  <label class="muted"
+                    ><input
+                      id="music-video-delete-asset"
+                      type="checkbox"
+                      checked
+                    />
+                    Xóa cả file video nếu asset không còn được dùng ở đâu
+                    khác</label
+                  >
+                  <button
+                    id="music-video-unlink-button"
+                    class="btn btn-danger"
+                    type="button"
+                  >
+                    Gỡ liên kết video
+                  </button>
+                </details>
               </div>
             </aside>
           </section>
@@ -3739,7 +3782,8 @@
       }
       function clearMusicVideoPosterPicker() {
         const preview = $("music-video-poster-preview");
-        if (musicVideoPosterPreviewUrl) URL.revokeObjectURL(musicVideoPosterPreviewUrl);
+        if (musicVideoPosterPreviewUrl)
+          URL.revokeObjectURL(musicVideoPosterPreviewUrl);
         musicVideoPosterPreviewUrl = "";
         musicVideoPosterTimestampSeconds = 0;
         preview.removeAttribute("src");
@@ -3755,8 +3799,12 @@
           Math.max(0, Number(seconds) || 0),
           Math.max(0, duration - 0.001),
         );
-        $("music-video-poster-timestamp").value = String(musicVideoPosterTimestampSeconds);
-        $("music-video-poster-time").textContent = formatMusicVideoPosterTime(musicVideoPosterTimestampSeconds);
+        $("music-video-poster-timestamp").value = String(
+          musicVideoPosterTimestampSeconds,
+        );
+        $("music-video-poster-time").textContent = formatMusicVideoPosterTime(
+          musicVideoPosterTimestampSeconds,
+        );
         if (preview.readyState >= HTMLMediaElement.HAVE_METADATA) {
           preview.currentTime = musicVideoPosterTimestampSeconds;
         }
@@ -3777,7 +3825,9 @@
         musicVideoPosterPreviewUrl = URL.createObjectURL(file);
         preview.onloadedmetadata = () => {
           const duration = Number(preview.duration) || 0;
-          $("music-video-poster-timestamp").max = String(Math.max(0, duration - 0.001));
+          $("music-video-poster-timestamp").max = String(
+            Math.max(0, duration - 0.001),
+          );
           $("music-video-poster-picker").classList.remove("hidden");
           selectMusicVideoPosterTime(0);
         };
@@ -3871,9 +3921,12 @@
             );
           };
           upload.upload.onload = () => {
-            setMusicVideoProcessingProgress("Đã nhận file, đang chuyển video sang storage.");
+            setMusicVideoProcessingProgress(
+              "Đã nhận file, đang chuyển video sang storage.",
+            );
           };
-          upload.onerror = () => reject(new Error("Lỗi mạng khi upload video."));
+          upload.onerror = () =>
+            reject(new Error("Lỗi mạng khi upload video."));
           upload.onabort = () => reject(new Error("Đã hủy upload video."));
           upload.onload = () => {
             if (upload.status >= 200 && upload.status < 300) {
@@ -3882,7 +3935,9 @@
             }
             try {
               const body = JSON.parse(upload.responseText);
-              reject(new Error(body.error || "Không thể upload video lên storage."));
+              reject(
+                new Error(body.error || "Không thể upload video lên storage."),
+              );
             } catch {
               reject(new Error("Không thể upload video lên storage."));
             }
@@ -3936,7 +3991,9 @@
         );
         const deadline = Date.now() + (Number(job.timeoutMs) || 30 * 60 * 1000);
         updateMusicVideoContinueButton(false);
-        setMusicVideoProcessingProgress("Video đang xử lý. Video 4K có thể mất lâu hơn 30 phút.");
+        setMusicVideoProcessingProgress(
+          "Video đang xử lý. Video 4K có thể mất lâu hơn 30 phút.",
+        );
         while (Date.now() < deadline) {
           await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
           let current;
@@ -3946,7 +4003,8 @@
             );
           } catch (error) {
             status.textContent = "Đang kết nối lại";
-            result.textContent = "Chưa kiểm tra được trạng thái. Studio sẽ tự thử lại.";
+            result.textContent =
+              "Chưa kiểm tra được trạng thái. Studio sẽ tự thử lại.";
             continue;
           }
           if (current.status === "READY") return current;
@@ -3964,7 +4022,9 @@
         status.textContent = "Vẫn đang xử lý";
         result.textContent =
           "Video vẫn đang xử lý. Bạn có thể rời trang và bấm Tiếp tục theo dõi xử lý bất cứ lúc nào.";
-        setMusicVideoProcessingProgress("Vẫn đang xử lý — có thể tiếp tục theo dõi bất cứ lúc nào.");
+        setMusicVideoProcessingProgress(
+          "Vẫn đang xử lý — có thể tiếp tục theo dõi bất cứ lúc nào.",
+        );
         updateMusicVideoContinueButton();
         return null;
       }
@@ -4158,11 +4218,18 @@
           return;
         }
         if (!file || !musicVideoPosterPreviewUrl) {
-          result.textContent = "Hãy chọn video gốc và kéo thanh frame poster ở phía trên.";
+          result.textContent =
+            "Hãy chọn video gốc và kéo thanh frame poster ở phía trên.";
           return;
         }
-        const timestampMillis = Math.round(musicVideoPosterTimestampSeconds * 1000);
-        if (!window.confirm("Đổi poster của video này? Video và HLS sẽ không bị upload hoặc transcode lại.")) {
+        const timestampMillis = Math.round(
+          musicVideoPosterTimestampSeconds * 1000,
+        );
+        if (
+          !window.confirm(
+            "Đổi poster của video này? Video và HLS sẽ không bị upload hoặc transcode lại.",
+          )
+        ) {
           return;
         }
         button.disabled = true;
@@ -4171,7 +4238,10 @@
         try {
           const replaced = await request(
             `/api/music-videos/${encodeURIComponent(songVideoId)}/poster`,
-            { method: "POST", body: { posterTimestampMillis: timestampMillis } },
+            {
+              method: "POST",
+              body: { posterTimestampMillis: timestampMillis },
+            },
           );
           status.textContent = "Hoàn tất";
           result.textContent = `Đã đổi poster ở ${formatMusicVideoPosterTime(musicVideoPosterTimestampSeconds)}. Asset ID: ${replaced.assetId}`;
@@ -4335,16 +4405,14 @@
       events.addEventListener("progress", (e) =>
         renderProgress(JSON.parse(e.data)),
       );
-      request("/api/status").then(
-        (s) => {
-          state.running = s.running;
-          jobStatus.textContent = s.running ? "Đang xử lý" : "Sẵn sàng";
-          renderProgress(s.progress);
-          renderHistory(s.history);
-          if (s.authenticated) authenticated();
-          else update();
-        },
-      );
+      request("/api/status").then((s) => {
+        state.running = s.running;
+        jobStatus.textContent = s.running ? "Đang xử lý" : "Sẵn sàng";
+        renderProgress(s.progress);
+        renderHistory(s.history);
+        if (s.authenticated) authenticated();
+        else update();
+      });
       checkHealth();
       updateMode();
     </script>

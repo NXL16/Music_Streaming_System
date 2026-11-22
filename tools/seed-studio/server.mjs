@@ -61,6 +61,10 @@ const mediaTransferTimeoutMs = positiveConfigInteger(
   config.SEED_MEDIA_TRANSFER_TIMEOUT_MS,
   60 * 60 * 1_000,
 );
+const songReadyWaitTimeoutMs = positiveConfigInteger(
+  config.SEED_READY_WAIT_TIMEOUT_MS,
+  45 * 60 * 1_000,
+);
 
 class RequestError extends Error {
   constructor(statusCode, message) {
@@ -264,11 +268,31 @@ function updateSong(title, status, detail = '', songId = '', progressKey = '') {
   publishProgress();
 }
 
+function processingDetail(elapsedSeconds) {
+  const isSing = job.current?.options?.audioMode === 'SING';
+  const stage = isSing
+    ? 'SING: Worker đang tách stem, trao đổi R2 hoặc đóng gói audio'
+    : 'Worker đang xử lý và đóng gói audio';
+  if (!Number.isFinite(elapsedSeconds)) return stage;
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  const elapsedRemainderSeconds = elapsedSeconds % 60;
+  const timeoutMinutes = Math.round(songReadyWaitTimeoutMs / 60_000);
+  return `${stage} • đã chờ ${elapsedMinutes}m ${elapsedRemainderSeconds}s / tối đa ${timeoutMinutes} phút`;
+}
+
 function trackProgressLine(line) {
   const upload = line.match(/uploading song\s+"(.+?)"/i);
   if (upload) return updateSong(upload[1], 'uploading');
   const processing = line.match(/waiting for song\s+"(.+?)"/i);
-  if (processing) return updateSong(processing[1], 'processing');
+  if (processing) return updateSong(processing[1], 'processing', processingDetail());
+  const stillProcessing = line.match(/still processing\s+"(.+?)"\.\.\.\s+\((\d+)s\)/i);
+  if (stillProcessing) {
+    return updateSong(
+      stillProcessing[1],
+      'processing',
+      processingDetail(Number(stillProcessing[2])),
+    );
+  }
   const ready = line.match(/song\s+"(.+?)"\s+ready\s+—\s+songId:\s*([a-f0-9-]+)/i);
   if (ready) return updateSong(ready[1], 'ready', '', ready[2]);
   const failed = line.match(/failed to upload\s+"(.+?)"\s*:\s*(.+)$/i);
@@ -682,7 +706,27 @@ function captureLine(stream, line) {
   if (/downloading audio/i.test(line)) return publishActivity('working', 'Đang tải audio nguồn');
   if (/uploading song/i.test(line)) return publishActivity('working', 'Đang upload bài hát', line.replace(/^.*Uploading song\s*/i, ''));
   if (/calling finalize/i.test(line)) return publishActivity('working', 'Đang đưa bài vào hàng đợi xử lý');
-  if (/waiting for song/i.test(line)) return publishActivity('working', 'Worker đang xử lý bài hát');
+  if (/waiting for song/i.test(line)) {
+    const isSing = job.current?.options?.audioMode === 'SING';
+    return publishActivity(
+      'working',
+      isSing ? 'Worker đang xử lý luồng SING' : 'Worker đang xử lý bài hát',
+      isSing
+        ? `Bao gồm tách vocal/instrumental, R2 và đóng gói audio; có thể mất đến ${Math.round(songReadyWaitTimeoutMs / 60_000)} phút.`
+        : '',
+    );
+  }
+  const stillProcessing = line.match(/still processing\s+"(.+?)"\.\.\.\s+\((\d+)s\)/i);
+  if (stillProcessing) {
+    return publishActivity(
+      'working',
+      'Worker / Modal vẫn đang xử lý',
+      `${stillProcessing[1]} — ${processingDetail(Number(stillProcessing[2]))}`,
+    );
+  }
+  if (/could not read processing status/i.test(line)) {
+    return publishActivity('info', 'API tạm thời chưa sẵn sàng, đang tự thử lại', line);
+  }
   if (/reading apple music static lyric/i.test(line)) {
     return publishActivity('working', 'Đang lấy static lyric từ Apple Music', line);
   }
@@ -923,6 +967,9 @@ async function startJob(options) {
             SEED_API_REQUEST_TIMEOUT_MS:
               config.SEED_API_REQUEST_TIMEOUT_MS,
           }
+          : {}),
+        ...(config.SEED_API_RETRY_ATTEMPTS
+          ? { SEED_API_RETRY_ATTEMPTS: config.SEED_API_RETRY_ATTEMPTS }
           : {}),
       },
       // The dashboard passes every required selection as arguments. No terminal
@@ -1174,7 +1221,7 @@ const server = createServer(async (req, res) => {
       if (!session.authenticated) return sendJson(res, 200, { artists: [] });
       const token = await accessToken();
       const response = await fetch(
-        `${baseUrl}/catalog/${encodeURIComponent('vn')}/search?q=${encodeURIComponent(name)}&types=artists&limit=20`,
+        `${baseUrl}/catalog/${encodeURIComponent('vn')}/search/results?q=${encodeURIComponent(name)}&limit=20`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
       const payload = await response.json().catch(() => ({}));

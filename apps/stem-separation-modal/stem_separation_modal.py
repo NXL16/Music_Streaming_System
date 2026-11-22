@@ -175,7 +175,7 @@ def health(authorization: Annotated[str | None, Header()] = None) -> dict:
 
 @app.function(
     image=image,
-    gpu="L4",
+    gpu=["L4", "A10G", "T4"],
     timeout=20 * 60,
     volumes={"/models": model_cache},
     secrets=[r2_secret, service_secret],

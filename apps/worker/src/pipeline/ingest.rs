@@ -55,9 +55,30 @@ pub async fn run_pipeline(
             ));
         }
         let separation_started = Instant::now();
-        let separated = if let Some((vocal_key, instrumental_key)) =
-            download::complete_staging_stem_keys(&ctx.r2_client, &song_id).await?
+        let existing_stems = match timeout(
+            Duration::from_secs(stage_timeout_secs("STEM_STAGING_CHECK_TIMEOUT_SEC", 60)),
+            download::complete_staging_stem_keys(&ctx.r2_client, &song_id),
+        )
+        .await
         {
+            Ok(Ok(stems)) => stems,
+            Ok(Err(error)) => {
+                eprintln!(
+                    "pipeline song_id={} warn=staging_preflight_failed error={}; delegating_to_modal=true",
+                    song_id, error
+                );
+                None
+            }
+            Err(_) => {
+                eprintln!(
+                    "pipeline song_id={} warn=staging_preflight_timed_out delegating_to_modal=true",
+                    song_id
+                );
+                None
+            }
+        };
+
+        let separated = if let Some((vocal_key, instrumental_key)) = existing_stems {
             eprintln!(
                 "pipeline song_id={} stage=modal_separation reused_staging=true",
                 song_id,

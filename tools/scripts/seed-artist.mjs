@@ -110,7 +110,7 @@ function parsePositiveIntegerEnv(name, fallback, min, max) {
 // Keep the wait bounded, but make it configurable for slower environments.
 const READY_WAIT_TIMEOUT_MS = parsePositiveIntegerEnv(
   "SEED_READY_WAIT_TIMEOUT_MS",
-  20 * 60 * 1000,
+  45 * 60 * 1000,
   60 * 1000,
   2 * 60 * 60 * 1000,
 );
@@ -137,6 +137,12 @@ const API_REQUEST_TIMEOUT_MS = parsePositiveIntegerEnv(
   30 * 1000,
   5000,
   2 * 60 * 1000,
+);
+const API_RETRY_ATTEMPTS = parsePositiveIntegerEnv(
+  "SEED_API_RETRY_ATTEMPTS",
+  6,
+  1,
+  10,
 );
 function optionValue(name) {
   const index = args.indexOf(name);
@@ -765,7 +771,7 @@ async function apiCall(method, urlPath, body, extraHeaders = {}) {
   }
 
   let lastErr;
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= API_RETRY_ATTEMPTS; attempt++) {
     try {
       const res = await fetch(url, {
         method,
@@ -793,9 +799,12 @@ async function apiCall(method, urlPath, body, extraHeaders = {}) {
       lastErr = err;
       const is4xx = err.message?.startsWith("API 4");
       if (is4xx) throw err;
-      if (attempt < 3) {
-        logWarn(`API call failed (attempt ${attempt}/3), retrying...`);
-        await sleep(1000 * attempt);
+      if (attempt < API_RETRY_ATTEMPTS) {
+        const retryDelayMs = Math.min(1000 * 2 ** (attempt - 1), 10_000);
+        logWarn(
+          `API call failed (attempt ${attempt}/${API_RETRY_ATTEMPTS}), retrying in ${Math.round(retryDelayMs / 1000)}s...`,
+        );
+        await sleep(retryDelayMs);
       }
     }
   }
@@ -1101,7 +1110,21 @@ class State {
         encoding: "utf8",
         flush: true,
       });
-      fs.renameSync(tempFile, this.file);
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          fs.renameSync(tempFile, this.file);
+          break;
+        } catch (error) {
+          const retryable = error?.code === "EPERM" || error?.code === "EACCES";
+          if (!retryable || attempt >= 5) throw error;
+          Atomics.wait(
+            new Int32Array(new SharedArrayBuffer(4)),
+            0,
+            0,
+            50 * 2 ** attempt,
+          );
+        }
+      }
     } finally {
       if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
     }
@@ -2558,7 +2581,7 @@ async function refreshExistingArtistMetadata({
 async function findCatalogArtistByExactName(name) {
   const response = await apiCall(
     "GET",
-    `/catalog/${STOREFRONT}/search?q=${encodeURIComponent(name)}&types=artists&limit=20`,
+    `/catalog/${STOREFRONT}/search/results?q=${encodeURIComponent(name)}&limit=20`,
   );
   const artists =
     response?.resources?.artists || response?.data?.resources?.artists || {};
