@@ -27,7 +27,7 @@
     "hls.js": "1.7.0",
     "lucide-react": "^1.26.0",
     "motion": "^12.42.2",
-    "next": "16.2.11",
+    "next": "16.4.5",
     "pixi.js": "7.2.4",
     "qrcode": "^1.5.4",
     "react": "19.2.8",
@@ -44,7 +44,7 @@
     "@types/react-dom": "^19",
     "@tauri-apps/cli": "^2.0.0",
     "eslint": "^9",
-    "eslint-config-next": "16.2.11",
+    "eslint-config-next": "16.4.5",
     "tailwindcss": "4.3.3",
     "typescript": "^5",
     "vitest": "^4.1.10"

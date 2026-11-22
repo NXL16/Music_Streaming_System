@@ -15,10 +15,7 @@ const eslintConfig = defineConfig([
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: [
-            "eslint.config.mjs",
-            "postcss.config.mjs",
-          ],
+          allowDefaultProject: ["eslint.config.mjs", "postcss.config.mjs"],
         },
         tsconfigRootDir: __dirname,
       },
@@ -29,6 +26,7 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    "tauri/target/**",
     "next-env.d.ts",
   ]),
 ]);
