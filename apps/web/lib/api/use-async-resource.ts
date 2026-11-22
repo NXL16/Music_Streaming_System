@@ -6,60 +6,81 @@ import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-durati
 
 type ResourceLoader<T> = (signal?: AbortSignal) => Promise<T>;
 
-/** Shared lifecycle for simple client-side read requests. */
 export function useAsyncResource<T>(
   loadResource: ResourceLoader<T>,
   fallbackErrorMessage: string,
   options?: { initialData?: T; enabled?: boolean },
 ) {
   const initialData = options?.initialData;
+  const hasInitialData = initialData !== undefined;
   const enabled = options?.enabled ?? true;
-  const [data, setData] = useState<T | null>(() => initialData ?? null);
-  const [loading, setLoading] = useMinimumLoadingState(!initialData && enabled);
-  const [error, setError] = useState("");
-  const [errorStatus, setErrorStatus] = useState<number | undefined>();
-  const requestVersion = useRef(0);
-
-  const load = useCallback(
-    async (signal?: AbortSignal) => {
-      const version = ++requestVersion.current;
-      setLoading(true);
-      setError("");
-      setErrorStatus(undefined);
-
-      try {
-        const nextData = await loadResource(signal);
-        if (!signal?.aborted && requestVersion.current === version) {
-          setData(nextData);
-        }
-        return nextData;
-      } catch (requestError) {
-        if (!signal?.aborted && requestVersion.current === version) {
-          setError(getApiErrorMessage(requestError, fallbackErrorMessage));
-          setErrorStatus(getApiErrorStatus(requestError));
-        }
-        return null;
-      } finally {
-        if (!signal?.aborted && requestVersion.current === version) {
-          setLoading(false);
-        }
-      }
-    },
-    [fallbackErrorMessage, loadResource, setLoading],
+  const [result, setResult] = useState<{
+    loader: ResourceLoader<T>;
+    data: T | null;
+    error: string;
+    errorStatus?: number;
+  }>(() => ({ loader: loadResource, data: initialData ?? null, error: "" }));
+  const [loading, setLoading] = useMinimumLoadingState(
+    !hasInitialData && enabled,
   );
+  const activeRequest = useRef<AbortController | null>(null);
+
+  const load = useCallback(async () => {
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    setLoading(true);
+    setResult((current) => ({
+      loader: loadResource,
+      data:
+        current.loader === loadResource ? current.data : (initialData ?? null),
+      error: "",
+    }));
+
+    try {
+      const nextData = await loadResource(controller.signal);
+      if (!controller.signal.aborted) {
+        setResult({ loader: loadResource, data: nextData, error: "" });
+      }
+      return nextData;
+    } catch (requestError) {
+      if (!controller.signal.aborted) {
+        setResult((current) => ({
+          ...current,
+          loader: loadResource,
+          error: getApiErrorMessage(requestError, fallbackErrorMessage),
+          errorStatus: getApiErrorStatus(requestError),
+        }));
+      }
+      return null;
+    } finally {
+      if (activeRequest.current === controller) activeRequest.current = null;
+      if (!controller.signal.aborted) {
+        setLoading(false);
+      }
+    }
+  }, [fallbackErrorMessage, initialData, loadResource, setLoading]);
 
   useEffect(() => {
-    // `initialData` is a page-owned snapshot used when this component mounts
-    // again after a detail view closes. It must not trigger a duplicate fetch.
-    if (initialData || !enabled) return;
+    let active = true;
+    if (!hasInitialData && enabled) {
+      queueMicrotask(() => {
+        if (active) void load();
+      });
+    }
 
-    const controller = new AbortController();
-    queueMicrotask(() => {
-      if (!controller.signal.aborted) void load(controller.signal);
-    });
+    return () => {
+      active = false;
+      activeRequest.current?.abort();
+    };
+  }, [enabled, hasInitialData, load]);
 
-    return () => controller.abort();
-  }, [enabled, initialData, load, setLoading]);
-
-  return { data, loading, error, errorStatus, reload: load };
+  const current = result.loader === loadResource;
+  return {
+    data: current ? result.data : (initialData ?? null),
+    loading: enabled && (current ? loading : !hasInitialData),
+    error: current ? result.error : "",
+    errorStatus: current ? result.errorStatus : undefined,
+    reload: load,
+  };
 }

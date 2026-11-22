@@ -1,6 +1,10 @@
 import { getCatalogArtistSongs } from "./catalog.api";
 import { mapCatalogTracks } from "./catalog.mapper";
-import { developmentCacheDisabled } from "@/lib/config/development-cache";
+import {
+  getCachedQuery,
+  getCachedQuerySnapshot,
+  invalidateCachedQueries,
+} from "@/lib/api/query-cache";
 import type { PlayerSong } from "@/lib/player/use-player-store";
 
 type ArtistSongPage = {
@@ -9,73 +13,31 @@ type ArtistSongPage = {
   hasMore: boolean;
 };
 
-type CacheEntry = {
-  expiresAt: number;
-  value: ArtistSongPage;
-};
-
-const CACHE_TTL_MS = 2 * 60 * 1000;
-const MAX_CACHE_ENTRIES = 48;
-const pageCache = new Map<string, CacheEntry>();
-const pendingRequests = new Map<string, Promise<ArtistSongPage>>();
-
+export function artistSongCachePrefix(artistId: string) {
+  return "catalog:artist-song-page:" + encodeURIComponent(artistId) + ":";
+}
 function pageKey(artistId: string, cursor?: string) {
-  return `${artistId}:${cursor ?? "first"}`;
+  return artistSongCachePrefix(artistId) + JSON.stringify(cursor ?? null);
 }
-
-function readCache(key: string) {
-  if (developmentCacheDisabled) return undefined;
-  const cached = pageCache.get(key);
-  if (!cached || cached.expiresAt <= Date.now()) {
-    if (cached) pageCache.delete(key);
-    return undefined;
-  }
-
-  pageCache.delete(key);
-  pageCache.set(key, cached);
-  return cached.value;
+export function getCatalogArtistSongPageSnapshot(
+  artistId: string,
+  cursor?: string,
+) {
+  return getCachedQuerySnapshot<ArtistSongPage>(pageKey(artistId, cursor));
 }
-
-function writeCache(key: string, value: ArtistSongPage) {
-  if (developmentCacheDisabled) return;
-  pageCache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
-
-  while (pageCache.size > MAX_CACHE_ENTRIES) {
-    const oldestKey = pageCache.keys().next().value;
-    if (!oldestKey) break;
-    pageCache.delete(oldestKey);
-  }
-}
-
 export function getCatalogArtistSongPage(
   artistId: string,
-  { cursor, force = false }: { cursor?: string; force?: boolean } = {},
+  { cursor }: { cursor?: string } = {},
 ) {
   const key = pageKey(artistId, cursor);
-  if (force) pageCache.delete(key);
-
-  const cached = readCache(key);
-  if (cached) return Promise.resolve(cached);
-
-  const pending = pendingRequests.get(key);
-  if (pending) return pending;
-
-  const request = getCatalogArtistSongs(artistId, { cursor })
-    .then((response) => ({
+  return getCachedQuery(key, async (signal): Promise<ArtistSongPage> => {
+    const response = await getCatalogArtistSongs(artistId, { cursor, signal });
+    return {
       songs: mapCatalogTracks(response),
       nextCursor: response.nextCursor,
       hasMore: Boolean(response.nextCursor),
-    }))
-    .then((page) => {
-      writeCache(key, page);
-      return page;
-    })
-    .finally(() => {
-      pendingRequests.delete(key);
-    });
-
-  pendingRequests.set(key, request);
-  return request;
+    };
+  });
 }
 
 export async function getAllCatalogArtistSongs(artistId: string) {
@@ -98,7 +60,5 @@ export async function getAllCatalogArtistSongs(artistId: string) {
 }
 
 export function invalidateCatalogArtistSongPages(artistId: string) {
-  for (const key of pageCache.keys()) {
-    if (key.startsWith(`${artistId}:`)) pageCache.delete(key);
-  }
+  invalidateCachedQueries(artistSongCachePrefix(artistId));
 }

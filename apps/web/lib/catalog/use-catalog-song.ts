@@ -1,28 +1,23 @@
 "use client";
 
-import { useCallback } from "react";
-import { useAsyncResource } from "@/lib/api/use-async-resource";
-import { getCatalogReleaseTrack } from "./catalog.api";
+import { useMemo } from "react";
+import { useCatalogDetail } from "./use-catalog-detail";
 import { mapCatalogTracks } from "./catalog.mapper";
 
 export function useCatalogSong(releaseTrackId: string) {
-  const fetchSong = useCallback(
-    async (signal?: AbortSignal) => {
-      if (!releaseTrackId) return null;
-      const catalog = await getCatalogReleaseTrack(releaseTrackId, signal);
-      return (
-        mapCatalogTracks(catalog).find(
-          (song) => song.releaseTrackId === releaseTrackId,
-        ) ?? null
-      );
-    },
-    [releaseTrackId],
-  );
-
-  const { data: song, loading, error, errorStatus, reload } = useAsyncResource(
-    fetchSong,
+  const { data, ...state } = useCatalogDetail(
+    "release-tracks",
+    releaseTrackId,
     "Không thể tải thông tin bài hát.",
   );
-
-  return { song, loading, error, errorStatus, reload };
+  const song = useMemo(
+    () =>
+      data
+        ? (mapCatalogTracks(data).find(
+            (track) => track.releaseTrackId === releaseTrackId,
+          ) ?? null)
+        : null,
+    [data, releaseTrackId],
+  );
+  return { song, ...state };
 }

@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getCachedQuerySnapshot, setCachedQuery } from "@/lib/api/query-cache";
+import { useAuthStore } from "@/lib/auth/auth-store";
 import { isAxiosError } from "axios";
 import {
   CATALOG_SEARCH_SONG_SHELF_PREVIEW_LIMIT,
@@ -8,7 +10,7 @@ import {
 } from "@musical/shared-constants";
 import { searchCatalogShelf } from "./catalog.api";
 import { mapSearchResults } from "./search.mapper";
-import type { PlayerSong } from "@/lib/player/use-player-store";
+import { playerSongKey, type PlayerSong } from "@/lib/player/use-player-store";
 
 type SearchSongShelfPagesOptions = {
   enabled: boolean;
@@ -33,12 +35,13 @@ const EMPTY_STATE: SongShelfPageState = {
 };
 
 function appendUniqueSongs(current: PlayerSong[], incoming: PlayerSong[]) {
-  const ids = new Set(current.map((song) => song.id));
+  const ids = new Set(current.map(playerSongKey));
   const songs = [...current];
 
   for (const song of incoming) {
-    if (ids.has(song.id)) continue;
-    ids.add(song.id);
+    const key = playerSongKey(song);
+    if (ids.has(key)) continue;
+    ids.add(key);
     songs.push(song);
   }
 
@@ -49,8 +52,29 @@ export function useSearchSongShelfPages(
   query: string,
   { enabled, initialSongs, initialHasMore }: SearchSongShelfPagesOptions,
 ) {
-  const key = [normalizeCatalogSearchQuery(query), "songs"].join(":");
+  const userId = useAuthStore((state) => state.user?.userId);
+  const key = JSON.stringify([
+    "search-song-pages",
+    userId ?? null,
+    normalizeCatalogSearchQuery(query),
+  ]);
+  const cachedPage = useMemo(
+    () =>
+      getCachedQuerySnapshot<Pick<SongShelfPageState, "songs" | "hasMore">>(
+        key,
+      ),
+    [key],
+  );
   const [state, setState] = useState<SongShelfPageState>(EMPTY_STATE);
+  const pageState = useMemo(
+    () =>
+      state.key === key
+        ? state
+        : cachedPage
+          ? { key, ...cachedPage, loadingMore: false, error: null }
+          : EMPTY_STATE,
+    [state, key, cachedPage],
+  );
   const requestIdRef = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
 
@@ -59,14 +83,19 @@ export function useSearchSongShelfPages(
       requestIdRef.current += 1;
       controllerRef.current?.abort();
       controllerRef.current = null;
+      setState((current) =>
+        current.key === key && current.loadingMore
+          ? { ...current, loadingMore: false }
+          : current,
+      );
     };
   }, [enabled, key]);
 
   const loadMore = useCallback(() => {
-    const isCurrent = state.key === key;
-    const songs = isCurrent ? state.songs : initialSongs;
-    const hasMore = isCurrent ? state.hasMore : initialHasMore;
-    const loadingMore = isCurrent && state.loadingMore;
+    const isCurrent = pageState.key === key;
+    const songs = isCurrent ? pageState.songs : initialSongs;
+    const hasMore = isCurrent ? pageState.hasMore : initialHasMore;
+    const loadingMore = isCurrent && pageState.loadingMore;
 
     if (!enabled || loadingMore || !hasMore) {
       return;
@@ -96,21 +125,21 @@ export function useSearchSongShelfPages(
       controller.signal,
     )
       .then((response) => {
-        if (controller.signal.aborted || requestId !== requestIdRef.current) {
+        if (
+          controller.signal.aborted ||
+          requestId !== requestIdRef.current ||
+          useAuthStore.getState().user?.userId !== userId
+        ) {
           return;
         }
 
         const page = mapSearchResults(response);
-        setState((current) =>
-          current.key === key
-            ? {
-                ...current,
-                songs: appendUniqueSongs(current.songs, page.trackSongs),
-                hasMore: page.hasMore,
-                loadingMore: false,
-              }
-            : current,
-        );
+        const next = {
+          songs: appendUniqueSongs(songs, page.trackSongs),
+          hasMore: page.hasMore,
+        };
+        setState({ key, ...next, loadingMore: false, error: null });
+        setCachedQuery(key, next, 2 * 60 * 1000);
       })
       .catch((cause: unknown) => {
         if (
@@ -131,24 +160,14 @@ export function useSearchSongShelfPages(
             : current,
         );
       });
-  }, [
-    enabled,
-    initialHasMore,
-    initialSongs,
-    key,
-    query,
-    state.hasMore,
-    state.key,
-    state.loadingMore,
-    state.songs,
-  ]);
+  }, [enabled, initialHasMore, initialSongs, key, query, pageState, userId]);
 
-  const isCurrent = enabled && state.key === key;
+  const isCurrent = enabled && pageState.key === key;
   return {
-    songs: isCurrent ? state.songs : enabled ? initialSongs : [],
-    hasMore: isCurrent ? state.hasMore : enabled && initialHasMore,
-    loadingMore: isCurrent && state.loadingMore,
-    error: isCurrent ? state.error : null,
+    songs: isCurrent ? pageState.songs : enabled ? initialSongs : [],
+    hasMore: isCurrent ? pageState.hasMore : enabled && initialHasMore,
+    loadingMore: isCurrent && pageState.loadingMore,
+    error: isCurrent ? pageState.error : null,
     loadMore,
   };
 }

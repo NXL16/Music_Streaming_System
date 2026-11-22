@@ -2,12 +2,77 @@ import { describe, expect, it, vi } from "vitest";
 import {
   clearCachedQueries,
   getCachedQuery,
+  getCachedQuerySnapshot,
   invalidateCachedQuery,
   MAX_QUERY_CACHE_ENTRIES,
   setCachedQuery,
+  createQueryCache,
+  invalidateCachedQueries,
 } from "./query-cache";
 
 describe("query cache", () => {
+  it("does not let an invalidated request overwrite a newer value for the same key", async () => {
+    let finish!: (value: string) => void;
+    const stale = getCachedQuery(
+      "test:race",
+      () =>
+        new Promise<string>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    invalidateCachedQuery("test:race");
+    await getCachedQuery("test:race", async () => "fresh");
+    finish("stale");
+    await stale;
+    expect(getCachedQuerySnapshot("test:race")).toBe("fresh");
+  });
+
+  it("invalidates matching snapshots and requests without affecting another artist", async () => {
+    setCachedQuery("test:artist:a:first", "old", 60_000);
+    setCachedQuery("test:artist:b:first", "kept", 60_000);
+    let signal!: AbortSignal;
+    let finish!: (value: string) => void;
+    const request = getCachedQuery("test:artist:a:next", (nextSignal) => {
+      signal = nextSignal;
+      return new Promise<string>((resolve) => {
+        finish = resolve;
+      });
+    });
+    invalidateCachedQueries("test:artist:a:");
+    expect(signal.aborted).toBe(true);
+    finish("stale");
+    await request;
+    expect(getCachedQuerySnapshot("test:artist:a:first")).toBeUndefined();
+    expect(getCachedQuerySnapshot("test:artist:a:next")).toBeUndefined();
+    expect(getCachedQuerySnapshot("test:artist:b:first")).toBe("kept");
+  });
+
+  it("keeps cache instances isolated and enforces their own capacity", async () => {
+    const first = createQueryCache<string>({ maxEntries: 2 });
+    const second = createQueryCache<string>();
+    await first.get("a", async () => "first");
+    await second.get("a", async () => "second");
+    first.set("b", "b");
+    first.snapshot("a");
+    first.set("c", "c");
+    expect(first.snapshot("a")).toBe("first");
+    expect(first.snapshot("b")).toBeUndefined();
+    first.clear();
+    expect(second.snapshot("a")).toBe("second");
+  });
+  it("reads a snapshot synchronously and stops exposing it after expiry", () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1000);
+    try {
+      setCachedQuery("test:snapshot", { songs: ["s1"] }, 100);
+      expect(getCachedQuerySnapshot("test:snapshot")).toEqual({
+        songs: ["s1"],
+      });
+      clock.mockReturnValue(1101);
+      expect(getCachedQuerySnapshot("test:snapshot")).toBeUndefined();
+    } finally {
+      clock.mockRestore();
+    }
+  });
   it("deduplicates concurrent reads and reuses a valid entry", async () => {
     const load = vi.fn(async () => "value");
 

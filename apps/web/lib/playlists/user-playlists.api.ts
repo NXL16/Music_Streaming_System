@@ -1,4 +1,4 @@
-import { getCachedQuery, invalidateCachedQuery } from "@/lib/api/query-cache";
+import { getCachedQuery } from "@/lib/api/query-cache";
 import { http } from "@/lib/api/http";
 import type { ContextMenuContext } from "@/lib/context-menu/types";
 import {
@@ -96,17 +96,11 @@ export function getUserPlaylists(userId: string) {
   );
 }
 
-export function invalidateUserPlaylists(userId: string) {
-  invalidateCachedQuery(cacheKey(userId));
-}
-
 function syncUserPlaylistMutation(
   playlistId: string,
   userId?: string,
   details?: Parameters<typeof notifyPlaylistChanged>[2],
 ) {
-  invalidateCachedQuery(`playlist:${playlistId}`);
-  if (userId) invalidateUserPlaylists(userId);
   // Dispatch the playlist event first: creation consumers can render the
   // returned title immediately, before the background Library refresh starts.
   notifyPlaylistChanged(playlistId, userId, details);

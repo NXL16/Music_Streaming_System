@@ -1,4 +1,5 @@
 import { clearCachedQueries } from "@/lib/api/query-cache";
+import { clearShelfDetailHistoryCache } from "@/hooks/shelf-detail-history-cache";
 import { invalidateCatalogResourceCache } from "@/lib/catalog/catalog.api";
 import { clearFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { clearAlbumFavoriteStore } from "@/lib/favorites/use-album-favorite-store";
@@ -11,6 +12,7 @@ import { clearSuggestLessStore } from "@/lib/recommendations/suggest-less.api";
 /** Removes in-memory state that belongs to the current authenticated user. */
 export function clearClientSessionCache() {
   clearCachedQueries();
+  clearShelfDetailHistoryCache();
   invalidateCatalogResourceCache();
   invalidateHomeRecommendationsCache();
   clearRecentlyPlayedSnapshot();

@@ -1,5 +1,10 @@
 import { http } from "@/lib/api/http";
-import { developmentCacheDisabled } from "@/lib/config/development-cache";
+import { useAuthStore } from "@/lib/auth/auth-store";
+import { normalizeCatalogSearchQuery } from "@musical/shared-constants";
+import {
+  createQueryCache,
+  invalidateCachedQueries,
+} from "@/lib/api/query-cache";
 import { hydrateCatalogMediaEntities } from "./hydrate-catalog-media-entities";
 import type { CatalogSearchExpandableShelfType } from "@musical/shared-constants";
 import { invalidateAllMediaEntities } from "@/lib/media/media-entity-store";
@@ -13,66 +18,22 @@ import type {
 import type { CatalogMusicVideo } from "./music-videos.api";
 
 const STOREFRONT = process.env.NEXT_PUBLIC_STOREFRONT || "vn";
-const RESOURCE_CACHE_TTL_MS = 2 * 60 * 1000;
 const MAX_RESOURCE_CACHE_ENTRIES = 100;
-const MAX_DETAIL_CACHE_ENTRIES = 100;
-
-type ResourceCacheEntry = {
-  expiresAt: number;
-  value: CatalogResponse;
-};
-
-const resourceCache = new Map<string, ResourceCacheEntry>();
-const detailCache = new Map<string, ResourceCacheEntry>();
-type PendingCatalogRequest = {
-  promise: Promise<CatalogResponse>;
-  controller: AbortController;
-};
-const pendingResourceRequests = new Map<string, PendingCatalogRequest>();
-const pendingDetailRequests = new Map<string, PendingCatalogRequest>();
-let cacheGeneration = 0;
-
-function pruneCatalogCache(
-  cache: Map<string, ResourceCacheEntry>,
-  now: number,
-) {
-  for (const [key, entry] of cache) {
-    if (entry.expiresAt <= now) cache.delete(key);
-  }
-}
-
-function getCatalogCacheEntry(
-  cache: Map<string, ResourceCacheEntry>,
-  key: string,
-  now: number,
-) {
-  pruneCatalogCache(cache, now);
-  const entry = cache.get(key);
-  if (!entry) return undefined;
-
-  // Map preserves insertion order, so re-inserting promotes this entry to MRU.
-  cache.delete(key);
-  cache.set(key, entry);
-  return entry.value;
-}
-
-function setCatalogCacheEntry(
-  cache: Map<string, ResourceCacheEntry>,
-  key: string,
-  value: CatalogResponse,
-  maxEntries: number,
-) {
-  const now = Date.now();
-  pruneCatalogCache(cache, now);
-  cache.delete(key);
-  cache.set(key, { value, expiresAt: now + RESOURCE_CACHE_TTL_MS });
-
-  while (cache.size > maxEntries) {
-    const oldestKey = cache.keys().next().value as string | undefined;
-    if (oldestKey === undefined) break;
-    cache.delete(oldestKey);
-  }
-}
+const resourceCache = createQueryCache<CatalogResponse>({
+  maxEntries: MAX_RESOURCE_CACHE_ENTRIES,
+});
+const detailCache = createQueryCache<CatalogResponse>({
+  maxEntries: MAX_RESOURCE_CACHE_ENTRIES,
+});
+const albumRelatedCache = createQueryCache<CatalogAlbumRelatedResponse>({
+  maxEntries: MAX_RESOURCE_CACHE_ENTRIES,
+});
+const searchOverviewCache = createQueryCache<CatalogSearchOverviewResponse>({
+  maxEntries: MAX_RESOURCE_CACHE_ENTRIES,
+});
+const searchPageCache = createQueryCache<CatalogSearchResultsResponse>({
+  maxEntries: MAX_RESOURCE_CACHE_ENTRIES,
+});
 
 function resourceCacheKey(
   resources: Array<Pick<CatalogReference, "id" | "type">>,
@@ -83,194 +44,174 @@ function resourceCacheKey(
     .join("|");
 }
 
-/**
- * Shares identical batch hydrations across callers and keeps a short-lived
- * entity snapshot. Requests that need AbortSignal semantics bypass this cache.
- */
-function getCachedCatalogResources(
+export async function getCatalogResources(
   resources: Array<Pick<CatalogReference, "id" | "type">>,
+  signal?: AbortSignal,
 ) {
   const key = resourceCacheKey(resources);
-  const now = Date.now();
-  const cached = developmentCacheDisabled
-    ? undefined
-    : getCatalogCacheEntry(resourceCache, key, now);
-  if (cached) {
-    return Promise.resolve(cached);
-  }
-
-  const pending = pendingResourceRequests.get(key);
-  if (pending) return pending.promise;
-
-  const requestGeneration = cacheGeneration;
-  const controller = new AbortController();
-  const request = http
-    .post<CatalogResponse>(
-      `/catalog/${STOREFRONT}/resources`,
-      { resources },
-      {
-        signal: controller.signal,
-      },
-    )
-    .then((response) => {
-      if (requestGeneration === cacheGeneration) {
-        if (!developmentCacheDisabled) {
-          setCatalogCacheEntry(
-            resourceCache,
-            key,
-            response.data,
-            MAX_RESOURCE_CACHE_ENTRIES,
-          );
-        }
-        return hydrateCatalogMediaEntities(response.data);
-      }
-
-      // Invalidated requests can still resolve in transports that do not
-      // honor abort immediately. Return their payload to the original caller
-      // without restoring stale entities into the shared store.
+  return resourceCache.get(
+    key,
+    async (signal) => {
+      const response = await http.post<CatalogResponse>(
+        `/catalog/${STOREFRONT}/resources`,
+        { resources },
+        { signal },
+      );
       return response.data;
-    })
-    .finally(() => {
-      if (pendingResourceRequests.get(key)?.promise === request) {
-        pendingResourceRequests.delete(key);
-      }
-    });
-
-  pendingResourceRequests.set(key, { promise: request, controller });
-  return request;
+    },
+    { signal, transform: hydrateCatalogMediaEntities },
+  );
 }
 
-function getCachedCatalogDetail(
-  key: string,
-  request: (signal: AbortSignal) => Promise<CatalogResponse>,
+function catalogDetailCacheKey(
+  resourceType: CatalogDetailResourceType,
+  resourceId: string,
+  userId: string | null = useAuthStore.getState().user?.userId ?? null,
 ) {
-  const cached = developmentCacheDisabled
-    ? undefined
-    : getCatalogCacheEntry(detailCache, key, Date.now());
-  if (cached) {
-    return Promise.resolve(cached);
-  }
-
-  const pending = pendingDetailRequests.get(key);
-  if (pending) return pending.promise;
-
-  const requestGeneration = cacheGeneration;
-  const controller = new AbortController();
-  const pendingRequest = request(controller.signal)
-    .then((response) => {
-      if (requestGeneration === cacheGeneration) {
-        const hydrated = hydrateCatalogMediaEntities(response);
-        if (!developmentCacheDisabled) {
-          setCatalogCacheEntry(
-            detailCache,
-            key,
-            hydrated,
-            MAX_DETAIL_CACHE_ENTRIES,
-          );
-        }
-        return hydrated;
-      }
-
-      return response;
-    })
-    .finally(() => {
-      if (pendingDetailRequests.get(key)?.promise === pendingRequest) {
-        pendingDetailRequests.delete(key);
-      }
-    });
-  pendingDetailRequests.set(key, { promise: pendingRequest, controller });
-  return pendingRequest;
+  return resourceType === "playlists"
+    ? `playlists:${userId ?? "guest"}:${resourceId}`
+    : `${resourceType}:${resourceId}`;
 }
 
-function abortPendingCatalogRequests(
-  requests: Map<string, PendingCatalogRequest>,
+export type CatalogDetailResourceType =
+  | "albums"
+  | "playlists"
+  | "artists"
+  | "release-tracks";
+
+export function getCatalogDetailSnapshot(
+  resourceType: CatalogDetailResourceType,
+  resourceId: string,
+  userId: string | null = useAuthStore.getState().user?.userId ?? null,
 ) {
-  for (const { controller } of requests.values()) controller.abort();
-  requests.clear();
+  return detailCache.snapshot(
+    catalogDetailCacheKey(resourceType, resourceId, userId),
+  );
 }
 
 function getCatalogDetail(
-  cacheKey: string,
-  path: string,
+  resourceType: CatalogDetailResourceType,
+  resourceId: string,
   signal?: AbortSignal,
+  prepare?: (
+    response: CatalogResponse,
+    signal: AbortSignal,
+  ) => Promise<CatalogResponse>,
 ) {
-  const request = (requestSignal?: AbortSignal) =>
+  const request = (requestSignal: AbortSignal) =>
     http
-      .get<CatalogResponse>(path, { signal: requestSignal })
-      .then((response) => response.data);
+      .get<CatalogResponse>(
+        `/catalog/${STOREFRONT}/${resourceType}/${encodeURIComponent(resourceId)}`,
+        { signal: requestSignal },
+      )
+      .then((response) =>
+        prepare ? prepare(response.data, requestSignal) : response.data,
+      );
 
-  // A caller that owns cancellation must never receive a shared request.
-  return signal
-    ? request(signal).then(hydrateCatalogMediaEntities)
-    : getCachedCatalogDetail(cacheKey, request);
+  return detailCache.get(
+    catalogDetailCacheKey(resourceType, resourceId),
+    request,
+    { signal, transform: hydrateCatalogMediaEntities },
+  );
 }
 
 export function invalidateCatalogResourceCache() {
-  cacheGeneration += 1;
   resourceCache.clear();
   detailCache.clear();
-  abortPendingCatalogRequests(pendingResourceRequests);
-  abortPendingCatalogRequests(pendingDetailRequests);
+  albumRelatedCache.clear();
+  searchOverviewCache.clear();
+  searchPageCache.clear();
+  invalidateCachedQueries("catalog:");
   invalidateAllMediaEntities();
 }
 
 export async function getCatalogAlbum(albumId: string, signal?: AbortSignal) {
-  return getCatalogDetail(
-    `albums:${albumId}`,
-    `/catalog/${STOREFRONT}/albums/${encodeURIComponent(albumId)}`,
-    signal,
-  );
+  return getCatalogDetail("albums", albumId, signal);
 }
 
 export async function getCatalogReleaseTrack(
   releaseTrackId: string,
   signal?: AbortSignal,
 ) {
-  return getCatalogDetail(
-    `release-tracks:${releaseTrackId}`,
-    `/catalog/${STOREFRONT}/release-tracks/${encodeURIComponent(releaseTrackId)}`,
-    signal,
-  );
+  return getCatalogDetail("release-tracks", releaseTrackId, signal);
+}
+
+type AlbumRelatedOptions = {
+  section?: string;
+  cursor?: string;
+  limit?: number;
+  sourceSongId?: string;
+};
+
+function albumRelatedCacheKey(albumId: string, options: AlbumRelatedOptions) {
+  return JSON.stringify([
+    albumId,
+    options.section ?? null,
+    options.cursor ?? null,
+    options.limit ?? null,
+    options.sourceSongId ?? null,
+  ]);
+}
+
+export function getCatalogAlbumRelatedSnapshot(
+  albumId: string,
+  options: AlbumRelatedOptions = {},
+) {
+  return albumRelatedCache.snapshot(albumRelatedCacheKey(albumId, options));
 }
 
 export async function getCatalogAlbumRelated(
   albumId: string,
-  options: {
-    section?: string;
-    cursor?: string;
-    limit?: number;
-    sourceSongId?: string;
-  } = {},
+  options: AlbumRelatedOptions = {},
   signal?: AbortSignal,
 ) {
-  const response = await http.get<CatalogAlbumRelatedResponse>(
-    `/catalog/${STOREFRONT}/albums/${encodeURIComponent(albumId)}/related`,
-    { params: options, signal },
+  return albumRelatedCache.get(
+    albumRelatedCacheKey(albumId, options),
+    async (requestSignal) => {
+      const response = await http.get<CatalogAlbumRelatedResponse>(
+        `/catalog/${STOREFRONT}/albums/${encodeURIComponent(albumId)}/related`,
+        { params: options, signal: requestSignal },
+      );
+      return response.data;
+    },
+    {
+      signal,
+      transform: (response) => {
+        hydrateCatalogMediaEntities(response.moreBy);
+        hydrateCatalogMediaEntities(response.featuredOn);
+        hydrateCatalogMediaEntities(response.youMightAlsoLike);
+        return response;
+      },
+    },
   );
-  hydrateCatalogMediaEntities(response.data.moreBy);
-  hydrateCatalogMediaEntities(response.data.featuredOn);
-  hydrateCatalogMediaEntities(response.data.youMightAlsoLike);
-  return response.data;
 }
 
 export async function getCatalogPlaylist(
   playlistId: string,
   signal?: AbortSignal,
 ) {
-  const catalog = await getCatalogDetail(
-    `playlists:${playlistId}`,
-    `/catalog/${STOREFRONT}/playlists/${encodeURIComponent(playlistId)}`,
+  return getCatalogDetail(
+    "playlists",
+    playlistId,
     signal,
+    (catalog, requestSignal) =>
+      personalizeCatalogPlaylist(catalog, playlistId, requestSignal),
   );
+}
+
+async function personalizeCatalogPlaylist(
+  catalog: CatalogResponse,
+  playlistId: string,
+  signal: AbortSignal,
+) {
   const root = catalog.data.find((resource) => resource.type === "playlists");
   const playlist = root ? catalog.resources.playlists[root.id] : undefined;
   if (!root || playlist?.attributes.playlistType !== "system-personalized") {
     return catalog;
   }
 
-  // There are only three catalog playlists. For these cards the identity and
-  // URL stay global, while this authenticated endpoint supplies the current
-  // listener's cached recommendation order.
+  // Personalized playlists keep global URLs; this endpoint supplies the
+  // current listener's recommendation order.
   const trackIds = await getPersonalizedSystemPlaylistTrackIds(
     playlistId,
     signal,
@@ -326,18 +267,10 @@ async function getPersonalizedSystemPlaylistTrackIds(
     : [];
 }
 
-export async function getCatalogResources(
+export function getCatalogResourcesSnapshot(
   resources: Array<Pick<CatalogReference, "id" | "type">>,
-  signal?: AbortSignal,
 ) {
-  if (!signal) return getCachedCatalogResources(resources);
-
-  const response = await http.post<CatalogResponse>(
-    `/catalog/${STOREFRONT}/resources`,
-    { resources },
-    { signal },
-  );
-  return hydrateCatalogMediaEntities(response.data);
+  return resourceCache.snapshot(resourceCacheKey(resources));
 }
 
 export type CatalogSearchSuggestionsResponse = CatalogResponse & {
@@ -382,16 +315,80 @@ export async function searchCatalogSuggestions(
   return hydrateCatalogMediaEntities(response.data);
 }
 
+type SearchPageOptions = {
+  source: "results" | "shelf";
+  shelfType?: CatalogSearchShelfType;
+  limit?: number;
+  offset?: number;
+};
+
+function searchCacheKey(
+  query: string,
+  options: readonly unknown[],
+  userId: string | null = useAuthStore.getState().user?.userId ?? null,
+) {
+  return JSON.stringify([
+    userId,
+    normalizeCatalogSearchQuery(query),
+    ...options,
+  ]);
+}
+
+function searchPageCacheKey(
+  query: string,
+  options: SearchPageOptions,
+  userId?: string | null,
+) {
+  return searchCacheKey(
+    query,
+    [
+      options.source,
+      options.shelfType ?? null,
+      options.limit ?? null,
+      options.offset ?? 0,
+    ],
+    userId,
+  );
+}
+
+export function getCatalogSearchPageSnapshot(
+  query: string,
+  options: SearchPageOptions,
+  userId?: string | null,
+) {
+  return searchPageCache.snapshot(searchPageCacheKey(query, options, userId));
+}
+
+export function getCatalogSearchOverviewSnapshot(
+  query: string,
+  options: { topLimit?: number; shelfLimit?: number },
+  userId?: string | null,
+) {
+  return searchOverviewCache.snapshot(
+    searchCacheKey(
+      query,
+      [options.topLimit ?? null, options.shelfLimit ?? null],
+      userId,
+    ),
+  );
+}
+
 export async function searchCatalogResults(
   query: string,
   options: { limit?: number; offset?: number } = {},
   signal?: AbortSignal,
 ): Promise<CatalogSearchResultsResponse> {
-  const response = await http.get<CatalogSearchResultsResponse>(
-    `/catalog/${STOREFRONT}/search/results`,
-    { params: { q: query, ...options }, signal },
+  return searchPageCache.get(
+    searchPageCacheKey(query, { ...options, source: "results" }),
+    async (requestSignal) => {
+      const response = await http.get<CatalogSearchResultsResponse>(
+        `/catalog/${STOREFRONT}/search/results`,
+        { params: { q: query, ...options }, signal: requestSignal },
+      );
+      return response.data;
+    },
+    { signal, transform: hydrateCatalogMediaEntities },
   );
-  return hydrateCatalogMediaEntities(response.data);
 }
 
 export async function searchCatalogOverview(
@@ -399,11 +396,20 @@ export async function searchCatalogOverview(
   options: { topLimit?: number; shelfLimit?: number } = {},
   signal?: AbortSignal,
 ): Promise<CatalogSearchOverviewResponse> {
-  const response = await http.get<CatalogSearchOverviewResponse>(
-    `/catalog/${STOREFRONT}/search/overview`,
-    { params: { q: query, ...options }, signal },
+  return searchOverviewCache.get(
+    searchCacheKey(query, [
+      options.topLimit ?? null,
+      options.shelfLimit ?? null,
+    ]),
+    async (requestSignal) => {
+      const response = await http.get<CatalogSearchOverviewResponse>(
+        `/catalog/${STOREFRONT}/search/overview`,
+        { params: { q: query, ...options }, signal: requestSignal },
+      );
+      return response.data;
+    },
+    { signal, transform: hydrateCatalogSearchOverview },
   );
-  return hydrateCatalogSearchOverview(response.data);
 }
 
 export async function searchCatalogShelf(
@@ -412,11 +418,17 @@ export async function searchCatalogShelf(
   options: { limit?: number; offset?: number } = {},
   signal?: AbortSignal,
 ): Promise<CatalogSearchResultsResponse> {
-  const response = await http.get<CatalogSearchResultsResponse>(
-    `/catalog/${STOREFRONT}/search/shelf`,
-    { params: { q: query, type, ...options }, signal },
+  return searchPageCache.get(
+    searchPageCacheKey(query, { ...options, source: "shelf", shelfType: type }),
+    async (requestSignal) => {
+      const response = await http.get<CatalogSearchResultsResponse>(
+        `/catalog/${STOREFRONT}/search/shelf`,
+        { params: { q: query, type, ...options }, signal: requestSignal },
+      );
+      return response.data;
+    },
+    { signal, transform: hydrateCatalogMediaEntities },
   );
-  return hydrateCatalogMediaEntities(response.data);
 }
 
 export async function recordCatalogSearchClick(
@@ -453,11 +465,7 @@ export async function clearCatalogRecentSearches() {
 }
 
 export async function getCatalogArtist(artistId: string, signal?: AbortSignal) {
-  return getCatalogDetail(
-    `artists:${artistId}`,
-    `/catalog/${STOREFRONT}/artists/${encodeURIComponent(artistId)}`,
-    signal,
-  );
+  return getCatalogDetail("artists", artistId, signal);
 }
 
 export async function getCatalogArtistAlbums(

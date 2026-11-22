@@ -89,9 +89,12 @@ export function useInfiniteScrollLoadMore({
     () => () => {
       if (delayedLoadTimerRef.current !== null) {
         window.clearTimeout(delayedLoadTimerRef.current);
+        delayedLoadTimerRef.current = null;
+        delayedLoadPendingRef.current = false;
+        setIsDelayPending(false);
       }
     },
-    [],
+    [enabled, loading, onLoadMore, loadDelayMs],
   );
 
   const sentinelRef = useInfiniteScrollSentinel({

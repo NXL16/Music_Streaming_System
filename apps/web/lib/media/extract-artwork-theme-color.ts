@@ -9,7 +9,14 @@ const EDGE_SIZE = 8;
 export { selectArtworkThemeColor, type ArtworkThemeSample };
 
 const RUNTIME_THEME_CACHE_LIMIT = 128;
-const runtimeThemeColorCache = new Map<string, Promise<string | null>>();
+const runtimeThemeColorCache = new Map<
+  string,
+  { promise: Promise<string | null>; color?: string | null }
+>();
+
+export function getCachedArtworkThemeColor(source: string) {
+  return runtimeThemeColorCache.get(source)?.color;
+}
 
 function optimizedImageUrl(source: string) {
   const url = new URL("/_next/image", window.location.origin);
@@ -45,7 +52,9 @@ function hexToHsl(color: string) {
 
   const delta = maximum - minimum;
   const saturation =
-    lightness > 0.5 ? delta / (2 - maximum - minimum) : delta / (maximum + minimum);
+    lightness > 0.5
+      ? delta / (2 - maximum - minimum)
+      : delta / (maximum + minimum);
   const hue =
     maximum === red
       ? ((green - blue) / delta + (green < blue ? 6 : 0)) * 60
@@ -89,7 +98,9 @@ function hslToHex(hue: number, saturation: number, lightness: number) {
  * This is browser-only and intentionally does not alter Asset palette output.
  */
 export function refineRuntimeArtworkThemeColor(color: string) {
-  const normalized = /^#[0-9a-f]{6}$/i.test(color) ? color.toLowerCase() : "#2c2c2e";
+  const normalized = /^#[0-9a-f]{6}$/i.test(color)
+    ? color.toLowerCase()
+    : "#2c2c2e";
   const { hue, saturation, lightness } = hexToHsl(normalized);
   if (saturation < 0.12) return normalized;
   return hslToHex(
@@ -103,20 +114,28 @@ function cacheRuntimeThemeColor(source: string, task: Promise<string | null>) {
   if (runtimeThemeColorCache.size >= RUNTIME_THEME_CACHE_LIMIT) {
     runtimeThemeColorCache.delete(runtimeThemeColorCache.keys().next().value!);
   }
-  runtimeThemeColorCache.set(source, task);
-  void task.catch(() => {
+  const entry: { promise: Promise<string | null>; color?: string | null } = {
+    promise: task,
+  };
+  entry.promise = task.then((color) => {
+    entry.color = color;
+    return color;
+  });
+  runtimeThemeColorCache.set(source, entry);
+  void entry.promise.catch(() => {
     // A transient image/CDN failure must be retried on the next visit instead
     // of leaving this artwork permanently cached as a failed request.
-    runtimeThemeColorCache.delete(source);
+    if (runtimeThemeColorCache.get(source) === entry)
+      runtimeThemeColorCache.delete(source);
   });
-  return task;
+  return entry.promise;
 }
 
 /** Samples artwork pixels in the browser; color choice is shared with Asset. */
 export async function extractArtworkThemeColor(source: string) {
   if (typeof window === "undefined" || !source) return null;
   const cached = runtimeThemeColorCache.get(source);
-  if (cached) return cached;
+  if (cached) return cached.promise;
   return cacheRuntimeThemeColor(
     source,
     loadImage(source).then((image) => {

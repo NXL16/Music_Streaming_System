@@ -1,4 +1,7 @@
-import { invalidateCachedQuery } from "@/lib/api/query-cache";
+import {
+  invalidateCachedQuery,
+  invalidateCachedQueries,
+} from "@/lib/api/query-cache";
 
 export const PLAYLIST_CHANGED_EVENT = "playlist:changed";
 const PLAYLIST_SYNC_CHANNEL = "playlist-changes";
@@ -15,11 +18,17 @@ const playlistSyncChannel =
     ? new BroadcastChannel(PLAYLIST_SYNC_CHANNEL)
     : null;
 
+export function invalidateUserPlaylists(userId: string) {
+  invalidateCachedQuery(`user-playlists:${userId}`);
+  invalidateCachedQuery(`user-playlist-pages:${userId}`);
+}
+
 function applyPlaylistChange(change: PlaylistChange) {
   invalidateCachedQuery(`playlist:${change.playlistId}`);
-  if (change.userId) {
-    invalidateCachedQuery(`user-playlists:${change.userId}`);
-  }
+  invalidateCachedQueries(
+    `library:playlist-detail:${encodeURIComponent(change.playlistId)}:`,
+  );
+  if (change.userId) invalidateUserPlaylists(change.userId);
   window.dispatchEvent(
     new CustomEvent<PlaylistChange>(PLAYLIST_CHANGED_EVENT, { detail: change }),
   );

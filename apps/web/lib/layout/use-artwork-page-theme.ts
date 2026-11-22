@@ -1,5 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
-import { extractArtworkThemeColor } from "@/lib/media/extract-artwork-theme-color";
+import { useLayoutEffect, useState } from "react";
+import {
+  extractArtworkThemeColor,
+  getCachedArtworkThemeColor,
+} from "@/lib/media/extract-artwork-theme-color";
 import { usePageThemeStore } from "./use-page-theme-store";
 
 type UseArtworkPageThemeOptions = {
@@ -24,25 +27,24 @@ export function useArtworkPageTheme({
 }: UseArtworkPageThemeOptions) {
   const setPageTheme = usePageThemeStore((state) => state.setTheme);
   const clearPageTheme = usePageThemeStore((state) => state.clearTheme);
-  const activeThemeSourceKey = usePageThemeStore((state) => state.sourceKey);
-  const activeThemeBaseColor = usePageThemeStore((state) => state.baseColor);
   const persistedColor = normalizeThemeColor(baseColor);
-  const requestKey = useMemo(
-    () => `${sourceKey}:${baseColor ?? ""}:${artworkUrl ?? ""}`,
-    [artworkUrl, baseColor, sourceKey],
-  );
+  const resolvedColor =
+    persistedColor ??
+    (artworkUrl ? getCachedArtworkThemeColor(artworkUrl) : undefined);
+  const requestKey = `${sourceKey}:${baseColor ?? ""}:${artworkUrl ?? ""}`;
   const [resolvedRequestKey, setResolvedRequestKey] = useState<string | null>(
     null,
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!enabled) {
       clearPageTheme(sourceKey);
       return;
     }
 
-    if (persistedColor) {
-      setPageTheme(sourceKey, persistedColor);
+    if (resolvedColor !== undefined) {
+      if (resolvedColor) setPageTheme(sourceKey, resolvedColor);
+      else clearPageTheme(sourceKey);
       return () => clearPageTheme(sourceKey);
     }
 
@@ -76,15 +78,14 @@ export function useArtworkPageTheme({
     requestKey,
     setPageTheme,
     sourceKey,
-    persistedColor,
+    resolvedColor,
   ]);
 
   return {
     isLoading:
       enabled &&
-      (persistedColor
-        ? activeThemeSourceKey !== sourceKey ||
-          activeThemeBaseColor !== persistedColor
-        : Boolean(artworkUrl) && resolvedRequestKey !== requestKey),
+      resolvedColor === undefined &&
+      Boolean(artworkUrl) &&
+      resolvedRequestKey !== requestKey,
   };
 }

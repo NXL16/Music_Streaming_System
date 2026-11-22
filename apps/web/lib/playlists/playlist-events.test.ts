@@ -18,7 +18,10 @@ const browser = vi.hoisted(() => {
   return { dispatchEvent, postMessage };
 });
 
-const queryCache = vi.hoisted(() => ({ invalidateCachedQuery: vi.fn() }));
+const queryCache = vi.hoisted(() => ({
+  invalidateCachedQuery: vi.fn(),
+  invalidateCachedQueries: vi.fn(),
+}));
 vi.mock("@/lib/api/query-cache", () => queryCache);
 
 import { notifyPlaylistChanged } from "./playlist-events";
@@ -31,6 +34,9 @@ describe("playlist change events", () => {
 
     expect(queryCache.invalidateCachedQuery).toHaveBeenCalledWith(
       "playlist:p1",
+    );
+    expect(queryCache.invalidateCachedQueries).toHaveBeenCalledWith(
+      "library:playlist-detail:p1:",
     );
     expect(queryCache.invalidateCachedQuery).toHaveBeenCalledWith(
       "user-playlists:u1",

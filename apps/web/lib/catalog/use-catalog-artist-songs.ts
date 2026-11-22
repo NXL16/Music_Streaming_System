@@ -1,148 +1,133 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAsyncResource } from "@/lib/api/use-async-resource";
+import { getCachedQuerySnapshot, setCachedQuery } from "@/lib/api/query-cache";
 import { getApiErrorMessage } from "@/lib/api/api-error";
 import {
   getCatalogArtistSongPage,
+  artistSongCachePrefix,
+  getCatalogArtistSongPageSnapshot,
   invalidateCatalogArtistSongPages,
 } from "./artist-song-pages";
-import type { PlayerSong } from "@/lib/player/use-player-store";
 import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 import {
   appendUniqueById,
   getSafeNextCursor,
 } from "@/lib/pagination/cursor-page";
 
-export function useCatalogArtistSongs(artistId: string) {
-  const [songs, setSongs] = useState<PlayerSong[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | undefined>();
-  const [loading, setLoading] = useMinimumLoadingState(true);
-  const [loadingMore, setLoadingMore] = useMinimumLoadingState();
-  const [error, setError] = useState("");
-  const isMountedRef = useRef(true);
-  const loadMoreRequestIdRef = useRef(0);
-  const seenCursorsRef = useRef(new Set<string>());
+type SongPage = Awaited<ReturnType<typeof getCatalogArtistSongPage>>;
+type PaginationState = {
+  firstPage: SongPage;
+  songs: SongPage["songs"];
+  nextCursor: string;
+  seenCursors: Set<string>;
+  error: string;
+};
 
-  const fetchFirstPage = useCallback(
-    (force = false) => getCatalogArtistSongPage(artistId, { force }),
+export function useCatalogArtistSongs(artistId: string) {
+  const cacheKey = `${artistSongCachePrefix(artistId)}loaded`;
+  const cachedPagination = useMemo(
+    () => getCachedQuerySnapshot<PaginationState>(cacheKey),
+    [cacheKey],
+  );
+  const initialData = useMemo(
+    () =>
+      cachedPagination?.firstPage ?? getCatalogArtistSongPageSnapshot(artistId),
+    [artistId, cachedPagination],
+  );
+  const loadFirstPage = useCallback(
+    () => getCatalogArtistSongPage(artistId),
+    [artistId],
+  );
+  const {
+    data: firstPage,
+    loading,
+    error,
+    reload: reloadFirstPage,
+  } = useAsyncResource(
+    loadFirstPage,
+    "Không thể tải danh sách bài hát của nghệ sĩ.",
+    { initialData, enabled: Boolean(artistId) },
+  );
+  const firstPageState = useMemo(() => {
+    if (!firstPage) return null;
+    const seenCursors = new Set<string>();
+    return {
+      firstPage,
+      songs: firstPage.songs,
+      nextCursor: getSafeNextCursor(firstPage, seenCursors),
+      seenCursors,
+      error: "",
+    };
+  }, [firstPage]);
+  const [pagination, setPagination] = useState<PaginationState | null>(
+    cachedPagination ?? null,
+  );
+  const current =
+    pagination?.firstPage === firstPage ? pagination : firstPageState;
+  const [loadingMore, setLoadingMore] = useMinimumLoadingState();
+  const activeRequest = useRef<AbortController | null>(null);
+
+  useEffect(
+    () => () => {
+      activeRequest.current?.abort();
+      activeRequest.current = null;
+    },
     [artistId],
   );
 
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-      loadMoreRequestIdRef.current += 1;
-    };
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-
-    queueMicrotask(() => {
-      if (!active) return;
-      setLoading(true);
-      setLoadingMore(false);
-      setError("");
-      seenCursorsRef.current = new Set();
-
-      fetchFirstPage()
-        .then((page) => {
-          if (!active) return;
-          setSongs(page.songs);
-          setNextCursor(
-            getSafeNextCursor(page, seenCursorsRef.current) || undefined,
-          );
-        })
-        .catch((requestError: unknown) => {
-          if (active) {
-            setError(
-              getApiErrorMessage(
-                requestError,
-                "Không thể tải danh sách bài hát của nghệ sĩ.",
-              ),
-            );
-          }
-        })
-        .finally(() => {
-          if (active) setLoading(false);
-        });
-    });
-
-    return () => {
-      active = false;
-    };
-  }, [fetchFirstPage, setLoading, setLoadingMore]);
-
   const loadMore = useCallback(async () => {
-    if (!nextCursor || loadingMore) return;
-
-    const requestId = ++loadMoreRequestIdRef.current;
+    if (!current?.nextCursor || loadingMore || activeRequest.current) return;
+    const controller = new AbortController();
+    activeRequest.current = controller;
     setLoadingMore(true);
-    setError("");
+    setPagination({ ...current, error: "" });
     try {
-      if (!isMountedRef.current || requestId !== loadMoreRequestIdRef.current) {
-        return;
-      }
-
       const page = await getCatalogArtistSongPage(artistId, {
-        cursor: nextCursor,
+        cursor: current.nextCursor,
       });
-      if (!isMountedRef.current || requestId !== loadMoreRequestIdRef.current) {
-        return;
-      }
-      setSongs((current) => appendUniqueById(current, page.songs));
-      setNextCursor(
-        getSafeNextCursor(page, seenCursorsRef.current) || undefined,
-      );
+      if (controller.signal.aborted) return;
+      const seenCursors = new Set(current.seenCursors);
+      const next = {
+        firstPage: current.firstPage,
+        songs: appendUniqueById(current.songs, page.songs),
+        nextCursor: getSafeNextCursor(page, seenCursors),
+        seenCursors,
+        error: "",
+      };
+      setCachedQuery(cacheKey, next);
+      setPagination(next);
     } catch (requestError) {
-      if (isMountedRef.current && requestId === loadMoreRequestIdRef.current) {
-        setError(
-          getApiErrorMessage(
+      if (!controller.signal.aborted)
+        setPagination({
+          ...current,
+          error: getApiErrorMessage(
             requestError,
             "Không thể tải thêm bài hát của nghệ sĩ.",
           ),
-        );
-      }
+        });
     } finally {
-      if (isMountedRef.current && requestId === loadMoreRequestIdRef.current) {
-        setLoadingMore(false);
-      }
+      if (activeRequest.current === controller) activeRequest.current = null;
+      if (!controller.signal.aborted) setLoadingMore(false);
     }
-  }, [artistId, loadingMore, nextCursor, setLoadingMore]);
+  }, [artistId, cacheKey, current, loadingMore, setLoadingMore]);
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(() => {
+    activeRequest.current?.abort();
+    activeRequest.current = null;
+    setLoadingMore(false);
+    setPagination(null);
     invalidateCatalogArtistSongPages(artistId);
-    seenCursorsRef.current = new Set();
-    setLoading(true);
-    setError("");
-    try {
-      const page = await fetchFirstPage(true);
-      if (!isMountedRef.current) return;
-      setSongs(page.songs);
-      setNextCursor(
-        getSafeNextCursor(page, seenCursorsRef.current) || undefined,
-      );
-    } catch (requestError) {
-      if (isMountedRef.current) {
-        setError(
-          getApiErrorMessage(
-            requestError,
-            "Không thể tải danh sách bài hát của nghệ sĩ.",
-          ),
-        );
-      }
-    } finally {
-      if (isMountedRef.current) setLoading(false);
-    }
-  }, [artistId, fetchFirstPage, setLoading]);
+    return reloadFirstPage();
+  }, [artistId, reloadFirstPage, setLoadingMore]);
 
   return {
-    songs,
+    songs: current?.songs ?? [],
     loading,
-    loadingMore,
-    error,
-    hasMore: Boolean(nextCursor),
+    loadingMore: loadingMore && pagination?.firstPage === firstPage,
+    error: error || current?.error || "",
+    hasMore: Boolean(current?.nextCursor),
     loadMore,
     reload,
   };

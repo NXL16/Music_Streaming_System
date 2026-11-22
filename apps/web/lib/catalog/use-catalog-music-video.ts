@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { useAsyncResource } from "@/lib/api/use-async-resource";
+import { useCachedQuery } from "@/lib/api/use-cached-query";
 import { getCatalogMusicVideo } from "./music-videos.api";
 
 export function useCatalogMusicVideo(songVideoId: string) {
@@ -10,5 +10,10 @@ export function useCatalogMusicVideo(songVideoId: string) {
     [songVideoId],
   );
 
-  return useAsyncResource(fetchVideo, "Không thể tải Music Video.");
+  return useCachedQuery(
+    `catalog:catalog-music-videos:detail:${songVideoId}`,
+    fetchVideo,
+    "Không thể tải Music Video.",
+    { enabled: Boolean(songVideoId) },
+  );
 }

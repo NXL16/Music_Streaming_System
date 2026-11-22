@@ -4,12 +4,10 @@ import {
   subscribeLibraryResourcesChanged,
 } from "@/lib/library/library-resources.api";
 import { useLibraryResourcesRevision } from "@/lib/library/use-library-resources-revision";
-import {
-  getUserPlaylists,
-  invalidateUserPlaylists,
-} from "@/lib/playlists/user-playlists.api";
+import { getUserPlaylists } from "@/lib/playlists/user-playlists.api";
 import {
   PLAYLIST_CHANGED_EVENT,
+  invalidateUserPlaylists,
   type PlaylistChange,
 } from "@/lib/playlists/playlist-events";
 

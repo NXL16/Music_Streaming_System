@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useAuthStore } from "@/lib/auth/auth-store";
 import { isAxiosError } from "axios";
 import {
   searchCatalogShelf,
   searchCatalogResults,
   searchCatalogSuggestions,
+  getCatalogSearchPageSnapshot,
   type CatalogSearchShelfType,
 } from "./catalog.api";
 import { attachSearchResultsClickTracking } from "./search-click-tracking";
@@ -23,7 +25,6 @@ type CatalogSearchOptions = {
   shelfType?: CatalogSearchShelfType;
   limit?: number;
   offset?: number;
-  requestKey?: number;
 };
 
 export const EMPTY_SEARCH_RESULTS: SearchResults = {
@@ -41,6 +42,7 @@ export const EMPTY_SEARCH_RESULTS: SearchResults = {
 };
 
 type SearchState = {
+  userId?: string;
   key: string;
   query: string;
   results: SearchResults;
@@ -77,22 +79,38 @@ export function useCatalogSearch(
     shelfType,
     limit,
     offset,
-    requestKey = 0,
   }: CatalogSearchOptions = {},
 ) {
   const trimmedQuery = query.trim();
   const normalizedQuery = normalizeCatalogSearchQuery(trimmedQuery);
   const hasQuery = enabled && Boolean(trimmedQuery);
   const [retryKey, setRetryKey] = useState(0);
+  const userId = useAuthStore((state) => state.user?.userId);
   const searchKey = [
     normalizedQuery,
     source,
     shelfType ?? "",
     limit ?? "",
     offset ?? "",
-    requestKey,
+    userId ?? "guest",
     retryKey,
   ].join(":");
+  const cachedResults = useMemo(() => {
+    if (source === "suggestions") return undefined;
+    const response = getCatalogSearchPageSnapshot(
+      trimmedQuery,
+      {
+        source,
+        shelfType,
+        limit,
+        offset,
+      },
+      userId ?? null,
+    );
+    return response
+      ? attachSearchResultsClickTracking(mapSearchResults(response))
+      : undefined;
+  }, [trimmedQuery, source, shelfType, limit, offset, userId]);
   const [state, setState] = useState<SearchState>({
     key: "",
     query: "",
@@ -102,9 +120,7 @@ export function useCatalogSearch(
   const [loading, setLoading] = useMinimumLoadingState();
 
   useEffect(() => {
-    // Returning to an already expanded shelf must reuse its result instead of
-    // restarting the request and replacing visible cards with a page loader.
-    if (!hasQuery || state.key === searchKey) {
+    if (!hasQuery || state.key === searchKey || cachedResults) {
       setLoading(false);
       return;
     }
@@ -122,6 +138,7 @@ export function useCatalogSearch(
         .then((response) => {
           if (controller.signal.aborted) return;
           setState({
+            userId,
             key: searchKey,
             query: normalizedQuery,
             results: attachSearchResultsClickTracking(
@@ -138,6 +155,7 @@ export function useCatalogSearch(
             return;
           }
           setState({
+            userId,
             key: searchKey,
             query: normalizedQuery,
             results: EMPTY_SEARCH_RESULTS,
@@ -170,9 +188,13 @@ export function useCatalogSearch(
     source,
     trimmedQuery,
     normalizedQuery,
+    cachedResults,
+    userId,
   ]);
 
-  const isCurrentResult = state.key === searchKey;
+  const isCurrentResult = state.key === searchKey || Boolean(cachedResults);
+  const currentResults =
+    state.key === searchKey ? state.results : cachedResults;
   const hasRelatedPreviousQuery =
     Boolean(state.query) &&
     (normalizedQuery.startsWith(state.query) ||
@@ -182,6 +204,7 @@ export function useCatalogSearch(
   // queries must not briefly render stale suggestions.
   const canKeepPreviousResults =
     keepPreviousResults &&
+    state.userId === userId &&
     hasQuery &&
     hasRelatedPreviousQuery &&
     Boolean(state.key) &&
@@ -192,10 +215,10 @@ export function useCatalogSearch(
   return {
     results:
       hasQuery && (isCurrentResult || canKeepPreviousResults)
-        ? state.results
+        ? (currentResults ?? state.results)
         : EMPTY_SEARCH_RESULTS,
-    loading: hasQuery && (loading || isAwaitingCurrentResult),
-    error: hasQuery && isCurrentResult ? state.error : null,
+    loading: hasQuery && !cachedResults && (loading || isAwaitingCurrentResult),
+    error: hasQuery && state.key === searchKey ? state.error : null,
     hasRelatedPreviousResults: canKeepPreviousResults,
     isCurrentQueryResolved: hasQuery && isCurrentResult,
     retry: () => setRetryKey((current) => current + 1),

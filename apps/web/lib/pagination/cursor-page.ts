@@ -4,9 +4,13 @@ type Identifiable = { id: string };
 export function appendUniqueById<T extends Identifiable>(
   current: T[],
   incoming: T[] | undefined,
+  keyOf: (item: T) => string = (item) => item.id,
 ) {
-  const ids = new Set(current.map((item) => item.id));
-  return [...current, ...(incoming ?? []).filter((item) => !ids.has(item.id))];
+  const ids = new Set(current.map(keyOf));
+  return [
+    ...current,
+    ...(incoming ?? []).filter((item) => !ids.has(keyOf(item))),
+  ];
 }
 
 /**
