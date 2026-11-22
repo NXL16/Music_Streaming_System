@@ -36,6 +36,7 @@ import {
   SetArtistFollowRequest,
   GetArtistFollowRequest,
   ArtistFollowResponse,
+  ListArtistFollowsRequest,
   CreateSongStationRequest,
   GetSongStationRequest,
   SongStationResponse,
@@ -317,6 +318,10 @@ export class RecommendationsController implements RecommendationServiceControlle
       request.isFollowed,
     );
   }
+  listArtistFollows(request: ListArtistFollowsRequest) {
+    return this.preferenceService.listArtistFollows(request.userId);
+  }
+
   getArtistFollow(
     request: GetArtistFollowRequest,
   ): Promise<ArtistFollowResponse> {

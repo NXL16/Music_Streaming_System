@@ -620,6 +620,12 @@ export class RecommendationsController {
     });
   }
 
+  @Get('artists/followed')
+  async listArtistFollows(@Req() req: Request) {
+    const user = req.user as JwtUser;
+    return this.recommendationsService.listArtistFollows(user.userId);
+  }
+
   @Get('artists/:artistId/follow')
   async getArtistFollow(
     @Req() req: Request,

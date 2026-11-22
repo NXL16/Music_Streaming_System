@@ -46,6 +46,7 @@ import {
   SetArtistFollowRequest,
   GetArtistFollowRequest,
   ArtistFollowResponse,
+  ListArtistFollowsResponse,
   CreateSongStationRequest,
   GetSongStationRequest,
   SongStationResponse,
@@ -340,6 +341,12 @@ export class RecommendationsService implements OnModuleInit, OnModuleDestroy {
     const request: SetArtistFollowRequest = { userId, artistId, isFollowed };
     return grpcFirstValueFrom(
       this.recommendationClient.setArtistFollow(request, this.metadata()),
+    );
+  }
+
+  async listArtistFollows(userId: string): Promise<ListArtistFollowsResponse> {
+    return grpcFirstValueFrom(
+      this.recommendationClient.listArtistFollows({ userId }, this.metadata()),
     );
   }
 

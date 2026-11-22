@@ -26,6 +26,7 @@ service RecommendationService {
   rpc ListContentPreferences(ListContentPreferencesRequest) returns (ListContentPreferencesResponse);
   rpc SetArtistFollow(SetArtistFollowRequest) returns (ArtistFollowResponse);
   rpc GetArtistFollow(GetArtistFollowRequest) returns (ArtistFollowResponse);
+  rpc ListArtistFollows(ListArtistFollowsRequest) returns (ListArtistFollowsResponse);
   rpc UpsertSystemStationArtwork(UpsertSystemStationArtworkRequest) returns (SystemStationArtworkResponse);
   rpc UpsertSystemPlaylistArtwork(UpsertSystemPlaylistArtworkRequest) returns (SystemPlaylistArtworkResponse);
   rpc SetSystemPlaylistArtworkColor(SetSystemPlaylistArtworkColorRequest) returns (SystemPlaylistArtworkResponse);
@@ -46,37 +47,38 @@ message CleanupPlaylistHistoryRequest {
 message CleanupPlaylistHistoryResponse { bool success = 1; }
 
 message UpsertSystemStationArtworkRequest {
-  string station_key   = 1;
-  string cover_asset_id = 2;
-  string actor_user_id = 3;
+  string station_key         = 1;
+  string cover_asset_id      = 2;
+  string actor_user_id       = 3;
   string hero_video_asset_id = 4;
 }
 
 message SystemStationArtworkResponse {
-  string station_key = 1;
-  string cover_asset_id = 2;
+  string station_key         = 1;
+  string cover_asset_id      = 2;
   string hero_video_asset_id = 3;
 }
 
 message UpsertSystemPlaylistArtworkRequest {
-  string playlist_key = 1;
-  string cover_asset_id = 2;
-  string home_card_asset_id = 3;
-  string actor_user_id = 4;
+  string playlist_key                 = 1;
+  string cover_asset_id               = 2;
+  string home_card_asset_id           = 3;
+  string actor_user_id                = 4;
   string detail_square_video_asset_id = 5;
   string detail_mobile_video_asset_id = 6;
-  string home_hero_video_asset_id = 7;
+  string home_hero_video_asset_id     = 7;
 }
+
 message SystemPlaylistArtworkResponse {
-  string playlist_key = 1;
-  string cover_asset_id = 2;
-  string home_card_asset_id = 3;
+  string playlist_key                 = 1;
+  string cover_asset_id               = 2;
+  string home_card_asset_id           = 3;
   string detail_square_video_asset_id = 4;
   string detail_mobile_video_asset_id = 5;
-  string home_hero_video_asset_id = 6;
+  string home_hero_video_asset_id     = 6;
 }
-message SetSystemPlaylistArtworkColorRequest { string playlist_key = 1; string bg_color = 2; string actor_user_id = 3; }
 
+message SetSystemPlaylistArtworkColorRequest { string playlist_key = 1; string bg_color = 2; string actor_user_id = 3; }
 
 message CreateSongStationRequest {
   string user_id = 1;
@@ -89,31 +91,31 @@ message CreateSongStationRequest {
 }
 
 message SongStationResponse {
-  string station_id = 1;
-  string name = 2;
-  string description = 3;
-  string artwork_url = 4;
-  string artwork_bg_color = 5;
-  repeated string track_ids = 6;
+  string          station_id       = 1;
+  string          name             = 2;
+  string          description      = 3;
+  string          artwork_url      = 4;
+  string          artwork_bg_color = 5;
+  repeated string track_ids        = 6;
   // Internal API rendering input; never needs to be displayed by the client.
   string seed_artwork_url = 7;
-  string seed_song_id = 8;
-  bool artwork_ready = 9;
-  string seed_album_id = 10;
+  string seed_song_id     = 8;
+  bool   artwork_ready    = 9;
+  string seed_album_id    = 10;
 }
 
 message GetSongStationRequest {
-  string user_id = 1;
+  string user_id    = 1;
   string station_id = 2;
 }
 
 // Requests the next distinct batch for a running Song Station. The caller
 // supplies its current session queue so the service never sends a repeat.
 message GetSongStationTracksRequest {
-  string user_id = 1;
-  string station_id = 2;
+  string          user_id           = 1;
+  string          station_id        = 2;
   repeated string excluded_song_ids = 3;
-  int32 limit = 4;
+  int32           limit             = 4;
 }
 
 message SongStationTracksResponse {
@@ -121,43 +123,43 @@ message SongStationTracksResponse {
 }
 
 message CreateArtistStationRequest {
-  string user_id = 1;
-  string artist_id = 2;
+  string user_id                  = 1;
+  string artist_id                = 2;
   string station_artwork_asset_id = 3;
   string station_artwork_bg_color = 4;
-  bool artist_only = 5;
+  bool   artist_only              = 5;
 }
 
 message ArtistStationResponse {
-  string station_id = 1;
-  string name = 2;
-  string description = 3;
-  string artwork_url = 4;
-  string artwork_bg_color = 5;
-  repeated string track_ids = 6;
+  string          station_id                   = 1;
+  string          name                         = 2;
+  string          description                  = 3;
+  string          artwork_url                  = 4;
+  string          artwork_bg_color             = 5;
+  repeated string track_ids                    = 6;
   repeated string featured_artist_artwork_urls = 7;
-  repeated string featured_artist_ids = 8;
-  bool artwork_ready = 9;
-  string seed_artist_id = 10;
-  bool artist_only = 11;
+  repeated string featured_artist_ids          = 8;
+  bool            artwork_ready                = 9;
+  string          seed_artist_id               = 10;
+  bool            artist_only                  = 11;
 }
 
 message GetArtistStationRequest {
-  string user_id = 1;
+  string user_id    = 1;
   string station_id = 2;
 }
 
 message GetArtistStationTracksRequest {
-  string user_id = 1;
-  string station_id = 2;
+  string          user_id           = 1;
+  string          station_id        = 2;
   repeated string excluded_song_ids = 3;
-  int32 limit = 4;
+  int32           limit             = 4;
 }
 
 // Resolves the signed-in listener's cached contents of one of the three fixed
 // catalog playlists. It never creates a user playlist.
 message GetSystemPlaylistTracksRequest {
-  string user_id = 1;
+  string user_id     = 1;
   string playlist_id = 2;
 }
 
@@ -293,7 +295,7 @@ message PersonalRecommendationAttributes {
   string                         source_album_url              = 13;
   string                         source_album_artwork_url      = 14;
   string                         source_album_artwork_bg_color = 15;
-  string                         listen_again_album_id        = 16;
+  string                         listen_again_album_id         = 16;
 }
 
 message PersonalRecommendationResource {
@@ -421,12 +423,12 @@ message RecordPreferenceEventResponse { bool success = 1; }
 
 message ListRecentSearchesRequest {
   string user_id = 1;
-  uint32 limit = 2;
+  uint32 limit   = 2;
 }
 
 message RecentSearchResource {
   string resource_type = 1;
-  string resource_id = 2;
+  string resource_id   = 2;
 }
 
 message ListRecentSearchesResponse {
@@ -453,6 +455,12 @@ message SetArtistFollowRequest { string user_id = 1; string artist_id = 2; bool 
 message GetArtistFollowRequest { string user_id = 1; string artist_id = 2; }
 
 message ArtistFollowResponse { bool success = 1; bool is_followed = 2; bool changed = 3; }
+
+message ListArtistFollowsRequest { string user_id = 1; }
+
+message ArtistFollowEntry { string artist_id = 1; double created_at = 2; }
+
+message ListArtistFollowsResponse { repeated ArtistFollowEntry artists = 1; }
 
 message RecordListeningEventResponse {
   bool success = 1;

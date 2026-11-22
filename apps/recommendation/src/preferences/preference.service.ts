@@ -245,6 +245,20 @@ export class PreferenceService {
     return { success: true, isFollowed, changed: true };
   }
 
+  async listArtistFollows(userId: string) {
+    const artists = await this.prisma.userArtistFollow.findMany({
+      where: { userId },
+      orderBy: [{ createdAt: 'desc' }, { artistId: 'asc' }],
+      select: { artistId: true, createdAt: true },
+    });
+    return {
+      artists: artists.map(({ artistId, createdAt }) => ({
+        artistId,
+        createdAt: createdAt.getTime(),
+      })),
+    };
+  }
+
   async isArtistFollowed(userId: string, artistId: string) {
     return {
       isFollowed: Boolean(
