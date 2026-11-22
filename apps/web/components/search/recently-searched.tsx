@@ -19,6 +19,7 @@ export default function RecentlySearched({
     <>
       <div className="max-[483px]:hidden">
         <MediaLockupGridShelf
+          shelfId="search-recently-searched"
           endAction={
             <div className="[--linkColor:var(--keyColor)] inline-block [font:var(--title-3)] z-[calc(var(--z-default)+1)]">
               <button
@@ -38,7 +39,7 @@ export default function RecentlySearched({
         />
       </div>
 
-      <section className="min-[484px]:hidden pt-3">
+      <section className="min-[484px]:hidden pt-5" data-app-scroll-return="top">
         <div className="flex items-center justify-end m-[0_var(--bodyGutter)_13px]">
           <h2 className="flex-1 text-(--header-title-color,var(--systemPrimary,#000)) [font:var(--header-title-font,var(--title-2-emphasized))]">
             Recently Searched

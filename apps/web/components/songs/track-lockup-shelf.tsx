@@ -17,12 +17,17 @@ import { PlaybackWaveform } from "@/components/songs/playback-waveform";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { formatReleaseYear } from "@/lib/format/release-date";
-import { usePlayerStore, type PlayerSong } from "@/lib/player/use-player-store";
+import {
+  playerSongKey,
+  usePlayerStore,
+  type PlayerSong,
+} from "@/lib/player/use-player-store";
 import { ArtistLinks } from "../media/artist-links";
 import PlayIcon from "../icons/play-icon";
 import PauseIcon from "../icons/pause-icon";
 
 type TrackLockupShelfProps = {
+  shelfId?: string;
   title: string;
   items: PlayerSong[];
   queue: PlayerSong[];
@@ -90,6 +95,7 @@ function primaryArtists(song: PlayerSong) {
 }
 
 export function TrackLockupShelf({
+  shelfId,
   title,
   items,
   queue,
@@ -105,7 +111,7 @@ export function TrackLockupShelf({
   const playing = usePlayerStore((state) => state.playing);
   const togglePlayback = usePlayerStore((state) => state.togglePlayback);
   const userId = useAuthStore((state) => state.user?.userId);
-  const favoriteSongIds = useFavoriteStore((state) => state.songIds);
+  const favoriteSongKeys = useFavoriteStore((state) => state.songKeys);
   const dragRef = useRef<{ startX: number; scrollLeft: number } | undefined>(
     undefined,
   );
@@ -130,6 +136,7 @@ export function TrackLockupShelf({
 
   return (
     <div
+      data-app-scroll-anchor={shelfId}
       className={
         isNarrowLayout
           ? "min-[1000px]:flex-1 min-[1000px]:-ms-5 min-[1000px]:min-w-0"
@@ -172,6 +179,7 @@ export function TrackLockupShelf({
         >
           <div className="top-song box-content -me-0.5 -ms-0.5 overflow-visible pe-0.5 ps-0.5 w-full">
             <ul
+              data-app-scroll-shelf={shelfId}
               className="shelf-grid__list--artist"
               onClickCapture={(event) => {
                 if (!draggedRef.current) return;
@@ -242,7 +250,9 @@ export function TrackLockupShelf({
               {items.map((song) => {
                 const artworkColor =
                   song.artworkBgColor ?? "var(--genericJoeColor)";
-                const isCurrentTrack = currentSong?.id === song.id;
+                const isCurrentTrack = currentSong
+                  ? playerSongKey(currentSong) === playerSongKey(song)
+                  : false;
                 const isTrackPlaying = isCurrentTrack && playing;
                 const artistMetadata = primaryArtists(song);
                 const songMeta =
@@ -252,7 +262,8 @@ export function TrackLockupShelf({
                         .filter(Boolean)
                         .join("\u202f\u00b7\u202f");
                 const queueIndex = queue.findIndex(
-                  (queuedSong) => queuedSong.id === song.id,
+                  (queuedSong) =>
+                    playerSongKey(queuedSong) === playerSongKey(song),
                 );
 
                 return (
@@ -261,6 +272,11 @@ export function TrackLockupShelf({
                     key={song.id}
                   >
                     <div
+                      data-app-navigation-href={
+                        song.albumUrl
+                          ? `${song.albumUrl}?trackId=${encodeURIComponent(song.id)}`
+                          : undefined
+                      }
                       className="group items-center text-(--systemPrimary) grid grid-cols-[auto_auto_1fr_auto] pb-[7.5px] pt-[7.5px] relative w-full pe-(--trackLockupPaddingInlineEnd,14px) cursor-pointer after:[border-top:var(--keyline-border-style)] after:inset-e-0 after:inset-s-0 after:absolute after:top-0 after:z-(--z-default)"
                       onClick={() => {
                         onSongOpen?.(song);
@@ -380,7 +396,9 @@ export function TrackLockupShelf({
                               artworkUrl: song.artworkUrl,
                               sourceAlbumId: song.albumId,
                               userId,
-                              isFavorite: favoriteSongIds.has(song.id),
+                              isFavorite: favoriteSongKeys.has(
+                                playerSongKey(song),
+                              ),
                             }}
                           />
                         </div>

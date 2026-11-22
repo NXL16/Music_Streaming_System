@@ -5,7 +5,10 @@ import MediaShelf, {
   type MediaShelfDisplayKind,
 } from "@/components/media/media-shelf";
 import { useAsyncResource } from "@/lib/api/use-async-resource";
-import { getCatalogAlbumRelated } from "@/lib/catalog/catalog.api";
+import {
+  getCatalogAlbumRelated,
+  getCatalogAlbumRelatedSnapshot,
+} from "@/lib/catalog/catalog.api";
 import {
   catalogAlbumReleaseYearCardOptions,
   mapCatalogAlbums,
@@ -14,7 +17,6 @@ import {
 import type { CatalogAlbumRelatedResponse } from "@/lib/catalog/catalog.types";
 import type { MediaCardProps } from "@/components/media/media-card.types";
 import MediaShelfSkeleton from "@/components/loading/media-shelf-skeleton";
-import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
 
 type AlbumRelatedShelfSection =
   | "more-by"
@@ -64,6 +66,10 @@ export function AlbumRelatedShelves({
   onDetailLoaded,
   onDetailLoadError,
 }: AlbumRelatedShelvesProps) {
+  const cachedData = useMemo(
+    () => getCatalogAlbumRelatedSnapshot(albumId, { sourceSongId }),
+    [albumId, sourceSongId],
+  );
   const loadRelated = useCallback(
     (signal?: AbortSignal) =>
       getCatalogAlbumRelated(albumId, { sourceSongId }, signal),
@@ -72,9 +78,9 @@ export function AlbumRelatedShelves({
   const { data, loading } = useAsyncResource(
     loadRelated,
     "Không thể tải các nội dung liên quan.",
-    { initialData },
+    { initialData: initialData ?? cachedData },
   );
-  const showRelatedLoading = useMinimumLoadingDuration(loading && !data);
+  const showRelatedLoading = loading && !data;
   const requestedShelfSections =
     requestedSections ?? ALL_RELATED_SHELF_SECTIONS;
   const loadingShelfCount = availableSections

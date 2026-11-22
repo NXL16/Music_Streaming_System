@@ -1,4 +1,5 @@
 "use client";
+import { FavoriteBadge } from "@/components/media/common/favorite-badge";
 
 import {
   catalogArtworkSrcSet,
@@ -11,8 +12,7 @@ import {
   useCatalogDetail,
 } from "@/lib/catalog/use-catalog-detail";
 import { useAlbumRelatedShelfState } from "@/lib/catalog/use-album-related-shelf-state";
-import { usePlayerStore } from "@/lib/player/use-player-store";
-import { playbackIntentProps } from "@/lib/player/playback-intent";
+import { playerSongKey, usePlayerStore } from "@/lib/player/use-player-store";
 import { useTrackRowSelection } from "@/lib/player/use-track-row-selection";
 import {
   CSSProperties,
@@ -43,13 +43,11 @@ import { PlaybackWaveform } from "../songs/playback-waveform";
 import { AlbumRelatedShelves } from "./album-related-shelves";
 import type { MediaCardProps } from "../media/media-card.types";
 import {
+  ShelfDetailLayout,
   ShelfDetailLoading,
   ShelfDetailView,
 } from "../media/shelf-detail-view";
-import {
-  getAppScrollContainer,
-  useAppScrollToTop,
-} from "@/lib/layout/use-app-scroll-to-top";
+import { getAppScrollContainer } from "@/lib/layout/use-app-scroll-to-top";
 import { getCatalogAlbumRelated } from "@/lib/catalog/catalog.api";
 import {
   catalogAlbumReleaseYearCardOptions,
@@ -145,7 +143,7 @@ export function CatalogDetailPage({
   const playing = usePlayerStore((state) => state.playing);
   const togglePlayback = usePlayerStore((state) => state.togglePlayback);
   const userId = useAuthStore((state) => state.user?.userId);
-  const favoriteSongIds = useFavoriteStore((state) => state.songIds);
+  const favoriteSongKeys = useFavoriteStore((state) => state.songKeys);
   const [isAlbumFavorite, setIsAlbumFavorite] = useState(false);
   const albumFavoriteRevisionRef = useRef(0);
   const isAlbumFavoriteVisible = Boolean(userId) && isAlbumFavorite;
@@ -201,23 +199,26 @@ export function CatalogDetailPage({
   const [expandedLibraryAlbumId, setExpandedLibraryAlbumId] = useState<
     string | null
   >(null);
-  const [revealedAlbumThemeKey, setRevealedAlbumThemeKey] = useState<
-    string | null
-  >(null);
-  const selectedRelatedShelfSection = selectedRelatedShelf?.section;
 
   const relatedShelfCacheKey = useCallback(
     (section: string) => `${resourceId}:${section}`,
     [resourceId],
   );
 
-  const { open: openShelfHistory, close: closeRelatedShelf } =
-    useShelfDetailHistory({
-      owner: `catalog-related:${resourceId}`,
-      selected: selectedRelatedShelf,
-      setSelected: setSelectedRelatedShelf,
-      getKey: (shelf) => relatedShelfCacheKey(shelf.section),
-    });
+  const {
+    open: openShelfHistory,
+    close: closeRelatedShelf,
+    update: updateRelatedShelf,
+    isCurrent: isCurrentRelatedShelf,
+    invalidate: invalidateRelatedShelf,
+  } = useShelfDetailHistory({
+    owner: `catalog-related:${resourceId}`,
+    selected: selectedRelatedShelf,
+    setSelected: setSelectedRelatedShelf,
+    getKey: (shelf) => relatedShelfCacheKey(shelf.section),
+    restoreScroll: resourceType === "albums" && !isLibraryView,
+    scrollReady: !selectedRelatedShelf || selectedRelatedShelf.items !== null,
+  });
 
   const openRelatedShelf = useCallback(
     (
@@ -234,12 +235,6 @@ export function CatalogDetailPage({
     [openShelfHistory],
   );
 
-  useAppScrollToTop(resourceId);
-  useAppScrollToTop(
-    selectedRelatedShelfSection
-      ? `${resourceId}:related-shelf:${selectedRelatedShelfSection}`
-      : null,
-  );
   const catalogTracks = useMemo(
     () => (data ? mapCatalogTracks(data) : []),
     [data],
@@ -247,11 +242,12 @@ export function CatalogDetailPage({
   const showFullLibraryAlbum = expandedLibraryAlbumId === resourceId;
   const hasHiddenLibraryTracks = Boolean(
     isLibraryView &&
-    librarySongIds?.length &&
+    librarySongIds !== undefined &&
     librarySongIds.length < catalogTracks.length,
   );
   const tracks = useMemo(() => {
-    if (!librarySongIds?.length || showFullLibraryAlbum) return catalogTracks;
+    if (librarySongIds === undefined || showFullLibraryAlbum)
+      return catalogTracks;
     const savedSongIds = new Set(librarySongIds);
     return catalogTracks.filter((track) => savedSongIds.has(track.id));
   }, [catalogTracks, librarySongIds, showFullLibraryAlbum]);
@@ -272,8 +268,11 @@ export function CatalogDetailPage({
     }
 
     const { section, nextCursor } = selectedRelatedShelf;
-    setSelectedRelatedShelf((current) =>
-      current ? { ...current, loadingMore: true } : current,
+    const shelfKey = relatedShelfCacheKey(section);
+    updateRelatedShelf(shelfKey, (current) =>
+      current.nextCursor === nextCursor
+        ? { ...current, loadingMore: true }
+        : current,
     );
     try {
       const response = await getCatalogAlbumRelated(resourceId, {
@@ -292,13 +291,8 @@ export function CatalogDetailPage({
                 ? catalogAlbumReleaseYearCardOptions
                 : undefined,
             );
-      setSelectedRelatedShelf((current) => {
-        if (
-          !current ||
-          !current.items ||
-          current.section !== section ||
-          current.nextCursor !== nextCursor
-        ) {
+      updateRelatedShelf(shelfKey, (current) => {
+        if (!current.items || current.nextCursor !== nextCursor) {
           return current;
         }
         const existingIds = new Set(current.items.map((item) => item.id));
@@ -313,13 +307,18 @@ export function CatalogDetailPage({
         };
       });
     } catch {
-      setSelectedRelatedShelf((current) =>
-        current && current.section === section
+      updateRelatedShelf(shelfKey, (current) =>
+        current.nextCursor === nextCursor
           ? { ...current, loadingMore: false }
           : current,
       );
     }
-  }, [resourceId, selectedRelatedShelf]);
+  }, [
+    resourceId,
+    selectedRelatedShelf,
+    relatedShelfCacheKey,
+    updateRelatedShelf,
+  ]);
 
   const root = data?.data[0];
   const albumResource =
@@ -371,28 +370,6 @@ export function CatalogDetailPage({
     artworkUrl,
     enabled: resourceType === "albums" && Boolean(resource),
   });
-
-  const canRevealAlbumLayout =
-    resourceType === "albums" &&
-    Boolean(resource) &&
-    !showInitialLoading &&
-    !isWaitingForAlbumTheme;
-
-  useEffect(() => {
-    if (!canRevealAlbumLayout) return;
-
-    let secondFrame = 0;
-    const firstFrame = requestAnimationFrame(() => {
-      secondFrame = requestAnimationFrame(() => {
-        setRevealedAlbumThemeKey(pageThemeKey);
-      });
-    });
-
-    return () => {
-      cancelAnimationFrame(firstFrame);
-      cancelAnimationFrame(secondFrame);
-    };
-  }, [canRevealAlbumLayout, pageThemeKey]);
 
   const artworkProps = useMemo(() => {
     if (!artworkUrl) return null;
@@ -478,6 +455,7 @@ export function CatalogDetailPage({
 
       scrolledInitialSelectionRef.current = initialSelectedTrackId;
       requestAnimationFrame(() => {
+        if (!row.isConnected || row.getClientRects().length === 0) return;
         const rowBounds = row.getBoundingClientRect();
         const scrollContainer = getAppScrollContainer();
         if (scrollContainer) {
@@ -606,12 +584,8 @@ export function CatalogDetailPage({
     ? Math.max(0, tracks.length - range.end) * rowHeight
     : 0;
 
-  if (selectedRelatedShelf) {
-    if (!selectedRelatedShelf.items) {
-      return <ShelfDetailLoading />;
-    }
-
-    return (
+  const detailView = selectedRelatedShelf ? (
+    selectedRelatedShelf.items ? (
       <ShelfDetailView
         shelf={{
           title: selectedRelatedShelf.title,
@@ -622,20 +596,19 @@ export function CatalogDetailPage({
         loadingMore={selectedRelatedShelf.loadingMore}
         onLoadMore={loadMoreRelatedShelf}
       />
-    );
-  }
+    ) : (
+      <ShelfDetailLoading />
+    )
+  ) : null;
 
   if (catalogPlaylist) {
     return <PlaylistDetailView playlist={catalogPlaylist} />;
   }
 
-  const isPreparingAlbumLayout =
-    canRevealAlbumLayout && revealedAlbumThemeKey !== pageThemeKey;
-  const showPageLoading =
-    showInitialLoading || isWaitingForAlbumTheme || isPreparingAlbumLayout;
+  const showPageLoading = showInitialLoading || isWaitingForAlbumTheme;
 
   return (
-    <>
+    <ShelfDetailLayout detail={detailView}>
       {showPageLoading && <CatalogPageLoading />}
 
       {!showPageLoading && errorStatus === 404 && <NotFoundState />}
@@ -646,7 +619,9 @@ export function CatalogDetailPage({
 
       {!showInitialLoading && !isWaitingForAlbumTheme && resource && (
         <div
-          className={`${isLibraryView ? "pb-10.75 min-[1000px]:pb-13.25" : ""} ${isPreparingAlbumLayout ? "invisible" : ""}`}
+          className={
+            isLibraryView ? "pb-10.75 min-[1000px]:pb-13.25" : undefined
+          }
         >
           <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) in-[.has-theme-override]:[--header-title-chevron-color:var(--systemSecondary)]">
             <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
@@ -733,17 +708,7 @@ export function CatalogDetailPage({
                         )}
 
                         {isAlbumFavoriteVisible && (
-                          <span className="ms-(--favoriteBadgeMarginInlineStart,2px)">
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              viewBox="0 0 64 64"
-                              width="64"
-                              height="64"
-                              className="inline-block fill-(--favoriteBadgeColor,var(--keyColor)) size-(--favoriteBadgeSize,9px) align-[2px]"
-                            >
-                              <path d="M13.559 60.051c1.102.86 2.5.565 4.166-.645l14.218-10.455L46.19 59.406c1.666 1.21 3.037 1.505 4.166.645 1.102-.833 1.344-2.204.672-4.166l-5.618-16.718 14.353-10.32c1.666-1.183 2.338-2.42 1.908-3.764-.43-1.29-1.693-1.935-3.763-1.908l-17.605.108-5.348-16.8C34.308 4.496 33.34 3.5 31.944 3.5c-1.372 0-2.34.995-2.984 2.984L23.61 23.283l-17.605-.108c-2.07-.027-3.333.618-3.763 1.908-.457 1.344.242 2.58 1.909 3.763l14.352 10.321-5.617 16.718c-.672 1.962-.43 3.333.672 4.166Z"></path>
-                            </svg>
-                          </span>
+                          <FavoriteBadge variant="detail" />
                         )}
                       </span>
                     </h1>
@@ -907,7 +872,7 @@ export function CatalogDetailPage({
             <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
               <div
                 ref={listRef}
-                className="[--linkColor:var(--systemSecondary)] border-collapse border-spacing-0 table [font:var(--callout)] table-fixed w-[calc(100%-var(--bodyGutter)*2)] ms-(--bodyGutter) me-(--bodyGutter)"
+                className={`[--linkColor:var(--systemSecondary)] border-collapse border-spacing-0 table [font:var(--callout)] table-fixed w-[calc(100%-var(--bodyGutter)*2)] ms-(--bodyGutter) me-(--bodyGutter) ${shouldVirtualize ? "[overflow-anchor:none]" : ""}`}
               >
                 <div className="[clip:rect(1px,1px,1px,1px)] border-0 [clip-path:inset(0_0_99.9%_99.9%)] h-px overflow-hidden p-0 static w-px text-(--systemSecondary) table-row [font:var(--callout-emphasized)]">
                   <div className="table-cell align-middle inset-s-1.75 overflow-visible w-0 relative z-(--z-default) rounded-none text-[0px]! h-0 leading-0! p-0 [font:var(--callout-emphasized)]">
@@ -936,7 +901,9 @@ export function CatalogDetailPage({
 
                 {visibleTracks.map((track, localIndex) => {
                   const index = startIndex + localIndex;
-                  const isCurrentTrack = currentSong?.id === track.id;
+                  const isCurrentTrack = currentSong
+                    ? playerSongKey(currentSong) === playerSongKey(track)
+                    : false;
                   const isTrackPlaying = isCurrentTrack && playing;
                   const isActiveTrack = activeTrackId === track.id;
                   return (
@@ -992,7 +959,6 @@ export function CatalogDetailPage({
                               <div className="[--nonPlatterIconFill:var(--nonPlatterOverrideIconColor,var(--keyColor))] size-full align-top">
                                 <button
                                   disabled={!track.playbackUrl}
-                                  {...playbackIntentProps(track)}
                                   onClick={(e) => {
                                     if (selectedTrackId !== null) {
                                       activateTrack(track.id);
@@ -1084,7 +1050,9 @@ export function CatalogDetailPage({
                                 sourceAlbumId: track.albumId,
                                 title: track.title,
                                 userId,
-                                isFavorite: favoriteSongIds.has(track.id),
+                                isFavorite: favoriteSongKeys.has(
+                                  playerSongKey(track),
+                                ),
                               }}
                             />
                           </div>
@@ -1162,17 +1130,20 @@ export function CatalogDetailPage({
               onDataLoaded={handleRelatedShelvesData}
               onOpenDetail={openRelatedShelf}
               onDetailLoaded={({ section, items, nextCursor }) =>
-                setSelectedRelatedShelf((current) =>
-                  current?.section === section
-                    ? { ...current, items, nextCursor }
-                    : current,
+                updateRelatedShelf(
+                  relatedShelfCacheKey(section),
+                  (current) => ({ ...current, items, nextCursor }),
                 )
               }
-              onDetailLoadError={closeRelatedShelf}
+              onDetailLoadError={(section) => {
+                invalidateRelatedShelf(relatedShelfCacheKey(section));
+                if (isCurrentRelatedShelf(relatedShelfCacheKey(section)))
+                  closeRelatedShelf();
+              }}
             />
           )}
         </div>
       )}
-    </>
+    </ShelfDetailLayout>
   );
 }

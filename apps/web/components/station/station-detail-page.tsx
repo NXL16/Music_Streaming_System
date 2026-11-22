@@ -7,7 +7,6 @@ import {
   playSystemStation,
   type SystemStationDetail,
 } from "@/lib/recommendations/stations-for-you";
-import { useAppScrollToTop } from "@/lib/layout/use-app-scroll-to-top";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import AmpContextMenuButton from "../custom-elements/AmpContextMenuButton";
 import CardArtwork from "../media/common/card-artwork";
@@ -31,22 +30,23 @@ export function StationDetailPage({ stationId }: StationDetailPageProps) {
   const loading = resolvedStation?.stationId !== stationId;
   const station = loading ? null : resolvedStation.detail;
 
-  useAppScrollToTop(stationId);
-
   useEffect(() => {
     let active = true;
 
-    setError(false);
-    void getSystemStationDetail(stationId)
-      .then((detail) => {
-        if (active) setResolvedStation({ stationId, detail });
-      })
-      .catch(() => {
-        if (active) {
-          setResolvedStation({ stationId, detail: null });
-          setError(true);
-        }
-      });
+    queueMicrotask(() => {
+      if (!active) return;
+      setError(false);
+      void getSystemStationDetail(stationId)
+        .then((detail) => {
+          if (active) setResolvedStation({ stationId, detail });
+        })
+        .catch(() => {
+          if (active) {
+            setResolvedStation({ stationId, detail: null });
+            setError(true);
+          }
+        });
+    });
 
     return () => {
       active = false;

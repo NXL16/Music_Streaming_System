@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
+import { AppScrollRestoration } from "@/lib/layout/app-scroll-restoration";
 import { AuthProvider } from "@/components/auth/auth-provider";
 import "./fonts.css";
 import "./globals.css";
@@ -61,6 +63,9 @@ export default function RootLayout({
         </svg>
 
         <AuthProvider>{children}</AuthProvider>
+        <Suspense fallback={null}>
+          <AppScrollRestoration />
+        </Suspense>
         <M404ContextualMenu />
         <CreatePlaylistDialog />
         <EditPlaylistDialog />

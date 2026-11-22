@@ -1,5 +1,7 @@
 "use client";
 
+import { useLayoutEffect, type ReactNode } from "react";
+import { APP_SCROLL_LAYOUT_COMMIT } from "@/lib/layout/use-app-scroll-to-top";
 import { useInfiniteScrollLoadMore } from "@/lib/pagination/use-infinite-scroll-sentinel";
 import MediaCardRenderer from "./media-card-renderer";
 import type { MediaCardProps } from "./media-card.types";
@@ -7,6 +9,27 @@ import Loading from "@/app/loading";
 import CatalogPageLoading from "../loading/catalog-page-loading";
 
 const NOOP = () => undefined;
+
+/** Keeps measured shelf heights intact across detail navigation. */
+export function ShelfDetailLayout({
+  detail,
+  children,
+}: {
+  detail: ReactNode;
+  children: ReactNode;
+}) {
+  useLayoutEffect(() => {
+    queueMicrotask(() =>
+      window.dispatchEvent(new Event(APP_SCROLL_LAYOUT_COMMIT)),
+    );
+  });
+  return (
+    <>
+      {detail}
+      <div hidden={Boolean(detail)}>{children}</div>
+    </>
+  );
+}
 
 type ShelfDetailViewProps = {
   shelf: { title: string; items: MediaCardProps[] };

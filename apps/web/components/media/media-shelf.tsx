@@ -1,11 +1,22 @@
 "use client";
 
-import { memo, useEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import MediaCardRenderer from "@/components/media/media-card-renderer";
 import type { MediaCardProps } from "@/components/media/media-card.types";
 import CardArtwork from "./common/card-artwork";
 import Link from "next/link";
-import { getAppScrollContainer } from "@/lib/layout/use-app-scroll-to-top";
+import {
+  getAppScrollContainer,
+  restoreShelfScrollLeft,
+  SHELF_RENDER_AHEAD_ROOT_MARGIN,
+} from "@/lib/layout/use-app-scroll-to-top";
 import { useMediaQuery } from "@/hooks/use-media-query";
 
 export type MediaShelfDisplayKind =
@@ -137,7 +148,6 @@ const MOUSE_DRAG_THRESHOLD = 6;
 const MOUSE_WHEEL_IDLE_DELAY = 160;
 const MOUSE_WHEEL_LINE_HEIGHT = 16;
 const DISCRETE_WHEEL_PIXEL_DELTA = 40;
-const SHELF_RENDER_AHEAD_ROOT_MARGIN = 96;
 
 type ShelfTitleButtonProps = {
   title: string;
@@ -195,6 +205,18 @@ const ESTIMATED_SHELF_HEIGHT: Record<MediaShelfDisplayKind, number> = {
   MusicVideoShelf: 225,
   MusicCircleCoverShelf: 225,
 };
+
+// Keep measured placeholders when navigation remounts a shelf.
+const shelfHeights = new Map<string, number>();
+function shelfHeightKey(
+  shelfId: string | undefined,
+  kind: MediaShelfDisplayKind,
+  contentType: string,
+) {
+  return shelfId && typeof window !== "undefined"
+    ? JSON.stringify([shelfId, kind, contentType, window.innerWidth])
+    : undefined;
+}
 let shelfResizeFrame: number | undefined;
 const pendingShelfDraggabilityUpdates = new Set<HTMLUListElement>();
 
@@ -246,14 +268,26 @@ function MediaShelf({
   const shouldVirtualize = !isHeroShelf && isDesktopViewport;
   const shelfContainerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
-  const measuredHeightRef = useRef<number | undefined>(undefined);
-  const [measuredHeight, setMeasuredHeight] = useState<number>();
+  const [measuredHeight, setMeasuredHeight] = useState<number | undefined>(
+    () => {
+      const key = shelfHeightKey(shelfId, displayKind, contentType);
+      return key ? shelfHeights.get(key) : undefined;
+    },
+  );
+  const measuredHeightRef = useRef(measuredHeight);
 
   const [isNearViewport, setIsNearViewport] = useState(
     () => prioritizeFirstCard || isHeroShelf,
   );
   const shouldRenderCards = !shouldVirtualize || isNearViewport;
   const trackedImpressionsRef = useRef(new Set<string>());
+  const previousScrollToStartKey = useRef(scrollToStartKey);
+
+  useLayoutEffect(() => {
+    const shelf = listRef.current;
+    if (shelf && shouldRenderCards)
+      restoreShelfScrollLeft(shelf, Number(shelf.dataset.appScrollLeft ?? 0));
+  }, [shouldRenderCards]);
 
   const isMoreLikeShelf = shelfId?.startsWith("user-more-like-");
 
@@ -340,7 +374,16 @@ function MediaShelf({
     const observer = new ResizeObserver(([entry]) => {
       if (!isNearViewport || entry.contentRect.height <= 0) return;
 
-      const nextHeight = Math.ceil(entry.contentRect.height);
+      const nextHeight =
+        entry.borderBoxSize?.[0]?.blockSize ??
+        shelfContainer.getBoundingClientRect().height;
+      const key = shelfHeightKey(shelfId, displayKind, contentType);
+      if (key) {
+        shelfHeights.delete(key);
+        shelfHeights.set(key, nextHeight);
+        if (shelfHeights.size > 128)
+          shelfHeights.delete(shelfHeights.keys().next().value!);
+      }
       if (nextHeight === measuredHeightRef.current) return;
 
       measuredHeightRef.current = nextHeight;
@@ -349,7 +392,7 @@ function MediaShelf({
 
     observer.observe(shelfContainer);
     return () => observer.disconnect();
-  }, [isNearViewport, shouldVirtualize]);
+  }, [contentType, displayKind, isNearViewport, shelfId, shouldVirtualize]);
 
   useEffect(() => {
     if (!shouldVirtualize || measuredHeight === undefined) return;
@@ -452,12 +495,14 @@ function MediaShelf({
   }, []);
 
   useEffect(() => {
+    if (previousScrollToStartKey.current === scrollToStartKey) return;
+    previousScrollToStartKey.current = scrollToStartKey;
     if (!scrollToStartKey) return;
     const shelf = listRef.current;
     if (!shelf) return;
 
     const frame = requestAnimationFrame(() => {
-      shelf.scrollLeft = 0;
+      restoreShelfScrollLeft(shelf, 0);
       queueShelfDraggabilityUpdate(shelf);
     });
     return () => cancelAnimationFrame(frame);
@@ -470,7 +515,13 @@ function MediaShelf({
     queueShelfDraggabilityUpdate(shelf);
     const resizeObserver =
       "ResizeObserver" in window
-        ? new ResizeObserver(() => queueShelfDraggabilityUpdate(shelf))
+        ? new ResizeObserver(() => {
+            restoreShelfScrollLeft(
+              shelf,
+              Number(shelf.dataset.appScrollLeft ?? shelf.scrollLeft),
+            );
+            queueShelfDraggabilityUpdate(shelf);
+          })
         : undefined;
     resizeObserver?.observe(shelf);
 
@@ -499,6 +550,8 @@ function MediaShelf({
     let releaseTimer: ReturnType<typeof setTimeout> | undefined;
 
     const promoteWhileScrolling = () => {
+      if (shelf.childElementCount && shelf.getClientRects().length)
+        shelf.dataset.appScrollLeft = String(shelf.scrollLeft);
       if (shelf.scrollWidth <= shelf.clientWidth + 1) return;
 
       shelf.style.willChange = "scroll-position";
@@ -669,6 +722,12 @@ function MediaShelf({
   return (
     <div
       ref={shelfContainerRef}
+      data-app-scroll-anchor={shelfId}
+      data-app-scroll-pending={
+        (shouldVirtualize &&
+          (!isNearViewport || measuredHeight === undefined)) ||
+        undefined
+      }
       className={`min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) pt-3 ${containerClassName ?? ""} section--alternate`}
       style={
         shouldVirtualize && !isNearViewport
@@ -740,6 +799,7 @@ function MediaShelf({
             <div className="box-content -mx-0.5 overflow-visible px-0.5 w-full">
               <ul
                 ref={listRef}
+                data-app-scroll-shelf={shelfId}
                 className={`${isArtistShelf ? "shelf-grid__list--artist" : `shelf-grid__list ${isHeroShelf ? "shelf-grid__list--align-items-end" : ""}`}`}
               >
                 {shouldRenderCards &&

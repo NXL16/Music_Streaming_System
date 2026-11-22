@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import MediaShelf from "@/components/media/media-shelf";
 import {
+  ShelfDetailLayout,
   ShelfDetailLoading,
   ShelfDetailView,
 } from "@/components/media/shelf-detail-view";
@@ -27,7 +28,6 @@ import {
   HERO_SHELF_PREVIEW_LIMIT,
   HOME_SHELF_PREVIEW_LIMIT,
 } from "@musical/shared-constants";
-import { useAppScrollToTop } from "@/lib/layout/use-app-scroll-to-top";
 import { RequestErrorState } from "@/components/states/request-error-state";
 import { useShelfDetailHistory } from "@/hooks/use-shelf-detail-history";
 
@@ -41,13 +41,9 @@ export default function HomePage() {
   const showHomeLoading = useMinimumLoadingDuration(
     loading || recentlyPlayedLoading,
   );
-  const [selectedShelfId, setSelectedShelfId] = useState<string | null>(null);
-  const { open: openShelf, close: closeShelf } = useShelfDetailHistory({
-    owner: "home-shelf",
-    selected: selectedShelfId,
-    setSelected: setSelectedShelfId,
-    getKey: (shelfId) => shelfId,
-  });
+  const [selectedShelfDetail, setSelectedShelfDetail] =
+    useState<HomeShelf | null>(null);
+  const selectedShelfId = selectedShelfDetail?.id ?? null;
   const [loadedShelves, setLoadedShelves] = useState<Record<string, HomeShelf>>(
     {},
   );
@@ -56,6 +52,21 @@ export default function HomePage() {
   const showShelfDetailLoading = useMinimumLoadingDuration(
     Boolean(selectedShelfId && loadingShelfId === selectedShelfId),
   );
+  const {
+    open: openShelf,
+    close: closeShelf,
+    isCurrent: isCurrentShelf,
+    invalidate: invalidateShelf,
+    update: updateShelf,
+  } = useShelfDetailHistory({
+    owner: "home-shelf",
+    selected: selectedShelfDetail,
+    setSelected: setSelectedShelfDetail,
+    getKey: (shelf) => shelf.id,
+    restoreScroll: true,
+    scrollReady:
+      !showHomeLoading && (!selectedShelfId || !showShelfDetailLoading),
+  });
 
   const shelves = useMemo(
     () =>
@@ -117,14 +128,18 @@ export default function HomePage() {
       );
       if (!localShelf) return;
 
+      setShelfLoadError(null);
       if (loadedShelves[shelfId]) {
-        openShelf(shelfId);
+        openShelf(loadedShelves[shelfId]);
+        return;
+      }
+      if (loadingShelfId === shelfId) {
+        openShelf(localShelf);
         return;
       }
 
       try {
-        setShelfLoadError(null);
-        openShelf(shelfId);
+        openShelf(localShelf);
         setLoadingShelfId(shelfId);
         const response = await getRecommendationSection(shelfId);
         const fullShelf = mapHomeRecommendations(response).find(
@@ -133,14 +148,26 @@ export default function HomePage() {
         if (!fullShelf) throw new Error("Recommendation section is empty");
 
         setLoadedShelves((current) => ({ ...current, [shelfId]: fullShelf }));
+        updateShelf(shelfId, () => fullShelf);
       } catch {
+        invalidateShelf(shelfId);
+        if (!isCurrentShelf(shelfId)) return;
         closeShelf();
         setShelfLoadError("Không thể tải đầy đủ nội dung của kệ này.");
       } finally {
         setLoadingShelfId((current) => (current === shelfId ? null : current));
       }
     },
-    [closeShelf, loadedShelves, openShelf, shelvesWithRecentlyPlayed],
+    [
+      closeShelf,
+      isCurrentShelf,
+      invalidateShelf,
+      loadedShelves,
+      loadingShelfId,
+      openShelf,
+      shelvesWithRecentlyPlayed,
+      updateShelf,
+    ],
   );
 
   const homeShelves = useMemo(
@@ -163,39 +190,34 @@ export default function HomePage() {
     [shelvesWithRecentlyPlayed],
   );
 
-  const selectedShelf = useMemo(
-    () =>
-      (selectedShelfId ? loadedShelves[selectedShelfId] : undefined) ??
-      shelvesWithRecentlyPlayed.find((shelf) => shelf.id === selectedShelfId) ??
-      null,
-    [loadedShelves, selectedShelfId, shelvesWithRecentlyPlayed],
-  );
-
-  const selectedShelfWithOverlay = useMemo(() => {
-    if (selectedShelf?.id !== RECENTLY_PLAYED_SHELF_ID) {
-      return selectedShelf;
-    }
-
-    return recentlyPlayedShelf ?? selectedShelf;
-  }, [recentlyPlayedShelf, selectedShelf]);
-
-  useAppScrollToTop(selectedShelfId);
+  const selectedShelfWithOverlay =
+    selectedShelfDetail?.id === RECENTLY_PLAYED_SHELF_ID
+      ? (recentlyPlayedShelf ?? selectedShelfDetail)
+      : selectedShelfDetail;
 
   return (
-    <>
-      {showShelfDetailLoading ? (
-        <ShelfDetailLoading />
-      ) : selectedShelfWithOverlay ? (
-        <ShelfDetailView
-          shelf={selectedShelfWithOverlay}
-          onBack={() => {
-            closeShelf();
-            setLoadingShelfId(null);
-          }}
-        />
-      ) : (
+    <ShelfDetailLayout
+      detail={
+        selectedShelfId &&
+        (showShelfDetailLoading ? (
+          <ShelfDetailLoading />
+        ) : selectedShelfWithOverlay ? (
+          <ShelfDetailView
+            shelf={selectedShelfWithOverlay}
+            onBack={() => {
+              closeShelf();
+              setLoadingShelfId(null);
+            }}
+          />
+        ) : null)
+      }
+    >
+      {!error && (
         <>
-          <div className="grid items-end grid-cols-[1fr_auto] me-(--bodyGutter) ms-(--bodyGutter) pb-[0.05px] pt-8">
+          <div
+            data-app-scroll-ready={!showHomeLoading}
+            className="grid items-end grid-cols-[1fr_auto] me-(--bodyGutter) ms-(--bodyGutter) pb-[0.05px] pt-8"
+          >
             <h1 className="text-(--systemPrimary) [font:var(--header-emphasized)] col-1 row-1">
               Home
             </h1>
@@ -219,44 +241,42 @@ export default function HomePage() {
 
       {!showHomeLoading &&
         !error &&
-        (selectedShelf
-          ? null
-          : homeShelves.map((shelf, index) => {
-              return (
-                <MediaShelf
-                  key={shelf.id}
-                  title={shelf.title}
-                  displayKind={shelf.displayKind}
-                  items={shelf.items}
-                  normalizeItem={
-                    shelf.id === RECENTLY_PLAYED_SHELF_ID
-                      ? normalizeRecentlyPlayedCard
-                      : undefined
-                  }
-                  prioritizeFirstCard={index === 0}
-                  shelfId={shelf.id}
-                  scrollToStartKey={
-                    shelf.id === RECENTLY_PLAYED_SHELF_ID
-                      ? shelf.items[0]?.id
-                      : undefined
-                  }
-                  onSelect={shelf.hasMore ? handleSelectShelf : undefined}
-                  onCardInteraction={(eventType, card, position) => {
-                    void recordRecommendationInteraction({
-                      sectionId: shelf.id,
-                      resourceType: card.resourceType,
-                      resourceId: card.resourceId,
-                      position,
-                      modelVersion: shelf.modelVersion,
-                      eventType,
-                    });
-                  }}
-                  headerArtwork={shelf.headerArtwork}
-                  sourceAlbumHref={shelf.sourceAlbumHref}
-                />
-              );
-            }))}
-    </>
+        homeShelves.map((shelf, index) => {
+          return (
+            <MediaShelf
+              key={shelf.id}
+              title={shelf.title}
+              displayKind={shelf.displayKind}
+              items={shelf.items}
+              normalizeItem={
+                shelf.id === RECENTLY_PLAYED_SHELF_ID
+                  ? normalizeRecentlyPlayedCard
+                  : undefined
+              }
+              prioritizeFirstCard={index === 0}
+              shelfId={shelf.id}
+              scrollToStartKey={
+                shelf.id === RECENTLY_PLAYED_SHELF_ID
+                  ? shelf.items[0]?.id
+                  : undefined
+              }
+              onSelect={shelf.hasMore ? handleSelectShelf : undefined}
+              onCardInteraction={(eventType, card, position) => {
+                void recordRecommendationInteraction({
+                  sectionId: shelf.id,
+                  resourceType: card.resourceType,
+                  resourceId: card.resourceId,
+                  position,
+                  modelVersion: shelf.modelVersion,
+                  eventType,
+                });
+              }}
+              headerArtwork={shelf.headerArtwork}
+              sourceAlbumHref={shelf.sourceAlbumHref}
+            />
+          );
+        })}
+    </ShelfDetailLayout>
   );
 }
 

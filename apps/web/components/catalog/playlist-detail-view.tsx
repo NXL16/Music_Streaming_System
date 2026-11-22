@@ -1,4 +1,5 @@
 "use client";
+import { FavoriteBadge } from "@/components/media/common/favorite-badge";
 
 import {
   CSSProperties,
@@ -10,7 +11,11 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
-import { usePlayerStore, type PlayerSong } from "@/lib/player/use-player-store";
+import {
+  playerSongKey,
+  usePlayerStore,
+  type PlayerSong,
+} from "@/lib/player/use-player-store";
 import CardArtwork from "../media/common/card-artwork";
 import ResponsiveArtwork from "../media/common/responsive-artwork";
 import AmpContextMenuButton from "../custom-elements/AmpContextMenuButton";
@@ -24,23 +29,25 @@ import { AddSongToLibraryButton } from "../songs/add-song-to-library-button";
 import { FavoriteSongButton } from "../songs/favorite-song-button";
 import { PlaybackWaveform } from "../songs/playback-waveform";
 import { useMediaQuery } from "@/hooks/use-media-query";
-import { useAppScrollToTop } from "@/lib/layout/use-app-scroll-to-top";
 import { useArtworkPageTheme } from "@/lib/layout/use-artwork-page-theme";
 import { useTrackRowSelection } from "@/lib/player/use-track-row-selection";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
 import { usePlaylistFavoriteStore } from "@/lib/favorites/use-playlist-favorite-store";
 import { withPlaylistPlaybackSource } from "@/lib/player/playlist-playback-source";
-import { playbackIntentProps } from "@/lib/player/playback-intent";
 import { ExplicitBadgeIcon } from "../icons/explicit-badge-icon";
 import CatalogPageLoading from "../loading/catalog-page-loading";
 import MediaShelf from "../media/media-shelf";
 import {
+  ShelfDetailLayout,
   ShelfDetailLoading,
   ShelfDetailView,
 } from "../media/shelf-detail-view";
 import { useAsyncResource } from "@/lib/api/use-async-resource";
-import { getCatalogResources } from "@/lib/catalog/catalog.api";
+import {
+  getCatalogResources,
+  getCatalogResourcesSnapshot,
+} from "@/lib/catalog/catalog.api";
 import { mapCatalogArtists } from "@/lib/catalog/search.mapper";
 import {
   SONG_ROW_HEIGHT,
@@ -50,6 +57,7 @@ import {
 import PlayIcon from "../icons/play-icon";
 import PauseIcon from "../icons/pause-icon";
 import { useShelfDetailHistory } from "@/hooks/use-shelf-detail-history";
+import { RequestErrorState } from "../states/request-error-state";
 
 export type GenericArtwork = {
   bgColor?: string;
@@ -106,7 +114,7 @@ export default function PlaylistDetailView({
     playlist.playlistKind ?? (playlist.isUserPlaylist ? "user" : "catalog");
   const isUserPlaylist = playlistKind === "user";
   const userId = useAuthStore((state) => state.user?.userId);
-  const favoriteSongIds = useFavoriteStore((state) => state.songIds);
+  const favoriteSongKeys = useFavoriteStore((state) => state.songKeys);
   const favoritePlaylistIds = usePlaylistFavoriteStore(
     (state) => state.playlistIds,
   );
@@ -126,13 +134,6 @@ export default function PlaylistDetailView({
     selectedFeaturedArtistsPlaylistId,
     setSelectedFeaturedArtistsPlaylistId,
   ] = useState<string | null>(null);
-  const { open: openFeaturedArtists, close: closeFeaturedArtists } =
-    useShelfDetailHistory({
-      owner: `playlist-featured-artists:${playlist.id}`,
-      selected: selectedFeaturedArtistsPlaylistId,
-      setSelected: setSelectedFeaturedArtistsPlaylistId,
-      getKey: (value) => value,
-    });
 
   useEffect(() => {
     if (userId) {
@@ -173,17 +174,41 @@ export default function PlaylistDetailView({
         .join(",")}`,
     [featuredArtistResources, isShowingAllFeaturedArtists, playlist.id],
   );
-  const loadFeaturedArtists = useCallback(
-    async () => ({
-      key: featuredArtistRequestKey,
-      catalog: await getCatalogResources(featuredArtistResources),
-    }),
-    [featuredArtistRequestKey, featuredArtistResources],
+  const cachedFeaturedArtistResponse = useMemo(() => {
+    const catalog = getCatalogResourcesSnapshot(featuredArtistResources);
+    return catalog ? { key: featuredArtistRequestKey, catalog } : undefined;
+  }, [featuredArtistRequestKey, featuredArtistResources]);
+  const [featuredArtistPreview, setFeaturedArtistPreview] = useState<{
+    key: string;
+    catalog: Awaited<ReturnType<typeof getCatalogResources>>;
+  } | null>(
+    isShowingAllFeaturedArtists ? null : (cachedFeaturedArtistResponse ?? null),
   );
-  const { data: featuredArtistResponse, loading: featuredArtistsLoading } =
-    useAsyncResource(loadFeaturedArtists, "Couldn't load featured artists.", {
-      enabled: isPublicPlaylist && featuredArtistResources.length > 0,
-    });
+  const loadFeaturedArtists = useCallback(
+    async (signal?: AbortSignal) => {
+      const response = {
+        key: featuredArtistRequestKey,
+        catalog: await getCatalogResources(featuredArtistResources, signal),
+      };
+      signal?.throwIfAborted();
+      if (!isShowingAllFeaturedArtists) setFeaturedArtistPreview(response);
+      return response;
+    },
+    [
+      featuredArtistRequestKey,
+      featuredArtistResources,
+      isShowingAllFeaturedArtists,
+    ],
+  );
+  const {
+    data: featuredArtistResponse,
+    loading: featuredArtistsLoading,
+    error: featuredArtistsError,
+    reload: reloadFeaturedArtists,
+  } = useAsyncResource(loadFeaturedArtists, "Couldn't load featured artists.", {
+    enabled: isPublicPlaylist && featuredArtistResources.length > 0,
+    initialData: cachedFeaturedArtistResponse,
+  });
   const featuredArtistsCatalog =
     featuredArtistResponse?.key === featuredArtistRequestKey
       ? featuredArtistResponse.catalog
@@ -193,6 +218,29 @@ export default function PlaylistDetailView({
       featuredArtistsCatalog ? mapCatalogArtists(featuredArtistsCatalog) : [],
     [featuredArtistsCatalog],
   );
+  const previewCatalog =
+    !isShowingAllFeaturedArtists && featuredArtistsCatalog
+      ? featuredArtistsCatalog
+      : featuredArtistPreview?.key.startsWith(`${playlist.id}:preview:`)
+        ? featuredArtistPreview.catalog
+        : null;
+  const featuredArtistPreviewCards = useMemo(
+    () => (previewCatalog ? mapCatalogArtists(previewCatalog) : []),
+    [previewCatalog],
+  );
+  const { open: openFeaturedArtists, close: closeFeaturedArtists } =
+    useShelfDetailHistory({
+      owner: `playlist-featured-artists:${playlist.id}`,
+      selected: selectedFeaturedArtistsPlaylistId,
+      setSelected: setSelectedFeaturedArtistsPlaylistId,
+      getKey: (value) => value,
+      restoreScroll: isPublicPlaylist,
+      scrollReady:
+        !isShowingAllFeaturedArtists ||
+        (!featuredArtistsLoading &&
+          !featuredArtistsError &&
+          Boolean(featuredArtistsCatalog)),
+    });
   const {
     activateTrack,
     activeTrackId,
@@ -200,12 +248,6 @@ export default function PlaylistDetailView({
     selectTrack,
     selectedTrackId,
   } = useTrackRowSelection<HTMLDivElement>();
-
-  useAppScrollToTop(playlist.id);
-
-  useAppScrollToTop(
-    isShowingAllFeaturedArtists ? `${playlist.id}:featured-artists` : null,
-  );
 
   const visibleSongRange = useVisibleSongRange(
     playlist.tracks.length,
@@ -250,29 +292,6 @@ export default function PlaylistDetailView({
     baseColor: playlist.artwork?.bgColor,
     artworkUrl: artworkImageUrl,
   });
-  const [revealedPlaylistThemeKey, setRevealedPlaylistThemeKey] = useState<
-    string | null
-  >(null);
-  const canRevealPlaylistLayout = !isWaitingForPlaylistTheme;
-
-  useEffect(() => {
-    if (!canRevealPlaylistLayout) return;
-
-    let secondFrame = 0;
-    const firstFrame = requestAnimationFrame(() => {
-      secondFrame = requestAnimationFrame(() => {
-        setRevealedPlaylistThemeKey(pageThemeKey);
-      });
-    });
-
-    return () => {
-      cancelAnimationFrame(firstFrame);
-      cancelAnimationFrame(secondFrame);
-    };
-  }, [canRevealPlaylistLayout, pageThemeKey]);
-
-  const isPreparingPlaylistLayout =
-    canRevealPlaylistLayout && revealedPlaylistThemeKey !== pageThemeKey;
 
   const artworkProps = artworkImageUrl
     ? {
@@ -330,7 +349,7 @@ export default function PlaylistDetailView({
       }
 
       const index = trackId
-        ? queue.findIndex((track) => track.id === trackId)
+        ? queue.findIndex((track) => playerSongKey(track) === trackId)
         : 0;
       setQueue(queue, Math.max(index, 0));
     } catch {
@@ -340,25 +359,25 @@ export default function PlaylistDetailView({
     }
   };
 
-  if (isWaitingForPlaylistTheme || isPreparingPlaylistLayout) {
+  if (isWaitingForPlaylistTheme) {
     return <CatalogPageLoading />;
   }
 
-  if (isShowingAllFeaturedArtists) {
-    if (featuredArtistsLoading || !featuredArtistsCatalog) {
-      return <ShelfDetailLoading />;
-    }
-
-    return (
+  const detailView = isShowingAllFeaturedArtists ? (
+    featuredArtistsError ? (
+      <RequestErrorState onRetry={() => void reloadFeaturedArtists()} />
+    ) : featuredArtistsLoading || !featuredArtistsCatalog ? (
+      <ShelfDetailLoading />
+    ) : (
       <ShelfDetailView
         shelf={{ title: "Featured Artists", items: featuredArtistCards }}
         onBack={closeFeaturedArtists}
       />
-    );
-  }
+    )
+  ) : null;
 
   return (
-    <>
+    <ShelfDetailLayout detail={detailView}>
       <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width)">
         <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
           <div className="[view-timeline-name:--header-view] [view-timeline-axis:block] after:bg-(--joe-color) after:block after:inset-0 after:absolute after:z-[calc(var(--z-default)-2)] min-[484px]:after:-inset-s-(--web-navigation-width)">
@@ -428,17 +447,7 @@ export default function PlaylistDetailView({
                   <span dir="auto">{playlist.title}</span>
                   <span className="inline-flex items-center gap-1 ms-1 [--explicitBadgeSize:19px] [--favoriteBadgeSize:14px] [--favoriteBadgeMarginInlineStart:1px] has-[.explicit-wrapper]:ms-[6.5px] max-[999px]:[--explicitBadgeSize:16px]">
                     {isPlaylistFavoriteVisible && (
-                      <span className="ms-(--favoriteBadgeMarginInlineStart,2px)">
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 64 64"
-                          width="64"
-                          height="64"
-                          className="inline-block fill-(--favoriteBadgeColor,var(--keyColor)) size-(--favoriteBadgeSize,9px) align-[2px]"
-                        >
-                          <path d="M13.559 60.051c1.102.86 2.5.565 4.166-.645l14.218-10.455L46.19 59.406c1.666 1.21 3.037 1.505 4.166.645 1.102-.833 1.344-2.204.672-4.166l-5.618-16.718 14.353-10.32c1.666-1.183 2.338-2.42 1.908-3.764-.43-1.29-1.693-1.935-3.763-1.908l-17.605.108-5.348-16.8C34.308 4.496 33.34 3.5 31.944 3.5c-1.372 0-2.34.995-2.984 2.984L23.61 23.283l-17.605-.108c-2.07-.027-3.333.618-3.763 1.908-.457 1.344.242 2.58 1.909 3.763l14.352 10.321-5.617 16.718c-.672 1.962-.43 3.333.672 4.166Z"></path>
-                        </svg>
-                      </span>
+                      <FavoriteBadge variant="detail" />
                     )}
                   </span>
                 </h1>
@@ -675,15 +684,18 @@ export default function PlaylistDetailView({
                 />
 
                 {visibleTracks.map((track) => {
-                  const isCurrentTrack = currentSong?.id === track.id;
+                  const trackKey = playerSongKey(track);
+                  const isCurrentTrack = currentSong
+                    ? playerSongKey(currentSong) === trackKey
+                    : false;
                   const isTrackPlaying = isCurrentTrack && playing;
 
                   return (
                     <div
-                      key={track.id}
-                      onClick={() => selectTrack(track.id)}
+                      key={trackKey}
+                      onClick={() => selectTrack(trackKey)}
                       className={`group text-(--systemSecondary) table-row relative z-(--z-default) [--platterBorderColor:var(--pageBG)] bg-(--rowBackgroundColor,transparent) h-13.5 hover:[--playButtonOpacity:1] hover:[--addToLibraryOpacity:1] last:[&>div]:after:[border-bottom:.5px_solid_var(--labelDivider)] last:[&>div]:after:h-full last:[&>div]:after:pointer-events-none ${
-                        selectedTrackId === track.id
+                        selectedTrackId === trackKey
                           ? "selected [&>div]:after:opacity-0 [&+_.group>div]:after:border-t-transparent"
                           : "hover:[--rowBackgroundColor:var(--tracklistHoverColor)] hover:[--platterBorderColor:#f0f0f0] hover:[&+_.group>div]:after:border-t-transparent"
                       }`}
@@ -694,7 +706,7 @@ export default function PlaylistDetailView({
                             <FavoriteSongButton
                               ariaLabel="Favourite"
                               className={`group-hover:[--favoriteIconStarOutline:var(--favoriteButtonStarOutline-hover,var(--keyColor))] ${
-                                activeTrackId === track.id
+                                activeTrackId === trackKey
                                   ? "[--favoriteIconStarOutlineOverride:var(--favoriteButtonStarOutline-hover,var(--keyColor))]"
                                   : ""
                               }`}
@@ -747,17 +759,16 @@ export default function PlaylistDetailView({
                               <div className="[--nonPlatterIconFill:var(--nonPlatterOverrideIconColor,var(--keyColor))] h-full align-top w-full">
                                 <button
                                   disabled={!track.playbackUrl}
-                                  {...playbackIntentProps(track)}
                                   onClick={(event) => {
                                     if (selectedTrackId !== null) {
-                                      activateTrack(track.id);
+                                      activateTrack(trackKey);
                                       event.stopPropagation();
                                     }
 
                                     if (isCurrentTrack) {
                                       togglePlayback();
                                     } else {
-                                      void startPlaylistPlayback(track.id);
+                                      void startPlaylistPlayback(trackKey);
                                     }
                                   }}
                                   className="[--nonPlatterIconFill:var(--playButtonIconColor,#fff)] [--playingBarColor:var(--nonPlatterIconFill,#fff)] leading-0 pointer-events-auto relative z-(--z-default) h-full align-top w-full"
@@ -882,10 +893,10 @@ export default function PlaylistDetailView({
                           </time>
 
                           <div
-                            className={`[grid-area:song-controls-context] ms-1.75 [--contextMenuButtonSize:28px] ${selectedTrackId === track.id ? "dark:[--contextMenuEllipsisFillOverride:#fff] [--contextMenuEllipsisFillOverride:#000000d9]" : "[--contextMenuEllipsisFillOverride:var(--systemSecondary)] hover:[--contextMenuEllipsisFillOverride:var(--keyColor)]"}`}
+                            className={`[grid-area:song-controls-context] ms-1.75 [--contextMenuButtonSize:28px] ${selectedTrackId === trackKey ? "dark:[--contextMenuEllipsisFillOverride:#fff] [--contextMenuEllipsisFillOverride:#000000d9]" : "[--contextMenuEllipsisFillOverride:var(--systemSecondary)] hover:[--contextMenuEllipsisFillOverride:var(--keyColor)]"}`}
                           >
                             <AmpContextMenuButton
-                              id={`song-${track.id}`}
+                              id={`song-${trackKey}`}
                               context={{
                                 kind: "song",
                                 songId: track.id,
@@ -893,7 +904,9 @@ export default function PlaylistDetailView({
                                 sourceAlbumId: track.albumId,
                                 title: track.title,
                                 userId,
-                                isFavorite: favoriteSongIds.has(track.id),
+                                isFavorite: favoriteSongKeys.has(
+                                  playerSongKey(track),
+                                ),
                                 playlistId: isUserPlaylist
                                   ? playlist.id
                                   : undefined,
@@ -930,7 +943,7 @@ export default function PlaylistDetailView({
             </div>
           )}
 
-          {isPublicPlaylist && featuredArtistCards.length > 0 && (
+          {isPublicPlaylist && featuredArtistPreviewCards.length > 0 && (
             <>
               <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) pt-3 [--songs-list-row-border-radius:12px] relative z-(--z-default) bg-(--opaqueShelfBG) section--alternate">
                 <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
@@ -944,7 +957,7 @@ export default function PlaylistDetailView({
                 displayKind="MusicCircleCoverShelf"
                 contentType="artist"
                 containerClassName="bg-(--opaqueShelfBG)"
-                items={featuredArtistCards.slice(
+                items={featuredArtistPreviewCards.slice(
                   0,
                   FEATURED_ARTIST_SHELF_PREVIEW_LIMIT,
                 )}
@@ -960,7 +973,7 @@ export default function PlaylistDetailView({
       ) : (
         <div className="-ms-(--web-navigation-width) ps-(--web-navigation-width) pt-3 [--songs-list-row-border-radius:12px] relative z-(--z-default)">
           <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
-            <div className="text-(--systemSecondary) block max-w-full p-[20px_var(--bodyGutter)_13px] relative text-center w-full">
+            <div className="text-(--systemSecondary) block max-w-full p-[20px_var(--bodyGutter)_22px] relative text-center w-full">
               <h2 className="block [font:var(--headline-emphasized)] mb-1.5 relative">
                 Empty Playlist
               </h2>
@@ -971,6 +984,6 @@ export default function PlaylistDetailView({
           </div>
         </div>
       )}
-    </>
+    </ShelfDetailLayout>
   );
 }

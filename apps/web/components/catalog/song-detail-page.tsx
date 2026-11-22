@@ -24,6 +24,7 @@ import { NotFoundState } from "../states/not-found-state";
 import { RequestErrorState } from "../states/request-error-state";
 import type { MediaCardProps } from "../media/media-card.types";
 import {
+  ShelfDetailLayout,
   ShelfDetailLoading,
   ShelfDetailView,
 } from "../media/shelf-detail-view";
@@ -141,14 +142,23 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
   } = useAlbumRelatedShelfState(relatedShelfKey);
   const [selectedRelatedShelf, setSelectedRelatedShelf] =
     useState<RelatedShelfDetail | null>(null);
-  const { open: openRelatedShelf, close: closeRelatedShelf } =
-    useShelfDetailHistory({
-      owner: `song-related:${relatedShelfKey}`,
-      selected: selectedRelatedShelf,
-      setSelected: setSelectedRelatedShelf,
-      getKey: (shelf) =>
-        `${shelf.albumId}:${shelf.sourceSongId}:${shelf.section}`,
-    });
+  const {
+    open: openRelatedShelf,
+    close: closeRelatedShelf,
+    update: updateRelatedShelf,
+    isCurrent: isCurrentRelatedShelf,
+    invalidate: invalidateRelatedShelf,
+  } = useShelfDetailHistory({
+    owner: `song-related:${relatedShelfKey}`,
+    selected: selectedRelatedShelf,
+    setSelected: setSelectedRelatedShelf,
+    getKey: (shelf) =>
+      `${shelf.albumId}:${shelf.sourceSongId}:${shelf.section}`,
+    restoreScroll: true,
+    scrollReady:
+      !showLoading &&
+      (!selectedRelatedShelf || selectedRelatedShelf.items !== null),
+  });
   const [staticLyricsResult, setStaticLyricsResult] = useState<{
     songId: string;
     lines: StaticLyricLine[];
@@ -191,8 +201,11 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
     }
 
     const { albumId, sourceSongId, section, nextCursor } = selectedRelatedShelf;
-    setSelectedRelatedShelf((current) =>
-      current ? { ...current, loadingMore: true } : current,
+    const shelfKey = [albumId, sourceSongId, section].join(":");
+    updateRelatedShelf(shelfKey, (current) =>
+      current.nextCursor === nextCursor
+        ? { ...current, loadingMore: true }
+        : current,
     );
     try {
       const response = await getCatalogAlbumRelated(albumId, {
@@ -205,14 +218,8 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
         response.moreBy,
         catalogAlbumReleaseYearCardOptions,
       );
-      setSelectedRelatedShelf((current) => {
-        if (
-          !current ||
-          !current.items ||
-          current.albumId !== albumId ||
-          current.section !== section ||
-          current.nextCursor !== nextCursor
-        ) {
+      updateRelatedShelf(shelfKey, (current) => {
+        if (!current.items || current.nextCursor !== nextCursor) {
           return current;
         }
         const existingIds = new Set(current.items.map((item) => item.id));
@@ -227,13 +234,13 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
         };
       });
     } catch {
-      setSelectedRelatedShelf((current) =>
-        current?.section === section
+      updateRelatedShelf(shelfKey, (current) =>
+        current.nextCursor === nextCursor
           ? { ...current, loadingMore: false }
           : current,
       );
     }
-  }, [selectedRelatedShelf]);
+  }, [selectedRelatedShelf, updateRelatedShelf]);
 
   if (showLoading) {
     return <CatalogPageLoading />;
@@ -296,10 +303,8 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
         {releaseDate}
       </>
     ) : null;
-  if (selectedRelatedShelf) {
-    if (!selectedRelatedShelf.items) return <ShelfDetailLoading />;
-
-    return (
+  const detailView = selectedRelatedShelf ? (
+    selectedRelatedShelf.items ? (
       <ShelfDetailView
         shelf={{
           title: selectedRelatedShelf.title,
@@ -310,11 +315,13 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
         loadingMore={selectedRelatedShelf.loadingMore}
         onLoadMore={loadMoreRelatedShelf}
       />
-    );
-  }
+    ) : (
+      <ShelfDetailLoading />
+    )
+  ) : null;
 
   return (
-    <>
+    <ShelfDetailLayout detail={detailView}>
       <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) in-[.has-theme-override]:[--header-title-chevron-color:var(--systemSecondary)]">
         <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
           <div className="[view-timeline-name:--header-view] [view-timeline-axis:block] after:bg-(--joe-color) after:block after:inset-0 after:absolute after:z-[calc(var(--z-default)-2)] min-[484px]:after:-inset-s-(--web-navigation-width)">
@@ -616,17 +623,19 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
               loadingMore: false,
             })
           }
-          onDetailLoaded={({ items, nextCursor }) =>
-            setSelectedRelatedShelf((current) => {
-              if (!current || current.albumId !== song.albumId) {
-                return current;
-              }
-              return { ...current, items, nextCursor };
-            })
+          onDetailLoaded={({ section, items, nextCursor }) =>
+            updateRelatedShelf(
+              `${song.albumId}:${song.id}:${section}`,
+              (current) => ({ ...current, items, nextCursor }),
+            )
           }
-          onDetailLoadError={closeRelatedShelf}
+          onDetailLoadError={(section) => {
+            invalidateRelatedShelf(`${song.albumId}:${song.id}:${section}`);
+            if (isCurrentRelatedShelf(`${song.albumId}:${song.id}:${section}`))
+              closeRelatedShelf();
+          }}
         />
       )}
-    </>
+    </ShelfDetailLayout>
   );
 }

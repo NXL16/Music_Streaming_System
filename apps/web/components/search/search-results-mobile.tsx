@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { MediaCardProps } from "@/components/media/media-card.types";
 import type { SearchResults as SearchResultsData } from "@/lib/catalog/search.mapper";
 import { MobileSearchMediaList } from "./mobile-search-media-list";
@@ -28,6 +28,8 @@ export default function SearchResultsMobile({
   results,
   shelfResults,
 }: SearchResultsMobileProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const allTabs: TabDefinition[] = [
     { id: "top-results", label: "Top Results", items: results.ordered },
     { id: "artists", label: "Artists", items: shelfResults.artists },
@@ -41,8 +43,15 @@ export default function SearchResultsMobile({
     },
   ];
   const tabs = allTabs.filter((tab) => tab.items.length > 0);
-  const [activeTab, setActiveTab] = useState<MobileSearchTab>("top-results");
+  const activeTab = searchParams.get("tab") ?? "top-results";
   const selectedTab = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
+
+  const selectTab = (tab: MobileSearchTab) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (tab === "top-results") params.delete("tab");
+    else params.set("tab", tab);
+    router.replace(`/search?${params}`, { scroll: false });
+  };
 
   return (
     <div className="search-tab-control">
@@ -67,7 +76,7 @@ export default function SearchResultsMobile({
               id={`mobile-search-tab-${tab.id}`}
               value={tab.id}
               checked={selectedTab?.id === tab.id}
-              onChange={() => setActiveTab(tab.id)}
+              onChange={() => selectTab(tab.id)}
             />
             {tab.label}
           </label>
@@ -81,9 +90,7 @@ export default function SearchResultsMobile({
         tabIndex={0}
         aria-labelledby={`mobile-search-tab-${selectedTab?.id ?? "empty"}-label`}
       >
-        {selectedTab && (
-          <MobileSearchMediaList items={selectedTab.items} />
-        )}
+        {selectedTab && <MobileSearchMediaList items={selectedTab.items} />}
       </div>
     </div>
   );

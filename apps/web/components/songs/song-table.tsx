@@ -6,8 +6,11 @@ import AmpContextMenuButton from "../custom-elements/AmpContextMenuButton";
 import ResponsiveArtwork from "../media/common/responsive-artwork";
 import { formatDuration } from "@/lib/format/duration";
 import { ArtistLinks } from "../media/artist-links";
-import { usePlayerStore, type PlayerSong } from "@/lib/player/use-player-store";
-import { playbackIntentProps } from "@/lib/player/playback-intent";
+import {
+  playerSongKey,
+  usePlayerStore,
+  type PlayerSong,
+} from "@/lib/player/use-player-store";
 import Loading from "@/app/loading";
 import { FavoriteSongButton } from "./favorite-song-button";
 import { AddSongToLibraryButton } from "./add-song-to-library-button";
@@ -58,7 +61,7 @@ export function SongTable({
   const playing = usePlayerStore((state) => state.playing);
   const togglePlayback = usePlayerStore((state) => state.togglePlayback);
   const userId = useAuthStore((state) => state.user?.userId);
-  const favoriteSongIds = useFavoriteStore((state) => state.songIds);
+  const favoriteSongKeys = useFavoriteStore((state) => state.songKeys);
 
   const [songTableElement, setSongTableElement] =
     useState<HTMLDivElement | null>(null);
@@ -145,7 +148,9 @@ export function SongTable({
             const index = visibleSongRange.start + visibleIndex;
             const artworkColor =
               song.artworkBgColor ?? "var(--genericJoeColor)";
-            const isCurrentTrack = currentSong?.id === song.id;
+            const isCurrentTrack = currentSong
+              ? playerSongKey(currentSong) === playerSongKey(song)
+              : false;
             const isTrackPlaying = isCurrentTrack && playing;
 
             return (
@@ -221,7 +226,6 @@ export function SongTable({
                         <div className="[--nonPlatterIconFill:var(--nonPlatterOverrideIconColor,var(--keyColor))] h-full align-top w-full">
                           <button
                             disabled={!song.playbackUrl}
-                            {...playbackIntentProps(song)}
                             onClick={(event) => {
                               if (selectedTrackId !== null) {
                                 activateTrack(song.id);
@@ -370,7 +374,7 @@ export function SongTable({
                           sourceAlbumId: song.albumId,
                           title: song.title,
                           userId,
-                          isFavorite: favoriteSongIds.has(song.id),
+                          isFavorite: favoriteSongKeys.has(playerSongKey(song)),
                         }}
                       />
                     </div>

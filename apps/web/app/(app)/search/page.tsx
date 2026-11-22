@@ -29,28 +29,14 @@ export default function SearchPage() {
   const searchParams = useSearchParams();
   const urlQuery = searchParams.get("term") ?? "";
   const [query, setQuery] = useState(urlQuery);
-  const [expandedTopResultsTerm, setExpandedTopResultsTerm] = useState<
-    string | null
-  >(null);
-  const { open: openTopResults, close: closeTopResults } =
-    useShelfDetailHistory({
-      owner: `search-top-results:${urlQuery}`,
-      selected: expandedTopResultsTerm,
-      setSelected: setExpandedTopResultsTerm,
-      getKey: (term) => term,
-    });
-  const [expandedTopResultsRequestKey, setExpandedTopResultsRequestKey] =
-    useState(0);
-  const [expandedShelfType, setExpandedShelfType] =
-    useState<CatalogSearchShelfType | null>(null);
-  const { open: openShelf, close: closeShelf } = useShelfDetailHistory({
-    owner: `search-shelf:${urlQuery}`,
-    selected: expandedShelfType,
-    setSelected: setExpandedShelfType,
-    getKey: (type) => type,
-  });
-  const [expandedCardShelfRequestKey, setExpandedCardShelfRequestKey] =
-    useState(0);
+  const [selectedDetail, setSelectedDetail] = useState<{
+    term: string;
+    shelf: CatalogSearchShelfType | "top-results";
+  } | null>(null);
+  const expandedShelfType =
+    selectedDetail?.term === urlQuery && selectedDetail.shelf !== "top-results"
+      ? selectedDetail.shelf
+      : null;
   const [isFocused, setIsFocused] = useState(false);
   const [isCancellingSearch, setIsCancellingSearch] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -62,7 +48,8 @@ export default function SearchPage() {
   const maxWidth484 = useMediaQuery("(max-width: 483px)");
   const shouldOpenSuggestions =
     isFocused && Boolean(trimmedQuery) && hasPendingSearch;
-  const isTopResultsExpanded = expandedTopResultsTerm === urlQuery;
+  const isTopResultsExpanded =
+    selectedDetail?.term === urlQuery && selectedDetail.shelf === "top-results";
   const isCatalogShelfExpanded = expandedShelfType !== null;
   const isSearchDetailExpanded = isTopResultsExpanded || isCatalogShelfExpanded;
   const expandedCardShelfPreviewLimit =
@@ -84,7 +71,6 @@ export default function SearchPage() {
       CATALOG_SEARCH_TOP_RESULTS_MAX_ITEMS -
       CATALOG_SEARCH_TOP_RESULTS_PREVIEW_LIMIT,
     offset: CATALOG_SEARCH_TOP_RESULTS_PREVIEW_LIMIT,
-    requestKey: expandedTopResultsRequestKey,
   });
   const expandedCardShelfSearch = useCatalogSearch(urlQuery, {
     enabled: isCatalogShelfExpanded && expandedShelfType !== "songs",
@@ -93,7 +79,6 @@ export default function SearchPage() {
     shelfType: expandedShelfType ?? undefined,
     limit: CATALOG_SEARCH_SHELF_MAX_ITEMS - expandedCardShelfPreviewLimit,
     offset: expandedCardShelfPreviewLimit,
-    requestKey: expandedCardShelfRequestKey,
   });
   const expandedSongShelf = useSearchSongShelfPages(urlQuery, {
     enabled: isCatalogShelfExpanded && expandedShelfType === "songs",
@@ -104,14 +89,33 @@ export default function SearchPage() {
     enabled: shouldOpenSuggestions,
   });
   const recentlySearched = useRecentlySearched(!urlQuery);
+  const scrollReady =
+    !searchOverview.loading &&
+    !(
+      isTopResultsExpanded &&
+      expandedResultSearch.loading &&
+      expandedResultSearch.results.isEmpty
+    ) &&
+    !(
+      expandedShelfType &&
+      expandedShelfType !== "songs" &&
+      expandedCardShelfSearch.loading &&
+      expandedCardShelfSearch.results.isEmpty
+    );
+  const { open: openDetail, close: closeDetail } = useShelfDetailHistory({
+    owner: `search:${urlQuery}`,
+    selected: selectedDetail?.term === urlQuery ? selectedDetail : null,
+    setSelected: setSelectedDetail,
+    getKey: (detail) => `${detail.term}:${detail.shelf}`,
+    restoreScroll: Boolean(urlQuery),
+    scrollReady,
+  });
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       setQuery(urlQuery);
       setActiveIndex(-1);
       setIsCancellingSearch(false);
-      setExpandedTopResultsTerm(null);
-      setExpandedShelfType(null);
     });
     return () => cancelAnimationFrame(frame);
   }, [urlQuery]);
@@ -123,7 +127,7 @@ export default function SearchPage() {
     const frame = requestAnimationFrame(() => {
       if (!searchInputRef.current || hasAutoFocusedRef.current) return;
       hasAutoFocusedRef.current = true;
-      searchInputRef.current.focus();
+      searchInputRef.current.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
   }, [isSearchDetailExpanded, maxWidth484]);
@@ -254,6 +258,7 @@ export default function SearchPage() {
 
       {urlQuery && !isCancellingSearch && (
         <SearchResults
+          scrollReady={scrollReady}
           error={searchOverview.error}
           expandedError={expandedResultSearch.error}
           expandedLoading={expandedResultSearch.loading}
@@ -263,12 +268,11 @@ export default function SearchPage() {
           results={searchOverview.topResults}
           term={urlQuery}
           isTopResultsExpanded={isTopResultsExpanded}
-          onCollapseTopResults={closeTopResults}
+          onCollapseTopResults={closeDetail}
           onExpandTopResults={() => {
             setIsFocused(false);
             setActiveIndex(-1);
-            setExpandedTopResultsRequestKey((current) => current + 1);
-            openTopResults(urlQuery);
+            openDetail({ term: urlQuery, shelf: "top-results" });
           }}
           onRetryExpanded={expandedResultSearch.retry}
           expandedShelfError={expandedCardShelfSearch.error}
@@ -279,18 +283,14 @@ export default function SearchPage() {
           expandedSongShelfLoadingMore={expandedSongShelf.loadingMore}
           expandedSongShelfSongs={expandedSongShelf.songs}
           expandedShelfType={expandedShelfType}
-          onCollapseShelf={closeShelf}
+          onCollapseShelf={closeDetail}
           onExpandShelf={(type) => {
             setIsFocused(false);
             setActiveIndex(-1);
-            if (type !== "songs")
-              setExpandedCardShelfRequestKey((current) => current + 1);
-            openShelf(type);
+            openDetail({ term: urlQuery, shelf: type });
           }}
           onRetryExpandedShelf={expandedCardShelfSearch.retry}
           onLoadMoreExpandedSongs={expandedSongShelf.loadMore}
-          shelfError={searchOverview.error}
-          shelfLoading={searchOverview.loading}
           shelfResults={searchOverview.shelves}
         />
       )}

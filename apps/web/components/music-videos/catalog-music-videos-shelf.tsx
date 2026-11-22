@@ -7,7 +7,7 @@ import {
   getCatalogMusicVideos,
   type MusicVideoCatalogResourceType,
 } from "@/lib/catalog/music-videos.api";
-import { useAsyncResource } from "@/lib/api/use-async-resource";
+import { useCachedQuery } from "@/lib/api/use-cached-query";
 import { mapCatalogMusicVideoCards } from "@/lib/catalog/music-video-cards";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { useFavoriteStore } from "@/lib/favorites/use-favorite-store";
@@ -41,7 +41,8 @@ export function CatalogMusicVideosShelf({
       getCatalogMusicVideos(resourceType, resourceId, signal),
     [resourceId, resourceType],
   );
-  const { data: videos } = useAsyncResource(
+  const { data: videos } = useCachedQuery(
+    `catalog:catalog-music-videos:${key}`,
     loadVideos,
     "Không thể tải music videos.",
   );

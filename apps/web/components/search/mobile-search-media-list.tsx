@@ -17,6 +17,7 @@ export function MobileSearchMediaList({ items }: MobileSearchMediaListProps) {
         <li
           aria-selected={false}
           className="search-hint search-hint--lockup"
+          data-app-navigation-href={card.slug}
           key={`${card.resourceType}-${card.id}`}
           onClick={() => {
             card.onOpen?.();

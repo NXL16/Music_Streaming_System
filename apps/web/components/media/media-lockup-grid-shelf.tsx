@@ -7,13 +7,13 @@ import type { MediaCardProps } from "@/components/media/media-card.types";
 import { PlaybackWaveform } from "@/components/songs/playback-waveform";
 import { getMediaCardMenuContext } from "@/lib/context-menu/media-card-menu-context";
 import { playCatalogResource } from "@/lib/catalog/play-catalog-resource";
-import { playbackIntentProps } from "@/lib/player/playback-intent";
-import { usePlayerStore } from "@/lib/player/use-player-store";
+import { playerSongKey, usePlayerStore } from "@/lib/player/use-player-store";
 import AmpContextMenuButton from "../custom-elements/AmpContextMenuButton";
 import PauseIcon from "../icons/pause-icon";
 import PlayIcon from "../icons/play-icon";
 
 type MediaLockupGridShelfProps = {
+  shelfId?: string;
   title: string;
   items: MediaCardProps[];
   onTitleClick?: () => void;
@@ -152,11 +152,6 @@ function TopResultPlayButton({
       type="button"
       className="play-button play-button--standard group relative"
       disabled={!canPlay}
-      {...playbackIntentProps({
-        id: card.resourceId,
-        playbackUrl:
-          card.resourceType === "songs" ? `mse:${card.resourceId}` : undefined,
-      })}
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -182,6 +177,7 @@ function TopResultPlayButton({
 }
 
 export default function MediaLockupGridShelf({
+  shelfId,
   title,
   items,
   onTitleClick,
@@ -201,6 +197,7 @@ export default function MediaLockupGridShelf({
   return (
     <>
       <div
+        data-app-scroll-anchor={shelfId}
         className={`min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width) ${isDetail ? "pt-8" : "pt-3"} ${sectionClassName ?? ""}`}
       >
         <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
@@ -227,7 +224,17 @@ export default function MediaLockupGridShelf({
               const menuContext = getMediaCardMenuContext(card);
               const isCurrentSong =
                 card.resourceType === "songs" &&
-                currentSong?.id === card.resourceId;
+                Boolean(
+                  currentSong &&
+                  playerSongKey(currentSong) ===
+                    playerSongKey({
+                      id: card.resourceId,
+                      sourceAlbumId:
+                        menuContext?.kind === "song"
+                          ? menuContext.sourceAlbumId
+                          : undefined,
+                    }),
+                );
               const isPlayingCard = isCurrentSong && playing;
               const isPausedCard = isCurrentSong && !playing;
 
