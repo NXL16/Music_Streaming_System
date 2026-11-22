@@ -1,4 +1,11 @@
-import { Application, Container, Graphics, Sprite, Texture } from "pixi.js";
+import {
+  Application,
+  BaseTexture,
+  Container,
+  Graphics,
+  Sprite,
+  Texture,
+} from "pixi.js";
 import { AdjustmentFilter } from "@pixi/filter-adjustment";
 import { KawaseBlurFilter } from "@pixi/filter-kawase-blur";
 import { TwistFilter } from "@pixi/filter-twist";
@@ -9,13 +16,20 @@ export class LyricsScene {
   private app: Application;
   private container: Container;
   private reduceMotionQuery: MediaQueryList;
-  private currentSprites: Sprite[];
+  private currentSprites: Sprite[] = [];
   private currentMotion: MotionState = [0, 0, 0, 0];
   private outgoingSprites: Sprite[] = [];
   private outgoingMotion: MotionState | null = null;
   private fade = 0;
+  private pendingTexture: { texture: Texture; onLoaded: () => void } | null =
+    null;
+  private destroyed = false;
 
-  constructor(canvas: HTMLCanvasElement, artworkURL: string) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    artworkURL: string,
+    private motionEnabled = true,
+  ) {
     const { width, height } = canvas.getBoundingClientRect();
     this.app = new Application({
       width,
@@ -23,6 +37,7 @@ export class LyricsScene {
       view: canvas,
       powerPreference: "low-power",
       backgroundAlpha: 0,
+      autoStart: false,
     });
     const background = new Graphics();
     background
@@ -35,8 +50,6 @@ export class LyricsScene {
     );
     this.container = new Container();
     this.app.stage.addChild(this.container);
-    this.currentSprites = this.createSprites();
-    this.addSprites(this.currentSprites);
     this.initFilters();
     this.addOverlays();
     this.app.ticker.maxFPS = 30;
@@ -44,13 +57,29 @@ export class LyricsScene {
     this.updateArtwork(artworkURL);
   }
 
-  updateArtwork(artworkURL: string) {
-    if (!artworkURL) return;
-    Texture.removeFromCache(artworkURL);
-    const texture = Texture.from(artworkURL);
+  setMotionEnabled(enabled: boolean) {
+    if (this.destroyed || this.motionEnabled === enabled) return;
+    this.motionEnabled = enabled;
+    this.syncTicker();
+  }
 
-    // A rapid skip discards only the layer that is already fading away. The
-    // layer visible to the listener becomes the next transition's outgoing one.
+  updateArtwork(artworkURL: string) {
+    if (this.destroyed || !artworkURL) return;
+    this.clearPendingTexture();
+    const texture = new Texture(new BaseTexture(artworkURL));
+    if (texture.baseTexture.valid) this.applyArtwork(texture);
+    else {
+      const onLoaded = () => {
+        if (this.destroyed || this.pendingTexture?.texture !== texture) return;
+        this.pendingTexture = null;
+        this.applyArtwork(texture);
+      };
+      this.pendingTexture = { texture, onLoaded };
+      texture.baseTexture.once("loaded", onLoaded);
+    }
+  }
+
+  private applyArtwork(texture: Texture) {
     this.destroySprites(this.outgoingSprites);
     this.outgoingSprites = this.currentSprites;
     this.outgoingMotion = [...this.currentMotion] as MotionState;
@@ -59,14 +88,38 @@ export class LyricsScene {
     this.addSprites(this.currentSprites);
     this.currentMotion = [...this.outgoingMotion] as MotionState;
     this.fade = 1;
+    if (!this.motionEnabled) {
+      this.advanceMotion(this.currentSprites, this.currentMotion, 0);
+    }
+    this.syncTicker();
+  }
+
+  private clearPendingTexture() {
+    const pending = this.pendingTexture;
+    this.pendingTexture = null;
+    if (!pending) return;
+    pending.texture.baseTexture.off("loaded", pending.onLoaded);
+    pending.texture.destroy(true);
+  }
+
+  private syncTicker() {
+    if (this.destroyed) return;
+    if (
+      (this.motionEnabled && this.currentSprites.length > 0) ||
+      this.outgoingMotion
+    )
+      this.app.start();
+    else this.app.stop();
   }
 
   private animate = () => {
     const delta = this.app.ticker.deltaMS / 33.333333;
-    this.advanceMotion(this.currentSprites, this.currentMotion, delta);
+    if (this.motionEnabled)
+      this.advanceMotion(this.currentSprites, this.currentMotion, delta);
 
     if (!this.outgoingMotion) return;
-    this.advanceMotion(this.outgoingSprites, this.outgoingMotion, delta);
+    if (this.motionEnabled)
+      this.advanceMotion(this.outgoingSprites, this.outgoingMotion, delta);
     this.fade -= delta * 0.02;
     this.outgoingSprites.forEach((sprite) => {
       sprite.alpha = this.fade;
@@ -82,6 +135,7 @@ export class LyricsScene {
       this.currentSprites.forEach((sprite) => {
         sprite.alpha = 1;
       });
+      if (!this.motionEnabled) this.app.stop();
     }
   };
 
@@ -118,7 +172,7 @@ export class LyricsScene {
       (this.app.screen.width / 4) * Math.sin(motion[3] * 0.75);
   }
 
-  private createSprites(texture?: Texture) {
+  private createSprites(texture: Texture) {
     return Array.from({ length: 4 }, () => new Sprite(texture));
   }
 
@@ -153,10 +207,12 @@ export class LyricsScene {
 
   private destroySprites(sprites: Sprite[]) {
     if (!sprites.length) return;
+    const textures = new Set(sprites.map((sprite) => sprite.texture));
     this.container.removeChild(...sprites);
     sprites.forEach((sprite) =>
       sprite.destroy({ children: true, texture: false, baseTexture: false }),
     );
+    textures.forEach((texture) => texture.destroy(true));
   }
 
   private initFilters() {
@@ -195,10 +251,15 @@ export class LyricsScene {
   }
 
   destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.clearPendingTexture();
+    this.destroySprites(this.currentSprites);
+    this.destroySprites(this.outgoingSprites);
+    this.currentSprites = [];
+    this.outgoingSprites = [];
     this.app.destroy(true, {
       children: true,
-      texture: true,
-      baseTexture: true,
     });
   }
 }

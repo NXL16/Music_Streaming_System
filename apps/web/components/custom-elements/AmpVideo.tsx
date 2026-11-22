@@ -1,6 +1,7 @@
 "use client";
 
 import { type ElementType } from "react";
+import { useVideoArtwork } from "@/lib/settings/use-video-artwork";
 import { useAmbientVideo } from "./use-ambient-video";
 
 type AmbientVideoVariant = "home" | "hero" | "artist";
@@ -8,6 +9,7 @@ type AmbientVideoVariant = "home" | "hero" | "artist";
 interface AmbientVideoProps {
   src: string;
   variant?: AmbientVideoVariant;
+  respectArtworkPreference?: boolean;
   /** Keeps the detail hero loaded while lightweight card video is pooled. */
   keepAlive?: boolean;
   /** Starts loading card video before it enters the viewport. */
@@ -17,6 +19,17 @@ interface AmbientVideoProps {
 const AmpAmbientVideoTag = "amp-ambient-video" as ElementType;
 
 export default function AmbientVideo({
+  respectArtworkPreference = true,
+  ...props
+}: AmbientVideoProps) {
+  const { videoArtworkEnabled } = useVideoArtwork();
+
+  return !respectArtworkPreference || videoArtworkEnabled ? (
+    <AmbientVideoMedia {...props} />
+  ) : null;
+}
+
+function AmbientVideoMedia({
   src,
   variant = "home",
   keepAlive = false,

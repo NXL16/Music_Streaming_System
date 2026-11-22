@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { LyricsScene } from "@/lib/player/lyrics-scene";
+import { useLyricsBackgroundMotion } from "@/lib/settings/use-lyrics-background-motion";
 
 type LyricsBackgroundProps = {
   artworkSrcSet?: string;
@@ -41,10 +42,17 @@ function getPixiArtworkUrl(artworkUrl: string): string {
 }
 
 export function LyricsBackground({ artworkSrcSet }: LyricsBackgroundProps) {
+  const { lyricsBackgroundMotionEnabled } = useLyricsBackgroundMotion();
+  const motionEnabledRef = useRef(lyricsBackgroundMotionEnabled);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<LyricsScene | null>(null);
   const currentArtworkRef = useRef<string | null>(null);
   const frameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    motionEnabledRef.current = lyricsBackgroundMotionEnabled;
+    sceneRef.current?.setMotionEnabled(lyricsBackgroundMotionEnabled);
+  }, [lyricsBackgroundMotionEnabled]);
 
   const artworkURL = useMemo(() => {
     const sourceArtworkUrl = getBackgroundArtworkUrl(artworkSrcSet);
@@ -58,6 +66,7 @@ export function LyricsBackground({ artworkSrcSet }: LyricsBackgroundProps) {
     if (!artworkURL) return;
     let disposed = false;
     let decodeRequested = false;
+    let resizeObserver: ResizeObserver | undefined;
 
     const applyArtwork = () => {
       if (disposed || currentArtworkRef.current === artworkURL) return;
@@ -80,12 +89,23 @@ export function LyricsBackground({ artworkSrcSet }: LyricsBackgroundProps) {
         const rect = canvas.getBoundingClientRect();
 
         if (rect.width <= 0 || rect.height <= 0) {
-          frameRef.current = requestAnimationFrame(createScene);
-
+          if (!resizeObserver) {
+            resizeObserver = new ResizeObserver(() => {
+              if (!disposed && frameRef.current === null)
+                frameRef.current = requestAnimationFrame(createScene);
+            });
+            resizeObserver.observe(canvas);
+          }
           return;
         }
 
-        sceneRef.current = new LyricsScene(canvas, artworkURL);
+        resizeObserver?.disconnect();
+        resizeObserver = undefined;
+        sceneRef.current = new LyricsScene(
+          canvas,
+          artworkURL,
+          motionEnabledRef.current,
+        );
         currentArtworkRef.current = artworkURL;
       };
 
@@ -96,7 +116,10 @@ export function LyricsBackground({ artworkSrcSet }: LyricsBackgroundProps) {
       if (decodeRequested) return;
       decodeRequested = true;
 
-      void image.decode().catch(() => undefined).finally(applyArtwork);
+      void image
+        .decode()
+        .catch(() => undefined)
+        .finally(applyArtwork);
     };
 
     const image = new Image();
@@ -111,6 +134,7 @@ export function LyricsBackground({ artworkSrcSet }: LyricsBackgroundProps) {
     return () => {
       disposed = true;
       image.onload = null;
+      resizeObserver?.disconnect();
 
       if (frameRef.current !== null) {
         cancelAnimationFrame(frameRef.current);
