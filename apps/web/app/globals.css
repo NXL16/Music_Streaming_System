@@ -62,7 +62,7 @@
 
   --mobileNavigationBG: rgba(255, 255, 255, 0.8);
   --navSidebarBG: rgba(242, 242, 247, 0.82);
-  --labelDivider: rgba(0, 0, 0, 0.15);
+  --labelDivider: #00000026;
   --keyline-border-style: 0.5px solid var(--labelDivider);
   --containerInnerStroke: #000;
 
@@ -167,7 +167,7 @@
   --mobileNavigationBG: hsla(240, 5%, 13%, 0.8);
   --navSidebarBG: rgba(38, 38, 41, 0.82);
   --navSidebarSelectedState: hsla(0, 0%, 100%, 0.05);
-  --labelDivider: rgba(255, 255, 255, 0.12);
+  --labelDivider: hsla(0, 0%, 100%, 0.102);
   --labelDivider-vibrantOnDark: hsla(0, 0%, 100%, 0.13);
 
   --glassMaterialBackground: rgba(38, 38, 40, 0.6);
@@ -238,7 +238,7 @@
     --mobileNavigationBG: hsla(240, 5%, 13%, 0.8);
     --navSidebarBG: rgba(38, 38, 41, 0.82);
     --navSidebarSelectedState: hsla(0, 0%, 100%, 0.05);
-    --labelDivider: rgba(255, 255, 255, 0.12);
+    --labelDivider: rgba(255, 255, 255, 0.102);
     --labelDivider-vibrantOnDark: hsla(0, 0%, 100%, 0.13);
 
     --glassMaterialBackground: rgba(38, 38, 40, 0.6);
@@ -289,16 +289,36 @@
   }
 
   body {
-    color: var(--systemPrimary);
+    color: var(--bodyTextColor, var(--systemPrimary));
     font-family: var(--apple-music-font);
     font-size: 13px;
     font-style: normal;
     font-weight: 400;
     letter-spacing: 0;
     line-height: 1.2307692308;
-    background: var(--background);
+  }
+
+  body,
+  button,
+  input,
+  select,
+  textarea {
+    -moz-font-feature-settings: "kern";
+    font-synthesis: none;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: var(--pageBG);
+    cursor: default;
+    overflow: hidden;
+  }
+
+  .body-container,
+  body,
+  html {
+    min-height: 100%;
   }
 
   @media (hover: hover) and (pointer: fine) {

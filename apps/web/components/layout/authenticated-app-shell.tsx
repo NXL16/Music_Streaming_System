@@ -104,7 +104,7 @@ export function AuthenticatedAppShell({
 
   return (
     <ProtectedOnly>
-      <div className="min-h-full">
+      <div className="body-container">
         <div
           className={`app-container ${pageThemeClass} ${hasResolvedArtworkTheme ? "has-theme-override" : ""} grid gap-0 [grid-template-areas:'structure-header'_'structure-upsell'_'structure-main-section'_'structure-locale-switcher'] grid-cols-[minmax(0,1fr)] grid-rows-[52px_auto_1fr_auto] h-screen min-[484px]:[grid-template-areas:'structure-header_structure-main-section'_'structure-upsell_structure-upsell'_'structure-locale-switcher_structure-locale-switcher'] min-[484px]:grid-cols-[33.88vw_minmax(0,1fr)] min-[484px]:grid-rows-[minmax(0,1fr)_auto_auto] min-[767.32px]:grid-cols-[260px_minmax(0,1fr)] pointer-coarse:max-h-[stretch] ${drawerOpen ? "is-drawer-open" : ""}`}
           style={
