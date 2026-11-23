@@ -26,6 +26,7 @@ export default function StationCard(props: StationCardProps) {
       artworkColor={props.artworkColors.main}
       href={props.slug}
       onOpen={props.onOpen}
+      onCoarsePointerPlay={handlePlay}
     >
       <div className="media-card-artwork rounded-(--global-border-radius-medium,7px) shadow-[0_1px_1px_rgba(0,0,0,0.01),0_2px_2px_rgba(0,0,0,0.01),0_4px_4px_rgba(0,0,0,0.02),0_8px_8px_rgba(0,0,0,0.03),0_14px_14px_rgba(0,0,0,0.03)] relative z-(--z-default) after:absolute after:inset-0 after:rounded-[inherit] after:bg-[#333333]/30 after:opacity-(--scrimOpacity,0) after:transition-opacity after:duration-100 after:ease-in after:z-1">
         <CardArtwork
@@ -36,12 +37,13 @@ export default function StationCard(props: StationCardProps) {
           artworkColors={props.artworkColors}
           containerClassName="w-full [--override-placeholder-bg-color:var(--artwork-bg-color)] [anchor-name:--shelf-first-artwork]"
         />
-        <div className="media-card-interaction rounded-[inherit] size-full opacity-(--scrimOpacity,0) absolute top-0 transition-(--global-transition) z-[calc(var(--z-default)+1)]">
+        <div className="media-card-interaction rounded-[inherit] size-full opacity-(--scrimOpacity,0) absolute top-0 transition-(--global-transition) z-[calc(var(--z-default)+1)] pointer-coarse:invisible">
           <CardPlayButton
             ariaLabel={`Play ${props.title}`}
             variant="station"
             onPlay={handlePlay}
           />
+
           <CardContextMenu
             id={cardId}
             context={{
@@ -53,6 +55,7 @@ export default function StationCard(props: StationCardProps) {
           />
         </div>
       </div>
+
       <StationCardMetadata {...props} />
     </MediaCardShell>
   );
