@@ -13,9 +13,7 @@ import CatalogPageLoading from "@/components/loading/catalog-page-loading";
 import { isLibraryResourcePendingRemoval } from "@/lib/library/library-resources.api";
 import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
 import { useLibraryMediaCards } from "@/lib/library/use-library-media-cards";
-import {
-  projectLibraryMediaCard,
-} from "@/lib/library/library-media-card.mapper";
+import { projectLibraryMediaCard } from "@/lib/library/library-media-card.mapper";
 import { setLibraryAlbumOrigin } from "@/lib/library/library-album-origin";
 import { RequestErrorState } from "@/components/states/request-error-state";
 
@@ -81,7 +79,9 @@ export default function AlbumsPage() {
             <MediaCardRenderer
               key={card.id}
               {...card}
-              onOpen={() => setLibraryAlbumOrigin(card.resourceId, "/library/albums")}
+              onOpen={() =>
+                setLibraryAlbumOrigin(card.resourceId, "/library/albums")
+              }
             />
           ))}
         </ul>

@@ -33,6 +33,11 @@ export type UserPlaylistSummary = {
 const LIBRARY_ARTWORK_COLOR = "34343b";
 const PERSONAL_PLAYLIST_ARTWORK_COLOR = "4a4566";
 
+export function libraryAlbumRoute(albumId: string, trackId?: string) {
+  const path = `/library/albums/${encodeURIComponent(albumId)}`;
+  return trackId ? `${path}?trackId=${encodeURIComponent(trackId)}` : path;
+}
+
 /** Adapter for the authenticated Library API; pages never build routes/cards. */
 export function projectLibraryMediaCard(
   resource: LibraryMediaResource,
@@ -71,7 +76,7 @@ export function projectLibraryMediaCard(
       typeTag: isAlbum ? "Album" : "Playlist",
       artists: projectLinkedArtists(resource.artists),
       slug: isAlbum
-        ? `/library/albums/${encodeURIComponent(resource.resourceId)}`
+        ? libraryAlbumRoute(resource.resourceId)
         : isFavoritePlaylist
           ? "/library/playlist/favorite"
           : `/library/playlist/${encodeURIComponent(resource.resourceId)}`,

@@ -18,6 +18,7 @@ export type SidebarNavigationItem = {
   resourceId?: string;
   sourceAlbumId?: string;
   isUserPlaylist?: boolean;
+  canShuffle?: boolean;
 };
 
 export type SidebarPinItem = {

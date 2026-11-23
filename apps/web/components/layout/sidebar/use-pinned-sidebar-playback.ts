@@ -3,6 +3,8 @@ import { playFavoritePlaylist } from "@/lib/favorites/play-favorite-playlist";
 import { usePlayerStore } from "@/lib/player/use-player-store";
 import { playUserPlaylist } from "@/lib/playlists/play-user-playlist";
 import { projectSongSummary } from "@/lib/songs/project-song-summary";
+import { playLibraryAlbums } from "@/lib/library/play-library-albums";
+import { notifyMenuError } from "@/lib/notifications/menu-toast";
 import type { SidebarItem } from "./sidebar-types";
 
 export function usePinnedSidebarPlayback(item: SidebarItem, enabled = false) {
@@ -53,6 +55,15 @@ export function usePinnedSidebarPlayback(item: SidebarItem, enabled = false) {
               playbackUrl: `stream:${resourceId}`,
             },
       );
+      return;
+    }
+
+    if (resourceType === "albums") {
+      void playLibraryAlbums([resourceId])
+        .then((played) => {
+          if (!played) notifyMenuError("No saved songs available to play.");
+        })
+        .catch(() => notifyMenuError("Could not play your saved music."));
       return;
     }
 

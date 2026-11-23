@@ -14,7 +14,7 @@ import { usePinnedLibraryResources } from "./sidebar/use-pinned-library-resource
 import { useLibraryMediaCards } from "@/lib/library/use-library-media-cards";
 import { ensureFavoriteLibraryResource } from "@/lib/favorites/ensure-favorite-library-resource";
 import { PlaylistIcon } from "./sidebar/playlist-icon";
-import { albumRoute } from "@/lib/catalog/album-route";
+import { libraryAlbumRoute } from "@/lib/library/library-media-card.mapper";
 import {
   libraryItems,
   playlistItems,
@@ -122,32 +122,36 @@ export default function AppSidebar() {
 
       return {
         ...item,
-        children: pinnedResources.map((resource) => ({
-          key: `pinned-${resource.resourceType}-${resource.resourceId}-${resource.sourceAlbumId ?? ""}`,
-          label: resource.title || resource.resourceId,
-          subtitle: resource.subtitle,
-          href:
-            resource.resourceType === "songs"
-              ? "/library/songs"
-              : resource.resourceType === "albums"
-                ? resource.catalogUrl
-                  ? albumRoute(resource.catalogUrl, resource.resourceId)
-                  : albumRoute("album", resource.resourceId)
-                : resource.catalogUrl ||
-                  `/library/playlist/${encodeURIComponent(resource.resourceId)}`,
-          icon: <PlaylistIcon />,
-          artworkUrl: resource.artworkUrl,
-          artworkSrcSet: resource.artworkSrcSet,
-          isExplicit: resource.contentRating === "explicit",
-          playbackSong: resource.playbackSong,
-          resourceType: resource.resourceType,
-          resourceId: resource.resourceId,
-          sourceAlbumId: resource.sourceAlbumId,
-          isUserPlaylist:
-            resource.resourceType === "playlists" &&
-            (resource.resourceId === "favorite" ||
-              resource.catalogUrl?.startsWith("/library/playlist/")),
-        })),
+        children: pinnedResources.map((resource) => {
+          const songAlbumId =
+            resource.sourceAlbumId || resource.playbackSong?.albumId;
+          return {
+            key: `pinned-${resource.resourceType}-${resource.resourceId}-${resource.sourceAlbumId ?? ""}`,
+            label: resource.title || resource.resourceId,
+            subtitle: resource.subtitle,
+            href:
+              resource.resourceType === "songs"
+                ? songAlbumId
+                  ? libraryAlbumRoute(songAlbumId, resource.resourceId)
+                  : "/library/songs"
+                : resource.resourceType === "albums"
+                  ? libraryAlbumRoute(resource.resourceId)
+                  : `/library/playlist/${encodeURIComponent(resource.resourceId)}`,
+            icon: <PlaylistIcon />,
+            artworkUrl: resource.artworkUrl,
+            artworkSrcSet: resource.artworkSrcSet,
+            isExplicit: resource.contentRating === "explicit",
+            playbackSong: resource.playbackSong,
+            canShuffle: resource.canShuffle,
+            resourceType: resource.resourceType,
+            resourceId: resource.resourceId,
+            sourceAlbumId: resource.sourceAlbumId,
+            isUserPlaylist:
+              resource.resourceType === "playlists" &&
+              (resource.resourceId === "favorite" ||
+                resource.catalogUrl?.startsWith("/library/playlist/")),
+          };
+        }),
       };
     })
     .filter((item): item is SidebarItem => item !== null);

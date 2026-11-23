@@ -14,6 +14,7 @@ import {
   type LibraryResource,
 } from "@/lib/library/library-resources.api";
 import { useLibraryResourcesRevision } from "@/lib/library/use-library-resources-revision";
+import { libraryAlbumSongIds } from "@/lib/library/library-album-song-ids";
 
 function getPinnedResources(resources: LibraryResource[]) {
   return resources
@@ -26,10 +27,14 @@ type PinnedLibraryResource = LibraryResource & {
   catalogUrl?: string;
   contentRating?: string;
   playbackSong?: SongSummary;
+  canShuffle?: boolean;
 };
 
 export function usePinnedLibraryResources(userId?: string) {
-  const [resources, setResources] = useState<PinnedLibraryResource[]>([]);
+  const [snapshot, setSnapshot] = useState<{
+    userId?: string;
+    resources: PinnedLibraryResource[];
+  }>({ resources: [] });
   const revision = useLibraryResourcesRevision();
 
   useEffect(() => {
@@ -38,14 +43,12 @@ export function usePinnedLibraryResources(userId?: string) {
     }
 
     let active = true;
-    let requestVersion = 0;
     const load = async () => {
-      const currentRequestVersion = ++requestVersion;
       try {
         const libraryResources = await getLibraryResources();
         const pinnedResources = getPinnedResources(libraryResources);
         if (!pinnedResources.length) {
-          if (active) setResources([]);
+          if (active) setSnapshot({ userId, resources: [] });
           return;
         }
 
@@ -63,12 +66,11 @@ export function usePinnedLibraryResources(userId?: string) {
             ? getAllLibrarySongs({ songIds: pinnedSongIds })
             : Promise.resolve([]),
           hasPinnedFavoriteCollection
-            ? listFavoriteSongs({ limit: 1 })
+            ? listFavoriteSongs({ limit: 2 })
             : Promise.resolve(undefined),
         ]);
         const favoriteArtwork = favoriteResponse?.collection?.artwork as
-          | CatalogArtwork
-          | undefined;
+          CatalogArtwork | undefined;
         const mediaByResource = new Map(
           mediaCards.map((resource) => [
             `${resource.resourceType}:${resource.resourceId}`,
@@ -113,6 +115,13 @@ export function usePinnedLibraryResources(userId?: string) {
           return {
             ...resource,
             ...media,
+            canShuffle:
+              resource.resourceType === "albums"
+                ? libraryAlbumSongIds(libraryResources, [resource.resourceId])
+                    .length > 1
+                : isFavoriteCollection
+                  ? (favoriteResponse?.songs.length ?? 0) > 1
+                  : (media?.trackCount ?? media?.songIds?.length ?? 0) > 1,
             artworkSrcSet:
               isFavoriteCollection && favoriteArtwork
                 ? catalogArtworkSrcSet(favoriteArtwork, [
@@ -131,14 +140,12 @@ export function usePinnedLibraryResources(userId?: string) {
           };
         });
 
-        if (active && currentRequestVersion === requestVersion) {
-          setResources(resourcesWithMetadata);
+        if (active) {
+          setSnapshot({ userId, resources: resourcesWithMetadata });
         }
       } catch {
-        // A library mutation can invalidate in-flight work. Ignore stale
-        // failures so an aborted request cannot erase freshly loaded pins.
-        if (active && currentRequestVersion === requestVersion) {
-          setResources([]);
+        if (active) {
+          setSnapshot({ userId, resources: [] });
         }
       }
     };
@@ -146,12 +153,11 @@ export function usePinnedLibraryResources(userId?: string) {
     void load();
     return () => {
       active = false;
-      requestVersion += 1;
     };
   }, [revision, userId]);
 
-  return userId
-    ? resources.filter(
+  return userId && snapshot.userId === userId
+    ? snapshot.resources.filter(
         (resource) =>
           !isLibraryResourcePendingRemoval(
             resource.resourceType,

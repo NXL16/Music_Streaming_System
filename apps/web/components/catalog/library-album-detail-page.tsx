@@ -17,11 +17,13 @@ import { CatalogDetailPage } from "./catalog-detail-page";
 
 type LibraryAlbumDetailPageProps = {
   albumId: string;
+  initialSelectedTrackId?: string;
 };
 
 /** Prevents a removed saved album from remaining reachable via a Library URL. */
 export function LibraryAlbumDetailPage({
   albumId,
+  initialSelectedTrackId,
 }: LibraryAlbumDetailPageProps) {
   const userId = useAuthStore((state) => state.user?.userId);
   const revision = useLibraryResourcesRevision();
@@ -93,6 +95,7 @@ export function LibraryAlbumDetailPage({
     <CatalogDetailPage
       resourceType="albums"
       resourceId={albumId}
+      initialSelectedTrackId={initialSelectedTrackId}
       isLibraryView
       librarySongIds={librarySongIds}
     />

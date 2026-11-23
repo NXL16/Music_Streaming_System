@@ -2,11 +2,16 @@ import { LibraryAlbumDetailPage } from "@/components/catalog/library-album-detai
 
 type LibraryAlbumPageProps = {
   params: Promise<{ albumId: string }>;
+  searchParams: Promise<{ trackId?: string }>;
 };
 
 export default async function LibraryAlbumPage({
   params,
+  searchParams,
 }: LibraryAlbumPageProps) {
   const { albumId } = await params;
-  return <LibraryAlbumDetailPage albumId={albumId} />;
+  const { trackId } = await searchParams;
+  return (
+    <LibraryAlbumDetailPage albumId={albumId} initialSelectedTrackId={trackId} />
+  );
 }

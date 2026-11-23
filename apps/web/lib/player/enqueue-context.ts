@@ -175,6 +175,14 @@ async function resolveContextTracks(
   return tracks.filter((track) => savedSongIds.has(track.id));
 }
 
+export async function shuffleContext(context: ContextMenuContext) {
+  const tracks = await resolveContextTracks(context);
+  if (!tracks.some((track) => track.playbackUrl)) return false;
+
+  usePlayerStore.getState().playShuffledQueue(tracks);
+  return true;
+}
+
 /** Resolves menu context into canonical PlayerSong data and inserts it in queue. */
 export async function enqueueContext(
   context: ContextMenuContext,

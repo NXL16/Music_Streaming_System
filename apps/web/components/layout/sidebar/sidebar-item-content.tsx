@@ -5,6 +5,14 @@ import { ExplicitBadgeIcon } from "@/components/icons/explicit-badge-icon";
 import { PlaybackWaveform } from "@/components/songs/playback-waveform";
 import type { SidebarItem, SidebarNavigationItem } from "./sidebar-types";
 import { usePinnedSidebarPlayback } from "./use-pinned-sidebar-playback";
+import { useAuthStore } from "@/lib/auth/auth-store";
+import { useMenuStore } from "@/lib/menu/use-menu-store";
+import { getContextMenuItems } from "@/lib/context-menu/get-context-menu-items";
+import type { ContextMenuContext } from "@/lib/context-menu/types";
+import PlayIcon from "@/components/icons/play-icon";
+import { shuffleContext } from "@/lib/player/enqueue-context";
+import { notifyMenuError } from "@/lib/notifications/menu-toast";
+import { ShuffleIcon } from "@/lib/context-menu/icons";
 
 type SidebarItemContentProps = {
   item: SidebarItem;
@@ -61,9 +69,106 @@ function PinnedSidebarItemContent({
   const isExplicit = item.isExplicit;
   const { isCurrentPin, isPinPlaying, playPin, resourceId } =
     usePinnedSidebarPlayback(item, true);
+  const userId = useAuthStore((state) => state.user?.userId);
+  const openMenu = useMenuStore((state) => state.openMenu);
 
   return (
     <div
+      onContextMenu={(event) => {
+        if (!item.resourceId) return;
+        const shared = {
+          title: item.label,
+          subtitle: item.subtitle,
+          artworkUrl: item.artworkUrl,
+          userId,
+          inLibrary: true,
+          isPinned: true,
+        };
+        let context: ContextMenuContext;
+        if (item.resourceType === "songs") {
+          context = {
+            ...shared,
+            kind: "song",
+            songId: item.resourceId,
+            sourceAlbumId: item.sourceAlbumId || item.playbackSong?.albumId,
+          };
+        } else if (
+          item.resourceType === "albums" ||
+          item.resourceType === "playlists"
+        ) {
+          const collection = {
+            ...shared,
+            kind: "collection" as const,
+            resourceType: item.resourceType,
+            resourceId: item.resourceId,
+            href: item.href,
+            isLibraryView: true,
+          };
+          context =
+            item.resourceType === "playlists" && item.resourceId === "favorite"
+              ? {
+                  ...collection,
+                  resourceType: "playlists",
+                  sourceOrigin: "favorite",
+                }
+              : item.resourceType === "playlists" && item.isUserPlaylist
+                ? {
+                    ...collection,
+                    resourceType: "playlists",
+                    sourceOrigin: "user-playlist",
+                    isUserPlaylist: true,
+                  }
+                : { ...collection, sourceOrigin: "catalog" };
+        } else return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        const actions = getContextMenuItems(context);
+        const queueActions = actions.filter(
+          (action) => action.id === "play-next" || action.id === "play-last",
+        );
+        const unpinActions = actions.filter(
+          (action) =>
+            action.id === "pin-library-song" ||
+            action.id === "pin-library-resource",
+        );
+        openMenu(
+          {
+            id: `pin-menu-${item.key}`,
+            anchorPoint: { x: event.clientX, y: event.clientY },
+            items: [
+              {
+                id: "play",
+                label: "Play",
+                icon: <PlayIcon className="size-4" fill="currentColor" />,
+                onClick: () => {
+                  if (!isPinPlaying) playPin();
+                },
+              },
+              ...(item.canShuffle && context.kind === "collection"
+                ? [
+                    {
+                      id: "shuffle",
+                      label: "Shuffle",
+                      icon: <ShuffleIcon />,
+                      onClick: async () => {
+                        try {
+                          if (!(await shuffleContext(context)))
+                            notifyMenuError("No playable songs available.");
+                        } catch {
+                          notifyMenuError("Could not play your saved music.");
+                        }
+                      },
+                    },
+                  ]
+                : []),
+              ...queueActions,
+              ...unpinActions,
+            ],
+          },
+          event.currentTarget,
+        );
+      }}
       className={`items-center rounded-[inherit] flex gap-2 size-full in-[.app-container]:gap-1.5 min-[484px]:in-[.app-container]:gap-0.5 text-(--navigation-item-text-color,var(--systemPrimary)) ${isCurrentPin ? "[--playButtonOpacity:1]" : ""} ${isSelected ? "font-semibold!" : ""}`}
     >
       <span
