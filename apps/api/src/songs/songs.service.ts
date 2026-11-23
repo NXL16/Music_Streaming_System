@@ -614,6 +614,24 @@ export class SongsService {
     const userPlaylistById = new Map(
       userPlaylists.playlists.map((playlist) => [playlist.id, playlist]),
     );
+    const seenPlaylistCursors = new Set<string>();
+    let playlistPage = userPlaylists;
+    while (playlistPage.hasMore) {
+      const cursor = playlistPage.nextCursor;
+      if (!cursor || seenPlaylistCursors.has(cursor)) {
+        throw new Error('INVALID_PLAYLIST_CURSOR');
+      }
+      seenPlaylistCursors.add(cursor);
+      playlistPage = await this.listUserPlaylists({
+        userId,
+        requesterUserId: userId,
+        limit: 50,
+        cursor,
+      });
+      for (const playlist of playlistPage.playlists) {
+        userPlaylistById.set(playlist.id, playlist);
+      }
+    }
     const catalogReferences = collectionResources.map((resource) => ({
       type: resource.resourceType,
       id: resource.resourceId,
@@ -670,6 +688,7 @@ export class SongsService {
             resourceType: resource.resourceType,
             resourceId: resource.resourceId,
             title: userPlaylist.name,
+            trackCount: userPlaylist.trackCount,
             subtitle: 'You',
             artworkUrl: userPlaylist.artworkUrl || resource.artworkUrl,
             catalogUrl: `/library/playlist/${encodeURIComponent(resource.resourceId)}`,
@@ -693,6 +712,7 @@ export class SongsService {
           resourceId: resource.resourceId,
           title: attributes?.name || resource.title,
           releaseDate: album?.attributes?.releaseDate || undefined,
+          playlistType: playlist?.attributes?.playlistType,
           subtitle:
             album?.attributes?.artistName ||
             playlist?.attributes?.curatorName ||

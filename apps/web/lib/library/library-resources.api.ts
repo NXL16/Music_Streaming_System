@@ -59,6 +59,8 @@ export type LibraryMediaCardResource = {
   catalogUrl: string;
   contentRating: string;
   releaseDate?: string;
+  playlistType?: string;
+  trackCount?: number;
   artists: Array<{ id: string; name: string; url: string }>;
   primaryArtists?: Array<{
     id: string;
