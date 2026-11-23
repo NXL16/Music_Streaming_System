@@ -169,6 +169,12 @@ export function getLibraryResourcesSnapshot() {
   return cachedResources;
 }
 
+export function getFreshLibraryResourcesSnapshot() {
+  return cachedResources && Date.now() - cachedAt < LIBRARY_CACHE_TTL_MS
+    ? cachedResources
+    : undefined;
+}
+
 export function subscribeLibraryResourcesRevision(listener: () => void) {
   return subscribeLibraryResourcesChanged(listener);
 }
@@ -552,9 +558,8 @@ export function rollbackOptimisticLibraryAddition(
 }
 
 export async function getLibraryResources() {
-  if (cachedResources && Date.now() - cachedAt < LIBRARY_CACHE_TTL_MS) {
-    return cachedResources;
-  }
+  const cached = getFreshLibraryResourcesSnapshot();
+  if (cached) return cached;
   if (loadingResources) return loadingResources;
 
   const requestVersion = libraryResourcesVersion;

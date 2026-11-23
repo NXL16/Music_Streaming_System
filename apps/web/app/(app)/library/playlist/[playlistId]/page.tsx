@@ -23,7 +23,10 @@ import {
 import { playlistArtworkVariants } from "@/lib/playlists/generated-playlist-cover";
 import { getCatalogPlaylist } from "@/lib/catalog/catalog.api";
 import { mapCatalogTracks } from "@/lib/catalog/catalog.mapper";
-import { getLibraryResources } from "@/lib/library/library-resources.api";
+import {
+  getLibraryResources,
+  getLibraryMediaCardsSnapshot,
+} from "@/lib/library/library-resources.api";
 import {
   getUserPlaylist,
   getAllUserPlaylistTracks,
@@ -93,37 +96,45 @@ async function loadLibraryPlaylist(
     )
   )
     return null;
-  // Catalog owns public IDs even when a seeded user playlist has the same ID.
-  try {
-    const catalog = await getCatalogPlaylist(playlistId, signal);
-    const reference = catalog.data.find(
-      (resource) => resource.type === "playlists",
-    );
-    const resource = catalog.resources.playlists[reference?.id ?? playlistId];
-    if (resource) {
-      const attributes = resource.attributes;
-      return {
-        playlist: null,
-        catalogPlaylist: {
-          id: playlistId,
-          title: attributes.name,
-          curatorName: attributes.curatorName || "",
-          description:
-            attributes.descriptionStandard || attributes.descriptionShort || "",
-          artwork: attributes.artwork,
-          sourcePlaylistHref:
-            "/library/playlist/" + encodeURIComponent(playlistId),
-          playlistKind: "catalog",
-          isLibraryView: true,
-          tracks: mapCatalogTracks(catalog),
-        },
-        tracks: [],
-        nextCursor: "",
-        seenCursors: new Set(),
-      };
+  const savedPlaylist = getLibraryMediaCardsSnapshot()?.find(
+    (resource) =>
+      resource.resourceType === "playlists" && resource.resourceId === playlistId,
+  );
+  const isKnownUserPlaylist =
+    savedPlaylist?.catalogUrl.startsWith("/library/playlist/") ?? false;
+  // Library metadata has already resolved catalog/private ID collisions.
+  if (!isKnownUserPlaylist) {
+    try {
+      const catalog = await getCatalogPlaylist(playlistId, signal);
+      const reference = catalog.data.find(
+        (resource) => resource.type === "playlists",
+      );
+      const resource = catalog.resources.playlists[reference?.id ?? playlistId];
+      if (resource) {
+        const attributes = resource.attributes;
+        return {
+          playlist: null,
+          catalogPlaylist: {
+            id: playlistId,
+            title: attributes.name,
+            curatorName: attributes.curatorName || "",
+            description:
+              attributes.descriptionStandard || attributes.descriptionShort || "",
+            artwork: attributes.artwork,
+            sourcePlaylistHref:
+              "/library/playlist/" + encodeURIComponent(playlistId),
+            playlistKind: "catalog",
+            isLibraryView: true,
+            tracks: mapCatalogTracks(catalog),
+          },
+          tracks: [],
+          nextCursor: "",
+          seenCursors: new Set(),
+        };
+      }
+    } catch (error) {
+      if (getApiErrorStatus(error) !== 404) throw error;
     }
-  } catch (error) {
-    if (getApiErrorStatus(error) !== 404) throw error;
   }
   const [playlist, firstPage] = await Promise.all([
     getUserPlaylist(playlistId),

@@ -10,6 +10,7 @@ import {
 const api = vi.hoisted(() => ({
   catalog: vi.fn(),
   library: vi.fn(),
+  mediaSnapshot: vi.fn(),
   playlist: vi.fn(),
   tracks: vi.fn(),
   load: undefined as (() => Promise<unknown>) | undefined,
@@ -38,6 +39,7 @@ vi.mock("@/lib/favorites/use-favorite-store", () => ({
 }));
 vi.mock("@/lib/library/library-resources.api", () => ({
   getLibraryResources: api.library,
+  getLibraryMediaCardsSnapshot: api.mediaSnapshot,
   subscribeLibraryResourcesChanged: vi.fn(),
 }));
 vi.mock("@/lib/catalog/catalog.api", () => ({
@@ -97,6 +99,7 @@ function privatePlaylist() {
 beforeEach(() => {
   clearCachedQueries();
   vi.clearAllMocks();
+  api.mediaSnapshot.mockReturnValue(undefined);
   api.library.mockResolvedValue([
     { resourceType: "playlists", resourceId: "p1" },
   ]);
@@ -149,4 +152,20 @@ it("does not restore a removed playlist or share another playlist's cache", asyn
   await api.load!();
   expect(mount()).toBe("not-found");
   expect(api.catalog).toHaveBeenCalledTimes(1);
+});
+
+it("opens a known private playlist without a catalog request and restores its cache", async () => {
+  api.mediaSnapshot.mockReturnValue([
+    {
+      resourceType: "playlists",
+      resourceId: "p1",
+      catalogUrl: "/library/playlist/p1",
+    },
+  ]);
+  mount();
+  await api.load!();
+  expect(mount()).toBe("user:1");
+  expect(api.catalog).not.toHaveBeenCalled();
+  expect(api.playlist).toHaveBeenCalledTimes(1);
+  expect(api.tracks).toHaveBeenCalledTimes(1);
 });

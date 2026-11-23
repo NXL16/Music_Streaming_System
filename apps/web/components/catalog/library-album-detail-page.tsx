@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback } from "react";
 import { useAuthStore } from "@/lib/auth/auth-store";
-import { useLibraryMediaCards } from "@/lib/library/use-library-media-cards";
+import { useAsyncResource } from "@/lib/api/use-async-resource";
+import { getCatalogAlbum } from "@/lib/catalog/catalog.api";
 import {
   getLibraryResources,
+  getFreshLibraryResourcesSnapshot,
+  getLibraryResourcesRevision,
   isLibraryResourcePendingRemoval,
-  type LibraryResource,
 } from "@/lib/library/library-resources.api";
 import { useLibraryResourcesRevision } from "@/lib/library/use-library-resources-revision";
 import { libraryAlbumSongIds } from "@/lib/library/library-album-song-ids";
@@ -27,37 +29,28 @@ export function LibraryAlbumDetailPage({
 }: LibraryAlbumDetailPageProps) {
   const userId = useAuthStore((state) => state.user?.userId);
   const revision = useLibraryResourcesRevision();
-  const { resources, loading, error, retry } = useLibraryMediaCards({
-    userId,
-    errorMessage: "Could not load your saved albums.",
-  });
-  const [libraryResources, setLibraryResources] = useState<LibraryResource[]>(
-    [],
+  const initialData = userId ? getFreshLibraryResourcesSnapshot() : undefined;
+  const load = useCallback(
+    async () => {
+      if (
+        useAuthStore.getState().user?.userId !== userId ||
+        getLibraryResourcesRevision() !== revision
+      )
+        throw new DOMException("Library context changed", "AbortError");
+      const [resources] = await Promise.all([
+        getLibraryResources(),
+        getCatalogAlbum(albumId),
+      ]);
+      return resources;
+    },
+    [albumId, userId, revision],
   );
-  const [loadingLibraryResources, setLoadingLibraryResources] = useState(true);
-  const [libraryResourcesError, setLibraryResourcesError] = useState(false);
-  const [retryKey, setRetryKey] = useState(0);
-
-  useEffect(() => {
-    if (!userId) return;
-    let active = true;
-    void getLibraryResources()
-      .then((nextResources) => {
-        if (active) {
-          setLibraryResources(nextResources);
-          setLibraryResourcesError(false);
-        }
-      })
-      .catch(() => {
-        if (active) setLibraryResourcesError(true);
-      })
-      .finally(() => {
-        if (active) setLoadingLibraryResources(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [revision, retryKey, userId]);
+  const { data, loading, error, reload } = useAsyncResource(
+    load,
+    "Could not load your saved album.",
+    { initialData, enabled: Boolean(userId) },
+  );
+  const resources = data ?? [];
   const isSaved = resources.some(
     (resource) =>
       resource.resourceType === "albums" &&
@@ -68,24 +61,15 @@ export function LibraryAlbumDetailPage({
       ),
   );
 
-  const librarySongIds = libraryAlbumSongIds(libraryResources, [albumId]);
+  const librarySongIds = libraryAlbumSongIds(resources, [albumId]);
 
   if (!userId) {
     return <NotFoundState />;
   }
 
-  if (loading || loadingLibraryResources) return <CatalogPageLoading />;
+  if (loading && !data) return <CatalogPageLoading />;
 
-  if (error || libraryResourcesError) {
-    return (
-      <RequestErrorState
-        onRetry={() => {
-          retry();
-          setRetryKey((key) => key + 1);
-        }}
-      />
-    );
-  }
+  if (error) return <RequestErrorState onRetry={() => void reload()} />;
 
   if (!isSaved) {
     return <NotFoundState />;
