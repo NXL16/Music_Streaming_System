@@ -185,9 +185,7 @@ export async function getHomeRecommendations() {
   if (!HOME_CACHE_DISABLED && cachedResponse && Date.now() < cacheExpiresAt) {
     return cachedResponse;
   }
-  // Concurrent consumers (for example splash prefetch and Home mounting) can
-  // share a live request without serving stale data. This remains active in
-  // development even when the completed-response cache is disabled.
+  // Coalesce concurrent reads even when completed-response caching is disabled.
   if (pendingHomeRecommendations) return pendingHomeRecommendations;
 
   const requestGeneration = cacheGeneration;

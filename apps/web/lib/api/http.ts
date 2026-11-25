@@ -36,6 +36,7 @@ const PUBLIC_AUTH_PATHS = [
   "/auth/2fa/login",
   "/auth/refresh",
   "/auth/password/",
+  "/auth/email/verify",
 ];
 
 function canRefreshRequest(config: RetryableRequestConfig) {

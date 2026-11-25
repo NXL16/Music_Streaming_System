@@ -17,7 +17,7 @@ export class ThrottlerExceptionFilter implements ExceptionFilter {
     response.status(HttpStatus.TOO_MANY_REQUESTS).json({
       success: false,
       code: 'AUTH_TOO_MANY_REQUESTS',
-      message: 'Quá nhiều yêu cầu được gửi đến. Vui lòng thử lại sau.',
+      message: 'Too many requests. Please try again later.',
       timestamp: new Date().toISOString(),
     });
   }

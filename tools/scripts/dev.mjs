@@ -8,7 +8,7 @@ const FORCE_STOP_DELAY_MS = 16_000;
 const TURBO_SHUTDOWN_MESSAGE = 'Shutting down Turborepo tasks...';
 const API_ORIGIN_HOST = 'localhost';
 const API_ORIGIN_PORT = 9999;
-const API_READY_TIMEOUT_MS = 90_000;
+const API_SLOW_START_WARNING_MS = 90_000;
 const API_READY_RETRY_MS = 500;
 
 function readEnvFile(file) {
@@ -49,7 +49,8 @@ let shuttingDown = false;
 let forceStopTimer;
 
 function waitForApiOrigin() {
-  const deadline = Date.now() + API_READY_TIMEOUT_MS;
+  const warnAfter = Date.now() + API_SLOW_START_WARNING_MS;
+  let warned = false;
 
   return new Promise((resolve) => {
     const tryConnect = () => {
@@ -71,9 +72,11 @@ function waitForApiOrigin() {
       socket.once('error', () => {
         socket.destroy();
 
-        if (Date.now() >= deadline) {
-          resolve(false);
-          return;
+        if (!warned && Date.now() >= warnAfter) {
+          warned = true;
+          console.warn(
+            `Still waiting for API at http://${API_ORIGIN_HOST}:${API_ORIGIN_PORT}; Cloudflare Tunnel will start when it is ready.`,
+          );
         }
 
         setTimeout(tryConnect, API_READY_RETRY_MS);
@@ -88,14 +91,7 @@ async function startTunnelWhenApiIsReady() {
   if (appEnv !== 'production') return;
 
   const isApiReady = await waitForApiOrigin();
-  if (!isApiReady) {
-    if (!shuttingDown) {
-      console.error(
-        `API did not become ready at http://${API_ORIGIN_HOST}:${API_ORIGIN_PORT}; Cloudflare Tunnel was not started.`,
-      );
-    }
-    return;
-  }
+  if (!isApiReady) return;
 
   if (shuttingDown || child.exitCode !== null || child.signalCode !== null) return;
 
