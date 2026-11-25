@@ -44,6 +44,8 @@ import AmpLyrics from "../custom-elements/AmpLyrics";
 import PlayIcon from "../icons/play-icon";
 import { ContentDialog } from "./content-dialog";
 import { useShelfDetailHistory } from "@/hooks/use-shelf-detail-history";
+import { useDocumentTitle } from "@/hooks/use-document-title";
+import { formatSongDocumentTitle } from "@/lib/catalog/document-title";
 
 type SongDetailPageProps = {
   releaseTrackId: string;
@@ -131,6 +133,12 @@ export function SongDetailPage({ releaseTrackId }: SongDetailPageProps) {
   const { song, loading, error, errorStatus, reload } =
     useCatalogSong(releaseTrackId);
   const showLoading = useMinimumLoadingDuration(loading);
+  useDocumentTitle(
+    formatSongDocumentTitle({
+      title: song?.title,
+      artistName: song?.songArtistName ?? song?.artist,
+    }),
+  );
   const currentAlbumId = song?.albumId ?? "";
   const relatedShelfKey = song ? `${currentAlbumId}:${song.id}` : "";
   const {

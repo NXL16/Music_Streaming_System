@@ -74,6 +74,8 @@ import { useShelfDetailHistory } from "@/hooks/use-shelf-detail-history";
 import PlayIcon from "../icons/play-icon";
 import PauseIcon from "../icons/pause-icon";
 import { CatalogDescription } from "./catalog-description";
+import { formatAlbumDocumentTitle } from "@/lib/catalog/document-title";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 const AmbientVideo = dynamic(() => import("../custom-elements/AmpVideo"), {
   ssr: false,
@@ -331,6 +333,23 @@ export function CatalogDetailPage({
   const albumArtists = data
     ? catalogArtists(data, albumResource?.relationships.artists?.data)
     : [];
+
+  const albumArtistLabel =
+    albumResource?.attributes.artistName?.trim() ||
+    albumArtists
+      .map((artist) => artist.name)
+      .filter(Boolean)
+      .join(", ");
+
+  useDocumentTitle(
+    resourceType === "albums"
+      ? formatAlbumDocumentTitle({
+          name: albumResource?.attributes.name,
+          artistName: albumArtistLabel,
+          releaseType: albumResource?.attributes.releaseType,
+        })
+      : null,
+  );
 
   const playlistSubtitle = playlistResource?.attributes.curatorName;
 

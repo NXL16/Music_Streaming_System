@@ -48,6 +48,8 @@ import { TrackLockupShelf } from "../songs/track-lockup-shelf";
 import { useArtistFollow } from "@/lib/favorites/use-artist-follow";
 import { notifyMenuError } from "@/lib/notifications/menu-toast";
 import { useShelfDetailHistory } from "@/hooks/use-shelf-detail-history";
+import { useDocumentTitle } from "@/hooks/use-document-title";
+import { formatArtistDocumentTitle } from "@/lib/catalog/document-title";
 
 type ArtistDetailPageProps = {
   artistId: string;
@@ -74,6 +76,7 @@ export function ArtistDetailPage({ artistId, slug }: ArtistDetailPageProps) {
     loadAlbumSection,
   } = useCatalogArtist(artistId);
   const showLoading = useMinimumLoadingDuration(loading);
+  useDocumentTitle(formatArtistDocumentTitle(artist?.attributes?.name));
   const userId = useAuthStore((state) => state.user?.userId);
   const [startingStation, setStartingStation] = useState(false);
   const {

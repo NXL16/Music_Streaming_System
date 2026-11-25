@@ -57,6 +57,8 @@ import {
 import PlayIcon from "../icons/play-icon";
 import PauseIcon from "../icons/pause-icon";
 import { useShelfDetailHistory } from "@/hooks/use-shelf-detail-history";
+import { useDocumentTitle } from "@/hooks/use-document-title";
+import { formatPlaylistDocumentTitle } from "@/lib/catalog/document-title";
 import { RequestErrorState } from "../states/request-error-state";
 
 export type GenericArtwork = {
@@ -140,6 +142,8 @@ export default function PlaylistDetailView({
       void hydrateFavoritePlaylists();
     }
   }, [hydrateFavoritePlaylists, userId]);
+
+  useDocumentTitle(formatPlaylistDocumentTitle(playlist.title));
 
   const isPlaylistFavoriteVisible =
     Boolean(userId) && favoritePlaylistIds.has(playlist.id);
