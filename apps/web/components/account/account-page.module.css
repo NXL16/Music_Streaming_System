@@ -55,18 +55,15 @@
   background: var(--systemQuinary);
 }
 
-.camera {
+.avatarSpinner {
   position: absolute;
-  bottom: 0;
-  right: 0;
+  inset: 0;
+  z-index: 1;
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
-  border: 3px solid var(--pageBG);
-  border-radius: 50%;
-  background: var(--systemPrimary);
-  color: var(--pageBG);
+  border-radius: inherit;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
 }
 
 .identity {
@@ -156,9 +153,6 @@
   user-select: all;
 }
 
-.editButton,
-.cancelButton,
-.saveButton,
 .verifyButton {
   min-height: 44px;
   padding: 8px 16px;
@@ -167,20 +161,38 @@
   cursor: pointer;
 }
 
-.editButton,
+.cancelButton,
+.saveButton {
+  min-height: 34px;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 6px;
+  font: var(--callout-emphasized);
+  cursor: pointer;
+}
+
 .cancelButton {
   background: var(--systemQuinary);
 }
 
 .editButton {
   position: absolute;
-  inset-block-start: 0;
-  inset-inline-start: calc(100% + 12px);
+  top: 16px;
+  right: 0;
   display: grid;
   place-items: center;
-  width: 44px;
+  width: 40px;
+  height: 40px;
   padding: 0;
   border-radius: 50%;
+  background: var(--systemQuinary);
+  color: var(--systemPrimary);
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+
+.editButton:hover:not(:disabled) {
+  background: var(--systemQuaternary);
 }
 
 .verifyButton {
@@ -189,9 +201,35 @@
   color: var(--keyColor);
 }
 
-.editor {
-  max-width: 560px;
-  margin: 24px auto 0;
+.editDialog {
+  --modalWidth: min(460px, calc(100vw - 32px));
+  --modalMaxHeight: calc(100dvh - 32px);
+}
+
+.editDialog :global(.content-modal-container) {
+  width: 100%;
+  max-height: var(--modalMaxHeight);
+}
+
+.editDialog :global(.button-container) {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+}
+
+.editDialog :global(.close-button) {
+  margin-top: 14px;
+  margin-bottom: 6px;
+  margin-inline-start: 0;
+  margin-inline-end: 20px;
+}
+
+.editDialog :global(.content-container) {
+  padding-bottom: 24px;
+}
+
+.editDialogForm {
+  margin-top: 18px;
 }
 
 .section> :is(.notice, .error) {
@@ -200,12 +238,12 @@
 
 .fields {
   display: grid;
-  gap: 20px;
+  gap: 16px;
 }
 
 .field {
   display: grid;
-  gap: 8px;
+  gap: 7px;
 }
 
 .field label {
@@ -218,32 +256,20 @@
   font-weight: 400;
 }
 
-.field input,
-.field textarea {
+.field input {
   width: 100%;
-  min-height: 44px;
-  padding: 10px 12px;
+  min-height: 42px;
+  padding: 9px 12px;
   border: 1px solid var(--labelDivider);
-  border-radius: 7px;
-  background: var(--systemQuinary);
-  font-size: 16px;
-  line-height: 1.5;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 15px;
+  line-height: 1.45;
 }
 
-.field textarea {
-  resize: vertical;
-}
-
-.field input:focus,
-.field textarea:focus {
-  border-color: var(--systemPrimary);
+.field input:focus {
+  border-color: var(--keyColor);
   outline: none;
-}
-
-.counter {
-  text-align: right;
-  color: var(--systemSecondary);
-  font: var(--caption-1);
 }
 
 .actions {
@@ -302,7 +328,7 @@
   }
 
   .profile {
-    padding-block: 20px 28px;
+    padding-block: 36px 46px;
   }
 
   .profile::before {

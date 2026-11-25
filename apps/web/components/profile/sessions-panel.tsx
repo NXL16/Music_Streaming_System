@@ -1,6 +1,6 @@
 "use client";
 
-import { Laptop } from "lucide-react";
+import { Laptop, Smartphone, Tablet } from "lucide-react";
 import { formatDateTime } from "@/lib/format/date";
 import { useSessions } from "@/lib/auth/use-sessions";
 import styles from "./security-settings.module.css";
@@ -28,6 +28,16 @@ function deviceLabel(userAgent?: string) {
           : "this device";
 
   return `${browser} on ${platform}`;
+}
+
+function DeviceIcon({ userAgent }: { userAgent?: string }) {
+  if (userAgent && /iPad|Tablet/i.test(userAgent)) {
+    return <Tablet size={22} aria-hidden="true" />;
+  }
+  if (userAgent && /iPhone|iPod|Android|Mobile/i.test(userAgent)) {
+    return <Smartphone size={22} aria-hidden="true" />;
+  }
+  return <Laptop size={22} aria-hidden="true" />;
 }
 
 type SessionsPanelProps = {
@@ -73,7 +83,7 @@ export function SessionsPanel({ className = "mt-6" }: SessionsPanelProps) {
       )}
       {sessions.map((session) => (
         <div key={session.deviceId} className={styles.device}>
-          <Laptop size={22} aria-hidden="true" />
+          <DeviceIcon userAgent={session.userAgent} />
           <div>
             <p className={styles.deviceName}>
               {deviceLabel(session.userAgent)}

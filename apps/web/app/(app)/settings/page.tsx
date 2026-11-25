@@ -39,7 +39,6 @@ export default function SettingsPage() {
       <div className={styles.page}>
         <header className={styles.header}>
           <h1>Settings</h1>
-          <p>Manage your listening experience and account security.</p>
         </header>
         <div className={styles.groups}>
           <section

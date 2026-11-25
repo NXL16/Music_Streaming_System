@@ -29,6 +29,8 @@ import { preloadAmbientHlsRuntime } from "@/components/custom-elements/ambient-h
 import { NotFoundState } from "@/components/states/not-found-state";
 import { RequestErrorState } from "@/components/states/request-error-state";
 import { useShelfDetailHistory } from "@/hooks/use-shelf-detail-history";
+import { useDocumentTitle } from "@/hooks/use-document-title";
+import { formatMusicVideoDocumentTitle } from "@/lib/catalog/document-title";
 
 type MusicVideoDetailPageProps = { songVideoId: string };
 
@@ -68,6 +70,12 @@ export function MusicVideoDetailPage({
   }, []);
   const primaryArtist =
     video?.artists.find((artist) => artist.isPrimary) ?? video?.artists[0];
+  useDocumentTitle(
+    formatMusicVideoDocumentTitle({
+      title: video?.songTitle,
+      artistName: sourceSong?.songArtistName ?? primaryArtist?.name,
+    }),
+  );
   const loadMoreByArtist = useCallback(
     (signal?: AbortSignal) =>
       primaryArtist

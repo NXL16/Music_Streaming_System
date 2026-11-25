@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatAlbumDocumentTitle,
   formatArtistDocumentTitle,
+  formatMusicVideoDocumentTitle,
   formatPlaylistDocumentTitle,
   formatSongDocumentTitle,
 } from "./document-title";
@@ -87,5 +88,23 @@ describe("formatArtistDocumentTitle", () => {
       "Hoàng Dũng - 404hz Melodies",
     );
     expect(formatArtistDocumentTitle("")).toBeNull();
+  });
+});
+
+describe("formatMusicVideoDocumentTitle", () => {
+  it("formats music video title with artist and falls back when missing", () => {
+    expect(
+      formatMusicVideoDocumentTitle({
+        title: "MỘT NGÀY NÀO ĐÓ",
+        artistName: "Hoàng Dũng, Đen & Bạn Nhạc.",
+      }),
+    ).toBe(
+      "MỘT NGÀY NÀO ĐÓ - Music Video by Hoàng Dũng, Đen & Bạn Nhạc. - 404hz Melodies",
+    );
+
+    expect(formatMusicVideoDocumentTitle({ title: "ABC", artistName: "" })).toBe(
+      "ABC - 404hz Melodies",
+    );
+    expect(formatMusicVideoDocumentTitle({ title: "" })).toBeNull();
   });
 });

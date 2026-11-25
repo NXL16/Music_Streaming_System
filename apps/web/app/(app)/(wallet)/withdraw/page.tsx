@@ -188,7 +188,7 @@ export default function WithdrawPage() {
                   <h2>Withdrawal amount</h2>
                   <WalletAmountField
                     id="withdraw-amount"
-                    presets={[50000, 100000, 200000, 500000]}
+                    presets={[50000, 100000, 200000, 500000, 1000000, 2000000]}
                     amount={auth.amount}
                     rate={rate.rate}
                     withdrawal
@@ -340,11 +340,13 @@ export default function WithdrawPage() {
                 )}
               </>
             )}
+
             {auth.error && (
               <p role="alert" className={styles.error}>
                 {auth.error}
               </p>
             )}
+
             <div className={styles.actions}>
               <button
                 type="button"
@@ -354,6 +356,7 @@ export default function WithdrawPage() {
               >
                 Cancel
               </button>
+
               <button
                 type="submit"
                 className={styles.primary}

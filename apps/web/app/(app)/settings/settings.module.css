@@ -3,90 +3,119 @@
   padding-bottom: 64px;
   color: var(--systemPrimary);
 }
+
 .header {
-  padding-block: 20px 44px;
+  padding-block: 24px 32px;
 }
+
 .header h1 {
   font-size: 36px;
   line-height: 1.15;
   font-weight: 600;
   letter-spacing: -0.025em;
 }
+
 .header p {
-  margin-top: 10px;
+  margin-top: 8px;
   color: var(--systemSecondary);
   font: var(--body-tall);
 }
+
 .groups {
+  margin-top: 20px;
   display: grid;
+  gap: 28px;
 }
+
 .group {
   display: grid;
-  grid-template-columns: minmax(180px, 0.7fr) minmax(0, 2fr);
-  gap: 48px;
-  padding-block: 32px;
-  border-top: 1px solid var(--labelDivider);
+  grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
+  align-items: start;
+  gap: 32px;
 }
+
+.groupIntro {
+  padding-top: 4px;
+}
+
 .groupIntro h2 {
   font: var(--title-2-emphasized);
 }
+
 .groupIntro p {
-  max-width: 30ch;
-  margin-top: 8px;
+  max-width: 28ch;
+  margin-top: 6px;
   color: var(--systemSecondary);
   font: var(--callout);
 }
+
 .controls {
   min-width: 0;
+  border: 1px solid var(--labelDivider);
+  border-radius: 10px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--systemQuinary) 35%, transparent);
 }
+
 .setting {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  padding-block: 0 24px;
+  padding: 18px 20px;
 }
-.setting + .setting {
-  padding-block: 24px 0;
+
+.setting+.setting {
   border-top: 1px solid var(--labelDivider);
 }
+
 .setting h3 {
   font: var(--body-tall-emphasized);
 }
+
 .setting p {
   max-width: 52ch;
-  margin-top: 5px;
+  margin-top: 4px;
   color: var(--systemSecondary);
   font: var(--callout);
 }
+
 .switch {
   display: grid;
   place-items: center;
   flex-shrink: 0;
   width: 48px;
   height: 44px;
+  cursor: pointer;
 }
+
 .track {
   width: 48px;
   height: 28px;
   padding: 4px;
   border-radius: 20px;
   background: var(--systemQuaternary);
+  transition: background-color 180ms ease;
 }
+
 .thumb {
   display: block;
   width: 20px;
   height: 20px;
   border-radius: 50%;
   background: var(--systemPrimary);
+  transition: transform 180ms ease, background-color 180ms ease;
 }
+
 .switch[aria-checked="true"] .track {
   background: var(--systemPrimary);
 }
+
 .switch[aria-checked="true"] .thumb {
   background: var(--pageBG);
   transform: translateX(20px);
 }
+
 .switch:focus-visible {
   outline: 2px solid var(--systemPrimary);
   outline-offset: 3px;
@@ -96,13 +125,14 @@
 @media (max-width: 999px) {
   .group {
     grid-template-columns: 1fr;
-    gap: 28px;
-    padding-block: 28px;
+    gap: 14px;
   }
+
   .groupIntro p {
     max-width: none;
   }
+
   .header {
-    padding-bottom: 32px;
+    padding-bottom: 24px;
   }
 }

@@ -2,16 +2,28 @@
 
 import Image from "next/image";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Camera, Check, Pencil } from "lucide-react";
+import { Check, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { AUTH_DISPLAY_NAME_MAX_LENGTH } from "@musical/shared-constants";
 import { Spinner } from "@/components/loading/spinner";
-import { useAvatarUpload } from "@/lib/auth/use-avatar-upload";
+import { ContentDialog } from "@/components/catalog/content-dialog";
+import { AvatarCropDialog } from "@/components/account/avatar-crop-dialog";
+import {
+  AVATAR_CONTENT_TYPES,
+  useAvatarUpload,
+} from "@/lib/auth/use-avatar-upload";
 import { useEmailVerificationRequest } from "@/lib/auth/use-email-verification-request";
 import { useProfileDetailsUpdate } from "@/lib/auth/use-profile-details-update";
 import { useProfile } from "@/lib/auth/use-profile";
 import { formatDateTime } from "@/lib/format/date";
 import styles from "./account-page.module.css";
+
+const BIO_MAX_LENGTH = 500;
+
+function resizeTextarea(textarea: HTMLTextAreaElement) {
+  textarea.style.height = "auto";
+  textarea.style.height = `${textarea.scrollHeight}px`;
+}
 
 export default function AccountPage() {
   const { user, error } = useProfile();
@@ -20,13 +32,17 @@ export default function AccountPage() {
   const verification = useEmailVerificationRequest();
   const avatarInput = useRef<HTMLInputElement>(null);
   const nameInput = useRef<HTMLInputElement>(null);
+  const bioInput = useRef<HTMLTextAreaElement>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ displayName: "", bio: "" });
+  const [pendingAvatarFile, setPendingAvatarFile] = useState<File | null>(null);
   const busy = profile.loading || avatar.loading;
   const name = user?.displayName || user?.username || "Your profile";
 
   useEffect(() => {
-    if (editing) nameInput.current?.focus();
+    if (!editing) return;
+    nameInput.current?.focus();
+    if (bioInput.current) resizeTextarea(bioInput.current);
   }, [editing]);
 
   function editProfile() {
@@ -49,8 +65,18 @@ export default function AccountPage() {
 
   async function changePhoto(file: File | undefined) {
     if (!file || busy) return;
-    if (await avatar.uploadAvatar(file))
+    if (!AVATAR_CONTENT_TYPES.has(file.type)) {
+      await avatar.uploadAvatar(file);
+      return;
+    }
+    setPendingAvatarFile(file);
+  }
+
+  async function submitCroppedPhoto(croppedFile: File) {
+    if (await avatar.uploadAvatar(croppedFile)) {
+      setPendingAvatarFile(null);
       toast.success("Profile picture updated.");
+    }
   }
 
   const activity = [
@@ -72,23 +98,21 @@ export default function AccountPage() {
             <h1>Account</h1>
           </header>
           <section className={styles.profile} aria-label="Your profile">
+            <button
+              type="button"
+              className={styles.editButton}
+              disabled={!user || busy}
+              onClick={editProfile}
+              aria-label="Edit profile"
+              title="Edit profile"
+            >
+              <Pencil size={18} aria-hidden="true" />
+            </button>
             <div className={styles.summary}>
               <div className={styles.portrait}>
-                {!editing && (
-                  <button
-                    type="button"
-                    className={styles.editButton}
-                    disabled={!user || busy}
-                    onClick={editProfile}
-                    aria-label="Edit profile"
-                    title="Edit profile"
-                  >
-                    <Pencil size={19} aria-hidden="true" />
-                  </button>
-                )}
                 <button
                   type="button"
-                  className={styles.avatar}
+                  className={`${styles.avatar} after:rounded-[inherit] after:shadow-(--artworkShadowInset) after:opacity-(--containerInnerStrokeAlpha,0.1) after:pointer-events-none after:absolute after:inset-0 dark:after:opacity-(--containerInnerStrokeAlpha,0.25)`}
                   onClick={() => avatarInput.current?.click()}
                   disabled={!user || busy}
                   aria-label="Change profile picture"
@@ -102,14 +126,11 @@ export default function AccountPage() {
                     sizes="(min-width: 768px) 120px, 96px"
                     className={styles.avatarImage}
                   />
-
-                  <span className={styles.camera}>
-                    {avatar.loading ? (
-                      <Spinner size={18} />
-                    ) : (
-                      <Camera size={17} aria-hidden="true" />
-                    )}
-                  </span>
+                  {avatar.loading && (
+                    <span className={styles.avatarSpinner}>
+                      <Spinner size={20} />
+                    </span>
+                  )}
                 </button>
                 <input
                   ref={avatarInput}
@@ -136,82 +157,6 @@ export default function AccountPage() {
               <p className={styles.error} role="alert">
                 {avatar.error || error}
               </p>
-            )}
-            {editing && (
-              <form
-                className={styles.editor}
-                onSubmit={saveProfile}
-                noValidate
-                aria-label="Edit profile"
-                aria-busy={profile.loading}
-              >
-                <div className={styles.fields}>
-                  <div className={styles.field}>
-                    <label htmlFor="profile-display-name">Display name</label>
-                    <input
-                      ref={nameInput}
-                      id="profile-display-name"
-                      name="displayName"
-                      autoComplete="nickname"
-                      value={draft.displayName}
-                      maxLength={AUTH_DISPLAY_NAME_MAX_LENGTH}
-                      disabled={profile.loading}
-                      onChange={(event) => {
-                        profile.clearError();
-                        setDraft((current) => ({
-                          ...current,
-                          displayName: event.target.value,
-                        }));
-                      }}
-                    />
-                  </div>
-                  <div className={styles.field}>
-                    <label htmlFor="profile-bio">
-                      Bio <span>Optional</span>
-                    </label>
-                    <textarea
-                      id="profile-bio"
-                      name="bio"
-                      rows={3}
-                      value={draft.bio}
-                      maxLength={500}
-                      disabled={profile.loading}
-                      onChange={(event) => {
-                        profile.clearError();
-                        setDraft((current) => ({
-                          ...current,
-                          bio: event.target.value,
-                        }));
-                      }}
-                    />
-                    <span className={styles.counter}>
-                      {draft.bio.length}/500
-                    </span>
-                  </div>
-                </div>
-                {profile.error && (
-                  <p className={styles.error} role="alert">
-                    {profile.error}
-                  </p>
-                )}
-                <div className={styles.actions}>
-                  <button
-                    type="button"
-                    className={styles.cancelButton}
-                    disabled={profile.loading}
-                    onClick={() => setEditing(false)}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className={styles.saveButton}
-                    disabled={busy}
-                  >
-                    {profile.loading ? "Saving..." : "Save changes"}
-                  </button>
-                </div>
-              </form>
             )}
           </section>
           <div className={styles.detailGrid}>
@@ -359,6 +304,110 @@ export default function AccountPage() {
           </div>
         </div>
       </div>
+      <ContentDialog
+        open={editing}
+        title="Edit profile"
+        subtitle="Update how your name and bio appear on your profile."
+        onClose={() => {
+          if (!profile.loading) setEditing(false);
+        }}
+        hideGradient
+        className={styles.editDialog}
+      >
+        {editing && (
+          <form
+            className={styles.editDialogForm}
+            onSubmit={saveProfile}
+            noValidate
+            aria-label="Edit profile"
+            aria-busy={profile.loading}
+          >
+            <div className={styles.fields}>
+              <div className={styles.field}>
+                <label htmlFor="profile-display-name">Display name</label>
+                <input
+                  ref={nameInput}
+                  id="profile-display-name"
+                  name="displayName"
+                  autoComplete="nickname"
+                  value={draft.displayName}
+                  maxLength={AUTH_DISPLAY_NAME_MAX_LENGTH}
+                  disabled={profile.loading}
+                  onChange={(event) => {
+                    profile.clearError();
+                    setDraft((current) => ({
+                      ...current,
+                      displayName: event.target.value,
+                    }));
+                  }}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="profile-bio">
+                  Bio <span>Optional</span>
+                </label>
+                <span className="relative block">
+                  <textarea
+                    ref={bioInput}
+                    id="profile-bio"
+                    name="bio"
+                    value={draft.bio}
+                    maxLength={BIO_MAX_LENGTH}
+                    disabled={profile.loading}
+                    placeholder="Tell people a little about yourself."
+                    className="min-h-26 w-full resize-none overflow-hidden rounded-lg border border-(--labelDivider) bg-transparent px-3 py-2.5 pb-7 text-[15px] leading-[1.45] font-normal outline-none focus:border-(--keyColor)"
+                    onChange={(event) => {
+                      profile.clearError();
+                      setDraft((current) => ({
+                        ...current,
+                        bio: event.target.value,
+                      }));
+                      resizeTextarea(event.currentTarget);
+                    }}
+                  />
+                  <span className="pointer-events-none absolute bottom-3 right-3 text-xs font-normal text-(--systemSecondary)">
+                    {BIO_MAX_LENGTH - draft.bio.length}
+                  </span>
+                </span>
+              </div>
+            </div>
+            {profile.error && (
+              <p className={styles.error} role="alert">
+                {profile.error}
+              </p>
+            )}
+            <div className={styles.actions}>
+              <button
+                type="button"
+                className={styles.cancelButton}
+                disabled={profile.loading}
+                onClick={() => setEditing(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className={styles.saveButton}
+                disabled={busy}
+              >
+                {profile.loading ? "Saving..." : "Save changes"}
+              </button>
+            </div>
+          </form>
+        )}
+      </ContentDialog>
+      <AvatarCropDialog
+        key={
+          pendingAvatarFile
+            ? `${pendingAvatarFile.name}-${pendingAvatarFile.lastModified}-${pendingAvatarFile.size}`
+            : "closed"
+        }
+        file={pendingAvatarFile}
+        submitting={avatar.loading}
+        error={avatar.error}
+        onCancel={() => setPendingAvatarFile(null)}
+        onSubmit={submitCroppedPhoto}
+      />
     </div>
   );
 }

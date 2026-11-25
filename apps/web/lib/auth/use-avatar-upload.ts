@@ -6,7 +6,7 @@ import { finalizeAvatarUpload, requestAvatarUpload } from "@/lib/auth/auth.api";
 import { useAuthStore } from "@/lib/auth/auth-store";
 
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
-const AVATAR_CONTENT_TYPES = new Set([
+export const AVATAR_CONTENT_TYPES = new Set([
   "image/jpeg",
   "image/png",
   "image/webp",

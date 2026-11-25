@@ -113,46 +113,41 @@ export default function DepositPage() {
   return (
     <>
       {ready && operation && (
-        <PaymentResult kind="DEPOSIT" {...status} onRefresh={status.refresh}>
-          {!completed && links && (
-            <>
-              {links.deepLink && (
-                <div className={styles.wide}>
-                  <div className={styles.qrCard}>
-                    <PaymentQr value={links.deepLink} />
-                    <p className={styles.notice}>
-                      Scan this QR code with your NFBank app to pay.
-                    </p>
-                  </div>
-                </div>
-              )}
-              {links.deepLink && (
-                <a className={styles.primary} href={links.deepLink}>
-                  Open NFBank app
-                </a>
-              )}
-              <a
-                className={links.deepLink ? styles.button : styles.primary}
-                href={links.paymentUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Open payment page
-              </a>
-            </>
-          )}
-          <div className={styles.wide}>
-            <button
-              className={completed ? styles.primary : styles.textButton}
-              type="button"
-              onClick={() => {
-                save(null);
-                setError("");
-              }}
+        <PaymentResult
+          kind="DEPOSIT"
+          {...status}
+          onRefresh={status.refresh}
+          media={
+            !completed && links?.deepLink ? (
+              <div className={styles.qrCard}>
+                <PaymentQr value={links.deepLink} />
+                <p className={styles.notice}>
+                  Scan this QR code with your NFBank app to pay.
+                </p>
+              </div>
+            ) : undefined
+          }
+        >
+          {!completed && links && !links.deepLink && (
+            <a
+              className={styles.primary}
+              href={links.paymentUrl}
+              target="_blank"
+              rel="noopener noreferrer"
             >
-              {completed ? "Make another top-up" : "Start a new top-up"}
-            </button>
-          </div>
+              Open payment page
+            </a>
+          )}
+          <button
+            className={completed ? styles.primary : styles.textButton}
+            type="button"
+            onClick={() => {
+              save(null);
+              setError("");
+            }}
+          >
+            {completed ? "Make another top-up" : "Start a new top-up"}
+          </button>
         </PaymentResult>
       )}
       {ready && !operation && (

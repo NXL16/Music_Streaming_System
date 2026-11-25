@@ -25,6 +25,9 @@ import { SidebarSection } from "./sidebar/sidebar-section";
 import type { SidebarItem } from "./sidebar/sidebar-types";
 import Coin from "../icons/coin-icon";
 
+const AVATAR_INNER_STROKE_CLASSES =
+  "after:rounded-[inherit] after:shadow-(--artworkShadowInset) after:opacity-(--containerInnerStrokeAlpha,0.1) after:pointer-events-none after:absolute after:inset-0 dark:after:opacity-(--containerInnerStrokeAlpha,0.25)";
+
 function MusicLogo() {
   return (
     <svg
@@ -353,7 +356,9 @@ export default function AppSidebar() {
                   onClick={openAccountMenu}
                   className="m-0 p-0 block [border:0] outline-none appearance-none [font:inherit] [font-size:inherit] leading-[inherit] rounded-(--ctxmenu-trigger-border-radius,50%) bg-(--ctxmenu-trigger-background-color,transparent) [transition:opacity_0.1s_ease-in] opacity-(--ctxmenu-trigger-opacity,1) cursor-pointer [backdrop-filter:blur(var(--ctxmenu-trigger-backdrop-blur,0))] no-underline"
                 >
-                  <span className="flex rounded-[50%]">
+                  <span
+                    className={`relative flex rounded-[50%] overflow-hidden ${AVATAR_INNER_STROKE_CLASSES}`}
+                  >
                     <Image
                       src={user?.avatarUrl || "/assets/avatar.webp"}
                       alt="avatar"
@@ -451,13 +456,17 @@ export default function AppSidebar() {
                         aria-expanded={isAccountMenuOpen}
                         onClick={openAccountMenu}
                       >
-                        <Image
-                          src={user?.avatarUrl || "/assets/avatar.webp"}
-                          alt="avatar"
-                          height={32}
-                          width={32}
-                          className="size-8 rounded-full object-cover"
-                        />
+                        <span
+                          className={`relative inline-block size-8 shrink-0 rounded-full overflow-hidden ${AVATAR_INNER_STROKE_CLASSES}`}
+                        >
+                          <Image
+                            src={user?.avatarUrl || "/assets/avatar.webp"}
+                            alt="avatar"
+                            height={32}
+                            width={32}
+                            className="size-full object-cover"
+                          />
+                        </span>
 
                         <div className="min-w-0 flex-1 text-left w-full truncate">
                           <span className="font-semibold">

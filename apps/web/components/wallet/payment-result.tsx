@@ -11,6 +11,7 @@ export function PaymentResult({
   error,
   checking,
   onRefresh,
+  media,
   children,
 }: {
   kind: PaymentKind;
@@ -18,6 +19,7 @@ export function PaymentResult({
   error?: string;
   checking: boolean;
   onRefresh: () => void;
+  media?: ReactNode;
   children?: ReactNode;
 }) {
   const success = order?.status === "SUCCESS",
@@ -82,6 +84,7 @@ export function PaymentResult({
           </div>
         </dl>
       )}
+      {media}
       <div className={styles.actions}>
         {!success && !failed && (
           <button

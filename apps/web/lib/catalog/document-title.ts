@@ -52,3 +52,14 @@ export function formatArtistDocumentTitle(
   const trimmed = name?.trim();
   return trimmed ? withBrandSuffix(trimmed) : null;
 }
+
+export function formatMusicVideoDocumentTitle(options: {
+  title?: string | null;
+  artistName?: string | null;
+}): string | null {
+  const title = options.title?.trim();
+  if (!title) return null;
+
+  const artist = options.artistName?.trim();
+  return withBrandSuffix(artist ? `${title} - Music Video by ${artist}` : title);
+}

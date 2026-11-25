@@ -28,8 +28,8 @@ export function WalletLayout({ children }: { children: ReactNode }) {
           <header className={styles.header}>
             <div>
               <h1>Wallet</h1>
-              <p>Coins for the music and artists you love.</p>
             </div>
+
             <div className={styles.balance}>
               <span>Available balance</span>
               <strong>

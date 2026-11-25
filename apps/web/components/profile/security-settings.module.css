@@ -3,10 +3,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  padding-bottom: 24px;
+  padding: 18px 20px;
 }
 .row + .row {
-  padding-top: 24px;
   border-top: 1px solid var(--labelDivider);
 }
 .row h3,
@@ -14,21 +13,22 @@
   font: var(--body-tall-emphasized);
 }
 .description {
-  margin-top: 5px;
+  margin-top: 4px;
   color: var(--systemSecondary);
   font: var(--callout);
 }
 .button,
 .primary,
 .textButton {
-  min-height: 44px;
-  padding: 10px 16px;
+  min-height: 36px;
+  padding: 0 14px;
   border-radius: 8px;
   font: var(--callout-emphasized);
   cursor: pointer;
 }
 .button {
   flex-shrink: 0;
+  border: 1px solid var(--labelDivider);
   background: var(--systemQuinary);
   color: var(--systemPrimary);
 }
@@ -37,6 +37,7 @@
   color: var(--pageBG);
 }
 .textButton {
+  padding-inline: 10px;
   color: var(--systemSecondary);
 }
 .dialog {
@@ -129,14 +130,16 @@
   align-items: center;
   justify-content: flex-end;
   gap: 16px;
-  margin-bottom: 8px;
+  padding: 10px 14px;
+  background: var(--systemQuinary);
+  border-bottom: 1px solid var(--labelDivider);
 }
 .device {
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
-  padding-block: 14px;
+  padding: 16px 20px;
 }
 .device + .device {
   border-top: 1px solid var(--labelDivider);
@@ -148,8 +151,12 @@
   overflow-wrap: anywhere;
 }
 .current {
-  color: var(--systemSecondary);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--statusPositive) 14%, transparent);
+  color: var(--statusPositive);
   font: var(--caption-1);
+  font-weight: 600;
 }
 .dialog button:disabled,
 .row button:disabled,
