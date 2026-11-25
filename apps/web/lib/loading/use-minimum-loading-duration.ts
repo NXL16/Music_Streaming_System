@@ -16,11 +16,12 @@ export function useMinimumLoadingDuration(
   minimumDurationMs = DEFAULT_MINIMUM_LOADING_MS,
 ) {
   const [isVisible, setIsVisible] = useState(isLoading);
-  const visibleSinceRef = useRef(0);
+  const visibleSinceRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (isLoading) {
-      if (!visibleSinceRef.current) visibleSinceRef.current = Date.now();
+      if (visibleSinceRef.current === null)
+        visibleSinceRef.current = performance.now();
       if (isVisible) return;
 
       const timer = window.setTimeout(() => setIsVisible(true), 0);
@@ -29,10 +30,11 @@ export function useMinimumLoadingDuration(
 
     if (!isVisible) return;
 
-    const elapsed = Date.now() - visibleSinceRef.current;
+    const elapsed =
+      performance.now() - (visibleSinceRef.current ?? performance.now());
     const remaining = Math.max(0, minimumDurationMs - elapsed);
     const timer = window.setTimeout(() => {
-      visibleSinceRef.current = 0;
+      visibleSinceRef.current = null;
       setIsVisible(false);
     }, remaining);
 

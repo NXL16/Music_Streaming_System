@@ -1,5 +1,8 @@
+"use client";
+
+import { useContext, type CSSProperties } from "react";
+import { IntroTransitionContext } from "@/components/brand/intro-transition-context";
 import { Spinner } from "@/components/loading/spinner";
-import type { CSSProperties } from "react";
 
 type LoadingProps = {
   fullScreen?: boolean;
@@ -12,6 +15,9 @@ export default function Loading({
   inline = false,
   size,
 }: LoadingProps) {
+  const { homeNavigation } = useContext(IntroTransitionContext);
+  if (fullScreen && homeNavigation) return null;
+
   const containerClassName = fullScreen
     ? "h-screen w-screen flex items-center justify-center select-none"
     : inline

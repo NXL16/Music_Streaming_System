@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { AppScrollRestoration } from "@/lib/layout/app-scroll-restoration";
 import { AuthProvider } from "@/components/auth/auth-provider";
+import { IntroTransition } from "@/components/brand/intro-transition";
 import "./fonts.css";
 import "./globals.css";
 import M404ContextualMenu from "@/components/custom-elements/m404-contextual-menu";
@@ -62,7 +63,9 @@ export default function RootLayout({
           </symbol>
         </svg>
 
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          <IntroTransition>{children}</IntroTransition>
+        </AuthProvider>
         <Suspense fallback={null}>
           <AppScrollRestoration />
         </Suspense>

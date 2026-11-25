@@ -1,0 +1,11 @@
+.logo :global(.mascot-logo-body) {
+  fill: #ffffff;
+  stroke: #000000;
+  stroke-width: 32;
+}
+
+.logo :global(.mascot-logo-details),
+.logo :global(.mascot-logo-details path) {
+  fill: #000000;
+  stroke: none;
+}

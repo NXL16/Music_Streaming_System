@@ -1,7 +1,17 @@
 @import "tailwindcss";
 
 /* App-level equivalent of the browser's Light / Dark / Device setting. */
-@custom-variant dark (&:where([data-app-theme="dark"], [data-app-theme="dark"] *));
+@custom-variant dark {
+  &:where([data-app-theme="dark"], [data-app-theme="dark"] *) {
+    @slot;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-app-theme]), :root:not([data-app-theme]) *) {
+      @slot;
+    }
+  }
+}
 
 :root {
   --apple-music-font:
@@ -5353,4 +5363,60 @@ body:has(.app-container.is-dark-theme) .up-next-item:focus {
   height: 28px;
   margin-top: 25px;
   padding: 4px 16px;
+}
+
+html[data-brand-handoff] [data-brand-part="title"] {
+  view-transition-name: brand-title;
+}
+
+html[data-brand-handoff] [data-brand-part="signature"] {
+  view-transition-name: brand-signature;
+}
+
+html[data-brand-handoff]::view-transition {
+  background: var(--pageBG);
+}
+
+html[data-brand-handoff]::view-transition-group(brand-title),
+html[data-brand-handoff]::view-transition-group(brand-signature) {
+  animation-duration: 700ms;
+  animation-timing-function: cubic-bezier(0.35, 0, 0.65, 1);
+}
+
+html[data-brand-handoff]::view-transition-old(brand-title),
+html[data-brand-handoff]::view-transition-new(brand-title),
+html[data-brand-handoff]::view-transition-old(brand-signature),
+html[data-brand-handoff]::view-transition-new(brand-signature) {
+  animation-duration: 400ms;
+  animation-timing-function: ease-in-out;
+}
+
+html[data-brand-handoff]::view-transition-old(brand-signature),
+html[data-brand-handoff]::view-transition-new(brand-signature) {
+  object-fit: none;
+  object-position: center;
+}
+
+html[data-brand-handoff]::view-transition-old(root) {
+  animation: brand-content-out 400ms ease-in-out both;
+}
+
+html[data-brand-handoff]::view-transition-new(root) {
+  animation: brand-content-in 650ms ease-in-out 380ms both;
+}
+
+@keyframes brand-content-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes brand-content-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
