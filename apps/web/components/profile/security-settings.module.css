@@ -100,6 +100,44 @@
 .notice {
   color: var(--systemSecondary);
 }
+.devicesHeader ~ .notice,
+.devicesHeader ~ .error {
+  padding: 16px 20px;
+}
+.skeletonIcon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--systemQuinary);
+  animation: sessionPulse 1.4s ease-in-out infinite;
+}
+.skeletonLines {
+  display: grid;
+  gap: 8px;
+}
+.skeletonLine,
+.skeletonShort {
+  height: 12px;
+  border-radius: 999px;
+  background: var(--systemQuinary);
+  animation: sessionPulse 1.4s ease-in-out infinite;
+}
+.skeletonLine {
+  width: min(220px, 60%);
+}
+.skeletonShort {
+  width: min(140px, 40%);
+  height: 10px;
+}
+@keyframes sessionPulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
 .qr {
   width: 180px;
   height: 180px;

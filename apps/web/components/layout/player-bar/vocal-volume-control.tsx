@@ -22,6 +22,8 @@ const CLOSE_DURATION_MS = 400;
 const AUTO_REDUCE_DURATION_MS = 1000;
 const AUTO_REDUCE_TARGET = 0.1;
 const MAX_STRETCH = 0.07;
+const COMPACT_DRAG_THRESHOLD_PX = 4;
+const COMPACT_DRAG_TRANSITION_MS = 220;
 const ACTIVE_ICON_COLOR = "var(--systemPrimary-onLight)";
 const INACTIVE_ICON_COLOR = "var(--systemPrimary-onDark)";
 
@@ -36,6 +38,13 @@ const rubberBand = (distance: number) =>
 type SliderBounds = {
   bottom: number;
   height: number;
+};
+
+type CompactDragState = {
+  startY: number;
+  startValue: number;
+  height: number;
+  hasDragged: boolean;
 };
 
 function VocalMark({ isOpen = false }) {
@@ -76,18 +85,20 @@ export function VocalVolumeControl({
   const dragValueRef = useRef<number | null>(null);
   const isDraggingRef = useRef(false);
   const sliderBoundsRef = useRef<SliderBounds | null>(null);
+  const compactDragRef = useRef<CompactDragState | null>(null);
   const openTimerRef = useRef<number | null>(null);
   const fillRef = useRef<HTMLSpanElement>(null);
   const iconRef = useRef<HTMLSpanElement>(null);
   const [isOpening, setIsOpening] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
-  const valueRef = useRef(value);
+  const [isDragging, setIsDragging] = useState(false);
+  const visualValueRef = useRef(value);
   const percent = Math.round(clamp(value) * 100);
   const iconColor = percent >= 24 ? ACTIVE_ICON_COLOR : INACTIVE_ICON_COLOR;
   const previewValueChange = onPreviewValueChange;
 
   useEffect(() => {
-    valueRef.current = value;
+    visualValueRef.current = value;
   }, [value]);
 
   useEffect(() => {
@@ -160,7 +171,9 @@ export function VocalVolumeControl({
   };
 
   const updateDragVisual = (nextValue: number) => {
-    const nextPercent = Math.round(clamp(nextValue) * 100);
+    const clampedValue = clamp(nextValue);
+    visualValueRef.current = clampedValue;
+    const nextPercent = Math.round(clampedValue * 100);
     fillRef.current?.style.setProperty(
       "transform",
       `translate3d(0,0,0) scale3d(1,${nextPercent / 100},1)`,
@@ -171,10 +184,7 @@ export function VocalVolumeControl({
     );
   };
 
-  const setValueFromPointer = (event: PointerEvent<HTMLButtonElement>) => {
-    const bounds = sliderBoundsRef.current;
-    if (!bounds) return;
-    const rawValue = (bounds.bottom - event.clientY) / bounds.height;
+  const applyRawValue = (rawValue: number) => {
     const overflow = rawValue < 0 ? rawValue : rawValue > 1 ? rawValue - 1 : 0;
     const elasticity =
       overflow === 0 ? 0 : Math.sign(overflow) * rubberBand(Math.abs(overflow));
@@ -192,9 +202,32 @@ export function VocalVolumeControl({
     schedulePreview();
   };
 
+  const setValueFromPointer = (event: PointerEvent<HTMLButtonElement>) => {
+    if (compact) {
+      const drag = compactDragRef.current;
+      if (!drag || drag.height <= 0) return;
+      const deltaY = drag.startY - event.clientY;
+      if (!drag.hasDragged && Math.abs(deltaY) < COMPACT_DRAG_THRESHOLD_PX) {
+        return;
+      }
+      if (!drag.hasDragged) {
+        drag.hasDragged = true;
+        setIsDragging(true);
+      }
+      applyRawValue(drag.startValue + deltaY / drag.height);
+      return;
+    }
+
+    const bounds = sliderBoundsRef.current;
+    if (!bounds || bounds.height <= 0) return;
+    applyRawValue((bounds.bottom - event.clientY) / bounds.height);
+  };
+
   const releaseDrag = (event: PointerEvent<HTMLButtonElement>) => {
     if (!isDraggingRef.current) return;
     isDraggingRef.current = false;
+    compactDragRef.current = null;
+    setIsDragging(false);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -202,7 +235,7 @@ export function VocalVolumeControl({
     const nextValue = flushDragValue();
     controlRef.current?.style.setProperty(
       "--vocal-volume-transition",
-      `${CLOSE_DURATION_MS}ms`,
+      compact ? `${COMPACT_DRAG_TRANSITION_MS}ms` : `${CLOSE_DURATION_MS}ms`,
     );
     controlRef.current?.style.setProperty("--vocal-volume-stretch", "1");
     if (nextValue !== null && isAtFullVolume(nextValue)) collapseControl();
@@ -230,7 +263,7 @@ export function VocalVolumeControl({
 
   const startAutoReduce = () => {
     setIsOpening(false);
-    const startValue = valueRef.current;
+    const startValue = visualValueRef.current;
     const targetValue = Math.min(startValue, AUTO_REDUCE_TARGET);
     if (startValue <= targetValue) return;
     const startedAt = performance.now();
@@ -274,7 +307,9 @@ export function VocalVolumeControl({
         className={`relative grid place-items-center overflow-hidden bg-(--systemQuaternary-onDark) text-(--systemPrimary-onDark) backdrop-blur-[60px] backface-hidden will-change-transform transform-[translate3d(0,0,0)_scale3d(1,var(--vocal-volume-stretch,1),1)] origin-(--vocal-volume-stretch-origin,center) transition-[width,height,border-radius,transform] duration-(--vocal-volume-transition,320ms) ease-out ${
           isExpanded
             ? compact
-              ? "h-22 w-9.5 rounded-[999px]"
+              ? isDragging
+                ? "h-27.5 w-11.5 rounded-[999px]"
+                : "h-22 w-9.5 rounded-[999px]"
               : "h-27.5 w-10.5 rounded-[999px]"
             : compact
               ? "size-9 rounded-full hover:bg-(--systemTertiary-onDark)"
@@ -304,6 +339,20 @@ export function VocalVolumeControl({
             onPointerDown={(event) => {
               stopAutoReduce();
               isDraggingRef.current = true;
+              event.currentTarget.setPointerCapture(event.pointerId);
+              if (compact) {
+                compactDragRef.current = {
+                  startY: event.clientY,
+                  startValue: visualValueRef.current,
+                  height: event.currentTarget.offsetHeight,
+                  hasDragged: false,
+                };
+                controlRef.current?.style.setProperty(
+                  "--vocal-volume-transition",
+                  `${COMPACT_DRAG_TRANSITION_MS}ms`,
+                );
+                return;
+              }
               const bounds = event.currentTarget.getBoundingClientRect();
               sliderBoundsRef.current = {
                 bottom: bounds.bottom,
@@ -313,7 +362,6 @@ export function VocalVolumeControl({
                 "--vocal-volume-transition",
                 "0ms",
               );
-              event.currentTarget.setPointerCapture(event.pointerId);
               setValueFromPointer(event);
             }}
             onPointerMove={(event) => {

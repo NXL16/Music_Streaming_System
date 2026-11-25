@@ -74,9 +74,17 @@ export function SessionsPanel({ className = "mt-6" }: SessionsPanelProps) {
         </p>
       )}
       {loading && sessions.length === 0 && (
-        <p role="status" className={styles.notice}>
-          Loading devices...
-        </p>
+        <div role="status" aria-label="Loading devices">
+          {[0, 1].map((item) => (
+            <div key={item} className={styles.device} aria-hidden="true">
+              <span className={styles.skeletonIcon} />
+              <div className={styles.skeletonLines}>
+                <span className={styles.skeletonLine} />
+                <span className={styles.skeletonShort} />
+              </div>
+            </div>
+          ))}
+        </div>
       )}
       {!loading && !error && sessions.length === 0 && (
         <p className={styles.notice}>No signed-in devices.</p>
