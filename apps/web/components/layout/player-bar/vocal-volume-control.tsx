@@ -12,6 +12,8 @@ type VocalVolumeControlProps = {
   onExpandedChange: (expanded: boolean) => void;
   onValueChange: (value: number) => void;
   onPreviewValueChange: (value: number) => void;
+  className?: string;
+  compact?: boolean;
 };
 
 const OPEN_DURATION_MS = 161;
@@ -65,6 +67,8 @@ export function VocalVolumeControl({
   onExpandedChange,
   onValueChange,
   onPreviewValueChange,
+  className = "absolute inset-e-5 top-5 z-[calc(var(--z-default)+1)]",
+  compact = false,
 }: VocalVolumeControlProps) {
   const controlRef = useRef<HTMLDivElement>(null);
   const rampFrameRef = useRef<number | null>(null);
@@ -264,10 +268,18 @@ export function VocalVolumeControl({
   const showSlider = isExpanded || isClosing;
 
   return (
-    <div className="absolute inset-e-5 top-5 z-[calc(var(--z-default)+1)]">
+    <div data-vocal-volume-control className={className}>
       <div
         ref={controlRef}
-        className={`relative grid place-items-center overflow-hidden bg-(--systemQuaternary-onDark) text-(--systemPrimary-onDark) backdrop-blur-[60px] backface-hidden will-change-transform transform-[translate3d(0,0,0)_scale3d(1,var(--vocal-volume-stretch,1),1)] origin-(--vocal-volume-stretch-origin,center) transition-[width,height,border-radius,transform] duration-(--vocal-volume-transition,320ms) ease-out ${isExpanded ? "h-27.5 w-10.5 rounded-[999px]" : "size-10 rounded-full hover:bg-(--systemTertiary-onDark)"}`}
+        className={`relative grid place-items-center overflow-hidden bg-(--systemQuaternary-onDark) text-(--systemPrimary-onDark) backdrop-blur-[60px] backface-hidden will-change-transform transform-[translate3d(0,0,0)_scale3d(1,var(--vocal-volume-stretch,1),1)] origin-(--vocal-volume-stretch-origin,center) transition-[width,height,border-radius,transform] duration-(--vocal-volume-transition,320ms) ease-out ${
+          isExpanded
+            ? compact
+              ? "h-22 w-9.5 rounded-[999px]"
+              : "h-27.5 w-10.5 rounded-[999px]"
+            : compact
+              ? "size-9 rounded-full hover:bg-(--systemTertiary-onDark)"
+              : "size-10 rounded-full hover:bg-(--systemTertiary-onDark)"
+        }`}
       >
         {!showSlider ? (
           <button

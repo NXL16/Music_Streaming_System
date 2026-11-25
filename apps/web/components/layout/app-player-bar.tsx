@@ -985,6 +985,12 @@ export function AppPlayerBar() {
           onTogglePlayback={handleTogglePlayback}
           onPrevious={handlePrevious}
           onNext={handleNext}
+          isStemActive={isStemActive}
+          vocalVolume={vocalVolume}
+          isVocalControlExpanded={isVocalControlExpanded}
+          onVocalControlExpandedChange={setIsVocalControlExpanded}
+          onSetVocalVolume={setVocalVolume}
+          onPreviewVocalVolume={previewVocalVolume}
         />
       ) : (
         <DesktopPlayerBar

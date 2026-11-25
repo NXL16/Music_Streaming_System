@@ -20,6 +20,7 @@ import AmpVolumeControl from "@/components/custom-elements/AmpVolumeControl";
 import PlaybackItem from "./compact/playback-item";
 import MobileQueue from "./compact/mobile-queue";
 import MobileLyrics from "./compact/mobile-lyrics";
+import { VocalVolumeControl } from "./vocal-volume-control";
 
 const MODAL_DRAG_SLOP = 6;
 const MODAL_DISMISS_DISTANCE = 400;
@@ -38,6 +39,12 @@ type CompactPlayerBarProps = {
   onPrevious: () => void;
   onNext: () => void;
   onOpenVideoPlayer: () => void;
+  isStemActive: boolean;
+  vocalVolume: number;
+  isVocalControlExpanded: boolean;
+  onVocalControlExpandedChange: (expanded: boolean) => void;
+  onSetVocalVolume: (volume: number) => void;
+  onPreviewVocalVolume: (volume: number) => void;
 };
 
 type ModalDragState = {
@@ -51,7 +58,7 @@ type ModalDragState = {
 function preservesNativeGesture(target: HTMLElement) {
   return Boolean(
     target.closest(
-      ".up-next-mobile-queue, amp-lyrics, amp-playback-controls-progress, amp-volume-control, .queue-drag-handle",
+      ".up-next-mobile-queue, amp-lyrics, amp-playback-controls-progress, amp-volume-control, .queue-drag-handle, [data-vocal-volume-control]",
     ),
   );
 }
@@ -68,6 +75,12 @@ export function CompactPlayerBar({
   onPrevious,
   onNext,
   onOpenVideoPlayer,
+  isStemActive,
+  vocalVolume,
+  isVocalControlExpanded,
+  onVocalControlExpandedChange,
+  onSetVocalVolume,
+  onPreviewVocalVolume,
 }: CompactPlayerBarProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const slidingModalRef = useRef<HTMLDivElement>(null);
@@ -513,7 +526,19 @@ export function CompactPlayerBar({
                       </div>
 
                       <div className="now-playing-controls touch-none">
-                        <div className="playback-controls">
+                        <div className="playback-controls relative">
+                          {isStemActive && activeView === "lyrics" && (
+                            <VocalVolumeControl
+                              compact
+                              className="absolute bottom-full inset-e-0 mb-4 z-[calc(var(--z-default)+1)]"
+                              value={vocalVolume}
+                              isExpanded={isVocalControlExpanded}
+                              onExpandedChange={onVocalControlExpandedChange}
+                              onValueChange={onSetVocalVolume}
+                              onPreviewValueChange={onPreviewVocalVolume}
+                            />
+                          )}
+
                           <AmpPlaybackControlsProgress
                             inDetailView
                             audioRef={audioRef}
