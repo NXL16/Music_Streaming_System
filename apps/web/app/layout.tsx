@@ -13,8 +13,23 @@ import { DeleteLibraryConfirmationDialog } from "@/components/songs/delete-libra
 import { SharedFeedbackDialog } from "@/components/reports/shared-feedback-dialog";
 
 export const metadata: Metadata = {
-  title: "Music App",
-  description: "Music streaming system",
+  metadataBase: new URL("https://music.404hz.me"),
+  title: {
+    default: "404hz Melodies",
+    template: "%s | 404hz Melodies",
+  },
+  description:
+    "404hz Melodies — Nghe nhạc trực tuyến chất lượng cao, khám phá album, playlist và nghệ sĩ yêu thích.",
+  keywords: ["404hz", "404hz Melodies", "music streaming", "nghe nhạc trực tuyến"],
+  openGraph: {
+    title: "404hz Melodies",
+    description:
+      "404hz Melodies — Nghe nhạc trực tuyến chất lượng cao, khám phá album, playlist và nghệ sĩ yêu thích.",
+    url: "https://music.404hz.me",
+    siteName: "404hz Melodies",
+    locale: "vi_VN",
+    type: "website",
+  },
 };
 
 export default function RootLayout({
