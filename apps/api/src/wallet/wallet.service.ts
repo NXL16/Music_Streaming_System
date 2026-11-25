@@ -5,6 +5,8 @@ import type { ClientGrpc } from '@nestjs/microservices';
 import { grpcFirstValueFrom } from '../common/utils/grpc-timeout';
 import type {
   BankAccountResponse,
+  CoinRateResponse,
+  PaymentOrderResponse,
   DebitWalletRequest,
   DebitWalletResponse,
   DepositOrderRequest,
@@ -50,6 +52,26 @@ export class WalletService implements OnModuleInit {
       coinBalance: balance.coinBalance ?? 0,
       frozenBalance: balance.frozenBalance ?? 0,
     };
+  }
+
+  async getCoinRate(userId: string): Promise<CoinRateResponse> {
+    return grpcFirstValueFrom(
+      this.walletClient.getCoinRate({ userId }, this.metadata()),
+    );
+  }
+
+  async getPaymentOrder(
+    userId: string,
+    kind: string,
+    reference: string,
+  ): Promise<PaymentOrderResponse> {
+    return grpcFirstValueFrom(
+      this.walletClient.getPaymentOrder(
+        { userId, kind, reference },
+        this.metadata(),
+      ),
+      35_000,
+    );
   }
 
   async debit(payload: DebitWalletRequest): Promise<DebitWalletResponse> {

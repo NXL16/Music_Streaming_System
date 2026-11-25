@@ -8,6 +8,7 @@ type ContentDialogProps = {
   subtitle: ReactNode;
   children: ReactNode;
   hideGradient?: boolean;
+  className?: string;
   onClose: () => void;
 };
 
@@ -17,6 +18,7 @@ export function ContentDialog({
   subtitle,
   children,
   hideGradient = false,
+  className = "",
   onClose,
 }: ContentDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -33,7 +35,7 @@ export function ContentDialog({
   return (
     <dialog
       ref={dialogRef}
-      className="lyrics-box"
+      className={`lyrics-box ${className}`}
       aria-labelledby={titleId}
       onCancel={(event) => {
         event.preventDefault();

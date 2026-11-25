@@ -1,5 +1,7 @@
 import {
   Body,
+  BadRequestException,
+  Param,
   Controller,
   Get,
   HttpStatus,
@@ -34,6 +36,32 @@ export class WalletController {
   async getBalance(@Req() req: Request) {
     const user = req.user as JwtUser;
     return this.walletService.getBalance(user.userId);
+  }
+
+  @Get('coin-rate')
+  @UseGuards(StrictJwtAuthGuard)
+  async getCoinRate(@Req() req: Request) {
+    return this.walletService.getCoinRate((req.user as JwtUser).userId);
+  }
+
+  @Get('orders/:kind/:reference')
+  @UseGuards(StrictJwtAuthGuard)
+  async getPaymentOrder(
+    @Req() req: Request,
+    @Param('kind') kind: string,
+    @Param('reference') reference: string,
+  ) {
+    if (
+      !['DEPOSIT', 'WITHDRAWAL'].includes(kind) ||
+      !/^[A-Za-z0-9_-]{1,128}$/.test(reference)
+    ) {
+      throw new BadRequestException('Invalid payment reference.');
+    }
+    return this.walletService.getPaymentOrder(
+      (req.user as JwtUser).userId,
+      kind,
+      reference,
+    );
   }
 
   @Get('withdraw/status')

@@ -51,14 +51,13 @@ func roomTopUpAmount(id string) int64 {
 }
 
 func (s *WalletService) RoomTopUpCatalog(ctx context.Context) ([]RoomTopUpPackage, error) {
-	var rateVnd, rateCoin int64
-	if err := s.db.QueryRowContext(ctx, `SELECT amount_vnd, coin_amount FROM coin_rates
-		WHERE is_active = true AND effective_at <= NOW() ORDER BY effective_at DESC LIMIT 1`).Scan(&rateVnd, &rateCoin); err != nil {
+	rate, err := s.GetCoinRate(ctx, &walletpb.GetBalanceRequest{})
+	if err != nil {
 		return nil, err
 	}
 	packages := make([]RoomTopUpPackage, 0, 6)
 	for _, amount := range []int64{10000, 20000, 50000, 100000, 200000, 500000} {
-		coins, err := calculateCoinAmount(amount, rateVnd, rateCoin)
+		coins, err := calculateCoinAmount(amount, rate.AmountVnd, rate.CoinAmount)
 		if err != nil {
 			return nil, err
 		}

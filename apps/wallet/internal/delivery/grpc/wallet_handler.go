@@ -56,3 +56,10 @@ func (h *WalletGRPCHandler) LinkBankAccount(ctx context.Context, req *walletpb.L
 func (h *WalletGRPCHandler) GetUserBankAccounts(ctx context.Context, req *walletpb.GetUserBankAccountsRequest) (*walletpb.GetUserBankAccountsResponse, error) {
 	return h.walletService.GetUserBankAccounts(ctx, req)
 }
+
+func (h *WalletGRPCHandler) GetCoinRate(ctx context.Context, req *walletpb.GetBalanceRequest) (*walletpb.CoinRateResponse, error) {
+	return h.walletService.GetCoinRate(ctx, req)
+}
+func (h *WalletGRPCHandler) GetPaymentOrder(ctx context.Context, req *walletpb.GetPaymentOrderRequest) (*walletpb.PaymentOrderResponse, error) {
+	return h.walletService.GetPaymentOrder(ctx, req)
+}

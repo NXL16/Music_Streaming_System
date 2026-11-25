@@ -7,6 +7,8 @@ option go_package = "Music_Streaming_System/packages/shared-proto/wallet";
 service WalletService {
   rpc CreateWallet (CreateWalletRequest) returns (CreateWalletResponse);
   rpc GetBalance (GetBalanceRequest) returns (GetBalanceResponse);
+  rpc GetCoinRate (GetBalanceRequest) returns (CoinRateResponse);
+  rpc GetPaymentOrder (GetPaymentOrderRequest) returns (PaymentOrderResponse);
   rpc DebitWallet (DebitWalletRequest) returns (DebitWalletResponse);
   rpc CreateDepositOrder (DepositOrderRequest) returns (DepositOrderResponse);
   rpc VerifyNFBankAccount (VerifyNFBankAccountRequest) returns (VerifyNFBankAccountResponse);
@@ -33,6 +35,27 @@ message GetBalanceRequest {
 message GetBalanceResponse {
   int64 coin_balance   = 1;
   int64 frozen_balance = 2;
+}
+
+message CoinRateResponse {
+  int64 amount_vnd = 1;
+  int64 coin_amount = 2;
+}
+
+message GetPaymentOrderRequest {
+  string user_id = 1;
+  string reference = 2;
+  string kind = 3;
+}
+
+message PaymentOrderResponse {
+  string order_id = 1;
+  string kind = 2;
+  string status = 3;
+  int64 amount_vnd = 4;
+  int64 coin_amount = 5;
+  string provider = 6;
+  int64 created_at = 7;
 }
 
 message DebitWalletRequest {

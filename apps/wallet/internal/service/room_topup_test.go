@@ -11,9 +11,10 @@ import (
 )
 
 type topUpConnector struct {
-	values   []driver.Value
-	wantUser string
-	seen     *bool
+	values         []driver.Value
+	wantUser       string
+	wantWithdrawal bool
+	seen           *bool
 }
 
 func (c topUpConnector) Connect(context.Context) (driver.Conn, error) { return &topUpConn{c}, nil }
@@ -36,7 +37,11 @@ func (c *topUpConn) Close() error              { return nil }
 func (c *topUpConn) Begin() (driver.Tx, error) { return nil, errors.New("unexpected write") }
 func (c *topUpConn) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	if c.wantUser != "" {
-		if !strings.Contains(query, "WHERE user_id = $1 AND order_code = $2") || len(args) != 2 || args[0].Value != c.wantUser {
+		clause := "WHERE user_id = $1 AND order_code = $2"
+		if c.wantWithdrawal {
+			clause = "WHERE user_id=$1 AND (order_code=$2 OR idempotency_key=$2)"
+		}
+		if !strings.Contains(query, clause) || len(args) != 2 || args[0].Value != c.wantUser {
 			return nil, errors.New("unbound payer")
 		}
 	}
@@ -50,6 +55,9 @@ type topUpRows struct {
 }
 
 func (r *topUpRows) Columns() []string {
+	if len(r.values) == 5 {
+		return []string{"order_code", "status", "amount_vnd", "coin_amount", "created_at"}
+	}
 	if len(r.values) == 2 {
 		return []string{"amount_vnd", "coin_amount"}
 	}

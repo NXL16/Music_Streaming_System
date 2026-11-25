@@ -1,8 +1,15 @@
 import { http } from "@/lib/api/http";
-import { getCachedQuery, invalidateCachedQuery } from "@/lib/api/query-cache";
+import {
+  getCachedQuery,
+  getCachedQuerySnapshot,
+  invalidateCachedQuery,
+  setCachedQuery,
+} from "@/lib/api/query-cache";
 
 const WALLET_BALANCE_KEY = "wallet:balance";
 const WALLET_BALANCE_TTL_MS = 30_000;
+const WITHDRAW_STATUS_KEY = "wallet:withdraw-status";
+const WITHDRAW_STATUS_TTL_MS = 5 * 60_000;
 
 export type WalletBalanceResponse = {
   coinBalance: number;
@@ -57,16 +64,45 @@ export async function refreshWalletBalance() {
   return getWalletBalance();
 }
 
-export async function getWithdrawStatus() {
-  return (await http.get<GetWithdrawStatusResponse>("/wallet/withdraw/status")).data;
+export function getWithdrawStatusSnapshot() {
+  return getCachedQuerySnapshot<GetWithdrawStatusResponse>(WITHDRAW_STATUS_KEY);
+}
+
+export function cacheWithdrawStatus(data: GetWithdrawStatusResponse) {
+  setCachedQuery(WITHDRAW_STATUS_KEY, data, WITHDRAW_STATUS_TTL_MS);
+}
+
+export function getWithdrawStatus() {
+  return getCachedQuery(
+    WITHDRAW_STATUS_KEY,
+    async (signal) =>
+      (
+        await http.get<GetWithdrawStatusResponse>("/wallet/withdraw/status", {
+          signal,
+        })
+      ).data,
+    WITHDRAW_STATUS_TTL_MS,
+  );
 }
 
 export async function setWithdrawPin(pin: string) {
-  return (await http.post<{ success: boolean }>("/wallet/withdraw/pin", { pin })).data;
+  const response = (
+    await http.post<{ success: boolean }>("/wallet/withdraw/pin", { pin })
+  ).data;
+  invalidateCachedQuery(WITHDRAW_STATUS_KEY);
+  return response;
 }
 
-export async function linkBankAccount(payload: { accountNumber: string; pin: string; bankCode?: string }) {
-  return (await http.post<BankAccount>("/wallet/bank-accounts/link", payload)).data;
+export async function linkBankAccount(payload: {
+  accountNumber: string;
+  pin: string;
+  bankCode?: string;
+}) {
+  const response = (
+    await http.post<BankAccount>("/wallet/bank-accounts/link", payload)
+  ).data;
+  invalidateCachedQuery(WITHDRAW_STATUS_KEY);
+  return response;
 }
 
 export async function createDepositOrder(payload: CreateDepositPayload) {
@@ -74,7 +110,6 @@ export async function createDepositOrder(payload: CreateDepositPayload) {
     "/wallet/deposit",
     payload,
   );
-  invalidateCachedQuery(WALLET_BALANCE_KEY);
   return response.data;
 }
 
@@ -100,4 +135,31 @@ export async function createNFBankWithdrawal(payload: {
   );
   invalidateCachedQuery(WALLET_BALANCE_KEY);
   return response.data;
+}
+
+export type CoinRate = { amountVnd: number; coinAmount: number };
+export type PaymentKind = "DEPOSIT" | "WITHDRAWAL";
+export type PaymentOrder = {
+  orderId: string;
+  kind: PaymentKind;
+  status: "PENDING" | "PROCESSING" | "SUCCESS" | "FAILED";
+  amountVnd: number;
+  coinAmount: number;
+  provider: string;
+  createdAt: number;
+};
+export async function getCoinRate(signal?: AbortSignal) {
+  return (await http.get<CoinRate>("/wallet/coin-rate", { signal })).data;
+}
+export async function getPaymentOrder(
+  kind: PaymentKind,
+  reference: string,
+  signal?: AbortSignal,
+) {
+  return (
+    await http.get<PaymentOrder>(
+      "/wallet/orders/" + kind + "/" + encodeURIComponent(reference),
+      { signal, timeout: 40_000 },
+    )
+  ).data;
 }

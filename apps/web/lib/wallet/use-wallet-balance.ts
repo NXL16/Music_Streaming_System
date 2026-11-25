@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { getApiErrorMessage } from "@/lib/api/api-error";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import {
   getWalletBalance,
@@ -18,42 +17,53 @@ export function useWalletBalance() {
   const [loading, setLoading] = useMinimumLoadingState();
   const [error, setError] = useState("");
   const requestRunning = useRef(false);
+  const refreshQueued = useRef(false);
 
-  const loadBalance = useCallback(async (isSilent = false, forceRefresh = false) => {
-    if (status !== "authenticated" || requestRunning.current) {
-      return;
-    }
-    requestRunning.current = true;
-
-    if (!isSilent) {
-      setLoading(true);
-    }
-    setError("");
-
-    try {
-      const data = forceRefresh
-        ? await refreshWalletBalance()
-        : await getWalletBalance();
-      setBalance(data);
-      window.dispatchEvent(
-        new CustomEvent<WalletBalanceResponse>(WALLET_BALANCE_UPDATED_EVENT, {
-          detail: data,
-        }),
-      );
-    } catch (err) {
-      setError(
-        getApiErrorMessage(
-          err,
-          "Không thể tải thông tin số dư ví của bạn."
-        )
-      );
-    } finally {
-      requestRunning.current = false;
-      if (!isSilent) {
-        setLoading(false);
+  const loadBalance = useCallback(
+    async (isSilent = false, forceRefresh = false): Promise<void> => {
+      const session = useAuthStore.getState();
+      if (status !== "authenticated" || session.status !== "authenticated")
+        return;
+      if (requestRunning.current) {
+        if (forceRefresh) refreshQueued.current = true;
+        return;
       }
-    }
-  }, [setLoading, status]);
+      requestRunning.current = true;
+      if (!isSilent) setLoading(true);
+      let force = forceRefresh;
+      try {
+        do {
+          refreshQueued.current = false;
+          setError("");
+          try {
+            const data = force
+              ? await refreshWalletBalance()
+              : await getWalletBalance();
+            const current = useAuthStore.getState();
+            if (
+              current.user?.userId !== session.user?.userId ||
+              current.status !== "authenticated"
+            )
+              return;
+            setBalance(data);
+            window.dispatchEvent(
+              new CustomEvent<WalletBalanceResponse>(
+                WALLET_BALANCE_UPDATED_EVENT,
+                { detail: data },
+              ),
+            );
+          } catch {
+            setError("Could not load your wallet balance. Please try again.");
+          }
+          force = true;
+        } while (refreshQueued.current);
+      } finally {
+        requestRunning.current = false;
+        if (!isSilent) setLoading(false);
+      }
+    },
+    [setLoading, status],
+  );
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -65,7 +75,8 @@ export function useWalletBalance() {
 
   useEffect(() => {
     function handleBalanceUpdated(event: Event) {
-      const updatedBalance = (event as CustomEvent<WalletBalanceResponse>).detail;
+      const updatedBalance = (event as CustomEvent<WalletBalanceResponse>)
+        .detail;
       if (updatedBalance) setBalance(updatedBalance);
     }
 
@@ -78,14 +89,25 @@ export function useWalletBalance() {
   }, []);
 
   useEffect(() => {
-    const refreshVisible = () => { if (document.visibilityState === "visible") void loadBalance(true, true); };
+    const refreshVisible = () => {
+      if (document.visibilityState === "visible") void loadBalance(true, true);
+    };
     window.addEventListener("focus", refreshVisible);
     document.addEventListener("visibilitychange", refreshVisible);
-    return () => { window.removeEventListener("focus", refreshVisible); document.removeEventListener("visibilitychange", refreshVisible); };
+    return () => {
+      window.removeEventListener("focus", refreshVisible);
+      document.removeEventListener("visibilitychange", refreshVisible);
+    };
   }, [loadBalance]);
 
-  const refreshBalance = useCallback(() => void loadBalance(true, true), [loadBalance]);
-  const refreshBalanceWithLoading = useCallback(() => void loadBalance(false), [loadBalance]);
+  const refreshBalance = useCallback(
+    () => void loadBalance(true, true),
+    [loadBalance],
+  );
+  const refreshBalanceWithLoading = useCallback(
+    () => void loadBalance(false, true),
+    [loadBalance],
+  );
 
   return {
     balance,

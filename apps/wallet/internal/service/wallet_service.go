@@ -20,6 +20,8 @@ import (
 	"Music_Streaming_System/apps/wallet/internal/config"
 	"Music_Streaming_System/apps/wallet/internal/domain"
 	walletpb "Music_Streaming_System/packages/shared-proto/wallet"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // WalletService hiện thực hóa gRPC Server interface được sinh ra từ file .proto
@@ -265,25 +267,11 @@ func (s *WalletService) CreateDepositOrder(ctx context.Context, req *walletpb.De
 // order is persisted. Orders retain that calculated coin amount, so a later
 // rate change cannot alter a payment that is already in progress.
 func (s *WalletService) coinAmountForDeposit(ctx context.Context, amountVnd int64) (int64, error) {
-	var rateVnd, rateCoin int64
-	err := s.db.QueryRowContext(ctx, `
-		SELECT amount_vnd, coin_amount
-		FROM coin_rates
-		WHERE is_active = true AND effective_at <= NOW()
-		ORDER BY effective_at DESC
-		LIMIT 1`).Scan(&rateVnd, &rateCoin)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, ErrActiveCoinRateNotFound
-	}
-	if err != nil {
-		return 0, fmt.Errorf("fetch active exchange rate: %w", err)
-	}
-
-	coinAmount, err := calculateCoinAmount(amountVnd, rateVnd, rateCoin)
+	rate, err := s.GetCoinRate(ctx, &walletpb.GetBalanceRequest{})
 	if err != nil {
 		return 0, err
 	}
-	return coinAmount, nil
+	return calculateCoinAmount(amountVnd, rate.AmountVnd, rate.CoinAmount)
 }
 
 func calculateCoinAmount(amountVnd, rateVnd, rateCoin int64) (int64, error) {
@@ -307,18 +295,11 @@ func calculateCoinAmount(amountVnd, rateVnd, rateCoin int64) (int64, error) {
 // coinAmountForWithdrawal rounds up so a withdrawal can never pay out more VND
 // than the Coin value debited from the user's wallet.
 func (s *WalletService) coinAmountForWithdrawal(ctx context.Context, amountVnd int64) (int64, error) {
-	var rateVnd, rateCoin int64
-	err := s.db.QueryRowContext(ctx, `
-		SELECT amount_vnd, coin_amount FROM coin_rates
-		WHERE is_active = true AND effective_at <= NOW()
-		ORDER BY effective_at DESC LIMIT 1`).Scan(&rateVnd, &rateCoin)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, ErrActiveCoinRateNotFound
-	}
+	rate, err := s.GetCoinRate(ctx, &walletpb.GetBalanceRequest{})
 	if err != nil {
-		return 0, fmt.Errorf("fetch active exchange rate: %w", err)
+		return 0, err
 	}
-	return calculateWithdrawalCoinAmount(amountVnd, rateVnd, rateCoin)
+	return calculateWithdrawalCoinAmount(amountVnd, rate.AmountVnd, rate.CoinAmount)
 }
 
 func calculateWithdrawalCoinAmount(amountVnd, rateVnd, rateCoin int64) (int64, error) {
@@ -510,6 +491,9 @@ func (s *WalletService) processDepositWebhook(ctx context.Context, orderID strin
 		return nil
 	}
 
+	if referenceType == "MOMO_ORDER" && !isFinalMomoResult(resultCode) {
+		return nil
+	}
 	status := domain.OrderStatusFailed
 	if resultCode == 0 {
 		status = domain.OrderStatusSuccess
@@ -770,7 +754,7 @@ func (s *WalletService) CreateNFBankWithdrawal(ctx context.Context, req *walletp
 		return nil, fmt.Errorf("wallet not found: %w", err)
 	}
 	if req.Pin == "" || !s.verifyPIN(walletForPin, req.Pin) {
-		return nil, errors.New("Mã PIN rút tiền không chính xác")
+		return nil, status.Error(codes.InvalidArgument, "The withdrawal PIN is incorrect.")
 	}
 
 	// A retry must not require NF-Bank to be available. It also must be scoped
@@ -822,7 +806,7 @@ func (s *WalletService) CreateNFBankWithdrawal(ctx context.Context, req *walletp
 		return nil, errors.New("wallet signature validation failed")
 	}
 	if wallet.CoinBalance < coinAmount {
-		return nil, errors.New("insufficient balance")
+		return nil, status.Error(codes.FailedPrecondition, "Insufficient available Coins.")
 	}
 	orderCode, err := newPaymentOrderCode("NFBANK-WITHDRAW")
 	if err != nil {
@@ -930,6 +914,7 @@ func (s *WalletService) postJSON(
 	endpoint string,
 	payload any,
 	response any,
+	timeout ...time.Duration,
 ) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -946,7 +931,13 @@ func (s *WalletService) postJSON(
 	}
 	request.Header.Set("Content-Type", "application/json")
 
-	result, err := s.httpClient.Do(request)
+	client := s.httpClient
+	if len(timeout) > 0 {
+		copy := *client
+		copy.Timeout = timeout[0]
+		client = &copy
+	}
+	result, err := client.Do(request)
 	if err != nil {
 		return fmt.Errorf("send request: %w", err)
 	}

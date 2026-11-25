@@ -37,7 +37,7 @@ type MomoWebhookPayload struct {
 	OrderInfo    string `json:"orderInfo"`
 	OrderType    string `json:"orderType"`
 	TransId      int64  `json:"transId"`
-	ResultCode   int    `json:"resultCode"` // 0 = Thành công, khác 0 = Thất bại
+	ResultCode   int    `json:"resultCode"`
 	Message      string `json:"message"`
 	PayType      string `json:"payType"`
 	ExtraData    string `json:"extraData"`
@@ -65,11 +65,7 @@ func (h *MomoHTTPHandler) HandleWebhook(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if payload.ResultCode == 0 {
-		fmt.Printf("[SUCCESS] Đã xử lý nạp tiền thành công cho đơn hàng MoMo: %s\n", payload.OrderId)
-	} else {
-		fmt.Printf("[FAILED] Đơn hàng MoMo %s thanh toán thất bại với ResultCode: %d, Message: %s\n", payload.OrderId, payload.ResultCode, payload.Message)
-	}
+	fmt.Printf("[MoMo] Processed payment notification: order=%s resultCode=%d\n", payload.OrderId, payload.ResultCode)
 
 	// Trả về 204 No Content cho MoMo biết đã nhận và xử lý xong để họ dừng việc retry gửi IPN
 	c.Status(http.StatusNoContent)
