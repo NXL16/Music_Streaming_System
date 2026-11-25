@@ -257,41 +257,55 @@ export class UsersService {
     tokenHash: string,
     expiresAt: Date,
   ): Promise<void> {
-    await this.prisma.$transaction([
-      this.prisma.passwordResetToken.updateMany({
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockPasswordResetUser(tx, userId);
+      await tx.passwordResetToken.updateMany({
         where: { userId, usedAt: null },
         data: { usedAt: new Date() },
-      }),
-      this.prisma.passwordResetToken.create({
+      });
+      await tx.passwordResetToken.create({
         data: {
           userId,
           tokenHash,
           expiresAt,
         },
-      }),
-    ]);
+      });
+    });
   }
 
-  async consumePasswordResetToken(
-    tokenHash: string,
-  ): Promise<AuthUserRecord | null> {
-    const now = new Date();
+  async isPasswordResetTokenValid(tokenHash: string): Promise<boolean> {
+    const token = await this.prisma.passwordResetToken.findFirst({
+      where: {
+        tokenHash,
+        usedAt: null,
+        expiresAt: { gt: new Date() },
+        user: { isActive: true },
+      },
+      select: { id: true },
+    });
+    return token !== null;
+  }
 
+  async resetPasswordWithToken(
+    tokenHash: string,
+    newPassword: string,
+  ): Promise<UserEntity | null> {
     return this.prisma.$transaction(async (tx) => {
       const token = await tx.passwordResetToken.findUnique({
         where: { tokenHash },
-        include: { user: true },
+        select: { id: true, userId: true },
       });
 
-      if (!token || token.usedAt || token.expiresAt <= now) {
-        return null;
-      }
+      if (!token) return null;
+      await this.lockPasswordResetUser(tx, token.userId);
+      const now = new Date();
 
       const consumed = await tx.passwordResetToken.updateMany({
         where: {
           id: token.id,
           usedAt: null,
           expiresAt: { gt: now },
+          user: { isActive: true },
         },
         data: { usedAt: now },
       });
@@ -300,8 +314,15 @@ export class UsersService {
         return null;
       }
 
-      return token.user;
+      return this.changePassword(token.userId, newPassword, tx);
     });
+  }
+
+  private async lockPasswordResetUser(
+    tx: Prisma.TransactionClient,
+    userId: string,
+  ): Promise<void> {
+    await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
   }
 
   async createEmailVerificationToken(
@@ -482,8 +503,12 @@ export class UsersService {
     return this.mapToEntity(user, null);
   }
 
-  async changePassword(id: string, newPassword: string): Promise<UserEntity> {
-    const user = await this.prisma.user.update({
+  async changePassword(
+    id: string,
+    newPassword: string,
+    database: Pick<Prisma.TransactionClient, 'user'> = this.prisma,
+  ): Promise<UserEntity> {
+    const user = await database.user.update({
       where: { id },
       data: {
         password: newPassword,

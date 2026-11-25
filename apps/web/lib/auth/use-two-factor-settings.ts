@@ -1,8 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import {
+  securityFormError,
+  validateVerificationForm,
+} from "./auth-form-validation";
 import { useRouter } from "next/navigation";
-import { getApiErrorMessage } from "@/lib/api/api-error";
 import {
   beginTwoFactorSetup,
   confirmTwoFactorSetup,
@@ -18,27 +21,14 @@ type SetupData = {
   otpauthUrl: string;
 };
 
-type DisableForm = {
-  password: string;
-  verificationInput: string;
-};
-
-type RegenerateForm = {
-  password: string;
-  verificationInput: string;
-};
-
-const initialDisableForm: DisableForm = {
-  password: "",
-  verificationInput: "",
-};
-
-const initialRegenerateForm: RegenerateForm = {
+type SecurityForm = { password: string; verificationInput: string };
+const initialSecurityForm: SecurityForm = {
   password: "",
   verificationInput: "",
 };
 
 export function useTwoFactorSettings() {
+  const inFlight = useRef(false);
   const router = useRouter();
   const setUser = useAuthStore((state) => state.setUser);
   const clearSession = useAuthStore((state) => state.clearSession);
@@ -46,12 +36,10 @@ export function useTwoFactorSettings() {
   const [setupData, setSetupData] = useState<SetupData | null>(null);
   const [confirmCode, setConfirmCode] = useState("");
   const [disableForm, setDisableForm] =
-    useState<DisableForm>(initialDisableForm);
-  const [regenerateForm, setRegenerateForm] = useState<RegenerateForm>(
-    initialRegenerateForm,
-  );
+    useState<SecurityForm>(initialSecurityForm);
+  const [regenerateForm, setRegenerateForm] =
+    useState<SecurityForm>(initialSecurityForm);
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [loadingAction, setLoadingAction] = useState<
     "setup" | "confirm" | "disable" | "regenerate" | null
@@ -59,12 +47,11 @@ export function useTwoFactorSettings() {
 
   function resetFeedback() {
     setError("");
-    setMessage("");
   }
 
-  function updateDisableField<TField extends keyof DisableForm>(
+  function updateDisableField<TField extends keyof SecurityForm>(
     field: TField,
-    value: DisableForm[TField],
+    value: SecurityForm[TField],
   ) {
     setDisableForm((current) => ({
       ...current,
@@ -72,9 +59,9 @@ export function useTwoFactorSettings() {
     }));
   }
 
-  function updateRegenerateField<TField extends keyof RegenerateForm>(
+  function updateRegenerateField<TField extends keyof SecurityForm>(
     field: TField,
-    value: RegenerateForm[TField],
+    value: SecurityForm[TField],
   ) {
     setRegenerateForm((current) => ({
       ...current,
@@ -83,26 +70,41 @@ export function useTwoFactorSettings() {
   }
 
   async function startSetup() {
+    if (inFlight.current) return;
     resetFeedback();
     setRecoveryCodes([]);
+    inFlight.current = true;
     setLoadingAction("setup");
 
     try {
       const result = await beginTwoFactorSetup();
       setSetupData(result.data);
-      setMessage("Quét QR hoặc nhập secret vào ứng dụng xác thực.");
     } catch (error) {
       setError(
-        getApiErrorMessage(error, "Không thể bắt đầu thiết lập 2FA."),
+        securityFormError(
+          error,
+          "Could not start two-factor setup. Please try again.",
+        ),
       );
     } finally {
+      inFlight.current = false;
       setLoadingAction(null);
     }
   }
 
   async function confirmSetup(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (inFlight.current) return;
     resetFeedback();
+    const validation = validateVerificationForm(
+      { verificationInput: confirmCode },
+      false,
+    );
+    if (validation.verificationInput) {
+      setError(validation.verificationInput);
+      return;
+    }
+    inFlight.current = true;
     setLoadingAction("confirm");
 
     try {
@@ -114,17 +116,35 @@ export function useTwoFactorSettings() {
       setRecoveryCodes(result.data.recoveryCodes);
       setSetupData(null);
       setConfirmCode("");
-      setMessage("2FA đã được bật. Hãy lưu recovery codes ở nơi an toàn.");
     } catch (error) {
-      setError(getApiErrorMessage(error, "Mã xác thực 2FA không chính xác."));
+      setError(
+        securityFormError(
+          error,
+          "That code could not be verified. Please try again.",
+        ),
+      );
     } finally {
+      inFlight.current = false;
       setLoadingAction(null);
     }
   }
 
   async function disable(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (inFlight.current) return;
     resetFeedback();
+    const validation = validateVerificationForm({
+      verificationInput: disableForm.verificationInput,
+    });
+    if (!disableForm.password || validation.verificationInput) {
+      setError(
+        !disableForm.password
+          ? "Enter your password."
+          : validation.verificationInput || "",
+      );
+      return;
+    }
+    inFlight.current = true;
     setLoadingAction("disable");
 
     try {
@@ -137,15 +157,36 @@ export function useTwoFactorSettings() {
       clearSession();
       router.push("/login");
     } catch (error) {
-      setError(getApiErrorMessage(error, "Không thể tắt 2FA."));
+      setError(
+        securityFormError(
+          error,
+          "Could not turn off two-factor authentication. Check your details and try again.",
+        ),
+      );
     } finally {
+      inFlight.current = false;
       setLoadingAction(null);
     }
   }
 
-  async function regenerateRecoveryCodes(event: React.FormEvent<HTMLFormElement>) {
+  async function regenerateRecoveryCodes(
+    event: React.FormEvent<HTMLFormElement>,
+  ) {
     event.preventDefault();
+    if (inFlight.current) return;
     resetFeedback();
+    const validation = validateVerificationForm({
+      verificationInput: regenerateForm.verificationInput,
+    });
+    if (!regenerateForm.password || validation.verificationInput) {
+      setError(
+        !regenerateForm.password
+          ? "Enter your password."
+          : validation.verificationInput || "",
+      );
+      return;
+    }
+    inFlight.current = true;
     setLoadingAction("regenerate");
 
     try {
@@ -155,11 +196,16 @@ export function useTwoFactorSettings() {
       });
 
       setRecoveryCodes(result.data.recoveryCodes);
-      setRegenerateForm(initialRegenerateForm);
-      setMessage("Recovery codes mới đã được tạo. Codes cũ không còn dùng được.");
+      setRegenerateForm(initialSecurityForm);
     } catch (error) {
-      setError(getApiErrorMessage(error, "Không thể tạo lại recovery codes."));
+      setError(
+        securityFormError(
+          error,
+          "Could not generate recovery codes. Check your details and try again.",
+        ),
+      );
     } finally {
+      inFlight.current = false;
       setLoadingAction(null);
     }
   }
@@ -175,11 +221,16 @@ export function useTwoFactorSettings() {
     disableForm,
     error,
     loadingAction,
-    message,
     recoveryCodes,
     regenerateForm,
     setupData,
-    cancelSetup,
+    reset: () => {
+      if (inFlight.current) return;
+      cancelSetup();
+      setDisableForm(initialSecurityForm);
+      setRegenerateForm(initialSecurityForm);
+      setRecoveryCodes([]);
+    },
     confirmSetup,
     disable,
     regenerateRecoveryCodes,

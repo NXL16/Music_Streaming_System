@@ -1,88 +1,41 @@
 "use client";
-
-import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { getApiErrorMessage } from "@/lib/api/api-error";
-import { login } from "@/lib/auth/auth.api";
-import { useAuthStore } from "@/lib/auth/auth-store";
-import { getOrCreateDeviceId } from "@/lib/auth/device-id";
-import { saveTwoFactorChallengeId } from "@/lib/auth/two-factor-challenge-store";
-import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
+import { login } from "./auth.api";
+import { useAuthStore } from "./auth-store";
+import { getOrCreateDeviceId } from "./device-id";
+import { saveTwoFactorChallengeId } from "./two-factor-challenge-store";
 import {
-  navigateAfterLogin,
-  resolveLoginReturnTo,
-} from "@/lib/auth/login-return-to";
-
-type LoginForm = {
-  identifier: string;
-  password: string;
-};
-
-const initialLoginForm: LoginForm = {
-  identifier: "",
-  password: "",
-};
+  validateLoginForm,
+  type LoginFormValues,
+} from "./auth-form-validation";
+import { useAuthForm } from "./use-auth-form";
 
 export function useLoginForm() {
   const router = useRouter();
   const setSession = useAuthStore((state) => state.setSession);
-
-  const [form, setForm] = useState<LoginForm>(initialLoginForm);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useMinimumLoadingState();
-
-  function updateField<TField extends keyof LoginForm>(
-    field: TField,
-    value: LoginForm[TField],
-  ) {
-    setForm((current) => ({
-      ...current,
-      [field]: value,
-    }));
-  }
-
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setLoading(true);
-
-    try {
+  return useAuthForm<LoginFormValues>(
+    { identifier: "", password: "" },
+    validateLoginForm,
+    async (form) => {
       const result = await login({
         ...form,
+        identifier: form.identifier.trim(),
         deviceId: getOrCreateDeviceId(),
       });
-
       if (result.data.twoFactorRequired) {
-        if (result.data.twoFactorChallengeId) {
-          saveTwoFactorChallengeId(result.data.twoFactorChallengeId);
-        }
-
-        router.push(
-          `/login/2fa?returnTo=${encodeURIComponent(resolveLoginReturnTo().toString())}`,
-        );
+        if (!result.data.twoFactorChallengeId)
+          throw new Error("Missing authentication challenge");
+        saveTwoFactorChallengeId(result.data.twoFactorChallengeId);
+        router.push("/login/2fa");
         return;
       }
-
       setSession(
         result.data.accessToken,
         result.data.user,
         result.data.expiresIn,
       );
-      navigateAfterLogin(router);
-    } catch (error) {
-      setError(
-        getApiErrorMessage(error, "Đăng nhập thất bại, vui lòng thử lại"),
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return {
-    form,
-    error,
-    loading,
-    updateField,
-    handleSubmit,
-  };
+      router.replace("/home");
+    },
+    "login",
+  );
 }

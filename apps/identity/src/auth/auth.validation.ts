@@ -8,9 +8,12 @@ import type {
   UpdateProfileRequest,
 } from '@musical/shared-proto';
 
-const USERNAME_REGEX = /^[a-zA-Z0-9_]+$/;
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).+$/;
+import {
+  AUTH_USERNAME_PATTERN as USERNAME_REGEX,
+  AUTH_DISPLAY_NAME_MAX_LENGTH,
+  AUTH_EMAIL_PATTERN as EMAIL_REGEX,
+  AUTH_PASSWORD_PATTERN as PASSWORD_REGEX,
+} from '@musical/shared-constants';
 const MAX_BIO_LENGTH = 500;
 
 export function normalizeAndValidateSignUpRequest(
@@ -56,10 +59,14 @@ export function normalizeAndValidateSignUpRequest(
     });
   }
 
-  if (!displayName || displayName.length < 2 || displayName.length > 100) {
+  if (
+    !displayName ||
+    displayName.length < 2 ||
+    displayName.length > AUTH_DISPLAY_NAME_MAX_LENGTH
+  ) {
     throw new RpcException({
       code: status.INVALID_ARGUMENT,
-      message: 'Tên hiển thị phải từ 2 đến 100 ký tự',
+      message: 'Tên hiển thị phải từ 2 đến 50 ký tự',
     });
   }
 
@@ -177,10 +184,14 @@ export function normalizeAndValidateUpdateProfileRequest(
     });
   }
 
-  if (!displayName || displayName.length < 2 || displayName.length > 100) {
+  if (
+    !displayName ||
+    displayName.length < 2 ||
+    displayName.length > AUTH_DISPLAY_NAME_MAX_LENGTH
+  ) {
     throw new RpcException({
       code: status.INVALID_ARGUMENT,
-      message: 'Tên hiển thị phải từ 2 đến 100 ký tự',
+      message: 'Tên hiển thị phải từ 2 đến 50 ký tự',
     });
   }
 
@@ -210,7 +221,7 @@ export function normalizeAndValidateUpdateProfileRequest(
     displayName,
     avatarAssetId: avatarAssetId || undefined,
     avatarUrl: avatarUrl || undefined,
-    bio: bio || undefined,
+    bio,
   };
 }
 

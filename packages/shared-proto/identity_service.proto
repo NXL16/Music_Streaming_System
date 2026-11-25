@@ -18,6 +18,7 @@ service IdentityService {
   rpc GetProfile (GetProfileRequest) returns (UserProfile);
   rpc UpdateProfile (UpdateProfileRequest) returns (UserProfile);
   rpc ChangePassword (ChangePasswordRequest) returns (EmptyResponse);
+  rpc VerifyCurrentPassword (VerifyCurrentPasswordRequest) returns (EmptyResponse);
   rpc ListUsers (ListUsersRequest) returns (ListUsersResponse);
   rpc SetUserStatus (SetUserStatusRequest) returns (UserProfile);
   rpc AdminRevokeUserSessions (AdminUserActionRequest) returns (EmptyResponse);
@@ -25,6 +26,7 @@ service IdentityService {
   rpc SetUserRole (SetUserRoleRequest) returns (UserProfile);
   rpc GrantArtistWorkspaceSeat (GrantArtistWorkspaceSeatRequest) returns (UserProfile);
   rpc RequestPasswordReset (RequestPasswordResetRequest) returns (TokenIssueResponse);
+  rpc ValidatePasswordResetToken (ValidatePasswordResetTokenRequest) returns (ValidatePasswordResetTokenResponse);
   rpc ResetPassword (ResetPasswordRequest) returns (EmptyResponse);
   rpc RequestEmailVerification (RequestEmailVerificationRequest) returns (TokenIssueResponse);
   rpc VerifyEmail (VerifyEmailRequest) returns (UserProfile);
@@ -112,6 +114,11 @@ message ChangePasswordRequest {
   string new_password     = 3;
 }
 
+message VerifyCurrentPasswordRequest {
+  string user_id = 1;
+  string current_password = 2;
+}
+
 message ListUsersRequest {
   int32           page      = 1;
   int32           limit     = 2;
@@ -156,6 +163,14 @@ message RequestPasswordResetRequest {
 message ResetPasswordRequest {
   string token        = 1;
   string new_password = 2;
+}
+
+message ValidatePasswordResetTokenRequest {
+  string token = 1;
+}
+
+message ValidatePasswordResetTokenResponse {
+  bool valid = 1;
 }
 
 message RequestEmailVerificationRequest {

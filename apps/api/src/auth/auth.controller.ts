@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Header,
   Param,
   Patch,
   Post,
@@ -27,12 +28,16 @@ import { AdminGuard } from '../common/guards/admin.guard';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { UpdateProfileDto } from './dto/update-profile.dto';
-import { ChangePasswordDto } from './dto/change-password.dto';
+import {
+  ChangePasswordDto,
+  VerifyCurrentPasswordDto,
+} from './dto/change-password.dto';
 import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { SetUserStatusDto } from './dto/set-user-status.dto';
 import {
   RequestPasswordResetDto,
   ResetPasswordDto,
+  PasswordResetTokenDto,
 } from './dto/password-reset.dto';
 import { LogoutDeviceDto } from './dto/logout-device.dto';
 import { VerifyEmailDto } from './dto/email-verification.dto';
@@ -244,6 +249,25 @@ export class AuthController {
     );
   }
 
+  @Post('password/verify-current')
+  @UseGuards(StrictJwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async verifyCurrentPassword(
+    @Req() req: Request,
+    @Body() dto: VerifyCurrentPasswordDto,
+  ) {
+    const user = req.user as JwtUser;
+    await this.authService.verifyCurrentPassword({
+      userId: user.userId,
+      currentPassword: dto.currentPassword,
+    });
+    return this.formatResponse(
+      null,
+      'AUTH_CURRENT_PASSWORD_VERIFIED',
+      'Current password verified.',
+    );
+  }
+
   @Post('change-password')
   @UseGuards(StrictJwtAuthGuard)
   @HttpCode(HttpStatus.OK)
@@ -276,6 +300,20 @@ export class AuthController {
       null,
       'AUTH_PASSWORD_RESET_REQUESTED',
       data.message,
+    );
+  }
+
+  @Post('password/reset/validate')
+  @HttpCode(HttpStatus.OK)
+  @Header('Cache-Control', 'no-store')
+  async validatePasswordResetToken(@Body() dto: PasswordResetTokenDto) {
+    const data = await this.authService.validatePasswordResetToken({
+      token: dto.token,
+    });
+    return this.formatResponse(
+      data,
+      'AUTH_PASSWORD_RESET_TOKEN_CHECKED',
+      'Reset link checked.',
     );
   }
 

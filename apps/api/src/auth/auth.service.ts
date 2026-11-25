@@ -14,6 +14,7 @@ import type {
   GetProfileRequest,
   UpdateProfileRequest,
   ChangePasswordRequest,
+  VerifyCurrentPasswordRequest,
   AdminUserActionRequest,
   ListUsersRequest,
   ListUsersResponse,
@@ -22,6 +23,8 @@ import type {
   GrantArtistWorkspaceSeatRequest,
   RequestPasswordResetRequest,
   ResetPasswordRequest,
+  ValidatePasswordResetTokenRequest,
+  ValidatePasswordResetTokenResponse,
   RequestEmailVerificationRequest,
   VerifyEmailRequest,
   TokenIssueResponse,
@@ -242,6 +245,14 @@ export class AuthService implements OnModuleInit {
     return { asset, user };
   }
 
+  async verifyCurrentPassword(
+    request: VerifyCurrentPasswordRequest,
+  ): Promise<EmptyResponse> {
+    return grpcFirstValueFrom(
+      this.identityService.verifyCurrentPassword(request, this.metadata()),
+    );
+  }
+
   async changePassword(request: ChangePasswordRequest): Promise<EmptyResponse> {
     return await grpcFirstValueFrom(
       this.identityService.changePassword(request, this.metadata()),
@@ -295,6 +306,14 @@ export class AuthService implements OnModuleInit {
   ): Promise<TokenIssueResponse> {
     return await grpcFirstValueFrom(
       this.identityService.requestPasswordReset(request, this.metadata()),
+    );
+  }
+
+  async validatePasswordResetToken(
+    request: ValidatePasswordResetTokenRequest,
+  ): Promise<ValidatePasswordResetTokenResponse> {
+    return await grpcFirstValueFrom(
+      this.identityService.validatePasswordResetToken(request, this.metadata()),
     );
   }
 

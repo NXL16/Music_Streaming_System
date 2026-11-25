@@ -1,8 +1,9 @@
 "use client";
 
-import { Laptop, ShieldCheck } from "lucide-react";
+import { Laptop } from "lucide-react";
 import { formatDateTime } from "@/lib/format/date";
 import { useSessions } from "@/lib/auth/use-sessions";
+import styles from "./security-settings.module.css";
 
 function deviceLabel(userAgent?: string) {
   if (!userAgent) return "Unknown device";
@@ -44,77 +45,60 @@ export function SessionsPanel({ className = "mt-6" }: SessionsPanelProps) {
     revokeAllSessions,
   } = useSessions();
 
+  const busy = logoutAllLoading || Boolean(actionDeviceId);
   return (
-    <section className={className}>
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-(--systemPrimary) [font:var(--title-2-emphasized)]">
-          Devices
-        </h2>
+    <section className={className} aria-label="Signed-in devices">
+      <div className={styles.devicesHeader}>
         <button
           type="button"
           onClick={() => void revokeAllSessions()}
-          disabled={logoutAllLoading}
-          className="rounded-full border border-(--labelDivider) px-3.5 py-2 text-(--systemSecondary) [font:var(--callout-emphasized)] transition hover:border-(--keyColor) hover:text-(--keyColor) disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={busy || loading || sessions.length === 0}
+          className={styles.textButton}
         >
-          {logoutAllLoading ? "Signing out..." : "Sign out all"}
+          {logoutAllLoading ? "Signing out..." : "Sign out all devices"}
         </button>
       </div>
-
       {error && (
-        <div className="mt-5 text-(--keyColor) [font:var(--callout)]">
+        <p role="alert" className={styles.error}>
           {error}
-        </div>
+        </p>
       )}
-
-      <div className="mt-5 divide-y divide-(--labelDivider)">
-        {sessions.length === 0 && !loading && (
-          <div className="py-8 text-(--systemSecondary) [font:var(--callout)]">
-            No signed-in sessions yet.
+      {loading && sessions.length === 0 && (
+        <p role="status" className={styles.notice}>
+          Loading devices...
+        </p>
+      )}
+      {!loading && !error && sessions.length === 0 && (
+        <p className={styles.notice}>No signed-in devices.</p>
+      )}
+      {sessions.map((session) => (
+        <div key={session.deviceId} className={styles.device}>
+          <Laptop size={22} aria-hidden="true" />
+          <div>
+            <p className={styles.deviceName}>
+              {deviceLabel(session.userAgent)}
+            </p>
+            <p className={styles.description}>
+              Last active {formatDateTime(session.lastSeenAt)}
+            </p>
           </div>
-        )}
-
-        {sessions.map((session) => (
-          <div
-            key={session.deviceId}
-            className="group grid gap-4 py-5 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center"
-          >
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-(--systemQuinary) text-(--systemPrimary)">
-              <Laptop className="h-5 w-5" strokeWidth={1.75} />
-            </div>
-
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="truncate text-(--systemPrimary) [font:var(--body-tall-emphasized)]">
-                  {deviceLabel(session.userAgent)}
-                </p>
-                {session.isCurrent && (
-                  <span className="rounded-full bg-(--systemQuaternary) px-2.5 py-1 text-(--systemPrimary) [font:var(--subhead-emphasized)]">
-                    Current
-                  </span>
-                )}
-              </div>
-              <p className="mt-1 text-(--systemSecondary) [font:var(--callout)]">
-                Last active {formatDateTime(session.lastSeenAt)}
-              </p>
-            </div>
-
-            {session.isCurrent ? (
-              <span className="inline-flex items-center gap-2 text-(--statusPositive) [font:var(--callout-emphasized)]">
-                <ShieldCheck className="h-4 w-4" /> In use
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={() => void revokeDevice(session.deviceId)}
-                disabled={actionDeviceId === session.deviceId}
-                className="justify-self-start rounded-full border border-(--labelDivider) px-3.5 py-2 text-(--systemPrimary) [font:var(--callout-emphasized)] transition hover:border-(--keyColor) hover:text-(--keyColor) disabled:cursor-not-allowed disabled:opacity-50 sm:justify-self-end"
-              >
-                {actionDeviceId === session.deviceId ? "Signing out..." : "Sign out"}
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
+          {session.isCurrent ? (
+            <span className={styles.current}>This device</span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void revokeDevice(session.deviceId)}
+              disabled={busy}
+              className={styles.textButton}
+              aria-label={"Sign out " + deviceLabel(session.userAgent)}
+            >
+              {actionDeviceId === session.deviceId
+                ? "Signing out..."
+                : "Sign out"}
+            </button>
+          )}
+        </div>
+      ))}
     </section>
   );
 }

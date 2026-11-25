@@ -1,37 +1,49 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { refreshAccessToken } from "@/lib/auth/session-refresh";
+import { RequestErrorState } from "@/components/states/request-error-state";
 
 const REFRESH_EARLY_MS = 60_000;
 const REFRESH_RETRY_MS = 15_000;
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const initializedRef = useRef(false);
+  const [bootstrapFailed, setBootstrapFailed] = useState(false);
   const status = useAuthStore((state) => state.status);
   const accessTokenExpiresAt = useAuthStore(
     (state) => state.accessTokenExpiresAt,
   );
-  const setGuest = useAuthStore((state) => state.setGuest);
 
-  useEffect(() => {
-    if (initializedRef.current) return;
-
-    initializedRef.current = true;
-
-    async function bootstrapSession() {
-      try {
-        await refreshAccessToken();
-      } catch {
-        if (useAuthStore.getState().status === "checking") {
-          setGuest();
-        }
+  const bootstrapSession = useCallback(async () => {
+    setBootstrapFailed(false);
+    try {
+      await refreshAccessToken();
+    } catch {
+      if (useAuthStore.getState().status === "checking") {
+        setBootstrapFailed(true);
       }
     }
+  }, []);
 
-    void bootstrapSession();
-  }, [setGuest]);
+  useEffect(() => {
+    if (!initializedRef.current) {
+      initializedRef.current = true;
+      void bootstrapSession();
+    }
+
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (
+        event.persisted &&
+        useAuthStore.getState().status === "checking"
+      ) {
+        void bootstrapSession();
+      }
+    };
+    window.addEventListener("pageshow", handlePageShow);
+    return () => window.removeEventListener("pageshow", handlePageShow);
+  }, [bootstrapSession]);
 
   useEffect(() => {
     if (status !== "authenticated" || !accessTokenExpiresAt) return;
@@ -84,6 +96,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [accessTokenExpiresAt, status]);
+
+  if (bootstrapFailed && status === "checking") {
+    return (
+      <main className="relative min-h-dvh bg-(--pageBG) text-(--systemPrimary)">
+        <RequestErrorState onRetry={() => void bootstrapSession()} />
+      </main>
+    );
+  }
 
   return children;
 }

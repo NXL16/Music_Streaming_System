@@ -1,30 +1,26 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Download, KeyRound, ShieldCheck } from "lucide-react";
+import Image from "next/image";
+import { Download } from "lucide-react";
+import { AuthInput } from "@/components/auth/auth-form";
+import { ContentDialog } from "@/components/catalog/content-dialog";
 import type { UserProfile } from "@/lib/auth/auth.types";
 import { useTwoFactorSettings } from "@/lib/auth/use-two-factor-settings";
-
-type TwoFactorPanelProps = {
-  user: UserProfile | null;
-  open: boolean;
-  onToggle: () => void;
-};
+import styles from "./security-settings.module.css";
 
 function downloadRecoveryCodes(codes: string[]) {
-  const content = [
-    "Music Streaming System - 2FA Recovery Codes",
-    "",
-    "Lưu các mã này ở nơi an toàn. Mỗi mã chỉ được dùng một lần.",
-    "",
-    ...codes,
-    "",
-  ].join("\n");
-  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const blob = new Blob(
+    [
+      "404hz - Recovery codes\nKeep these codes somewhere safe. Each code can be used once.\n\n" +
+        codes.join("\n"),
+    ],
+    { type: "text/plain;charset=utf-8" },
+  );
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "mss-recovery-codes.txt";
+  link.download = "404hz-recovery-codes.txt";
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -32,72 +28,329 @@ function downloadRecoveryCodes(codes: string[]) {
 }
 
 function TwoFactorQrCode({ value }: { value: string }) {
-  const [dataUrl, setDataUrl] = useState("");
-
+  const [image, setImage] = useState("");
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    async function renderQrCode() {
-      const QRCode = await import("qrcode");
-      const url = await QRCode.toDataURL(value, {
-        errorCorrectionLevel: "M",
-        margin: 2,
-        scale: 8,
-        color: { dark: "#1d1d1f", light: "#f5f5f7" },
+    import("qrcode")
+      .then((qr) =>
+        qr.toDataURL(value, {
+          errorCorrectionLevel: "M",
+          margin: 2,
+          scale: 6,
+          color: { dark: "#1d1d1f", light: "#ffffff" },
+        }),
+      )
+      .then((url) => {
+        if (!cancelled) setImage(url);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
       });
-      if (!cancelled) setDataUrl(url);
-    }
-    void renderQrCode();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [value]);
-
-  if (!dataUrl) {
-    return <div className="flex aspect-square w-full max-w-52 items-center justify-center bg-(--systemQuinary) text-(--systemSecondary) [font:var(--callout)]">Đang tạo QR…</div>;
-  }
-
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={dataUrl} alt="Mã QR xác thực hai lớp" className="aspect-square w-full max-w-52 bg-white p-3" />;
+  if (!image)
+    return (
+      <p className={styles.notice} role="status">
+        {failed
+          ? "The QR code could not be displayed. Use the setup key below."
+          : "Preparing QR code..."}
+      </p>
+    );
+  return (
+    <Image
+      width={180}
+      height={180}
+      unoptimized
+      className={styles.qr}
+      src={image}
+      alt="Authenticator setup QR code"
+    />
+  );
 }
 
-function SecurityInput({
-  placeholder,
-  value,
-  onChange,
-  type = "text",
+export function TwoFactorPanel({
+  user,
+  open,
+  onToggle,
 }: {
-  placeholder: string;
-  value: string;
-  onChange: (value: string) => void;
-  type?: "password" | "text";
+  user: UserProfile | null;
+  open: boolean;
+  onToggle: () => void;
 }) {
-  return <input type={type} placeholder={placeholder} value={value} onChange={(event) => onChange(event.target.value)} required className="w-full border-b border-(--labelDivider) bg-transparent px-1 py-3 text-(--systemPrimary) outline-none focus:border-(--keyColor)" />;
-}
-
-function RecoveryCodes({ codes }: { codes: string[] }) {
-  if (codes.length === 0) return null;
-  return <section className="mt-6 max-w-xl border-t border-(--labelDivider) pt-5"><div className="flex items-start justify-between gap-4"><div><h3 className="text-(--systemPrimary) [font:var(--body-tall-emphasized)]">Mã khôi phục</h3><p className="mt-1 text-(--systemSecondary) [font:var(--callout)]">Mỗi mã chỉ được dùng một lần.</p></div><button type="button" onClick={() => downloadRecoveryCodes(codes)} className="inline-flex shrink-0 items-center gap-2 rounded-full border border-(--labelDivider) px-3.5 py-2 text-(--systemPrimary) [font:var(--callout-emphasized)]"><Download className="h-4 w-4" />Tải xuống</button></div><div className="mt-4 grid gap-2 sm:grid-cols-2">{codes.map((code) => <code key={code} className="bg-(--systemQuinary) px-3 py-2 text-(--systemPrimary) [font:var(--callout-emphasized)] tracking-[0.12em]">{code}</code>)}</div></section>;
-}
-
-export function TwoFactorPanel({ user, open, onToggle }: TwoFactorPanelProps) {
-  const [activeTool, setActiveTool] = useState<"none" | "recovery" | "disable">("none");
-  const twoFactor = useTwoFactorSettings();
+  const auth = useTwoFactorSettings();
+  const [tool, setTool] = useState<"manage" | "recovery" | "disable">("manage");
   const enabled = Boolean(user?.twoFactorEnabled);
-  const busy = twoFactor.loadingAction !== null;
-
-  function toggleManager() {
-    if (open) setActiveTool("none");
+  const busy = auth.loadingAction !== null;
+  function close() {
+    if (busy || !open) return;
+    auth.reset();
+    setTool("manage");
     onToggle();
   }
-
-  return <section className="border-t border-(--labelDivider) py-5">
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex gap-3"><ShieldCheck className={`mt-0.5 h-5 w-5 shrink-0 ${enabled ? "text-(--statusPositive)" : "text-(--systemSecondary)"}`} /><div><h2 className="text-(--systemPrimary) [font:var(--body-tall-emphasized)]">Xác thực hai lớp</h2><p className="mt-1 text-(--systemSecondary) [font:var(--callout)]">{enabled ? "Đang bật để bảo vệ tài khoản khi đăng nhập." : "Thêm một bước xác thực khi đăng nhập để bảo vệ tài khoản."}</p></div></div>
-      {enabled ? <button type="button" onClick={toggleManager} className="shrink-0 rounded-full border border-(--labelDivider) px-4 py-2 text-(--systemPrimary) [font:var(--callout-emphasized)]">{open ? "Đóng" : "Quản lý 2FA"}</button> : !twoFactor.setupData ? <button type="button" onClick={() => void twoFactor.startSetup()} disabled={busy} className="shrink-0 rounded-full bg-(--keyColor) px-4 py-2 text-(--keyColorText) [font:var(--callout-emphasized)] disabled:opacity-60">{twoFactor.loadingAction === "setup" ? "Đang tạo QR…" : "Thiết lập 2FA"}</button> : null}
+  function launch() {
+    onToggle();
+    if (!enabled) void auth.startSetup();
+  }
+  const showingCodes = auth.recoveryCodes.length > 0;
+  const title = showingCodes
+    ? "Save your recovery codes"
+    : !enabled
+      ? "Set up two-factor authentication"
+      : tool === "disable"
+        ? "Turn off two-factor authentication"
+        : tool === "recovery"
+          ? "Replace recovery codes"
+          : "Two-factor authentication";
+  return (
+    <div className={styles.row}>
+      <div>
+        <h3>Two-factor authentication</h3>
+        <p className={styles.description}>
+          {enabled
+            ? "An extra layer of protection is enabled."
+            : "Add a verification code when signing in."}
+        </p>
+      </div>
+      <button
+        type="button"
+        className={styles.button}
+        onClick={launch}
+        disabled={!user || busy}
+        aria-haspopup="dialog"
+      >
+        {enabled ? "Manage" : "Set up"}
+      </button>
+      <ContentDialog
+        open={open}
+        title={title}
+        subtitle={
+          showingCodes
+            ? "Keep these somewhere safe. Each code can only be used once."
+            : "Protect your account with an authenticator app."
+        }
+        onClose={close}
+        hideGradient
+        className={styles.dialog}
+      >
+        {open && (
+          <div className={styles.form}>
+            {auth.error && (
+              <p role="alert" className={styles.error}>
+                {auth.error}
+              </p>
+            )}
+            {showingCodes ? (
+              <>
+                <div className={styles.codes}>
+                  {auth.recoveryCodes.map((code) => (
+                    <code key={code}>{code}</code>
+                  ))}
+                </div>
+                <div className={styles.actions}>
+                  <button
+                    type="button"
+                    className={styles.button}
+                    onClick={() => downloadRecoveryCodes(auth.recoveryCodes)}
+                  >
+                    <Download
+                      size={16}
+                      aria-hidden="true"
+                      className="inline-block mr-2"
+                    />
+                    Download
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.primary}
+                    onClick={close}
+                  >
+                    Done
+                  </button>
+                </div>
+              </>
+            ) : !enabled ? (
+              auth.setupData ? (
+                <>
+                  <TwoFactorQrCode value={auth.setupData.otpauthUrl} />
+                  <details className={styles.notice}>
+                    <summary>Can&apos;t scan the QR code?</summary>
+                    <p className="break-all mt-2 select-all">
+                      {auth.setupData.secret}
+                    </p>
+                  </details>
+                  <form
+                    onSubmit={auth.confirmSetup}
+                    noValidate
+                    className={styles.form}
+                    aria-busy={busy}
+                  >
+                    <AuthInput
+                      compact
+                      id="two-factor-setup-code"
+                      label="Verification code"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      value={auth.confirmCode}
+                      disabled={busy}
+                      onChange={(event) =>
+                        auth.setConfirmCode(event.target.value)
+                      }
+                    />
+                    <div className={styles.actions}>
+                      <button
+                        type="button"
+                        className={styles.textButton}
+                        onClick={close}
+                        disabled={busy}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className={styles.primary}
+                        disabled={busy}
+                      >
+                        {busy
+                          ? "Verifying..."
+                          : "Enable two-factor authentication"}
+                      </button>
+                    </div>
+                  </form>
+                </>
+              ) : (
+                <>
+                  <p role="status" className={styles.notice}>
+                    {busy ? "Preparing setup..." : "Try again to start setup."}
+                  </p>
+                  {!busy && (
+                    <button
+                      type="button"
+                      className={styles.primary}
+                      onClick={() => void auth.startSetup()}
+                    >
+                      Try again
+                    </button>
+                  )}
+                </>
+              )
+            ) : tool === "manage" ? (
+              <div className={styles.tools}>
+                <p className={styles.notice}>
+                  Two-factor authentication is enabled.
+                </p>
+                <button
+                  type="button"
+                  className={styles.button}
+                  onClick={() => setTool("recovery")}
+                >
+                  Replace recovery codes
+                </button>
+                <button
+                  type="button"
+                  className={styles.button}
+                  onClick={() => setTool("disable")}
+                >
+                  Turn off two-factor authentication
+                </button>
+              </div>
+            ) : (
+              <form
+                className={styles.form}
+                noValidate
+                aria-busy={busy}
+                onSubmit={
+                  tool === "recovery"
+                    ? auth.regenerateRecoveryCodes
+                    : auth.disable
+                }
+              >
+                <p className={styles.notice}>
+                  {tool === "recovery"
+                    ? "New codes will replace all of your previous recovery codes."
+                    : "You will be signed out after turning off two-factor authentication."}
+                </p>
+                <fieldset className={styles.fields} disabled={busy}>
+                  <AuthInput
+                    compact
+                    id="two-factor-password"
+                    label="Password"
+                    disabled={busy}
+                    type="password"
+                    autoComplete="current-password"
+                    value={
+                      tool === "recovery"
+                        ? auth.regenerateForm.password
+                        : auth.disableForm.password
+                    }
+                    onChange={(event) =>
+                      tool === "recovery"
+                        ? auth.updateRegenerateField(
+                            "password",
+                            event.target.value,
+                          )
+                        : auth.updateDisableField(
+                            "password",
+                            event.target.value,
+                          )
+                    }
+                  />
+                  <AuthInput
+                    compact
+                    id="two-factor-verification"
+                    label="Verification or recovery code"
+                    disabled={busy}
+                    autoComplete="one-time-code"
+                    value={
+                      tool === "recovery"
+                        ? auth.regenerateForm.verificationInput
+                        : auth.disableForm.verificationInput
+                    }
+                    onChange={(event) =>
+                      tool === "recovery"
+                        ? auth.updateRegenerateField(
+                            "verificationInput",
+                            event.target.value,
+                          )
+                        : auth.updateDisableField(
+                            "verificationInput",
+                            event.target.value,
+                          )
+                    }
+                  />
+                </fieldset>
+                <div className={styles.actions}>
+                  <button
+                    type="button"
+                    className={styles.textButton}
+                    disabled={busy}
+                    onClick={() => {
+                      auth.reset();
+                      setTool("manage");
+                    }}
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="submit"
+                    className={styles.primary}
+                    disabled={busy}
+                  >
+                    {busy
+                      ? "Saving..."
+                      : tool === "recovery"
+                        ? "Replace codes"
+                        : "Turn off"}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        )}
+      </ContentDialog>
     </div>
-
-    {(twoFactor.message || twoFactor.error) && <p className={`mt-4 [font:var(--callout)] ${twoFactor.error ? "text-(--keyColor)" : "text-(--statusPositive)"}`}>{twoFactor.error || twoFactor.message}</p>}
-
-    {twoFactor.setupData && !enabled && <div className="mt-6 grid max-w-3xl gap-6 border-t border-(--labelDivider) pt-6 lg:grid-cols-[208px_minmax(0,1fr)]"><TwoFactorQrCode value={twoFactor.setupData.otpauthUrl} /><form onSubmit={twoFactor.confirmSetup} className="max-w-md"><h3 className="text-(--systemPrimary) [font:var(--body-tall-emphasized)]">Quét mã QR bằng ứng dụng xác thực</h3><p className="mt-1 text-(--systemSecondary) [font:var(--callout)]">Sau đó nhập mã gồm 6 chữ số để hoàn tất thiết lập.</p><label className="mt-5 block text-(--systemPrimary) [font:var(--callout-emphasized)]">Mã xác thực</label><input inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={twoFactor.confirmCode} onChange={(event) => twoFactor.setConfirmCode(event.target.value)} required className="mt-2 w-full border-b border-(--labelDivider) bg-transparent px-1 py-3 text-center text-xl text-(--systemPrimary) outline-none [font:var(--large-title-semibold)] tracking-[0.28em] focus:border-(--keyColor)" /><div className="mt-5 flex gap-2"><button type="button" onClick={twoFactor.cancelSetup} disabled={busy} className="rounded-full px-4 py-2 text-(--systemSecondary) [font:var(--callout-emphasized)]">Hủy</button><button type="submit" disabled={busy} className="rounded-full bg-(--keyColor) px-4 py-2 text-(--keyColorText) [font:var(--callout-emphasized)]">{twoFactor.loadingAction === "confirm" ? "Đang xác nhận…" : "Bật 2FA"}</button></div></form></div>}
-
-    {enabled && open && <div className="mt-6 max-w-3xl border-t border-(--labelDivider) pt-5">{activeTool === "none" ? <div className="grid gap-5 sm:grid-cols-2"><button type="button" onClick={() => setActiveTool("recovery")} className="text-left"><div className="flex items-center gap-2 text-(--systemPrimary) [font:var(--body-tall-emphasized)]"><KeyRound className="h-4 w-4 text-(--systemSecondary)" />Mã khôi phục</div><p className="mt-1 text-(--systemSecondary) [font:var(--callout)]">Tạo mã mới hoặc tải lại mã vừa tạo.</p><span className="mt-3 inline-block text-(--keyColor) [font:var(--callout-emphasized)]">Quản lý mã →</span></button><button type="button" onClick={() => setActiveTool("disable")} className="border-t border-(--labelDivider) pt-5 text-left sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0"><p className="text-(--systemPrimary) [font:var(--body-tall-emphasized)]">Tắt xác thực hai lớp</p><p className="mt-1 text-(--systemSecondary) [font:var(--callout)]">Tắt 2FA sẽ đăng xuất tài khoản khỏi thiết bị này.</p><span className="mt-3 inline-block text-(--keyColor) [font:var(--callout-emphasized)]">Tiếp tục →</span></button></div> : activeTool === "recovery" ? <form onSubmit={twoFactor.regenerateRecoveryCodes} className="max-w-xl"><button type="button" onClick={() => setActiveTool("none")} className="text-(--systemSecondary) [font:var(--callout-emphasized)]">← Quay lại</button><h3 className="mt-4 text-(--systemPrimary) [font:var(--body-tall-emphasized)]">Tạo lại mã khôi phục</h3><p className="mt-1 text-(--systemSecondary) [font:var(--callout)]">Mã mới sẽ thay thế toàn bộ mã khôi phục cũ.</p><div className="mt-5 space-y-3"><SecurityInput type="password" placeholder="Mật khẩu" value={twoFactor.regenerateForm.password} onChange={(value) => twoFactor.updateRegenerateField("password", value)} /><SecurityInput placeholder="Mã 2FA hoặc mã khôi phục" value={twoFactor.regenerateForm.verificationInput} onChange={(value) => twoFactor.updateRegenerateField("verificationInput", value)} /></div><button type="submit" disabled={busy} className="mt-5 rounded-full bg-(--keyColor) px-4 py-2 text-(--keyColorText) [font:var(--callout-emphasized)]">{twoFactor.loadingAction === "regenerate" ? "Đang tạo…" : "Tạo lại mã"}</button></form> : <form onSubmit={twoFactor.disable} className="max-w-xl"><button type="button" onClick={() => setActiveTool("none")} className="text-(--systemSecondary) [font:var(--callout-emphasized)]">← Quay lại</button><h3 className="mt-4 text-(--systemPrimary) [font:var(--body-tall-emphasized)]">Tắt xác thực hai lớp</h3><p className="mt-1 text-(--systemSecondary) [font:var(--callout)]">Sau khi tắt, bạn sẽ được đăng xuất và cần đăng nhập lại.</p><div className="mt-5 space-y-3"><SecurityInput type="password" placeholder="Mật khẩu" value={twoFactor.disableForm.password} onChange={(value) => twoFactor.updateDisableField("password", value)} /><SecurityInput placeholder="Mã 2FA hoặc mã khôi phục" value={twoFactor.disableForm.verificationInput} onChange={(value) => twoFactor.updateDisableField("verificationInput", value)} /></div><button type="submit" disabled={busy} className="mt-5 rounded-full bg-(--keyColor) px-4 py-2 text-(--keyColorText) [font:var(--callout-emphasized)]">{twoFactor.loadingAction === "disable" ? "Đang tắt…" : "Tắt 2FA"}</button></form>}<RecoveryCodes codes={twoFactor.recoveryCodes} /></div>}
-  </section>;
+  );
 }

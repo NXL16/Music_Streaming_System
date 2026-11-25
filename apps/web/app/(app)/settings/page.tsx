@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import styles from "./settings.module.css";
 import { MusicPageLayout } from "@/components/layout/music-page-layout";
 import { ChangePasswordPanel } from "@/components/profile/change-password-panel";
 import { SessionsPanel } from "@/components/profile/sessions-panel";
@@ -20,16 +21,14 @@ export default function SettingsPage() {
     {
       id: "video-artwork",
       label: "Video artwork",
-      description:
-        "Animate cover artwork. Turn off to use still images and reduce resource usage.",
+      description: "Play animated album covers when available.",
       enabled: videoArtworkEnabled,
       onChange: setVideoArtworkEnabled,
     },
     {
       id: "lyrics-background-motion",
       label: "Lyrics background motion",
-      description:
-        "Animate the lyrics background. Turn off to keep the background still.",
+      description: "Animate the background while viewing lyrics.",
       enabled: lyricsBackgroundMotionEnabled,
       onChange: setLyricsBackgroundMotionEnabled,
     },
@@ -37,51 +36,52 @@ export default function SettingsPage() {
 
   return (
     <MusicPageLayout>
-      <header className="mx-(--bodyGutter) mb-8">
-        <h1 className="text-[32px] leading-[38px] font-semibold tracking-[-0.02em] text-(--systemPrimary)">
-          Settings
-        </h1>
-      </header>
-
-      <main className="w-full px-(--bodyGutter) pb-14">
-        <div className="max-w-6xl">
-          {appearanceSettings.map((setting) => (
-            <section
-              key={setting.id}
-              className="flex items-center justify-between gap-4 py-5"
-            >
-              <div>
-                <h2
-                  id={`${setting.id}-label`}
-                  className="text-(--systemPrimary) [font:var(--body-tall-emphasized)]"
-                >
-                  {setting.label}
-                </h2>
-                <p
-                  id={`${setting.id}-description`}
-                  className="mt-1 text-(--systemSecondary) [font:var(--callout)]"
-                >
-                  {setting.description}
-                </p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={setting.enabled}
-                aria-labelledby={`${setting.id}-label`}
-                aria-describedby={`${setting.id}-description`}
-                onClick={() => setting.onChange(!setting.enabled)}
-                className={`relative h-7 w-12 shrink-0 rounded-full focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-(--systemPrimary) ${setting.enabled ? "bg-(--keyColor)" : "bg-(--systemQuaternary)"}`}
-              >
-                <span
-                  className={`absolute left-1 top-1 size-5 rounded-full bg-white ${setting.enabled ? "translate-x-5" : ""}`}
-                />
-              </button>
-            </section>
-          ))}
-
-          <section className="pb-7">
-            <div>
+      <div className={styles.page}>
+        <header className={styles.header}>
+          <h1>Settings</h1>
+          <p>Manage your listening experience and account security.</p>
+        </header>
+        <div className={styles.groups}>
+          <section
+            className={styles.group}
+            aria-labelledby="appearance-heading"
+          >
+            <div className={styles.groupIntro}>
+              <h2 id="appearance-heading">Listening experience</h2>
+              <p>Choose how your music looks and moves.</p>
+            </div>
+            <div className={styles.controls}>
+              {appearanceSettings.map((setting) => (
+                <div key={setting.id} className={styles.setting}>
+                  <div>
+                    <h3 id={setting.id + "-label"}>{setting.label}</h3>
+                    <p id={setting.id + "-description"}>
+                      {setting.description}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={setting.enabled}
+                    aria-labelledby={setting.id + "-label"}
+                    aria-describedby={setting.id + "-description"}
+                    onClick={() => setting.onChange(!setting.enabled)}
+                    className={styles.switch}
+                  >
+                    <span className={styles.track}>
+                      <span className={styles.thumb} />
+                    </span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+          <section className={styles.group} aria-labelledby="security-heading">
+            <div className={styles.groupIntro}>
+              <h2 id="security-heading">Security</h2>
+              <p>Keep your account protected.</p>
+            </div>
+            <div className={styles.controls}>
               <ChangePasswordPanel
                 open={passwordOpen}
                 onToggle={() => setPasswordOpen((value) => !value)}
@@ -93,12 +93,15 @@ export default function SettingsPage() {
               />
             </div>
           </section>
-
-          <section className="py-7">
-            <SessionsPanel className="w-full" />
+          <section className={styles.group} aria-labelledby="sessions-heading">
+            <div className={styles.groupIntro}>
+              <h2 id="sessions-heading">Sessions</h2>
+              <p>Review where you are signed in and manage access.</p>
+            </div>
+            <SessionsPanel className={styles.controls} />
           </section>
         </div>
-      </main>
+      </div>
     </MusicPageLayout>
   );
 }

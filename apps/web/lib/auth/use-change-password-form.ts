@@ -1,9 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import {
+  securityFormError,
+  validateResetPasswordForm,
+} from "./auth-form-validation";
 import { useRouter } from "next/navigation";
-import { getApiErrorMessage } from "@/lib/api/api-error";
-import { changePassword, logout } from "@/lib/auth/auth.api";
+import { getApiErrorStatus } from "@/lib/api/api-error";
+import {
+  changePassword,
+  logout,
+  verifyCurrentPassword,
+} from "@/lib/auth/auth.api";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
 
@@ -20,10 +28,12 @@ const initialForm: ChangePasswordForm = {
 };
 
 export function useChangePasswordForm() {
+  const inFlight = useRef(false);
   const router = useRouter();
   const clearSession = useAuthStore((state) => state.clearSession);
 
   const [form, setForm] = useState<ChangePasswordForm>(initialForm);
+  const [step, setStep] = useState<1 | 2>(1);
   const [error, setError] = useState("");
   const [loading, setLoading] = useMinimumLoadingState();
 
@@ -31,6 +41,7 @@ export function useChangePasswordForm() {
     field: TField,
     value: ChangePasswordForm[TField],
   ) {
+    setError("");
     setForm((current) => ({
       ...current,
       [field]: value,
@@ -41,11 +52,39 @@ export function useChangePasswordForm() {
     event.preventDefault();
     setError("");
 
-    if (form.newPassword !== form.confirmPassword) {
-      setError("Mật khẩu xác nhận không khớp.");
+    if (inFlight.current) return;
+    if (!form.currentPassword) {
+      setError("Enter your current password.");
       return;
     }
-
+    if (step === 1) {
+      inFlight.current = true;
+      setLoading(true);
+      try {
+        await verifyCurrentPassword(form.currentPassword);
+        setStep(2);
+      } catch (error) {
+        setError(
+          securityFormError(
+            error,
+            getApiErrorStatus(error) === 400
+              ? "Your current password is incorrect."
+              : "Could not check your password. Please try again.",
+          ),
+        );
+      } finally {
+        inFlight.current = false;
+        setLoading(false);
+      }
+      return;
+    }
+    const errors = validateResetPasswordForm(form);
+    const validationError = errors.newPassword || errors.confirmPassword;
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    inFlight.current = true;
     setLoading(true);
 
     try {
@@ -59,17 +98,29 @@ export function useChangePasswordForm() {
       router.push("/login");
     } catch (error) {
       setError(
-        getApiErrorMessage(
+        securityFormError(
           error,
-          "Không thể đổi mật khẩu, vui lòng thử lại.",
+          "Could not change your password. Please try again.",
         ),
       );
     } finally {
+      inFlight.current = false;
       setLoading(false);
     }
   }
 
   return {
+    reset: () => {
+      setForm(initialForm);
+      setError("");
+      setStep(1);
+    },
+    back: () => {
+      if (inFlight.current) return;
+      setStep(1);
+      setError("");
+    },
+    step,
     form,
     error,
     loading,

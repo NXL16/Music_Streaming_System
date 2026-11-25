@@ -1,0 +1,192 @@
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 24px;
+}
+.row + .row {
+  padding-top: 24px;
+  border-top: 1px solid var(--labelDivider);
+}
+.row h3,
+.deviceName {
+  font: var(--body-tall-emphasized);
+}
+.description {
+  margin-top: 5px;
+  color: var(--systemSecondary);
+  font: var(--callout);
+}
+.button,
+.primary,
+.textButton {
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font: var(--callout-emphasized);
+  cursor: pointer;
+}
+.button {
+  flex-shrink: 0;
+  background: var(--systemQuinary);
+  color: var(--systemPrimary);
+}
+.primary {
+  background: var(--systemPrimary);
+  color: var(--pageBG);
+}
+.textButton {
+  color: var(--systemSecondary);
+}
+.dialog {
+  --modalWidth: min(480px, calc(100vw - 32px));
+  --modalMaxHeight: calc(100dvh - 32px);
+}
+.dialog :global(.content-modal-container) {
+  width: 100%;
+  max-height: calc(100dvh - 32px);
+  min-height: 0;
+}
+.dialog :global(.header-container) {
+  position: static;
+  flex-shrink: 0;
+  max-height: none;
+  padding-bottom: 20px;
+}
+.dialog :global(.header-container) h1 {
+  font-size: 24px;
+  line-height: 1.2;
+}
+.dialog :global(.header-container) h2 {
+  margin-top: 8px;
+  font: var(--callout);
+}
+.dialog :global(.content-container) {
+  height: auto;
+  min-height: 0;
+  padding-bottom: 24px;
+  white-space: normal;
+  font: var(--body-tall);
+}
+.dialog :global(.close-button) {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: 6px 8px 4px auto;
+}
+.form,
+.fields {
+  display: grid;
+  gap: 18px;
+}
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.error,
+.notice {
+  font: var(--callout);
+  overflow-wrap: anywhere;
+}
+.error {
+  color: var(--keyColor);
+}
+.notice {
+  color: var(--systemSecondary);
+}
+.qr {
+  width: 180px;
+  height: 180px;
+  margin-inline: auto;
+  border-radius: 8px;
+}
+.codes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.codes code {
+  padding: 10px;
+  border-radius: 6px;
+  background: var(--systemQuinary);
+  text-align: center;
+  font-size: 14px;
+}
+.tools {
+  display: grid;
+  gap: 12px;
+}
+.tools > button {
+  text-align: start;
+}
+.devicesHeader {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+.device {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding-block: 14px;
+}
+.device + .device {
+  border-top: 1px solid var(--labelDivider);
+}
+.device > svg {
+  color: var(--systemSecondary);
+}
+.deviceName {
+  overflow-wrap: anywhere;
+}
+.current {
+  color: var(--systemSecondary);
+  font: var(--caption-1);
+}
+.dialog button:disabled,
+.row button:disabled,
+.device button:disabled,
+.devicesHeader button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.dialog button:focus-visible,
+.button:focus-visible,
+.textButton:focus-visible {
+  outline: 2px solid var(--systemPrimary);
+  outline-offset: 3px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .button:not(:disabled):hover {
+    background: var(--systemQuaternary);
+  }
+  .textButton:not(:disabled):hover {
+    color: var(--systemPrimary);
+  }
+}
+@media (max-width: 599px) {
+  .row {
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .row > .button {
+    max-width: 42%;
+    padding-inline: 12px;
+  }
+  .device {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+  .device > button,
+  .device > .current {
+    grid-column: 2;
+    justify-self: start;
+  }
+}

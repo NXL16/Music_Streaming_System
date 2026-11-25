@@ -1,89 +1,80 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { getApiErrorMessage } from "@/lib/api/api-error";
-import { resetPassword } from "@/lib/auth/auth.api";
-import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
+import { useEffect, useState, type FormEvent } from "react";
+import { getApiErrorStatus } from "@/lib/api/api-error";
+import { resetPassword, validatePasswordResetToken } from "./auth.api";
+import {
+  authFormError,
+  validateResetPasswordForm,
+} from "./auth-form-validation";
+import { useAuthForm } from "./use-auth-form";
+import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
 
-type ResetPasswordForm = {
-  newPassword: string;
-  confirmPassword: string;
-};
+export function useResetPasswordForm(token: string) {
+  const [status, setStatus] = useState<
+    "checking" | "editing" | "success" | "invalid" | "check-error"
+  >(token ? "checking" : "invalid");
+  const [checkVersion, setCheckVersion] = useState(0);
+  const [checkError, setCheckError] = useState("");
+  const checking = useMinimumLoadingDuration(status === "checking");
 
-const initialForm: ResetPasswordForm = {
-  newPassword: "",
-  confirmPassword: "",
-};
-
-export function useResetPasswordForm() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-
-  const token = useMemo(() => searchParams.get("token") ?? "", [searchParams]);
-
-  const [form, setForm] = useState<ResetPasswordForm>(initialForm);
-  const [error, setError] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
-  const [loading, setLoading] = useMinimumLoadingState();
-
-  function updateField<TField extends keyof ResetPasswordForm>(
-    field: TField,
-    value: ResetPasswordForm[TField],
-  ) {
-    setForm((current) => ({
-      ...current,
-      [field]: value,
-    }));
-  }
-
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setSuccessMessage("");
-
-    if (!token) {
-      setError("Token đặt lại mật khẩu không hợp lệ.");
-      return;
-    }
-
-    if (form.newPassword !== form.confirmPassword) {
-      setError("Mật khẩu xác nhận không khớp.");
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      const result = await resetPassword({
-        token,
-        newPassword: form.newPassword,
-      });
-
-      setSuccessMessage(result.message || "Đặt lại mật khẩu thành công.");
-
-      window.setTimeout(() => {
-        router.push("/login");
-      }, 1200);
-    } catch (error) {
-      setError(
-        getApiErrorMessage(
-          error,
-          "Không thể đặt lại mật khẩu, vui lòng thử lại.",
-        ),
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
+  useEffect(() => {
+    if (!token) return;
+    const controller = new AbortController();
+    void validatePasswordResetToken(token, controller.signal).then(
+      (result) => {
+        if (!controller.signal.aborted)
+          setStatus(result.data.valid ? "editing" : "invalid");
+      },
+      (error: unknown) => {
+        if (controller.signal.aborted) return;
+        const code = getApiErrorStatus(error);
+        if (code === 400 || code === 401) {
+          setStatus("invalid");
+          return;
+        }
+        setCheckError(
+          code === 429
+            ? authFormError(error, "reset-password")
+            : "We couldn't check this link. Please try again.",
+        );
+        setStatus("check-error");
+      },
+    );
+    return () => controller.abort();
+  }, [token, checkVersion]);
+  const auth = useAuthForm(
+    { newPassword: "", confirmPassword: "" },
+    validateResetPasswordForm,
+    async ({ newPassword }) => {
+      try {
+        await resetPassword({ token, newPassword });
+        setStatus("success");
+      } catch (error) {
+        if (getApiErrorStatus(error) === 401) setStatus("invalid");
+        throw error;
+      }
+    },
+    "reset-password",
+  );
 
   return {
-    form,
-    token,
-    error,
-    successMessage,
-    loading,
-    updateField,
-    handleSubmit,
+    ...auth,
+    status,
+    checking,
+    checkError,
+    retryValidation: () => {
+      if (status !== "check-error") return;
+      setCheckError("");
+      setStatus("checking");
+      setCheckVersion((version) => version + 1);
+    },
+    handleSubmit: (event: FormEvent<HTMLFormElement>) => {
+      if (auth.loading || status !== "editing") {
+        event.preventDefault();
+        return;
+      }
+      return auth.handleSubmit(event);
+    },
   };
 }

@@ -3,11 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getApiErrorMessage } from "@/lib/api/api-error";
-import {
-  listSessions,
-  logoutAll,
-  logoutDevice,
-} from "@/lib/auth/auth.api";
+import { listSessions, logoutAll, logoutDevice } from "@/lib/auth/auth.api";
 import { useAuthStore } from "@/lib/auth/auth-store";
 import type { SessionDevice } from "@/lib/auth/auth.types";
 
@@ -33,7 +29,7 @@ export function useSessions() {
       setError(
         getApiErrorMessage(
           error,
-          "Khong the tai danh sach phien dang nhap.",
+          "Could not load your devices. Please try again.",
         ),
       );
     } finally {
@@ -50,7 +46,10 @@ export function useSessions() {
       await loadSessions();
     } catch (error) {
       setError(
-        getApiErrorMessage(error, "Khong the dang xuat thiet bi nay."),
+        getApiErrorMessage(
+          error,
+          "Could not sign out this device. Please try again.",
+        ),
       );
     } finally {
       setActionDeviceId("");
@@ -69,7 +68,7 @@ export function useSessions() {
       setError(
         getApiErrorMessage(
           error,
-          "Khong the dang xuat tat ca thiet bi.",
+          "Could not sign out your devices. Please try again.",
         ),
       );
     } finally {

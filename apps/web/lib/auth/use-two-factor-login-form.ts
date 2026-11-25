@@ -1,71 +1,72 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { getApiErrorMessage } from "@/lib/api/api-error";
-import { verifyTwoFactorLogin } from "@/lib/auth/auth.api";
-import { useAuthStore } from "@/lib/auth/auth-store";
-import { resolveTwoFactorVerificationInput } from "@/lib/auth/two-factor-verification";
-import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
+import { getApiErrorStatus } from "@/lib/api/api-error";
+import { useMinimumLoadingDuration } from "@/lib/loading/use-minimum-loading-duration";
+import { verifyTwoFactorLogin } from "./auth.api";
+import { useAuthStore } from "./auth-store";
+import { resolveTwoFactorVerificationInput } from "./two-factor-verification";
 import {
   clearTwoFactorChallengeId,
   getTwoFactorChallengeId,
-} from "@/lib/auth/two-factor-challenge-store";
-import { navigateAfterLogin } from "@/lib/auth/login-return-to";
+  subscribeTwoFactorChallenge,
+} from "./two-factor-challenge-store";
+import { validateVerificationForm } from "./auth-form-validation";
+import { useAuthForm } from "./use-auth-form";
 
 export function useTwoFactorLoginForm() {
   const router = useRouter();
   const setSession = useAuthStore((state) => state.setSession);
-
-  const [verificationInput, setVerificationInput] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useMinimumLoadingState();
-
-  useEffect(() => {
-    const challengeId = getTwoFactorChallengeId();
-
-    if (!challengeId) {
-      router.replace("/login");
-    }
-  }, [router]);
-
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setLoading(true);
-
-    try {
-      const challengeId = getTwoFactorChallengeId();
-
-      if (!challengeId) {
-        router.replace("/login");
-        return;
+  const challengeId = useSyncExternalStore(
+    subscribeTwoFactorChallenge,
+    getTwoFactorChallengeId,
+    () => undefined,
+  );
+  const checking = useMinimumLoadingDuration(challengeId === undefined);
+  const [recoveryMode, setRecoveryMode] = useState(false);
+  const auth = useAuthForm(
+    { verificationInput: "" },
+    (values) => validateVerificationForm(values, recoveryMode),
+    async (form) => {
+      const currentChallengeId = getTwoFactorChallengeId();
+      if (!currentChallengeId) return;
+      try {
+        const result = await verifyTwoFactorLogin({
+          challengeId: currentChallengeId,
+          ...resolveTwoFactorVerificationInput(form.verificationInput),
+        });
+        clearTwoFactorChallengeId();
+        setSession(
+          result.data.accessToken,
+          result.data.user,
+          result.data.expiresIn,
+        );
+        router.replace("/home");
+      } catch (error) {
+        if (getApiErrorStatus(error) === 409) clearTwoFactorChallengeId();
+        throw error;
       }
-
-      const result = await verifyTwoFactorLogin({
-        challengeId,
-        ...resolveTwoFactorVerificationInput(verificationInput),
-      });
-
-      clearTwoFactorChallengeId();
-      setSession(
-        result.data.accessToken,
-        result.data.user,
-        result.data.expiresIn,
-      );
-      navigateAfterLogin(router);
-    } catch (error) {
-      setError(getApiErrorMessage(error, "Ma 2FA khong hop le."));
-    } finally {
-      setLoading(false);
-    }
-  }
+    },
+    "two-factor",
+  );
 
   return {
-    error,
-    loading,
-    verificationInput,
-    handleSubmit,
-    setVerificationInput,
+    ...auth,
+    checking,
+    expired: challengeId === null,
+    recoveryMode,
+    toggleRecoveryMode: () => {
+      if (auth.loading) return;
+      auth.reset();
+      setRecoveryMode((current) => !current);
+    },
+    handleSubmit: (event: FormEvent<HTMLFormElement>) => {
+      if (auth.loading || !getTwoFactorChallengeId()) {
+        event.preventDefault();
+        return;
+      }
+      return auth.handleSubmit(event);
+    },
   };
 }

@@ -1,11 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { getApiErrorMessage } from "@/lib/api/api-error";
-import {
-  finalizeAvatarUpload,
-  requestAvatarUpload,
-} from "@/lib/auth/auth.api";
+import { finalizeAvatarUpload, requestAvatarUpload } from "@/lib/auth/auth.api";
 import { useAuthStore } from "@/lib/auth/auth-store";
 
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
@@ -30,27 +27,31 @@ async function sha256(file: File): Promise<string> {
 }
 
 function wait(milliseconds: number) {
-  return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
+  return new Promise<void>((resolve) =>
+    window.setTimeout(resolve, milliseconds),
+  );
 }
 
 function getAvatarValidationError(file: File) {
   if (!AVATAR_CONTENT_TYPES.has(file.type)) {
-    return "Ảnh đại diện phải là JPEG, PNG, WebP hoặc AVIF.";
+    return "Choose a JPEG, PNG, WebP or AVIF image.";
   }
 
   if (file.size > MAX_AVATAR_BYTES) {
-    return "Ảnh đại diện tối đa 5 MB.";
+    return "Choose an image no larger than 5 MB.";
   }
 
   return null;
 }
 
 export function useAvatarUpload() {
+  const inFlight = useRef(false);
   const setUser = useAuthStore((state) => state.setUser);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   async function uploadAvatar(file: File) {
+    if (inFlight.current) return false;
     const validationError = getAvatarValidationError(file);
     if (validationError) {
       setError(validationError);
@@ -58,6 +59,7 @@ export function useAvatarUpload() {
     }
 
     setError("");
+    inFlight.current = true;
     setLoading(true);
 
     try {
@@ -76,13 +78,16 @@ export function useAvatarUpload() {
         });
 
         if (!response.ok) {
-          throw new Error("Không thể tải ảnh đại diện lên kho lưu trữ.");
+          throw new Error("Could not upload your profile picture.");
         }
       }
 
       for (let attempt = 0; attempt < 45; attempt += 1) {
         const finalized = await finalizeAvatarUpload(upload.data.asset.id);
-        if (finalized.data.asset.status === READY_STATUS && finalized.data.user) {
+        if (
+          finalized.data.asset.status === READY_STATUS &&
+          finalized.data.user
+        ) {
           setUser(finalized.data.user);
           return true;
         }
@@ -90,23 +95,24 @@ export function useAvatarUpload() {
         if (finalized.data.asset.status !== PROCESSING_STATUS) {
           throw new Error(
             finalized.data.asset.errorMessage ||
-              "Không thể xử lý ảnh đại diện.",
+              "Could not process your profile picture.",
           );
         }
 
         await wait(1_000);
       }
 
-      throw new Error("Xử lý ảnh đại diện mất quá lâu, vui lòng thử lại.");
+      throw new Error("Image processing timed out. Please try again.");
     } catch (uploadError) {
       setError(
         getApiErrorMessage(
           uploadError,
-          "Không thể thay ảnh đại diện, vui lòng thử lại.",
+          "Could not change your profile picture. Please try again.",
         ),
       );
       return false;
     } finally {
+      inFlight.current = false;
       setLoading(false);
     }
   }

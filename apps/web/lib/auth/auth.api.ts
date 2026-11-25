@@ -147,6 +147,10 @@ export async function finalizeAvatarUpload(assetId: string) {
   return response.data;
 }
 
+export async function verifyCurrentPassword(currentPassword: string) {
+  await http.post("/auth/password/verify-current", { currentPassword });
+}
+
 export async function changePassword(payload: ChangePasswordPayload) {
   const response = await http.post<ApiResponse<Record<string, never>>>(
     "/auth/change-password",
@@ -157,7 +161,7 @@ export async function changePassword(payload: ChangePasswordPayload) {
 }
 
 export async function forgotPassword(payload: ForgotPasswordPayload) {
-  const response = await http.post<ApiResponse<{ success: boolean }>>(
+  const response = await http.post<ApiResponse<null>>(
     "/auth/password/forgot",
     payload,
   );
@@ -165,8 +169,20 @@ export async function forgotPassword(payload: ForgotPasswordPayload) {
   return response.data;
 }
 
+export async function validatePasswordResetToken(
+  token: string,
+  signal?: AbortSignal,
+) {
+  const response = await http.post<ApiResponse<{ valid: boolean }>>(
+    "/auth/password/reset/validate",
+    { token },
+    { signal },
+  );
+  return response.data;
+}
+
 export async function resetPassword(payload: ResetPasswordPayload) {
-  const response = await http.post<ApiResponse<Record<string, never>>>(
+  const response = await http.post<ApiResponse<null>>(
     "/auth/password/reset",
     payload,
   );
@@ -220,6 +236,6 @@ export async function verifyEmail(payload: VerifyEmailPayload) {
     payload,
   );
 
+  invalidateCachedQuery(PROFILE_KEY);
   return response.data;
 }
-

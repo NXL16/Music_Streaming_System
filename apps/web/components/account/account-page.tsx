@@ -1,521 +1,364 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
-import {
-  Camera,
-  Check,
-  Coins,
-  LoaderCircle,
-  Mail,
-  Pencil,
-  ShieldCheck,
-  X,
-} from "lucide-react";
-import {
-  MusicPageHeading,
-  MusicPageLayout,
-} from "@/components/layout/music-page-layout";
-import { ChangePasswordPanel } from "@/components/profile/change-password-panel";
-import { SessionsPanel } from "@/components/profile/sessions-panel";
-import { TwoFactorPanel } from "@/components/profile/two-factor-panel";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Camera, Check, Pencil } from "lucide-react";
+import { toast } from "sonner";
+import { AUTH_DISPLAY_NAME_MAX_LENGTH } from "@musical/shared-constants";
+import { Spinner } from "@/components/loading/spinner";
 import { useAvatarUpload } from "@/lib/auth/use-avatar-upload";
 import { useEmailVerificationRequest } from "@/lib/auth/use-email-verification-request";
 import { useProfileDetailsUpdate } from "@/lib/auth/use-profile-details-update";
 import { useProfile } from "@/lib/auth/use-profile";
 import { formatDateTime } from "@/lib/format/date";
-import { useWalletBalance } from "@/lib/wallet/use-wallet-balance";
+import styles from "./account-page.module.css";
 
-const accountTabs = [
-  { id: "ho-so", label: "Profile" },
- ] as const;
-
-const settingsTabs = [
-  { id: "bao-mat", label: "Security" },
-  { id: "thiet-bi", label: "Devices" },
-  { id: "vi", label: "Coin Wallet" },
-] as const;
-
-const tabs = [...accountTabs, ...settingsTabs] as const;
-
-type TabId = (typeof tabs)[number]["id"];
-type AccountPageSection = "account" | "settings";
-
-function isTabId(value: string): value is TabId {
-  return tabs.some((tab) => tab.id === value);
-}
-
-function DetailRow({ label, value }: { label: string; value?: string | null }) {
-  return (
-    <div className="grid grid-cols-[minmax(9rem,.65fr)_1fr] gap-4 py-3 text-(--systemPrimary)">
-      <dt className="text-(--systemSecondary) [font:var(--callout)]">
-        {label}
-      </dt>
-      <dd className="min-w-0 truncate text-right [font:var(--body-tall-emphasized)]">
-        {value || "—"}
-      </dd>
-    </div>
-  );
-}
-
-function StatusRow({
-  icon,
-  title,
-  description,
-  positive,
-}: {
-  icon: "email" | "security";
-  title: string;
-  description: string;
-  positive: boolean;
-}) {
-  const Icon = icon === "email" ? Mail : ShieldCheck;
-
-  return (
-    <div className="flex gap-3 py-4">
-      <Icon
-        className={`mt-0.5 h-4 w-4 shrink-0 ${positive ? "text-(--statusPositive)" : "text-(--systemSecondary)"}`}
-      />
-      <div>
-        <p className="text-(--systemPrimary) [font:var(--callout-emphasized)]">
-          {title}
-        </p>
-        <p className="mt-1 text-(--systemSecondary) [font:var(--callout)]">
-          {description}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-export default function AccountPage({
-  section,
-}: {
-  section: AccountPageSection;
-}) {
-  const { user, loading, error } = useProfile();
-  const { balance } = useWalletBalance();
-  const verificationRequest = useEmailVerificationRequest();
-  const {
-    error: avatarError,
-    loading: avatarUploading,
-    uploadAvatar,
-  } = useAvatarUpload();
-  const profileDetails = useProfileDetailsUpdate();
-  const avatarInputRef = useRef<HTMLInputElement>(null);
-  const visibleTabs = section === "account" ? accountTabs : settingsTabs;
-  const [activeTab, setActiveTab] = useState<TabId>(
-    section === "account" ? "ho-so" : "bao-mat",
-  );
-  const [securityWorkspace, setSecurityWorkspace] = useState<
-    "password" | "twoFactor" | null
-  >(null);
-  const [editingField, setEditingField] = useState<
-    "displayName" | "bio" | null
-  >(null);
-  const [displayNameDraft, setDisplayNameDraft] = useState("");
-  const [bioDraft, setBioDraft] = useState("");
+export default function AccountPage() {
+  const { user, error } = useProfile();
+  const avatar = useAvatarUpload();
+  const profile = useProfileDetailsUpdate();
+  const verification = useEmailVerificationRequest();
+  const avatarInput = useRef<HTMLInputElement>(null);
+  const nameInput = useRef<HTMLInputElement>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({ displayName: "", bio: "" });
+  const busy = profile.loading || avatar.loading;
+  const name = user?.displayName || user?.username || "Your profile";
 
   useEffect(() => {
-    const syncTab = () => {
-      const hash = window.location.hash.slice(1);
-      if (isTabId(hash) && visibleTabs.some((tab) => tab.id === hash))
-        setActiveTab(hash);
-    };
+    if (editing) nameInput.current?.focus();
+  }, [editing]);
 
-    syncTab();
-    window.addEventListener("hashchange", syncTab);
-    return () => window.removeEventListener("hashchange", syncTab);
-  }, [visibleTabs]);
-
-  const name = user?.displayName || user?.username || "Your account";
-  const coinBalance = (balance?.coinBalance ?? 0).toLocaleString();
-
-  function selectTab(tabId: TabId) {
-    setActiveTab(tabId);
-    window.history.replaceState(null, "", `#${tabId}`);
-  }
-
-  function selectAvatar(file: File | null) {
-    if (file) {
-      void uploadAvatar(file);
-    }
-  }
-
-  function startEditing(field: "displayName" | "bio") {
-    setDisplayNameDraft(user?.displayName || user?.username || "");
-    setBioDraft(user?.bio || "");
-    setEditingField(field);
-  }
-
-  async function saveEditing() {
-    const saved = await profileDetails.saveProfileDetails({
-      displayName: displayNameDraft,
-      bio: bioDraft,
+  function editProfile() {
+    profile.clearError();
+    setDraft({
+      displayName: user?.displayName || user?.username || "",
+      bio: user?.bio || "",
     });
+    setEditing(true);
+  }
 
-    if (saved) {
-      setEditingField(null);
+  async function saveProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    if (await profile.saveProfileDetails(draft)) {
+      setEditing(false);
+      toast.success("Profile updated.");
     }
   }
+
+  async function changePhoto(file: File | undefined) {
+    if (!file || busy) return;
+    if (await avatar.uploadAvatar(file))
+      toast.success("Profile picture updated.");
+  }
+
+  const activity = [
+    { label: "Last sign-in", value: user?.lastLoginAt },
+    { label: "Profile updated", value: user?.updatedAt },
+  ];
+  const role = user?.role
+    ? user.role
+        .toLowerCase()
+        .replaceAll("_", " ")
+        .replace(/^./, (letter) => letter.toUpperCase())
+    : "Not available";
 
   return (
-    <MusicPageLayout>
-      <MusicPageHeading title={section === "account" ? "Account" : "Settings"} />
-
-      {section === "account" && (
-      <section className="px-(--bodyGutter) pb-6 pt-2">
-        <div className="flex items-center gap-5">
-          <button
-            type="button"
-            onClick={() => avatarInputRef.current?.click()}
-            disabled={avatarUploading}
-            className="group relative h-20 w-20 shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-(--keyColor) focus-visible:ring-offset-2 focus-visible:ring-offset-(--background)"
-            title="Change profile picture"
-            aria-label="Change profile picture"
-          >
-            <Image
-              src={user?.avatarUrl || "/assets/avatar.webp"}
-              alt=""
-              width={96}
-              height={96}
-              className="h-20 w-20 rounded-full object-cover transition duration-200 group-hover:brightness-75"
-            />
-            <span className="absolute bottom-0 right-0 flex h-7 w-7 items-center justify-center rounded-full border-2 border-(--background) bg-(--keyColor) text-(--keyColorText) shadow-sm transition group-hover:scale-105">
-              {avatarUploading ? (
-                <LoaderCircle
-                  className="h-3.5 w-3.5 animate-spin"
-                  aria-hidden="true"
-                />
-              ) : (
-                <Camera className="h-3.5 w-3.5" aria-hidden="true" />
-              )}
-            </span>
-          </button>
-          <input
-            ref={avatarInputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp,image/avif"
-            className="sr-only"
-            onChange={(event) => {
-              selectAvatar(event.target.files?.[0] ?? null);
-              event.target.value = "";
-            }}
-          />
-          <div className="min-w-0">
-            <p className="text-(--systemSecondary) [font:var(--subhead-emphasized)]">
-              YOUR PROFILE
-            </p>
-            {editingField === "displayName" ? (
-              <form
-                className="mt-1 flex max-w-md items-center gap-2"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void saveEditing();
-                }}
-              >
-                <input
-                  autoFocus
-                  value={displayNameDraft}
-                  onChange={(event) => setDisplayNameDraft(event.target.value)}
-                  maxLength={100}
-                  className="min-w-0 flex-1 border-b border-(--labelDivider) bg-transparent py-1 text-(--systemPrimary) outline-none [font:var(--large-title-emphasized)] focus:border-(--keyColor)"
-                  aria-label="Display name"
-                />
-                <button
-                  type="submit"
-                  disabled={profileDetails.loading}
-                  className="rounded-full p-1.5 text-(--statusPositive) disabled:opacity-50"
-                  aria-label="Save display name"
-                >
-                  <Check className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEditingField(null)}
-                  disabled={profileDetails.loading}
-                  className="rounded-full p-1.5 text-(--systemSecondary) disabled:opacity-50"
-                  aria-label="Cancel editing display name"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </form>
-            ) : (
-              <div className="mt-1 flex items-center gap-2">
-                <h2 className="truncate text-(--systemPrimary) [font:var(--large-title-emphasized)]">
-                  {name}
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => startEditing("displayName")}
-                  className="shrink-0 rounded-full p-1.5 text-(--systemSecondary) transition hover:bg-(--systemQuinary) hover:text-(--systemPrimary)"
-                  aria-label="Edit display name"
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            )}
-            <p className="mt-1 truncate text-(--systemSecondary) [font:var(--body-tall)]">
-              {user?.email || "Loading account information…"}
-            </p>
-            {avatarError && (
-              <p className="mt-1 text-(--keyColor) [font:var(--callout)]">
-                {avatarError}
-              </p>
-            )}
-            {editingField === "displayName" && profileDetails.error && (
-              <p className="mt-1 text-(--keyColor) [font:var(--callout)]">
-                {profileDetails.error}
-              </p>
-            )}
-          </div>
-        </div>
-      </section>
-      )}
-
-      {section === "settings" && (
-        <section className="px-(--bodyGutter) pb-4 pt-2">
-          <p className="max-w-2xl text-(--systemSecondary) [font:var(--body-tall)]">
-            Manage your security, signed-in devices, and MusicCoin wallet.
-          </p>
-        </section>
-      )}
-
-      {visibleTabs.length > 1 && <nav
-        aria-label="Settings sections"
-        className="mb-6 flex gap-1 overflow-x-auto border-b border-(--labelDivider) px-(--bodyGutter)"
-      >
-        {visibleTabs.map((tab) => {
-          const active = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => selectTab(tab.id)}
-              className={`shrink-0 border-b-2 px-3 py-2.5 [font:var(--callout-emphasized)] transition ${active ? "border-(--keyColor) text-(--systemPrimary)" : "border-transparent text-(--systemSecondary) hover:text-(--systemPrimary)"}`}
-            >
-              {tab.label}
-            </button>
-          );
-        })}
-      </nav>}
-
-      {activeTab === "ho-so" && (
-        <section className="relative z-(--z-default) w-full px-(--bodyGutter) pb-8">
-          <div className="grid gap-8 xl:grid-cols-[minmax(0,1.45fr)_minmax(250px,.55fr)] xl:gap-12">
-            <div>
-              <div className="pb-4">
-                <div>
-                  <h3 className="text-(--systemPrimary) [font:var(--title-2-emphasized)]">
-                    Personal information
-                  </h3>
-                  <p className="mt-1 text-(--systemSecondary) [font:var(--callout)]">
-                    This information appears on your profile.
-                  </p>
-                </div>
-              </div>
-
-              {loading && (
-                <p className="pb-4 text-(--systemSecondary) [font:var(--callout)]">
-                  Đang đồng bộ thông tin…
-                </p>
-              )}
-              {error && (
-                <p className="pb-4 text-(--keyColor) [font:var(--callout)]">
-                  {error}
-                </p>
-              )}
-              <dl className="divide-y divide-(--labelDivider)">
-                <DetailRow label="Display name" value={user?.displayName} />
-                <DetailRow label="Username" value={user?.username} />
-                <DetailRow label="Email" value={user?.email} />
-                <DetailRow
-                  label="Member since"
-                  value={formatDateTime(user?.createdAt)}
-                />
-              </dl>
-              <div className="mt-6">
-                <div className="flex items-center gap-1">
-                  <p className="text-(--systemSecondary) [font:var(--subhead-emphasized)]">
-                    ABOUT
-                  </p>
-                  {editingField !== "bio" && (
-                    <button
-                      type="button"
-                      onClick={() => startEditing("bio")}
-                      className="rounded-full p-1 text-(--systemSecondary) transition hover:bg-(--systemQuinary) hover:text-(--systemPrimary)"
-                      aria-label="Chỉnh sửa giới thiệu"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                </div>
-                {editingField === "bio" ? (
-                  <form
-                    className="mt-2 max-w-xl"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      void saveEditing();
-                    }}
+    <div className="min-[484px]:-ms-(--web-navigation-width) min-[484px]:ps-(--web-navigation-width)">
+      <div className="in-[.is-drawer-open]:min-[1260px]:pe-75 motion-safe:min-[1260px]:[transition:padding-inline-end_.3s_cubic-bezier(.215,.61,.355,1)]">
+        <div className={styles.page}>
+          <header className="sr-only">
+            <h1>Account</h1>
+          </header>
+          <section className={styles.profile} aria-label="Your profile">
+            <div className={styles.summary}>
+              <div className={styles.portrait}>
+                {!editing && (
+                  <button
+                    type="button"
+                    className={styles.editButton}
+                    disabled={!user || busy}
+                    onClick={editProfile}
+                    aria-label="Edit profile"
+                    title="Edit profile"
                   >
-                    <textarea
-                      autoFocus
-                      value={bioDraft}
-                      onChange={(event) => setBioDraft(event.target.value)}
-                      maxLength={500}
-                      rows={3}
-                      className="w-full resize-y rounded-xl bg-(--systemQuinary) px-3 py-2 text-(--systemPrimary) outline-none ring-1 ring-transparent focus:ring-(--keyColor) [font:var(--body-tall)]"
-                      aria-label="Giới thiệu"
-                    />
-                    <div className="mt-2 flex items-center justify-between gap-3">
-                      <p className="text-(--systemSecondary) [font:var(--caption-1)]">
-                        {bioDraft.length}/500
-                      </p>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setEditingField(null)}
-                          disabled={profileDetails.loading}
-                          className="rounded-full px-3 py-1.5 text-(--systemSecondary) [font:var(--callout-emphasized)]"
-                        >
-                          Hủy
-                        </button>
-                        <button
-                          type="submit"
-                          disabled={profileDetails.loading}
-                          className="rounded-full bg-(--keyColor) px-3 py-1.5 text-(--keyColorText) [font:var(--callout-emphasized)]"
-                        >
-                          {profileDetails.loading ? "Đang lưu…" : "Lưu"}
-                        </button>
-                      </div>
-                    </div>
-                    {profileDetails.error && (
-                      <p className="mt-2 text-(--keyColor) [font:var(--callout)]">
-                        {profileDetails.error}
-                      </p>
+                    <Pencil size={19} aria-hidden="true" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={styles.avatar}
+                  onClick={() => avatarInput.current?.click()}
+                  disabled={!user || busy}
+                  aria-label="Change profile picture"
+                  aria-busy={avatar.loading}
+                >
+                  <Image
+                    src={user?.avatarUrl || "/assets/avatar.webp"}
+                    alt=""
+                    width={160}
+                    height={160}
+                    sizes="(min-width: 768px) 120px, 96px"
+                    className={styles.avatarImage}
+                  />
+
+                  <span className={styles.camera}>
+                    {avatar.loading ? (
+                      <Spinner size={18} />
+                    ) : (
+                      <Camera size={17} aria-hidden="true" />
                     )}
-                  </form>
-                ) : (
-                  <p className="mt-2 whitespace-pre-wrap text-(--systemPrimary) [font:var(--body-tall)]">
-                    {user?.bio || "No introduction yet."}
+                  </span>
+                </button>
+                <input
+                  ref={avatarInput}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/avif"
+                  className="sr-only"
+                  tabIndex={-1}
+                  aria-label="Choose profile picture"
+                  onChange={(event) => {
+                    void changePhoto(event.target.files?.[0]);
+                    event.target.value = "";
+                  }}
+                />
+              </div>
+
+              <div className={styles.identity}>
+                <h2>{name}</h2>
+                <p className={styles.emailAddress}>
+                  {user?.email || "Not available"}
+                </p>
+              </div>
+            </div>
+            {(error || avatar.error) && (
+              <p className={styles.error} role="alert">
+                {avatar.error || error}
+              </p>
+            )}
+            {editing && (
+              <form
+                className={styles.editor}
+                onSubmit={saveProfile}
+                noValidate
+                aria-label="Edit profile"
+                aria-busy={profile.loading}
+              >
+                <div className={styles.fields}>
+                  <div className={styles.field}>
+                    <label htmlFor="profile-display-name">Display name</label>
+                    <input
+                      ref={nameInput}
+                      id="profile-display-name"
+                      name="displayName"
+                      autoComplete="nickname"
+                      value={draft.displayName}
+                      maxLength={AUTH_DISPLAY_NAME_MAX_LENGTH}
+                      disabled={profile.loading}
+                      onChange={(event) => {
+                        profile.clearError();
+                        setDraft((current) => ({
+                          ...current,
+                          displayName: event.target.value,
+                        }));
+                      }}
+                    />
+                  </div>
+                  <div className={styles.field}>
+                    <label htmlFor="profile-bio">
+                      Bio <span>Optional</span>
+                    </label>
+                    <textarea
+                      id="profile-bio"
+                      name="bio"
+                      rows={3}
+                      value={draft.bio}
+                      maxLength={500}
+                      disabled={profile.loading}
+                      onChange={(event) => {
+                        profile.clearError();
+                        setDraft((current) => ({
+                          ...current,
+                          bio: event.target.value,
+                        }));
+                      }}
+                    />
+                    <span className={styles.counter}>
+                      {draft.bio.length}/500
+                    </span>
+                  </div>
+                </div>
+                {profile.error && (
+                  <p className={styles.error} role="alert">
+                    {profile.error}
                   </p>
                 )}
-              </div>
-            </div>
-
-            <aside>
-              <h3 className="text-(--systemPrimary) [font:var(--title-2-emphasized)]">
-                Account protection
-              </h3>
-              <div className="mt-4 divide-y divide-(--labelDivider)">
-                <StatusRow
-                  icon="email"
-                  positive={Boolean(user?.emailVerified)}
-                  title={
-                    user?.emailVerified
-                      ? "Email verified"
-                      : "Email not verified"
-                  }
-                  description="Used to recover your account."
-                />
-                <StatusRow
-                  icon="security"
-                  positive={Boolean(user?.twoFactorEnabled)}
-                  title={
-                    user?.twoFactorEnabled
-                      ? "Two-factor authentication is on"
-                      : "Two-factor authentication is off"
-                  }
-                  description="Adds protection when you sign in."
-                />
-              </div>
-            </aside>
-          </div>
-
-          {!user?.emailVerified && (
-            <div className="mt-7 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-(--systemPrimary) [font:var(--body-tall-emphasized)]">
-                  Verify your email address
-                </p>
-                <p className="mt-1 text-(--systemSecondary) [font:var(--callout)]">
-                  We will send a verification link to your email.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => void verificationRequest.sendVerificationEmail()}
-                disabled={verificationRequest.loading}
-                className="shrink-0 rounded-full bg-(--keyColor) px-4 py-2 text-(--keyColorText) [font:var(--callout-emphasized)] disabled:opacity-60"
-              >
-                {verificationRequest.loading ? "Sending…" : "Send email"}
-              </button>
-            </div>
-          )}
-          {(verificationRequest.message || verificationRequest.error) && (
-            <p
-              className={`mt-3 [font:var(--callout)] ${verificationRequest.error ? "text-(--keyColor)" : "text-(--statusPositive)"}`}
+                <div className={styles.actions}>
+                  <button
+                    type="button"
+                    className={styles.cancelButton}
+                    disabled={profile.loading}
+                    onClick={() => setEditing(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className={styles.saveButton}
+                    disabled={busy}
+                  >
+                    {profile.loading ? "Saving..." : "Save changes"}
+                  </button>
+                </div>
+              </form>
+            )}
+          </section>
+          <div className={styles.detailGrid}>
+            <section
+              className={styles.section}
+              aria-labelledby="personal-details"
             >
-              {verificationRequest.error || verificationRequest.message}
-            </p>
-          )}
-        </section>
-      )}
-
-      {activeTab === "bao-mat" && (
-        <section className="relative z-(--z-default) w-full px-(--bodyGutter) pb-8">
-          <div className="max-w-3xl">
-            <ChangePasswordPanel
-              open={securityWorkspace === "password"}
-              onToggle={() =>
-                setSecurityWorkspace((current) =>
-                  current === "password" ? null : "password",
-                )
-              }
-            />
-            <TwoFactorPanel
-              user={user}
-              open={securityWorkspace === "twoFactor"}
-              onToggle={() =>
-                setSecurityWorkspace((current) =>
-                  current === "twoFactor" ? null : "twoFactor",
-                )
-              }
-            />
-          </div>
-        </section>
-      )}
-
-      {activeTab === "thiet-bi" && (
-        <section className="relative z-(--z-default) w-full px-(--bodyGutter) pb-8">
-          <div className="max-w-4xl">
-            <SessionsPanel className="mt-0" />
-          </div>
-        </section>
-      )}
-
-      {activeTab === "vi" && (
-        <section className="relative z-(--z-default) w-full px-(--bodyGutter) pb-8">
-          <div className="max-w-3xl py-2 sm:flex sm:items-center sm:justify-between">
-            <div>
-              <p className="text-(--systemSecondary) [font:var(--callout)]">
-                MusicCoin · số dư ví hiện tại
-              </p>
-              <p className="mt-1 flex items-center gap-2 text-(--systemPrimary) [font:var(--large-title-emphasized)]">
-                <Coins className="h-6 w-6 text-(--keyColor)" />
-                {coinBalance} Coin
-              </p>
-            </div>
-            <Link
-              href="/deposit"
-              className="mt-4 inline-flex rounded-full bg-(--keyColor) px-5 py-2.5 text-(--keyColorText) [font:var(--callout-emphasized)] sm:mt-0"
+              <h2 id="personal-details" className={styles.sectionHeading}>
+                Personal details
+              </h2>
+              <dl>
+                <div className={styles.row}>
+                  <dt>Display name</dt>
+                  <dd>{user?.displayName || "Not set"}</dd>
+                </div>
+                <div className={styles.row}>
+                  <dt>Username</dt>
+                  <dd>{user?.username || "Not available"}</dd>
+                </div>
+                <div className={styles.row}>
+                  <dt>Email address</dt>
+                  <dd>{user?.email || "Not available"}</dd>
+                </div>
+                <div className={styles.row}>
+                  <dt>Bio</dt>
+                  <dd className={styles.bio}>{user?.bio || "No bio added."}</dd>
+                </div>
+              </dl>
+            </section>
+            <section
+              className={styles.section}
+              aria-labelledby="account-details"
             >
-              Top Up Coin
-            </Link>
+              <h2 id="account-details" className={styles.sectionHeading}>
+                Account details
+              </h2>
+              <dl>
+                <div className={styles.row}>
+                  <dt>Role</dt>
+                  <dd>{role}</dd>
+                </div>
+                <div className={styles.row}>
+                  <dt>Status</dt>
+                  <dd>
+                    <span
+                      className={
+                        user?.isActive ? styles.positive : styles.secondary
+                      }
+                    >
+                      {user
+                        ? user.isActive
+                          ? "Active"
+                          : "Inactive"
+                        : "Not available"}
+                    </span>
+                  </dd>
+                </div>
+                <div className={styles.row}>
+                  <dt>Account created</dt>
+                  <dd>
+                    {user?.createdAt
+                      ? formatDateTime(user.createdAt)
+                      : "Not available"}
+                  </dd>
+                </div>
+                <div className={styles.row}>
+                  <dt>Account ID</dt>
+                  <dd className={styles.accountId}>
+                    {user?.userId || "Not available"}
+                  </dd>
+                </div>
+              </dl>
+            </section>
+            <section
+              className={styles.section}
+              aria-labelledby="account-security"
+            >
+              <h2 id="account-security" className={styles.sectionHeading}>
+                Security
+              </h2>
+              <dl>
+                <div className={styles.row}>
+                  <dt>Email verification</dt>
+                  <dd>
+                    <span
+                      className={
+                        user?.emailVerified ? styles.positive : styles.secondary
+                      }
+                    >
+                      {user?.emailVerified && (
+                        <Check size={13} aria-hidden="true" />
+                      )}
+                      {user?.emailVerified ? "Verified" : "Not verified"}
+                    </span>
+                    {user && !user.emailVerified && (
+                      <button
+                        type="button"
+                        className={styles.verifyButton}
+                        disabled={verification.loading}
+                        onClick={() =>
+                          void verification.sendVerificationEmail()
+                        }
+                      >
+                        {verification.loading ? "Sending..." : "Verify email"}
+                      </button>
+                    )}
+                  </dd>
+                </div>
+                <div className={styles.row}>
+                  <dt>Two-factor authentication</dt>
+                  <dd>
+                    {user
+                      ? user.twoFactorEnabled
+                        ? "Enabled"
+                        : "Not enabled"
+                      : "Not available"}
+                  </dd>
+                </div>
+              </dl>
+              {(verification.message || verification.error) && (
+                <p
+                  className={verification.error ? styles.error : styles.notice}
+                  role={verification.error ? "alert" : "status"}
+                >
+                  {verification.error || verification.message}
+                </p>
+              )}
+            </section>
+            <section
+              className={styles.section}
+              aria-labelledby="account-activity"
+            >
+              <h2 id="account-activity" className={styles.sectionHeading}>
+                Account activity
+              </h2>
+              <dl>
+                {activity.map(({ label, value }) => (
+                  <div key={label} className={styles.row}>
+                    <dt>{label}</dt>
+                    <dd>{value ? formatDateTime(value) : "Not available"}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
           </div>
-        </section>
-      )}
-    </MusicPageLayout>
+        </div>
+      </div>
+    </div>
   );
 }

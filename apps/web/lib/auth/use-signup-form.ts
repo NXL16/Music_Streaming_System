@@ -1,76 +1,59 @@
 "use client";
-
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { getApiErrorMessage } from "@/lib/api/api-error";
-import { signup } from "@/lib/auth/auth.api";
-import { useAuthStore } from "@/lib/auth/auth-store";
-import { getOrCreateDeviceId } from "@/lib/auth/device-id";
-import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
-
-type SignupForm = {
-  displayName: string;
-  username: string;
-  email: string;
-  password: string;
-};
-
-const initialSignupForm: SignupForm = {
-  displayName: "",
-  username: "",
-  email: "",
-  password: "",
-};
+import { signup } from "./auth.api";
+import { useAuthStore } from "./auth-store";
+import { getOrCreateDeviceId } from "./device-id";
+import {
+  validateSignupForm,
+  type SignupFormValues,
+} from "./auth-form-validation";
+import { useAuthForm } from "./use-auth-form";
 
 export function useSignupForm() {
   const router = useRouter();
   const setSession = useAuthStore((state) => state.setSession);
-
-  const [form, setForm] = useState<SignupForm>(initialSignupForm);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useMinimumLoadingState();
-
-  function updateField<TField extends keyof SignupForm>(
-    field: TField,
-    value: SignupForm[TField],
-  ) {
-    setForm((current) => ({
-      ...current,
-      [field]: value,
-    }));
-  }
-
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setLoading(true);
-
-    try {
+  const [step, setStep] = useState<1 | 2>(1);
+  const auth = useAuthForm<SignupFormValues>(
+    { displayName: "", username: "", email: "", password: "" },
+    validateSignupForm,
+    async (form) => {
       const result = await signup({
         ...form,
+        displayName: form.displayName.trim(),
+        username: form.username.trim().toLowerCase(),
+        email: form.email.trim().toLowerCase(),
         deviceId: getOrCreateDeviceId(),
       });
-
       setSession(
         result.data.accessToken,
         result.data.user,
         result.data.expiresIn,
       );
-      router.push("/");
-    } catch (error) {
-      setError(
-        getApiErrorMessage(error, "Đăng ký thất bại, vui lòng thử lại"),
-      );
-    } finally {
-      setLoading(false);
+      router.replace("/home");
+    },
+    "signup",
+  );
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (auth.loading) return;
+    if (step === 1) {
+      if (auth.validateForm(event.currentTarget, ["email", "password"]))
+        setStep(2);
+      return;
     }
+    return auth.handleSubmit(event);
   }
 
   return {
-    form,
-    error,
-    loading,
-    updateField,
+    ...auth,
+    step,
+    goBack: () => {
+      if (auth.loading) return;
+      auth.clearError();
+      setStep(1);
+    },
     handleSubmit,
   };
 }

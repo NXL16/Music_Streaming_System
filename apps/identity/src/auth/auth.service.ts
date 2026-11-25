@@ -1,5 +1,6 @@
 ﻿import { Inject, Injectable, Logger } from '@nestjs/common';
-import { JwtService, TokenExpiredError } from '@nestjs/jwt';
+import { JsonWebTokenError, JwtService, TokenExpiredError } from '@nestjs/jwt';
+import { AUTH_TWO_FACTOR_CHALLENGE_TTL_SECONDS as TWO_FACTOR_CHALLENGE_TTL_SECONDS } from '@musical/shared-constants';
 import * as argon2 from 'argon2';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
@@ -18,6 +19,7 @@ import {
   BeginTwoFactorSetupRequest,
   BeginTwoFactorSetupResponse,
   ChangePasswordRequest,
+  VerifyCurrentPasswordRequest,
   ConfirmTwoFactorSetupRequest,
   ConfirmTwoFactorSetupResponse,
   DisableTwoFactorRequest,
@@ -29,6 +31,8 @@ import {
   RequestEmailVerificationRequest,
   RequestPasswordResetRequest,
   ResetPasswordRequest,
+  ValidatePasswordResetTokenRequest,
+  ValidatePasswordResetTokenResponse,
   SignUpRequest,
   TokenIssueResponse,
   TwoFactorRecoveryCodesResponse,
@@ -85,7 +89,6 @@ type RateLimitPolicy = {
   message: string;
 };
 
-const TWO_FACTOR_CHALLENGE_TTL_SECONDS = 300;
 const TWO_FACTOR_RECOVERY_CODE_COUNT = 10;
 const PASSWORD_RESET_TTL_MINUTES = 15;
 const EMAIL_VERIFICATION_TTL_HOURS = 24;
@@ -100,25 +103,30 @@ const ALLOWED_ADMIN_ROLES = new Set<string>(ADMIN_ROLES);
 const EMAIL_REQUEST_POLICY: RateLimitPolicy = {
   maxAttempts: 3,
   windowSeconds: 15 * 60,
-  message: 'Bạn thao tác quá nhanh, vui lòng thử lại sau ít phút',
+  message: 'Too many requests',
 };
 
 const TWO_FACTOR_VERIFY_POLICY: RateLimitPolicy = {
   maxAttempts: 5,
   windowSeconds: 5 * 60,
-  message: 'Bạn nhập sai mã 2FA quá nhiều lần, vui lòng thử lại sau ít phút',
+  message: 'Too many verification attempts',
 };
 
 const TWO_FACTOR_SETUP_POLICY: RateLimitPolicy = {
   maxAttempts: 5,
   windowSeconds: 15 * 60,
-  message: 'Bạn thao tác 2FA quá nhiều lần, vui lòng thử lại sau ít phút',
+  message: 'Too many two-factor authentication requests',
 };
 
 const LOGIN_POLICY: RateLimitPolicy = {
   maxAttempts: 5,
   windowSeconds: 10 * 60,
-  message: 'Bạn đăng nhập sai quá nhiều lần, vui lòng thử lại sau ít phút',
+  message: 'Too many sign-in attempts',
+};
+
+const PASSWORD_VERIFICATION_POLICY: RateLimitPolicy = {
+  ...LOGIN_POLICY,
+  message: 'Too many password verification attempts',
 };
 
 const twoFactorChallengeKey = (challengeId: string): string =>
@@ -177,6 +185,17 @@ export class AuthService {
     return 0
   `;
   private static readonly SAVE_REFRESH_SESSION_LUA = `
+    if ARGV[7] then
+      local stored = redis.call("GET", KEYS[1])
+      if not stored then return -1 end
+      if stored ~= ARGV[7] then
+        redis.call("DEL", KEYS[1], KEYS[2])
+        redis.call("SREM", KEYS[3], ARGV[4])
+        redis.call("ZREM", KEYS[4], ARGV[4])
+        return 0
+      end
+    end
+
     redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[3])
     redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
     redis.call("SADD", KEYS[3], ARGV[4])
@@ -803,8 +822,8 @@ export class AuthService {
 
     if (!rawChallenge) {
       throw new RpcException({
-        code: status.UNAUTHENTICATED,
-        message: 'Phiên xác thực 2FA không tồn tại hoặc đã hết hạn',
+        code: status.FAILED_PRECONDITION,
+        message: 'Your sign-in session has expired. Sign in again.',
       });
     }
 
@@ -844,10 +863,16 @@ export class AuthService {
       });
     }
 
-    await this.redis.del(
+    const consumedChallenge = await this.redis.getdel(
       twoFactorChallengeKey(request.challengeId),
-      authRateLimitKey('2fa-login', request.challengeId),
     );
+    if (consumedChallenge !== rawChallenge) {
+      throw new RpcException({
+        code: status.FAILED_PRECONDITION,
+        message: 'Your sign-in session has expired. Sign in again.',
+      });
+    }
+    await this.redis.del(authRateLimitKey('2fa-login', request.challengeId));
 
     await this.markDeviceAsTrusted(user.id, challenge.deviceId, user.role);
 
@@ -873,29 +898,52 @@ export class AuthService {
     return this.verifyTwoFactorLogin(request, 'artist', sessionMeta);
   }
 
+  async verifyCurrentPassword(
+    request: VerifyCurrentPasswordRequest,
+  ): Promise<void> {
+    await this.requireCurrentPassword(request.userId, request.currentPassword);
+  }
+
+  private async requireCurrentPassword(
+    userId: string,
+    currentPassword: string,
+  ) {
+    if (!userId || !currentPassword) {
+      throw new RpcException({
+        code: status.INVALID_ARGUMENT,
+        message: 'Enter your current password.',
+      });
+    }
+    await this.assertRateLimit(
+      'current-password',
+      userId,
+      PASSWORD_VERIFICATION_POLICY,
+    );
+    const user = await this.usersService.findAuthUserById(userId);
+    if (!user || !user.isActive) {
+      throw new RpcException({
+        code: status.PERMISSION_DENIED,
+        message: 'This account is unavailable.',
+      });
+    }
+    if (!(await argon2.verify(user.password, currentPassword))) {
+      throw new RpcException({
+        code: status.INVALID_ARGUMENT,
+        message: 'Your current password is incorrect.',
+      });
+    }
+    await this.redis.del(authRateLimitKey('current-password', userId));
+    return user;
+  }
+
   async changePassword(request: ChangePasswordRequest): Promise<void> {
     const normalizedRequest =
       normalizeAndValidateChangePasswordRequest(request);
 
-    const user = await this.usersService.findAuthUserById(
+    const user = await this.requireCurrentPassword(
       normalizedRequest.userId,
+      normalizedRequest.currentPassword,
     );
-
-    if (!user || !user.isActive) {
-      throw new RpcException({
-        code: status.PERMISSION_DENIED,
-        message: 'Người dùng không tồn tại hoặc bị khóa',
-      });
-    }
-
-    if (
-      !(await argon2.verify(user.password, normalizedRequest.currentPassword))
-    ) {
-      throw new RpcException({
-        code: status.UNAUTHENTICATED,
-        message: 'Mật khẩu hiện tại không chính xác',
-      });
-    }
 
     const hashedPassword = await argon2.hash(normalizedRequest.newPassword);
     const updatedUser = await this.usersService.changePassword(
@@ -943,7 +991,19 @@ export class AuthService {
     }
 
     return {
-      message: 'Nếu email tồn tại, hệ thống sẽ gửi hướng dẫn đặt lại mật khẩu',
+      message: 'If an account exists, a reset link is on its way.',
+    };
+  }
+
+  async validatePasswordResetToken(
+    request: ValidatePasswordResetTokenRequest,
+  ): Promise<ValidatePasswordResetTokenResponse> {
+    return {
+      valid:
+        Boolean(request.token) &&
+        (await this.usersService.isPasswordResetTokenValid(
+          hashToken(request.token),
+        )),
     };
   }
 
@@ -957,31 +1017,31 @@ export class AuthService {
 
     validateNewPassword(request.newPassword);
 
-    const user = await this.usersService.consumePasswordResetToken(
-      hashToken(request.token),
-    );
+    const tokenHash = hashToken(request.token);
+    const updatedUser = (await this.usersService.isPasswordResetTokenValid(
+      tokenHash,
+    ))
+      ? await this.usersService.resetPasswordWithToken(
+          tokenHash,
+          await argon2.hash(request.newPassword),
+        )
+      : null;
 
-    if (!user || !user.isActive) {
+    if (!updatedUser) {
       throw new RpcException({
         code: status.UNAUTHENTICATED,
         message: 'Token đặt lại mật khẩu không hợp lệ hoặc đã hết hạn',
       });
     }
 
-    const hashedPassword = await argon2.hash(request.newPassword);
-    const updatedUser = await this.usersService.changePassword(
-      user.id,
-      hashedPassword,
-    );
-
     await Promise.all([
-      this.deleteRefreshTokens(user.id),
+      this.deleteRefreshTokens(updatedUser.id),
       this.saveAuthState(updatedUser),
     ]);
 
     await this.writeAuditLog({
-      actorUserId: user.id,
-      targetUserId: user.id,
+      actorUserId: updatedUser.id,
+      targetUserId: updatedUser.id,
       action: 'AUTH_RESET_PASSWORD',
       status: 'SUCCESS',
     });
@@ -1574,22 +1634,14 @@ export class AuthService {
     const ttl = Number(result?.[1] ?? -1);
 
     if (attempts > policy.maxAttempts) {
-      if (ttl > 0) {
-        const waitMinutes = Math.ceil(ttl / 60);
-        const baseMessage = policy.message.replace(
-          /,?\s*vui lòng thử lại sau.*$/i,
-          '',
-        );
-
-        throw new RpcException({
-          code: status.RESOURCE_EXHAUSTED,
-          message: `${baseMessage}. Thử lại sau ${waitMinutes} phút`,
-        });
-      }
-
+      const minutes = Math.ceil(ttl / 60);
       throw new RpcException({
         code: status.RESOURCE_EXHAUSTED,
-        message: policy.message,
+        message: `${policy.message}. ${
+          ttl > 0
+            ? `Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`
+            : 'Please wait a moment and try again.'
+        }`,
       });
     }
   }
@@ -1618,44 +1670,6 @@ export class AuthService {
         secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
       });
 
-      const hashedToken = createHash('sha256').update(token).digest('hex');
-      const key = authRefreshKey(payload.sub, payload.deviceId);
-      const deviceSetKey = authDevicesKey(payload.sub);
-
-      const luaScript = `
-        local stored = redis.call("GET", KEYS[1])
-        if not stored then return -1 end
-        if stored == ARGV[1] then
-          redis.call("DEL", KEYS[1])
-          return 1
-        else
-          redis.call("DEL", KEYS[1])
-          redis.call("SREM", KEYS[2], ARGV[2])
-          redis.call("ZREM", KEYS[3], ARGV[2])
-          return 0
-        end
-      `;
-
-      const result = await this.redis.eval(
-        luaScript,
-        3,
-        key,
-        deviceSetKey,
-        authDeviceRecencyKey(payload.sub),
-        hashedToken,
-        payload.deviceId,
-      );
-
-      if (result !== 1) {
-        throw new RpcException({
-          code: status.UNAUTHENTICATED,
-          message:
-            result === 0
-              ? 'Phát hiện truy cập bất thường, vui lòng đăng nhập lại'
-              : 'Phiên đăng nhập không tồn tại',
-        });
-      }
-
       const user = await this.usersService.findById(payload.sub, true);
       if (!user || !user.isActive) {
         throw new RpcException({
@@ -1677,25 +1691,34 @@ export class AuthService {
       );
       const tokens = this.generateTokens(user, payload.deviceId);
 
-      await Promise.all([
-        this.saveRefreshToken(
-          user.id,
-          tokens.refreshToken,
-          payload.deviceId,
-          sessionMeta,
-        ),
-        this.saveAuthState(user),
-      ]);
+      await this.saveAuthState(user);
+      await this.saveRefreshToken(
+        user.id,
+        tokens.refreshToken,
+        payload.deviceId,
+        sessionMeta,
+        createHash('sha256').update(token).digest('hex'),
+      );
 
       return tokens;
     } catch (e: unknown) {
       if (e instanceof RpcException) throw e;
-      const isExpired = e instanceof TokenExpiredError;
+      if (e instanceof JsonWebTokenError) {
+        throw new RpcException({
+          code: status.UNAUTHENTICATED,
+          message:
+            e instanceof TokenExpiredError
+              ? 'Phiên đăng nhập đã hết hạn'
+              : 'Token không hợp lệ',
+        });
+      }
+      this.logger.error(
+        'Session refresh failed',
+        e instanceof Error ? e.stack : undefined,
+      );
       throw new RpcException({
-        code: isExpired ? status.DEADLINE_EXCEEDED : status.UNAUTHENTICATED,
-        message: isExpired
-          ? 'Phiên đăng nhập đã hết hạn'
-          : 'Token không hợp lệ',
+        code: status.INTERNAL,
+        message: 'Could not refresh session. Try again.',
       });
     }
   }
@@ -1726,6 +1749,7 @@ export class AuthService {
     token: string,
     deviceId: string,
     sessionMeta?: SessionMeta,
+    previousTokenHash?: string,
   ) {
     const rfExpiresIn = this.configService.getOrThrow<string>(
       'JWT_REFRESH_EXPIRES_IN',
@@ -1765,7 +1789,17 @@ export class AuthService {
       deviceId,
       String(lastSeenAt),
       String(this.maxActiveSessions()),
+      ...(previousTokenHash ? [previousTokenHash] : []),
     );
+    if (evictedDeviceIds === 0 || evictedDeviceIds === -1) {
+      throw new RpcException({
+        code: status.UNAUTHENTICATED,
+        message:
+          evictedDeviceIds === 0
+            ? 'Phát hiện truy cập bất thường, vui lòng đăng nhập lại'
+            : 'Phiên đăng nhập không tồn tại',
+      });
+    }
     const evicted = Array.isArray(evictedDeviceIds)
       ? evictedDeviceIds.filter(
           (candidate): candidate is string => typeof candidate === 'string',

@@ -13,11 +13,14 @@ import type {
   ListUserSessionsResponse,
   LogoutDeviceRequest,
   ChangePasswordRequest,
+  VerifyCurrentPasswordRequest,
   AdminUserActionRequest,
   SetUserRoleRequest,
   GrantArtistWorkspaceSeatRequest,
   RequestPasswordResetRequest,
   ResetPasswordRequest,
+  ValidatePasswordResetTokenRequest,
+  ValidatePasswordResetTokenResponse,
   RequestEmailVerificationRequest,
   VerifyEmailRequest,
   TokenIssueResponse,
@@ -171,6 +174,14 @@ export class AuthController {
     return {};
   }
 
+  @GrpcMethod('IdentityService', 'VerifyCurrentPassword')
+  async verifyCurrentPassword(
+    @Payload() request: VerifyCurrentPasswordRequest,
+  ): Promise<EmptyResponse> {
+    await this.authService.verifyCurrentPassword(request);
+    return {};
+  }
+
   @GrpcMethod('IdentityService', 'ChangePassword')
   async changePassword(
     @Payload() request: ChangePasswordRequest,
@@ -279,6 +290,13 @@ export class AuthController {
     @Payload() request: RequestPasswordResetRequest,
   ): Promise<TokenIssueResponse> {
     return this.authService.requestPasswordReset(request);
+  }
+
+  @GrpcMethod('IdentityService', 'ValidatePasswordResetToken')
+  async validatePasswordResetToken(
+    @Payload() request: ValidatePasswordResetTokenRequest,
+  ): Promise<ValidatePasswordResetTokenResponse> {
+    return this.authService.validatePasswordResetToken(request);
   }
 
   @GrpcMethod('IdentityService', 'ResetPassword')

@@ -3,6 +3,7 @@
 import axios from "axios";
 import type { ApiResponse, AuthSession } from "./auth.types";
 import { useAuthStore } from "./auth-store";
+import { clearClientSessionCache } from "./session-cache";
 
 const refreshHttp = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL,
@@ -12,6 +13,7 @@ const refreshHttp = axios.create({
 
 let refreshPromise: Promise<AuthSession> | null = null;
 const REFRESH_LOCK_NAME = "music-auth-refresh";
+const LOCK_ACQUIRE_TIMEOUT_MS = 1000;
 const SESSION_CHANNEL_NAME = "music-auth-session";
 const SHARED_REFRESH_TIMEOUT_MS = 20_000;
 const tabId =
@@ -21,14 +23,31 @@ type SessionMessage =
   | { type: "session"; senderId: string; session: AuthSession }
   | { type: "guest"; senderId: string };
 type OutboundSessionMessage =
-  | { type: "session"; session: AuthSession }
-  | { type: "guest" };
+  { type: "session"; session: AuthSession } | { type: "guest" };
 
 let sessionChannel: BroadcastChannel | null | undefined;
 
+function isValidSession(session: unknown): session is AuthSession {
+  if (!session || typeof session !== "object") return false;
+  const value = session as Partial<AuthSession>;
+  return (
+    typeof value.accessToken === "string" &&
+    value.accessToken.length > 0 &&
+    typeof value.user?.userId === "string" &&
+    value.user.userId.length > 0 &&
+    typeof value.expiresIn === "number" &&
+    Number.isFinite(value.expiresIn) &&
+    value.expiresIn > 0
+  );
+}
+
 function applySession(session: AuthSession) {
-  if (!session.accessToken || !session.user || session.expiresIn <= 0) {
+  if (!isValidSession(session)) {
     throw new Error("Refresh response không hợp lệ");
+  }
+
+  if (useAuthStore.getState().user?.userId !== session.user.userId) {
+    clearClientSessionCache();
   }
 
   useAuthStore
@@ -54,7 +73,7 @@ function getSessionChannel() {
       if (!message || message.senderId === tabId) return;
 
       if (message.type === "session") {
-        applySession(message.session);
+        if (isValidSession(message.session)) applySession(message.session);
         return;
       }
 
@@ -81,21 +100,24 @@ function waitForSharedSession() {
     if (listener) channel.removeEventListener("message", listener);
   };
 
-  const promise = new Promise<AuthSession>((resolve, reject) => {
+  const promise = new Promise<AuthSession | "guest" | "timeout">((resolve) => {
     timer = window.setTimeout(() => {
       cancel();
-      reject(new Error("Timed out waiting for shared refresh session"));
+      resolve("timeout");
     }, SHARED_REFRESH_TIMEOUT_MS);
 
     listener = (event: MessageEvent<SessionMessage>) => {
       const message = event.data;
       if (!message || message.senderId === tabId) return;
+      if (message.type !== "session" && message.type !== "guest") return;
+      if (message.type === "session" && !isValidSession(message.session))
+        return;
       cancel();
 
       if (message.type === "session") {
         resolve(message.session);
       } else {
-        reject(new Error("Shared refresh rejected"));
+        resolve("guest");
       }
     };
 
@@ -154,31 +176,47 @@ async function refreshAcrossTabs(sessionVersion: number): Promise<AuthSession> {
 
   const sharedSession = waitForSharedSession();
   try {
-    const leaderResult = await navigator.locks.request(
-      REFRESH_LOCK_NAME,
-      { ifAvailable: true },
-      async (lock) => {
-        if (!lock) return null;
-        return requestRefresh(sessionVersion, true);
-      },
-    );
+    let lockTimer: number | undefined;
+    let lockTimedOut = false;
+    const leaderResult = await Promise.race([
+      navigator.locks.request(
+        REFRESH_LOCK_NAME,
+        { ifAvailable: true },
+        async (lock) => {
+          if (lockTimer !== undefined) window.clearTimeout(lockTimer);
+          if (!lock || lockTimedOut) return null;
+          return requestRefresh(sessionVersion, true);
+        },
+      ),
+      new Promise<AuthSession | "lock-timeout">((resolve) => {
+        lockTimer = window.setTimeout(() => {
+          lockTimedOut = true;
+          resolve("lock-timeout");
+        }, LOCK_ACQUIRE_TIMEOUT_MS);
+      }),
+    ]).finally(() => {
+      if (lockTimer !== undefined) window.clearTimeout(lockTimer);
+    });
 
+    if (leaderResult === "lock-timeout") {
+      return requestRefresh(sessionVersion, false);
+    }
     if (leaderResult) return leaderResult;
 
-    try {
-      return await sharedSession!.promise;
-    } catch {
-      // If the owner tab was closed before it could broadcast, wait for its
-      // lock to be released before retrying. This avoids racing the same
-      // refresh token.
-      return navigator.locks.request(REFRESH_LOCK_NAME, () =>
-        requestRefresh(useAuthStore.getState().sessionVersion, true),
-      );
-    }
+    const sharedResult = await sharedSession!.promise;
+    if (sharedResult === "guest") throw new Error("Shared refresh rejected");
+    if (sharedResult !== "timeout") return sharedResult;
+
+    // Never queue behind a suspended tab or race its refresh token.
+    return navigator.locks.request(
+      REFRESH_LOCK_NAME,
+      { ifAvailable: true },
+      (lock) => {
+        if (!lock) throw new Error("Session refresh is still in progress");
+        return requestRefresh(useAuthStore.getState().sessionVersion, true);
+      },
+    );
   } finally {
-    // A leader refresh can reject before broadcasting. Without this cleanup,
-    // the speculative follower waiter rejects 20 seconds later as an unhandled
-    // Promise rejection in the same tab.
     sharedSession?.cancel();
   }
 }

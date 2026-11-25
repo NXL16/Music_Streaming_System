@@ -3,7 +3,7 @@
 import { useAuthStore } from "@/lib/auth/auth-store";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { navigateAfterLogin } from "@/lib/auth/login-return-to";
+import Loading from "@/app/loading";
 
 export function GuestOnly({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -11,16 +11,14 @@ export function GuestOnly({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (status === "authenticated") {
-      navigateAfterLogin(router);
+      router.replace("/home");
     }
   }, [router, status]);
 
   if (status === "checking" || status === "authenticated") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#f5f5f7] text-[#1d1d1f]">
-        <p className="text-sm font-semibold uppercase tracking-[0.3em]">
-          Đang kiểm tra phiên đăng nhập...
-        </p>
+      <main className="bg-(--pageBG) text-(--systemPrimary)">
+        <Loading />
       </main>
     );
   }

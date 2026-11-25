@@ -1,67 +1,37 @@
 "use client";
 
-import { useState } from "react";
-import { getApiErrorMessage } from "@/lib/api/api-error";
-import { forgotPassword } from "@/lib/auth/auth.api";
-import { useMinimumLoadingState } from "@/lib/loading/use-minimum-loading-duration";
-
-type ForgotPasswordForm = {
-  email: string;
-};
-
-const initialForm: ForgotPasswordForm = {
-  email: "",
-};
+import { useState, type FormEvent } from "react";
+import { forgotPassword } from "./auth.api";
+import { validateEmailForm } from "./auth-form-validation";
+import { useAuthForm } from "./use-auth-form";
 
 export function useForgotPasswordForm() {
-  const [form, setForm] = useState<ForgotPasswordForm>(initialForm);
-  const [error, setError] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
-  const [loading, setLoading] = useMinimumLoadingState();
-
-  function updateField<TField extends keyof ForgotPasswordForm>(
-    field: TField,
-    value: ForgotPasswordForm[TField],
-  ) {
-    setForm((current) => ({
-      ...current,
-      [field]: value,
-    }));
-  }
-
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setSuccessMessage("");
-    setLoading(true);
-
-    try {
-      const result = await forgotPassword({
-        email: form.email.trim(),
-      });
-
-      setSuccessMessage(
-        result.message ||
-          "Nếu email tồn tại, hệ thống sẽ gửi link đặt lại mật khẩu.",
-      );
-    } catch (error) {
-      setError(
-        getApiErrorMessage(
-          error,
-          "Không thể gửi yêu cầu đặt lại mật khẩu, vui lòng thử lại.",
-        ),
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
+  const [sentEmail, setSentEmail] = useState("");
+  const auth = useAuthForm(
+    { email: "" },
+    validateEmailForm,
+    async ({ email }) => {
+      const normalizedEmail = email.trim().toLowerCase();
+      await forgotPassword({ email: normalizedEmail });
+      setSentEmail(normalizedEmail);
+    },
+    "forgot-password",
+  );
 
   return {
-    form,
-    error,
-    successMessage,
-    loading,
-    updateField,
-    handleSubmit,
+    ...auth,
+    sentEmail,
+    changeEmail: () => {
+      if (auth.loading) return;
+      setSentEmail("");
+      auth.clearError();
+    },
+    handleSubmit: (event: FormEvent<HTMLFormElement>) => {
+      if (auth.loading) {
+        event.preventDefault();
+        return;
+      }
+      return auth.handleSubmit(event);
+    },
   };
 }

@@ -1,0 +1,108 @@
+.page {
+  margin-inline: var(--bodyGutter);
+  padding-bottom: 64px;
+  color: var(--systemPrimary);
+}
+.header {
+  padding-block: 20px 44px;
+}
+.header h1 {
+  font-size: 36px;
+  line-height: 1.15;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+.header p {
+  margin-top: 10px;
+  color: var(--systemSecondary);
+  font: var(--body-tall);
+}
+.groups {
+  display: grid;
+}
+.group {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(0, 2fr);
+  gap: 48px;
+  padding-block: 32px;
+  border-top: 1px solid var(--labelDivider);
+}
+.groupIntro h2 {
+  font: var(--title-2-emphasized);
+}
+.groupIntro p {
+  max-width: 30ch;
+  margin-top: 8px;
+  color: var(--systemSecondary);
+  font: var(--callout);
+}
+.controls {
+  min-width: 0;
+}
+.setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding-block: 0 24px;
+}
+.setting + .setting {
+  padding-block: 24px 0;
+  border-top: 1px solid var(--labelDivider);
+}
+.setting h3 {
+  font: var(--body-tall-emphasized);
+}
+.setting p {
+  max-width: 52ch;
+  margin-top: 5px;
+  color: var(--systemSecondary);
+  font: var(--callout);
+}
+.switch {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 48px;
+  height: 44px;
+}
+.track {
+  width: 48px;
+  height: 28px;
+  padding: 4px;
+  border-radius: 20px;
+  background: var(--systemQuaternary);
+}
+.thumb {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--systemPrimary);
+}
+.switch[aria-checked="true"] .track {
+  background: var(--systemPrimary);
+}
+.switch[aria-checked="true"] .thumb {
+  background: var(--pageBG);
+  transform: translateX(20px);
+}
+.switch:focus-visible {
+  outline: 2px solid var(--systemPrimary);
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+
+@media (max-width: 999px) {
+  .group {
+    grid-template-columns: 1fr;
+    gap: 28px;
+    padding-block: 28px;
+  }
+  .groupIntro p {
+    max-width: none;
+  }
+  .header {
+    padding-bottom: 32px;
+  }
+}

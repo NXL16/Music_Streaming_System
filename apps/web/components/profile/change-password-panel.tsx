@@ -1,5 +1,11 @@
 "use client";
+
+import { AuthInput } from "@/components/auth/auth-form";
+import { PasswordRequirementsInput } from "@/components/auth/password-requirements-input";
+import { ContentDialog } from "@/components/catalog/content-dialog";
 import { useChangePasswordForm } from "@/lib/auth/use-change-password-form";
+import styles from "./security-settings.module.css";
+
 export function ChangePasswordPanel({
   open,
   onToggle,
@@ -7,85 +13,113 @@ export function ChangePasswordPanel({
   open: boolean;
   onToggle: () => void;
 }) {
-  const { form, error, loading, updateField, handleSubmit } =
-    useChangePasswordForm();
+  const auth = useChangePasswordForm();
+  function close() {
+    if (auth.loading || !open) return;
+    auth.reset();
+    onToggle();
+  }
   return (
-    <section className="py-5">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-(--systemPrimary) [font:var(--body-tall-emphasized)]">
-            Password
-          </h2>
-          <p className="mt-1 text-(--systemSecondary) [font:var(--callout)]">
-            Use a strong, unique password for this account.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onToggle}
-          disabled={loading}
-          className="shrink-0 rounded-full border border-(--labelDivider) px-4 py-2 text-(--systemPrimary) [font:var(--callout-emphasized)]"
-        >
-          {open ? "Close" : "Change password"}
-        </button>
+    <div className={styles.row}>
+      <div>
+        <h3>Password</h3>
+        <p className={styles.description}>
+          Use a strong, unique password for your account.
+        </p>
       </div>
-      {open && (
-        <form
-          onSubmit={handleSubmit}
-          className="mt-6 max-w-xl border-t border-(--labelDivider) pt-6"
-        >
-          <p className="text-(--systemSecondary) [font:var(--callout)]">
-            After changing your password, you will be signed out and must sign
-            in again with the new password.
-          </p>
-          <div className="mt-5 space-y-4">
-            {(
-              [
-                ["currentPassword", "Current password"],
-                ["newPassword", "New password"],
-                ["confirmPassword", "Confirm new password"],
-              ] as const
-            ).map(([field, label]) => (
-              <label
-                key={field}
-                className="block text-(--systemPrimary) [font:var(--callout-emphasized)]"
+      <button
+        type="button"
+        onClick={onToggle}
+        className={styles.button}
+        aria-haspopup="dialog"
+      >
+        Change password
+      </button>
+      <ContentDialog
+        open={open}
+        title="Change password"
+        subtitle={
+          auth.step === 1
+            ? "Enter your current password to continue."
+            : "Choose a new password. You will be signed out after saving."
+        }
+        onClose={close}
+        hideGradient
+        className={styles.dialog}
+      >
+        {open && (
+          <form
+            onSubmit={auth.handleSubmit}
+            noValidate
+            className={styles.form}
+            aria-busy={auth.loading}
+          >
+            <p className={styles.notice}>Step {auth.step} of 2</p>
+            <fieldset
+              key={auth.step}
+              disabled={auth.loading}
+              className={styles.fields}
+            >
+              {(auth.step === 1
+                ? ([["currentPassword", "Current password"]] as const)
+                : ([
+                    ["newPassword", "New password"],
+                    ["confirmPassword", "Confirm new password"],
+                  ] as const)
+              ).map(([field, label], index) => {
+                const inputProps = {
+                  compact: true,
+                  id: "change-" + field,
+                  name: field,
+                  label,
+                  autoComplete:
+                    field === "currentPassword"
+                      ? "current-password"
+                      : "new-password",
+                  value: auth.form[field],
+                  disabled: auth.loading,
+                  autoFocus: index === 0,
+                  onChange: (event: React.ChangeEvent<HTMLInputElement>) =>
+                    auth.updateField(field, event.target.value),
+                };
+                return field === "newPassword" ? (
+                  <PasswordRequirementsInput key={field} {...inputProps} />
+                ) : (
+                  <AuthInput key={field} {...inputProps} type="password" />
+                );
+              })}
+            </fieldset>
+            {auth.error && (
+              <p role="alert" className={styles.error}>
+                {auth.error}
+              </p>
+            )}
+            <div className={styles.actions}>
+              <button
+                type="button"
+                onClick={auth.step === 1 ? close : auth.back}
+                disabled={auth.loading}
+                className={styles.textButton}
               >
-                {label}
-                <input
-                  type="password"
-                  value={form[field]}
-                  onChange={(e) => updateField(field, e.target.value)}
-                  required
-                  minLength={field === "currentPassword" ? undefined : 8}
-                  className="mt-2 w-full border-b border-(--labelDivider) bg-transparent px-1 py-3 text-(--systemPrimary) outline-none focus:border-(--keyColor)"
-                />
-              </label>
-            ))}
-          </div>
-          {error && (
-            <p className="mt-4 text-(--keyColor) [font:var(--callout)]">
-              {error}
-            </p>
-          )}
-          <div className="mt-5 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onToggle}
-              disabled={loading}
-              className="rounded-full px-4 py-2 text-(--systemSecondary) [font:var(--callout-emphasized)]"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="rounded-full bg-(--keyColor) px-4 py-2 text-(--keyColorText) [font:var(--callout-emphasized)]"
-            >
-              {loading ? "Changing…" : "Save new password"}
-            </button>
-          </div>
-        </form>
-      )}
-    </section>
+                {auth.step === 1 ? "Cancel" : "Back"}
+              </button>
+              <button
+                type="submit"
+                disabled={auth.loading}
+                className={styles.primary}
+              >
+                {auth.loading
+                  ? auth.step === 1
+                    ? "Checking..."
+                    : "Saving..."
+                  : auth.step === 1
+                    ? "Continue"
+                    : "Change password"}
+              </button>
+            </div>
+          </form>
+        )}
+      </ContentDialog>
+    </div>
   );
 }

@@ -123,12 +123,11 @@ describe('UsersService.create provisioning outbox', () => {
   beforeEach(() => {
     createUser = jest.fn().mockResolvedValue(createdUser);
     insertOutbox = jest.fn().mockResolvedValue(2);
-    transaction = jest.fn(
-      (callback: (transactionClient: unknown) => unknown) =>
-        callback({
+    transaction = jest.fn((callback: (transactionClient: unknown) => unknown) =>
+      callback({
         user: { create: createUser },
         $executeRaw: insertOutbox,
-        }),
+      }),
     );
     metadataCreate = jest.fn();
 
@@ -179,6 +178,174 @@ describe('UsersService.create provisioning outbox', () => {
 
     expect(transaction).toHaveBeenCalledTimes(1);
     expect(metadataCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe('UsersService password reset token preflight', () => {
+  const now = new Date('2026-01-01T00:00:00.000Z');
+  let findFirst: jest.Mock;
+  let updateMany: jest.Mock;
+  let transaction: jest.Mock;
+  let service: UsersService;
+
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(now);
+    findFirst = jest.fn();
+    updateMany = jest.fn();
+    transaction = jest.fn();
+    service = new UsersService(
+      {
+        passwordResetToken: { findFirst, updateMany },
+        $transaction: transaction,
+      } as unknown as PrismaService,
+      {} as never,
+    );
+  });
+
+  afterEach(() => jest.useRealTimers());
+
+  it('checks expiry, usage and active account without consuming the token', async () => {
+    findFirst.mockResolvedValue({ id: 'token-id' });
+    await expect(service.isPasswordResetTokenValid('token-hash')).resolves.toBe(
+      true,
+    );
+    await expect(service.isPasswordResetTokenValid('token-hash')).resolves.toBe(
+      true,
+    );
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        tokenHash: 'token-hash',
+        usedAt: null,
+        expiresAt: { gt: now },
+        user: { isActive: true },
+      },
+      select: { id: true },
+    });
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects tokens that do not meet the validity query', async () => {
+    findFirst.mockResolvedValue(null);
+    await expect(service.isPasswordResetTokenValid('token-hash')).resolves.toBe(
+      false,
+    );
+  });
+
+  it('does not report a database outage as an invalid token', async () => {
+    findFirst.mockRejectedValue(new Error('database unavailable'));
+    await expect(
+      service.isPasswordResetTokenValid('token-hash'),
+    ).rejects.toThrow('database unavailable');
+  });
+});
+
+describe('UsersService password reset writes', () => {
+  const now = new Date('2026-01-01T00:00:00.000Z');
+  let queryRaw: jest.Mock;
+  let findUnique: jest.Mock;
+  let updateMany: jest.Mock;
+  let create: jest.Mock;
+  let updateUser: jest.Mock;
+  let externalUpdate: jest.Mock;
+  let service: UsersService;
+
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(now);
+    queryRaw = jest.fn().mockResolvedValue([{ id: 'user-1' }]);
+    findUnique = jest
+      .fn()
+      .mockResolvedValue({ id: 'token-1', userId: 'user-1' });
+    updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    create = jest.fn().mockResolvedValue({});
+    updateUser = jest.fn().mockResolvedValue({ id: 'user-1', tokenVersion: 2 });
+    externalUpdate = jest.fn();
+    const tx = {
+      $queryRaw: queryRaw,
+      passwordResetToken: { findUnique, updateMany, create },
+      user: { update: updateUser },
+    };
+    service = new UsersService(
+      {
+        $transaction: (work: (database: typeof tx) => Promise<unknown>) =>
+          work(tx),
+        user: { update: externalUpdate },
+      } as unknown as PrismaService,
+      {} as never,
+    );
+  });
+
+  afterEach(() => jest.useRealTimers());
+
+  it('locks the account before replacing old reset links', async () => {
+    await service.createPasswordResetToken(
+      'user-1',
+      'new-token-hash',
+      new Date(),
+    );
+    expect(queryRaw).toHaveBeenCalledWith(expect.any(Array), 'user-1');
+    const [query] = queryRaw.mock.calls[0] as [TemplateStringsArray, string];
+    expect(query.join('')).toContain('FOR UPDATE');
+    expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      updateMany.mock.invocationCallOrder[0],
+    );
+    expect(updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+      create.mock.invocationCallOrder[0],
+    );
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { userId: 'user-1', usedAt: null },
+      data: { usedAt: now },
+    });
+  });
+
+  it('updates the password and session version in the same transaction as claiming the token', async () => {
+    await expect(
+      service.resetPasswordWithToken('token-hash', 'password-hash'),
+    ).resolves.toMatchObject({ id: 'user-1', tokenVersion: 2 });
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'token-1',
+          usedAt: null,
+          expiresAt: { gt: now },
+          user: { isActive: true },
+        },
+      }),
+    );
+    expect(updateUser).toHaveBeenCalledWith({
+      where: { id: 'user-1' },
+      data: {
+        password: 'password-hash',
+        lastPasswordChangeAt: now,
+        tokenVersion: { increment: 1 },
+      },
+    });
+    expect(externalUpdate).not.toHaveBeenCalled();
+  });
+
+  it('does not update a password when another request already claimed or invalidated the token', async () => {
+    updateMany.mockResolvedValue({ count: 0 });
+    await expect(
+      service.resetPasswordWithToken('token-hash', 'password-hash'),
+    ).resolves.toBeNull();
+    expect(updateUser).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown token without locking an account or writing data', async () => {
+    findUnique.mockResolvedValue(null);
+    await expect(
+      service.resetPasswordWithToken('token-hash', 'password-hash'),
+    ).resolves.toBeNull();
+    expect(queryRaw).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(updateUser).not.toHaveBeenCalled();
+  });
+
+  it('propagates password write failures so the transaction can roll back the token claim', async () => {
+    updateUser.mockRejectedValue(new Error('password write failed'));
+    await expect(
+      service.resetPasswordWithToken('token-hash', 'password-hash'),
+    ).rejects.toThrow('password write failed');
   });
 });
 
