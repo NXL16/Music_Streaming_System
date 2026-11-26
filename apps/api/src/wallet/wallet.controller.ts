@@ -7,6 +7,7 @@ import {
   HttpStatus,
   Logger,
   Post,
+  Query,
   Req,
   Res,
   UseGuards,
@@ -42,6 +43,39 @@ export class WalletController {
   @UseGuards(StrictJwtAuthGuard)
   async getCoinRate(@Req() req: Request) {
     return this.walletService.getCoinRate((req.user as JwtUser).userId);
+  }
+
+  @Get('transactions')
+  @UseGuards(StrictJwtAuthGuard)
+  async getTransactionHistory(
+    @Req() req: Request,
+    @Query('kind') kindParam?: string,
+    @Query('limit') limitParam?: string,
+    @Query('offset') offsetParam?: string,
+  ) {
+    const kind = (kindParam ?? 'ALL').toUpperCase();
+    if (kind !== 'ALL' && kind !== 'DEPOSIT' && kind !== 'WITHDRAWAL') {
+      throw new BadRequestException('Invalid transaction kind.');
+    }
+
+    const limit = limitParam ? Number.parseInt(limitParam, 10) : 20;
+    const offset = offsetParam ? Number.parseInt(offsetParam, 10) : 0;
+    if (
+      !Number.isFinite(limit) ||
+      limit < 1 ||
+      limit > 50 ||
+      !Number.isFinite(offset) ||
+      offset < 0
+    ) {
+      throw new BadRequestException('Invalid pagination parameters.');
+    }
+
+    return this.walletService.getTransactionHistory({
+      userId: (req.user as JwtUser).userId,
+      kind,
+      limit,
+      offset,
+    });
   }
 
   @Get('orders/:kind/:reference')

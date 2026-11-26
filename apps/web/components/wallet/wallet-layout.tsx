@@ -20,7 +20,13 @@ export function useWallet() {
 export function WalletLayout({ children }: { children: ReactNode }) {
   const wallet = useWalletBalance();
   const { balance, error } = wallet;
-  const active = usePathname() === "/withdraw" ? "withdraw" : "deposit";
+  const pathname = usePathname();
+  const active =
+    pathname === "/withdraw"
+      ? "withdraw"
+      : pathname === "/history"
+        ? "history"
+        : "deposit";
   return (
     <WalletContext.Provider value={wallet}>
       <MusicPageLayout>
@@ -64,6 +70,12 @@ export function WalletLayout({ children }: { children: ReactNode }) {
               aria-current={active === "withdraw" ? "page" : undefined}
             >
               Withdraw
+            </Link>
+            <Link
+              href="/history"
+              aria-current={active === "history" ? "page" : undefined}
+            >
+              History
             </Link>
           </nav>
           {children}

@@ -355,7 +355,7 @@ export default function AccountPage() {
                     maxLength={BIO_MAX_LENGTH}
                     disabled={profile.loading}
                     placeholder="Tell people a little about yourself."
-                    className="min-h-26 w-full resize-none overflow-hidden rounded-lg border border-(--labelDivider) bg-transparent px-3 py-2.5 pb-7 text-[15px] leading-[1.45] font-normal outline-none focus:border-(--keyColor)"
+                    className="min-h-26 w-full resize-none overflow-hidden rounded-lg border border-(--labelDivider) bg-transparent px-3 py-2.5 pb-7 text-base leading-[1.45] font-normal outline-none focus:border-(--keyColor) md:text-[15px]"
                     onChange={(event) => {
                       profile.clearError();
                       setDraft((current) => ({

@@ -1,4 +1,10 @@
-import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  OnModuleInit,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { Metadata } from '@grpc/grpc-js';
 import { ConfigService } from '@nestjs/config';
 import type { ClientGrpc } from '@nestjs/microservices';
@@ -131,5 +137,47 @@ export class WalletService implements OnModuleInit {
         this.metadata(),
       ),
     );
+  }
+
+  async getTransactionHistory(params: {
+    userId: string;
+    kind: 'ALL' | 'DEPOSIT' | 'WITHDRAWAL';
+    limit: number;
+    offset: number;
+  }): Promise<{
+    items: PaymentOrderResponse[];
+    hasMore: boolean;
+  }> {
+    const walletHttpUrl =
+      this.configService.getOrThrow<string>('WALLET_HTTP_URL');
+    const internalToken = this.configService.getOrThrow<string>(
+      'INTERNAL_GRPC_TOKEN',
+    );
+
+    const response = await fetch(
+      `${walletHttpUrl}/internal/wallet/transactions`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-internal-token': internalToken,
+        },
+        body: JSON.stringify(params),
+      },
+    );
+
+    if (response.status === 400) {
+      throw new BadRequestException('Invalid transaction history query.');
+    }
+    if (!response.ok) {
+      throw new ServiceUnavailableException(
+        'Transaction history is temporarily unavailable.',
+      );
+    }
+
+    return (await response.json()) as {
+      items: PaymentOrderResponse[];
+      hasMore: boolean;
+    };
   }
 }

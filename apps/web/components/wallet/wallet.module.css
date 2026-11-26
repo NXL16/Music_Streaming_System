@@ -467,3 +467,400 @@
     margin-block: 28px;
   }
 }
+
+.historySection {
+  display: grid;
+  gap: 20px;
+  width: 100%;
+  padding-bottom: 48px;
+}
+
+.historyFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.historyFilter {
+  padding: 8px 16px;
+  border: 1px solid var(--labelDivider);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--systemSecondary);
+  font: var(--callout-emphasized);
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.historyFilter[aria-pressed="true"] {
+  border-color: var(--systemPrimary);
+  background: var(--systemPrimary);
+  color: var(--pageBG);
+}
+
+.historyTable {
+  width: 100%;
+  overflow: hidden;
+}
+
+.historyHeader,
+.historyRow,
+.historySkeletonRow {
+  display: grid;
+  grid-template-columns:
+    48px
+    minmax(220px, 1.85fr)
+    minmax(96px, 0.85fr)
+    minmax(110px, 0.9fr)
+    minmax(80px, 0.65fr)
+    minmax(100px, 0.8fr)
+    104px;
+  align-items: center;
+  gap: 16px;
+}
+
+.historyHeader {
+  padding: 0 12px 12px;
+  color: var(--systemSecondary);
+  font: var(--callout-emphasized);
+}
+
+.historyHeaderCell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.historyHeaderCell:not(:first-child)::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  width: 1px;
+  height: 14px;
+  transform: translateY(-50%);
+  background: var(--labelDivider);
+}
+
+.historyRow,
+.historySkeletonRow {
+  min-height: 48px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--labelDivider);
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.historyRowMuted {
+  color: var(--systemSecondary);
+}
+
+.historyPrimary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.historyIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--systemSecondary);
+}
+
+.historyTitle {
+  display: none;
+  font: var(--body-emphasized);
+  color: var(--systemPrimary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historyRowMuted .historyTitle {
+  font: var(--body);
+  color: var(--systemSecondary);
+}
+
+.historyMethodCell {
+  color: var(--systemSecondary);
+  font: var(--callout);
+  white-space: nowrap;
+}
+
+.historyOrderId {
+  color: var(--systemSecondary);
+  font: var(--callout);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historyAmountCell {
+  display: flex;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.historyVndCell {
+  color: var(--systemSecondary);
+  font: var(--callout);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.historySub {
+  color: var(--systemSecondary);
+  font: var(--callout);
+}
+
+.historyTimeCell {
+  color: var(--systemSecondary);
+  font: var(--callout);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.historyMobileMeta {
+  display: none;
+}
+
+.historyMobileVnd {
+  display: none;
+}
+
+.historyCoins {
+  font: var(--body-emphasized);
+  font-variant-numeric: tabular-nums;
+  color: var(--systemPrimary);
+  white-space: nowrap;
+}
+
+.historyCoinsMuted {
+  font: var(--body);
+  color: var(--systemSecondary);
+}
+
+.historyStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--systemSecondary);
+  font: var(--callout);
+  white-space: nowrap;
+}
+
+.historyStatusSuccess {
+  color: var(--systemPrimary);
+}
+
+.historyEmpty {
+  padding: 28px 20px;
+  border: 1px solid var(--labelDivider);
+  border-radius: 14px;
+  color: var(--systemSecondary);
+  font: var(--body);
+  text-align: center;
+}
+
+.historySkeletonRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--labelDivider);
+}
+
+.historySkeletonRow:last-child {
+  border-bottom: 0;
+}
+
+.historySkeletonBar {
+  height: 14px;
+  border-radius: 6px;
+  background: var(--systemQuinary);
+  animation: historyPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes historyPulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.historyLoadMore {
+  justify-self: start;
+  padding: 10px 18px;
+  border: 1px solid var(--labelDivider);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--systemPrimary);
+  font: var(--callout-emphasized);
+  cursor: pointer;
+}
+
+.historyLoadMore:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .historyRow:hover {
+    background: var(--systemQuinary);
+    border-radius: 8px;
+    border-top-color: transparent;
+  }
+
+  .historyRow:hover + .historyRow {
+    border-top-color: transparent;
+  }
+}
+
+@media (max-width: 1179px) {
+  .historyHeader,
+  .historyRow,
+  .historySkeletonRow {
+    grid-template-columns:
+      40px
+      minmax(140px, 1.6fr)
+      minmax(84px, 0.85fr)
+      minmax(96px, 0.9fr)
+      minmax(72px, 0.65fr)
+      minmax(88px, 0.8fr)
+      98px;
+    gap: 12px;
+  }
+
+  .historyHeader {
+    padding: 0 8px 12px;
+  }
+
+  .historyRow,
+  .historySkeletonRow {
+    padding: 10px 8px;
+  }
+
+  .historyHeaderCell:not(:first-child)::before {
+    left: -6px;
+  }
+}
+
+@media (max-width: 999px) {
+  .historyHeader,
+  .historyRow,
+  .historySkeletonRow {
+    grid-template-columns:
+      40px
+      minmax(140px, 1.6fr)
+      minmax(88px, 0.85fr)
+      minmax(88px, 0.85fr)
+      98px;
+  }
+
+  .historyHeader > :nth-child(4),
+  .historyHeader > :nth-child(5),
+  .historyRow > :nth-child(4),
+  .historyRow > :nth-child(5),
+  .historySkeletonRow > :nth-child(4),
+  .historySkeletonRow > :nth-child(5) {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .historyHeader {
+    display: none;
+  }
+
+  .historyRow,
+  .historySkeletonRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    padding: 14px 4px;
+  }
+
+  .historyRow:first-child,
+  .historySkeletonRow:first-child {
+    border-top: 0;
+  }
+
+  .historyMethodCell,
+  .historyOrderId,
+  .historyVndCell,
+  .historyStatusCell,
+  .historyTimeCell {
+    display: none;
+  }
+
+  .historyAmountCell {
+    display: grid;
+    justify-items: end;
+    gap: 2px;
+    text-align: end;
+  }
+
+  .historyMobileVnd {
+    display: block;
+    color: var(--systemSecondary);
+    font: var(--callout);
+  }
+
+  .historyMobileMeta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 2px;
+    color: var(--systemSecondary);
+    font: var(--callout);
+  }
+
+  .historyIcon {
+    display: inline-flex;
+  }
+
+  .historyTitle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .historyMobileMethod {
+    color: var(--systemSecondary);
+    font: var(--callout);
+    font-weight: 400;
+  }
+}
+
+@media (max-width: 479px) {
+  .historySection {
+    padding-bottom: 84px;
+  }
+  .historyFilter {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+
+  .historyRow,
+  .historySkeletonRow {
+    padding: 12px 0;
+  }
+
+  .historyLoadMore {
+    width: 100%;
+    justify-self: stretch;
+    text-align: center;
+  }
+}

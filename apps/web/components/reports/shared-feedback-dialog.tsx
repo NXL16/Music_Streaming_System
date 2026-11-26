@@ -392,7 +392,7 @@ export function SharedFeedbackDialog() {
                         ? "Tell us what happened and what you expected."
                         : "Tell us what you think."
                     }
-                    className="min-h-30 w-full resize-none overflow-hidden rounded-lg border border-(--labelDivider) bg-transparent px-3 py-2 pb-7 font-normal outline-none focus:border-(--keyColor)"
+                    className="min-h-30 w-full resize-none overflow-hidden rounded-lg border border-(--labelDivider) bg-transparent px-3 py-2 pb-7 text-base font-normal outline-none focus:border-(--keyColor) md:text-sm"
                   />
                   <span className="pointer-events-none absolute bottom-3 right-3 text-xs font-normal text-(--systemSecondary)">
                     {1000 - content.length}

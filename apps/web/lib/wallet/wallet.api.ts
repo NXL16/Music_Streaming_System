@@ -163,3 +163,29 @@ export async function getPaymentOrder(
     )
   ).data;
 }
+
+export type WalletTransactionKind = "ALL" | PaymentKind;
+export type WalletTransactionHistoryResponse = {
+  items: PaymentOrder[];
+  hasMore: boolean;
+};
+
+export async function getWalletTransactionHistory(
+  params: {
+    kind?: WalletTransactionKind;
+    limit?: number;
+    offset?: number;
+  },
+  signal?: AbortSignal,
+) {
+  return (
+    await http.get<WalletTransactionHistoryResponse>("/wallet/transactions", {
+      params: {
+        kind: params.kind ?? "ALL",
+        limit: params.limit ?? 20,
+        offset: params.offset ?? 0,
+      },
+      signal,
+    })
+  ).data;
+}
